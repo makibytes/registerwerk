@@ -158,3 +158,6 @@ Ein separater `@Scheduled`-Job läuft alle 10 Minuten:
 ## Einen neuen SPL-Token registrieren
 
 Wird über die API eine Solana-Asset-Bereitstellung angelegt, beginnt das Backend automatisch mit der Überwachung von deren Mint-Adresse. Keine manuelle Konfiguration nötig.
+
+!!! warning "Abdeckungsstatus: teilweise Beobachtung"
+    Der Indexer listet Signaturen nach **Mint-Adresse**. Eine einfache (Legacy-)SPL-`transfer`-Instruktion referenziert das Mint-Konto nicht; solche Bewegungen zwischen Inhabern werden daher nicht erfasst. Registerwerk meldet Solana-Deployments deshalb als *teilweise beobachtet* (`plain SPL transfers not observable`): Der Inhaber-Abgleich bleibt BLOCKED, und das Register wird aus der indexierten Solana-Historie nicht als abgestimmt markiert, bis Token-Konten indexiert werden.

@@ -82,6 +82,7 @@ public class Erc3643LifecycleService {
     private final BlockchainTransactionService txService;
     private final HolderBlockGate holderBlockGate;
     private final AssetLookupPort assetLookupPort;
+    private final de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate;
 
     public Erc3643LifecycleService(
             Erc3643SuiteRepository suiteRepository,
@@ -96,7 +97,9 @@ public class Erc3643LifecycleService {
             BlockchainClientRegistry blockchainClientRegistry,
             BlockchainTransactionService txService,
             HolderBlockGate holderBlockGate,
-            AssetLookupPort assetLookupPort) {
+            AssetLookupPort assetLookupPort,
+            de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate) {
+        this.destinationGate = destinationGate;
         this.assetLookupPort = assetLookupPort;
         this.suiteRepository = suiteRepository;
         this.complianceModuleRepository = complianceModuleRepository;
@@ -110,6 +113,14 @@ public class Erc3643LifecycleService {
         this.blockchainClientRegistry = blockchainClientRegistry;
         this.txService = txService;
         this.holderBlockGate = holderBlockGate;
+    }
+
+    /** P4C-2: the asset whose register the destination gate resolves holders against. */
+    private UUID assetIdOf(Erc3643Suite suite) {
+        return deploymentRepository.findById(suite.getAssetDeploymentId())
+                .orElseThrow(() -> new de.makibytes.registerwerk.shared.EntityNotFoundException(
+                        "AssetDeployment", suite.getAssetDeploymentId()))
+                .getAssetId();
     }
 
     // ── Shared on-chain helpers ────────────────────────────────────────────────
@@ -520,6 +531,7 @@ public class Erc3643LifecycleService {
         requireNotBlocked(to);
         Erc3643Suite suite = requireSuite(suiteId);
         requireRegisterOpen(suite, "forcedTransfer");
+        destinationGate.require(assetIdOf(suite), to, "forcedTransfer");
         Function fn = new Function(forcedTransferMethodName(),
                 List.of(new Address(from), new Address(to), new Uint256(amount.toBigIntegerExact())),
                 List.of());
@@ -542,6 +554,7 @@ public class Erc3643LifecycleService {
         requireNotBlocked(owner);
         Erc3643Suite suite = requireSuite(suiteId);
         requireRegisterOpen(suite, "forcedApprove");
+        destinationGate.require(assetIdOf(suite), spender, "forcedApprove");
         Function fn = new Function(forcedApproveMethodName(),
                 List.of(new Address(owner), new Address(spender), new Uint256(amount.toBigIntegerExact()),
                         new org.web3j.abi.datatypes.Utf8String(reason)),
@@ -656,6 +669,8 @@ public class Erc3643LifecycleService {
         tos.forEach(this::requireNotBlocked);
         Erc3643Suite suite = requireSuite(suiteId);
         requireRegisterOpen(suite, "batchForcedTransfer");
+        UUID gateAssetId = assetIdOf(suite);
+        tos.forEach(to -> destinationGate.require(gateAssetId, to, "batchForcedTransfer"));
         Function fn = new Function("batchForcedTransfer",
                 List.of(
                         new DynamicArray<>(Address.class, froms.stream().map(Address::new).toList()),
@@ -676,6 +691,8 @@ public class Erc3643LifecycleService {
         toAddresses.forEach(this::requireNotBlocked);
         Erc3643Suite suite = requireSuite(suiteId);
         requireRegisterOpen(suite, "batchMint");
+        UUID gateAssetId = assetIdOf(suite);
+        toAddresses.forEach(to -> destinationGate.require(gateAssetId, to, "batchMint"));
         Function fn = new Function("batchMint",
                 List.of(
                         new DynamicArray<>(Address.class, toAddresses.stream().map(Address::new).toList()),

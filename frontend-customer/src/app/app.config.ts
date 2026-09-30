@@ -10,6 +10,7 @@ import { AUTH_CONFIG, AuthConfig } from './core/auth/auth-config';
 import { CookieTokenSource } from './core/auth/cookie-token-source';
 import { MsalTokenSource } from './core/auth/msal-token-source';
 import { TokenSource } from './core/auth/token-source';
+import { idempotencyInterceptor } from './core/interceptors/idempotency.interceptor';
 import { authInterceptor } from './core/interceptors/auth.interceptor';
 import { errorInterceptor } from './core/interceptors/error.interceptor';
 import { PLATFORM_CAPABILITIES, PlatformCapabilities } from './core/feature/platform-capabilities';
@@ -26,7 +27,7 @@ export function appConfig(cfg: AuthConfig, capabilities: PlatformCapabilities): 
     providers: [
       provideRouter(routes, withComponentInputBinding()),
       provideHttpClient(
-        withInterceptors([authInterceptor, errorInterceptor]),
+        withInterceptors([idempotencyInterceptor, authInterceptor, errorInterceptor]),
         withXsrfConfiguration({ cookieName: 'XSRF-TOKEN', headerName: 'X-XSRF-TOKEN' })
       ),
       { provide: AUTH_CONFIG, useValue: cfg },

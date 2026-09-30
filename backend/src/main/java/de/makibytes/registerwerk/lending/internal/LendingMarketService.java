@@ -231,16 +231,23 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
         }
         String chainIdentifier = resolveChainIdentifier(market.getChainConfigId());
 
-        RepoMarketOnchainReader.PriceMark mark = onchainReader.price(
-                chainIdentifier, market.getPriceOracleAddress(), market.getCollateralTokenAddress());
-        BigInteger utilizationWad = onchainReader.utilization(chainIdentifier, market.getMarketAddress());
-        BigInteger borrowRateWad = onchainReader.borrowRate(chainIdentifier, market.getMarketAddress());
+        // All on-chain reads of a quote at one block number (obtained once), never a mix of heights/nodes.
+        RepoMarketOnchainReader.PriceMark mark;
+        BigInteger utilizationWad;
+        BigInteger borrowRateWad;
+        BigInteger availableLiquidity;
+        try (RepoMarketOnchainReader.Pin pin = onchainReader.pinBlock(chainIdentifier)) {
+            mark = onchainReader.price(
+                    chainIdentifier, market.getPriceOracleAddress(), market.getCollateralTokenAddress());
+            utilizationWad = onchainReader.utilization(chainIdentifier, market.getMarketAddress());
+            borrowRateWad = onchainReader.borrowRate(chainIdentifier, market.getMarketAddress());
+            availableLiquidity = onchainReader.availableLiquidity(
+                    chainIdentifier, market.getMarketAddress(), market.getLoanTokenAddress());
+        }
 
         BigInteger collateralValue = collateralAmount.multiply(mark.pricePerUnit());
         BigInteger collateralLimitedBorrow = collateralValue.multiply(BigInteger.valueOf(market.getMaxLtvBps()))
                 .divide(BigInteger.valueOf(10_000));
-        BigInteger availableLiquidity = onchainReader.availableLiquidity(
-                chainIdentifier, market.getMarketAddress(), market.getLoanTokenAddress());
         BigInteger maxBorrow = collateralLimitedBorrow.min(availableLiquidity);
         BigInteger age = BigInteger.valueOf(Instant.now().getEpochSecond()).subtract(mark.updatedAt());
         boolean oracleReliable = mark.pricePerUnit().signum() > 0

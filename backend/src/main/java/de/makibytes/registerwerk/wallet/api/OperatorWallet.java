@@ -13,6 +13,7 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "operator_wallet")
+@org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
 public class OperatorWallet {
 
     public enum WalletType { EVM, SOLANA, STARKNET, STELLAR, CANTON }

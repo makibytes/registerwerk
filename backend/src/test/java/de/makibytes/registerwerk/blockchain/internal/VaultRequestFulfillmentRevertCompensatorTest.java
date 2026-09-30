@@ -83,7 +83,7 @@ class VaultRequestFulfillmentRevertCompensatorTest {
         assertThat(request.getFulfilledAt()).isNull();
         assertThat(request.getNavAtFulfill()).isNull();
         assertThat(request.isConfirmed()).isFalse();
-        assertThat(request.getChainConfigId()).isNull();
+        assertThat(request.getChainConfigId()).isEqualTo(chainConfigId); // identity, kept
         assertThat(request.getBlockNumber()).isNull();
         verify(vaultRequestRepository).save(request);
         assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);

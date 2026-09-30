@@ -218,6 +218,24 @@ class VaultConfirmationListenerTest {
     }
 
     @Test
+    @DisplayName("P4-05: a tx confirmed on another chain does not resolve a request bound to this chain")
+    void confirmationOnOtherChain_doesNotResolve() {
+        VaultRequest request = request(UUID.randomUUID());
+        request.setChainConfigId(UUID.randomUUID());
+        request.setFulfilledTx("0xfulfiltx");
+        when(vaultRequestRepository.findByFulfilledTxIsNotNullAndConfirmedFalse()).thenReturn(List.of(request));
+        when(blockchainTransactionService.isConfirmedFailure("0xfulfiltx")).thenReturn(false);
+        when(blockchainTransactionService.confirmedLocation("0xfulfiltx"))
+                .thenReturn(Optional.of(new BlockchainTransactionService.ConfirmedTxLocation(chainConfigId, 300L, "0xblock300")));
+
+        listener.resolvePending();
+
+        assertThat(request.isConfirmed()).isFalse();
+        assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
+        verify(vaultRequestRepository, org.mockito.Mockito.never()).save(request);
+    }
+
+    @Test
     @DisplayName("T1-08: the executed NAV/shares/assets come from the fulfilment event, not the operator-typed NAV")
     void confirmedFulfillment_recordsOnChainNavNotTypedNav() throws Exception {
         VaultRequest request = request(UUID.randomUUID());

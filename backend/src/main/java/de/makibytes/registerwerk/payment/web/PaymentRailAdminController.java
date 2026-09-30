@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.payment.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.payment.api.PaymentRail;
 import de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository;
@@ -28,6 +29,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/payment-rails")
 @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+@RequiresIdempotencyKey
 public class PaymentRailAdminController {
 
     private final PaymentRailAdminService railService;

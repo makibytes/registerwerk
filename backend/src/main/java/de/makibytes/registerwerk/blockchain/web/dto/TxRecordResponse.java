@@ -28,7 +28,11 @@ public record TxRecordResponse(
         String opsNote,
         Instant opsReviewedAt,
         UUID opsReviewedBy,
-        String executionOutcome
+        String executionOutcome,
+        Instant lateMinedAt,
+        String replacedByTxHash,
+        String minedTxHash,
+        boolean awaitingChain
 ) {
     public static TxRecordResponse from(BlockchainTransactionView tx) {
         return new TxRecordResponse(
@@ -39,6 +43,7 @@ public record TxRecordResponse(
                 tx.gasUsed(), tx.blockNumber(), tx.errorMessage(),
                 tx.createdAt(), tx.completedAt(),
                 tx.opsNote(), tx.opsReviewedAt(), tx.opsReviewedBy(),
-                tx.executionOutcome());
+                tx.executionOutcome(), tx.lateMinedAt(), tx.replacedByTxHash(), tx.minedTxHash(),
+                tx.awaitingChain());
     }
 }

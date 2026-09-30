@@ -105,7 +105,7 @@ class VaultRequestFulfillmentRevertCompensator implements ChainEffectCompensator
         }
         request.setRequestStatus(VaultRequestStatus.PENDING);
         request.setConfirmed(false);
-        request.setChainConfigId(null);
+        // chainConfigId stays: it is part of the request's identity (asset, chain, request id).
         request.setBlockNumber(null);
         request.setBlockHash(null);
         vaultRequestRepository.save(request);

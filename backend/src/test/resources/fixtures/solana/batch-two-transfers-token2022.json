@@ -1,0 +1,37 @@
+{
+  "blockTime": 1767225700,
+  "slot": 310000050,
+  "version": "legacy",
+  "meta": {
+    "err": null,
+    "fee": 10000,
+    "preTokenBalances": [
+      {"accountIndex": 1, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerAlice1111111111111111111111111111111111",
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+       "uiTokenAmount": {"amount": "1000000000000000000000", "decimals": 18, "uiAmount": null, "uiAmountString": "1000"}},
+      {"accountIndex": 2, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerBob111111111111111111111111111111111111",
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+       "uiTokenAmount": {"amount": "0", "decimals": 18, "uiAmount": null, "uiAmountString": "0"}},
+      {"accountIndex": 3, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerCarol11111111111111111111111111111111111",
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+       "uiTokenAmount": {"amount": "0", "decimals": 18, "uiAmount": null, "uiAmountString": "0"}}
+    ],
+    "postTokenBalances": [
+      {"accountIndex": 1, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerAlice1111111111111111111111111111111111",
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+       "uiTokenAmount": {"amount": "850000000000000000000", "decimals": 18, "uiAmount": null, "uiAmountString": "850"}},
+      {"accountIndex": 2, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerBob111111111111111111111111111111111111",
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+       "uiTokenAmount": {"amount": "100000000000000000000", "decimals": 18, "uiAmount": null, "uiAmountString": "100"}},
+      {"accountIndex": 3, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerCarol11111111111111111111111111111111111",
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+       "uiTokenAmount": {"amount": "50000000000000000000", "decimals": 18, "uiAmount": null, "uiAmountString": "50"}}
+    ]
+  },
+  "transaction": {"message": {"accountKeys": [], "instructions": [
+    {"program": "spl-token-2022", "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "parsed": {"type": "transferChecked", "info": {"amount": "100000000000000000000"}}},
+    {"program": "spl-token-2022", "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "parsed": {"type": "transferChecked", "info": {"amount": "50000000000000000000"}}}
+  ]}, "signatures": ["sigBatch"]}
+}

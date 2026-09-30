@@ -36,6 +36,8 @@ import de.makibytes.registerwerk.blockchain.api.ZamaRelayerClient;
 import de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent;
 import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.kyc.api.OutboundDestinationGate;
+import de.makibytes.registerwerk.blockchain.api.RequestEvidence;
 import de.makibytes.registerwerk.travelrule.api.TravelRuleGate;
 
 /**
@@ -75,6 +77,7 @@ public class TokenAdminService implements TokenAdminPort {
     private final BlockchainTransactionService txService;
     private final TravelRuleGate travelRuleGate;
     private final HolderBlockGate holderBlockGate;
+    private final OutboundDestinationGate destinationGate;
     private final ApplicationEventPublisher eventPublisher;
     private final ZamaRelayerClient zamaRelayerClient;
 
@@ -86,6 +89,7 @@ public class TokenAdminService implements TokenAdminPort {
             BlockchainTransactionService txService,
             TravelRuleGate travelRuleGate,
             HolderBlockGate holderBlockGate,
+            OutboundDestinationGate destinationGate,
             ApplicationEventPublisher eventPublisher,
             ZamaRelayerClient zamaRelayerClient) {
         this.deploymentRepository = deploymentRepository;
@@ -95,6 +99,7 @@ public class TokenAdminService implements TokenAdminPort {
         this.txService = txService;
         this.travelRuleGate = travelRuleGate;
         this.holderBlockGate = holderBlockGate;
+        this.destinationGate = destinationGate;
         this.eventPublisher = eventPublisher;
         this.zamaRelayerClient = zamaRelayerClient;
     }
@@ -165,6 +170,7 @@ public class TokenAdminService implements TokenAdminPort {
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         requireNotBlocked(walletAddress);
+        destinationGate.require(dep.getAssetId(), walletAddress, "whitelist");
         Function fn = new Function("whitelist",
                 Collections.singletonList(new Address(walletAddress)),
                 Collections.emptyList());
@@ -195,8 +201,10 @@ public class TokenAdminService implements TokenAdminPort {
                     "forcedTransfer is not available for ERC-1155 tokens (it would only target token id 0) "
                     + "— use forcedTransferSingle to target a specific token id");
         }
+        requireLegalBasis(legalBasis);
         requireNotBlocked(from);
         requireNotBlocked(to);
+        destinationGate.require(dep.getAssetId(), to, "forcedTransfer");
         // TFR Reg (EU) 2023/1113: dispatch/record Travel Rule information before
         // submitting the on-chain transfer. EUR valuation is not available at this
         // layer — null is treated conservatively by the gate.
@@ -220,8 +228,10 @@ public class TokenAdminService implements TokenAdminPort {
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         RegisterFreeze.requireOpen(asset.status(), asset.id(), "forcedTransferSingle");
+        requireLegalBasis(legalBasis);
         requireNotBlocked(from);
         requireNotBlocked(to);
+        destinationGate.require(dep.getAssetId(), to, "forcedTransferSingle");
         travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
         if (asset.tokenStandard() != TokenStandard.ERC1155) {
             throw new IllegalArgumentException("forcedTransferSingle is only available for ERC-1155 tokens");
@@ -244,7 +254,9 @@ public class TokenAdminService implements TokenAdminPort {
         AssetDeployment dep = requireDeployment(deploymentId);
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         RegisterFreeze.requireOpen(asset.status(), asset.id(), "forcedApprove");
+        requireLegalBasis(legalBasis);
         requireNotBlocked(owner);
+        destinationGate.require(dep.getAssetId(), spender, "forcedApprove");
         Function fn = new Function(
                 forcedApproveMethodName(asset.tokenStandard()),
                 Arrays.asList(new Address(owner), new Address(spender), new Uint256(value), new Utf8String(legalBasis)),
@@ -268,6 +280,7 @@ public class TokenAdminService implements TokenAdminPort {
                     "forceBurn is not available for ERC-1155 tokens (it would only target token id 0) "
                     + "— use forceBurnSingle to target a specific token id");
         }
+        requireLegalBasis(legalBasis);
         requireNotBlocked(from);
         Function fn = new Function("forceBurn",
                 Arrays.asList(new Address(from), new Uint256(value), new Utf8String(legalBasis)),
@@ -289,6 +302,7 @@ public class TokenAdminService implements TokenAdminPort {
         if (asset.tokenStandard() != TokenStandard.ERC1155) {
             throw new IllegalArgumentException("forceBurnSingle is only available for ERC-1155 tokens");
         }
+        requireLegalBasis(legalBasis);
         requireNotBlocked(from);
         Function fn = new Function("forceBurnSingle",
                 Arrays.asList(new Address(from), new Uint256(id), new Uint256(amount), new Utf8String(legalBasis)),
@@ -367,6 +381,7 @@ public class TokenAdminService implements TokenAdminPort {
                     + "(registerwerk.zama.relayer-url) to encrypt the mint amount.");
         }
         requireNotBlocked(toAddress);
+        destinationGate.require(dep.getAssetId(), toAddress, "confidentialMint");
         String operatorAddress = evmContractService.signer(
                 new ChainDescriptor(dep.getChain(), dep.getNetwork())).address();
         ZamaRelayerClient.EncryptedInput encrypted =
@@ -499,8 +514,10 @@ public class TokenAdminService implements TokenAdminPort {
                     "Confidential forced-transfer requires a configured Zama relayer sidecar "
                     + "(registerwerk.zama.relayer-url) to encrypt the transfer amount.");
         }
+        requireLegalBasis(legalBasis);
         requireNotBlocked(from);
         requireNotBlocked(to);
+        destinationGate.require(dep.getAssetId(), to, "confidentialForcedTransfer");
         travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
         String operatorAddress = evmContractService.signer(
                 new ChainDescriptor(dep.getChain(), dep.getNetwork())).address();
@@ -540,6 +557,7 @@ public class TokenAdminService implements TokenAdminPort {
         AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
         RegisterFreeze.requireOpen(asset.status(), asset.id(), "mint");
         requireNotBlocked(toAddress);
+        destinationGate.require(dep.getAssetId(), toAddress, "mint");
         Function fn = new Function("mint",
                 Arrays.asList(new Address(toAddress), new Uint256(amount)),
                 Collections.emptyList());
@@ -588,6 +606,14 @@ public class TokenAdminService implements TokenAdminPort {
             throw new de.makibytes.registerwerk.shared.ComplianceGateException(
                     "Wallet " + walletAddress + " is subject to an active §16 eWpG Sperrvermerk "
                     + "(legal block) — operation refused.");
+        }
+    }
+
+    /** P4C-2: a forced operation needs a real legal basis (order / instruction), not a blank or a placeholder. */
+    static void requireLegalBasis(String legalBasis) {
+        if (legalBasis == null || legalBasis.trim().length() < 10) {
+            throw new IllegalArgumentException(
+                    "legalBasis is required for forced operations (at least 10 characters: order, authority, reference).");
         }
     }
 
@@ -649,7 +675,16 @@ public class TokenAdminService implements TokenAdminPort {
         String txHash = durableTransactions.submit(
                 requireChainConfigId(dep), dep.getContractAddress(), fn, params);
 
-        eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole, params));
+        Map<String, Object> auditParams = params;
+        String caseReference = RequestEvidence.caseReference();
+        if (caseReference != null) {
+            auditParams = new java.util.LinkedHashMap<>(params);
+            auditParams.put("caseReference", caseReference);
+        }
+        // P4C-4: the validated second approver of this request lands in the audit payload
+        // (AuditEvent.from) and, via BlockchainTransactionService.record, on blockchain_transaction.
+        eventPublisher.publishEvent(new TokenAdminActionEvent(dep.getId(), methodName, actorId, actorRole,
+                auditParams, RequestEvidence.approverId(), RequestEvidence.requestId()));
 
         return txService.record(txHash, methodName, dep.getId(), asset.id(),
                 dep.getChain().name(), dep.getNetwork().name(), dep.getContractAddress(), params);

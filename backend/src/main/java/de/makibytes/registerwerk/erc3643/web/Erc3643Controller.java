@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.erc3643.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -294,6 +295,7 @@ public class Erc3643Controller {
 
     // ── Agent operations ──────────────────────────────────────────────────────
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/forced-transfer")
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
@@ -308,6 +310,7 @@ public class Erc3643Controller {
         return accepted(txId);
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/forced-approve")
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_APPROVE_OVERRIDE")
@@ -322,6 +325,7 @@ public class Erc3643Controller {
         return accepted(txId);
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/freeze")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> freezeAddress(
@@ -333,6 +337,7 @@ public class Erc3643Controller {
     }
 
     /** Step-up + 4-eyes (T3-16); the service refuses while an ACTIVE Sperrvermerk covers the address. */
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/unfreeze")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     @RequiresStepUp(requireSecondApprover = true, reason = "UNFREEZE")
@@ -344,6 +349,7 @@ public class Erc3643Controller {
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/freeze-partial")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> freezePartialTokens(
@@ -356,6 +362,7 @@ public class Erc3643Controller {
     }
 
     /** Step-up + 4-eyes (T3-16); the service refuses while an ACTIVE Sperrvermerk covers the address. */
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/unfreeze-partial")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     @RequiresStepUp(requireSecondApprover = true, reason = "UNFREEZE")
@@ -368,6 +375,7 @@ public class Erc3643Controller {
                 resolveSuiteId(assetId, deploymentId), request.address(), request.amount(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/pause")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> pause(
@@ -376,6 +384,7 @@ public class Erc3643Controller {
         return accepted(lifecycleService.pause(resolveSuiteId(assetId, deploymentId), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/unpause")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> unpause(
@@ -384,6 +393,7 @@ public class Erc3643Controller {
         return accepted(lifecycleService.unpause(resolveSuiteId(assetId, deploymentId), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/force-burn")
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")
@@ -398,6 +408,7 @@ public class Erc3643Controller {
         return accepted(txId);
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/batch-forced-transfer")
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCED_TRANSFER_EWG24")
@@ -411,6 +422,7 @@ public class Erc3643Controller {
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/batch-mint")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     public ResponseEntity<TxSubmissionResponse> batchMint(
@@ -421,6 +433,7 @@ public class Erc3643Controller {
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{deploymentId}/batch-burn")
     @PreAuthorize("hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canForceAdmin(#assetId, authentication)")
     @RequiresStepUp(requireSecondApprover = true, reason = "FORCE_BURN_EWG26")

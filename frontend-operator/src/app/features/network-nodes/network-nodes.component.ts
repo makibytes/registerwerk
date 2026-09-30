@@ -9,12 +9,14 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { ChainService, ChainConfigCreateRequest, ChainConfigUpdateRequest, RpcNodeWriteRequest } from '../../core/api/chain.service';
+import { ChainService, RPC_NODE_CHANGE, ChainConfigCreateRequest, ChainConfigUpdateRequest, RpcNodeWriteRequest } from '../../core/api/chain.service';
 import { ChainConfig, ChainHealth, RpcNode } from '../../core/models';
 import { environment } from '../../../environments/environment';
 import { EMPTY, Subject, Subscription, catchError, exhaustMap, finalize, merge, timer } from 'rxjs';
 import { AddNodeDialogComponent } from './add-node-dialog.component';
 import { ChainConfigDialogComponent } from './chain-config-dialog.component';
+import { StepUpDialogComponent, StepUpDialogResult } from '../../shared/components/step-up/step-up-dialog.component';
+import { DualControlTokens } from '../../core/api/dual-control-headers';
 
 @Component({
   selector: 'app-network-nodes',
@@ -45,6 +47,13 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
       color: var(--rw-text-primary);
       letter-spacing: -0.4px;
       margin: 0;
+    }
+
+    .health-reason { color: var(--rw-danger, var(--rw-text-secondary)); font-weight: 600; }
+    .genesis-pin .mono { font-family: 'IBM Plex Mono', monospace; }
+    .pin-reset-btn {
+      margin-left: 8px; background: none; border: none; padding: 0; cursor: pointer;
+      color: var(--rw-accent); font-size: 12px; text-decoration: underline;
     }
 
     .page-subtitle {
@@ -359,6 +368,12 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
           <div class="chain-info">
             <p class="chain-name">{{ chain.displayName }}</p>
             <p class="chain-meta">{{ chain.identifier }}@if (chain.chainId) { · chain {{ chain.chainId }} }</p>
+            @if (pinnedGenesis(chain); as genesis) {
+              <p class="chain-meta genesis-pin" [matTooltip]="'Pinned genesis hash: ' + genesis">
+                Genesis pin <span class="mono">{{ genesis.length > 18 ? genesis.slice(0, 10) + '…' + genesis.slice(-6) : genesis }}</span>
+                <button type="button" class="pin-reset-btn" (click)="resetGenesisPin(chain)">Reset pin</button>
+              </p>
+            }
           </div>
           <div class="chain-badges">
             <span class="badge" [class.badge-mainnet]="chain.networkType === 'MAINNET'" [class.badge-testnet]="chain.networkType === 'TESTNET'">
@@ -427,6 +442,12 @@ import { ChainConfigDialogComponent } from './chain-config-dialog.component';
                           <span class="health-label unhealthy">Unhealthy</span>
                         }
                       </div>
+                      @if (node.healthReason && node.enabled) {
+                        <div class="failures-text row-indent health-reason" role="status"
+                             [matTooltip]="healthReasonHint(node.healthReason)">
+                          {{ healthReasonLabel(node.healthReason) }}
+                        </div>
+                      }
                       @if (node.consecutiveFailures > 0 && node.enabled) {
                         <div class="failures-text row-indent">{{ node.consecutiveFailures }} failures</div>
                       }
@@ -710,49 +731,104 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
     });
   }
 
-  toggleEnabled(chain: ChainHealth, node: RpcNode, enabled: boolean) {
-    const call = enabled
-      ? this.chainService.enableNode(chain.id, node.id)
-      : this.chainService.disableNode(chain.id, node.id);
-
-    call.subscribe({
-      next: () => {
-        this.updateNode(chain.id, node.id, { enabled });
-        this.snackBar.open(enabled ? 'Node started' : 'Node stopped', 'OK', { duration: 2500 });
-      },
-      error: () => {
-        this.snackBar.open('Failed to update node', 'OK', { duration: 3000 });
-        // Re-fetch to restore correct state
-        this.refresh();
-      },
+  /** Step-up + second approver (4-eyes) for every RPC-node change (P4C-1). */
+  private withDualControl(reason: string, run: (tokens: DualControlTokens) => void, onCancel?: () => void): void {
+    this.dialog.open(StepUpDialogComponent, {
+      data: { requireDualControl: true, reason, action: RPC_NODE_CHANGE },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (result?.stepUpToken && result.dualControlToken) {
+        run({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
+      } else {
+        onCancel?.();
+      }
     });
+  }
+
+  private errorMessage(e: { error?: { message?: string } }, fallback: string): string {
+    return e?.error?.message ?? fallback;
+  }
+
+  healthReasonLabel(reason: string): string {
+    switch (reason) {
+      case 'CHAIN_MISMATCH': return 'Wrong chain — quarantined';
+      case 'IMPLAUSIBLE_HEIGHT': return 'Implausible block height — quarantined';
+      case 'RECOVERING': return 'Recovering — awaiting consecutive good probes';
+      default: return reason;
+    }
+  }
+
+  healthReasonHint(reason: string): string {
+    switch (reason) {
+      case 'CHAIN_MISMATCH': return 'The node reports a chain id or genesis hash that differs from the pinned chain identity. It is excluded from routing, even as a last resort.';
+      case 'IMPLAUSIBLE_HEIGHT': return 'The node is far ahead of the other nodes of this chain and is not trusted as a height reference.';
+      case 'RECOVERING': return 'The node answered again; it is routable after two consecutive good probes.';
+      default: return reason;
+    }
+  }
+
+  pinnedGenesis(chain: ChainHealth): string | null {
+    return chain.nodes.find(n => !!n.pinnedGenesisHash)?.pinnedGenesisHash ?? null;
+  }
+
+  toggleEnabled(chain: ChainHealth, node: RpcNode, enabled: boolean) {
+    this.withDualControl(`${enabled ? 'Start' : 'Stop'} RPC node ${node.url}`, tokens => {
+      const call = enabled
+        ? this.chainService.enableNode(chain.id, node.id, tokens)
+        : this.chainService.disableNode(chain.id, node.id, tokens);
+      call.subscribe({
+        next: () => {
+          this.updateNode(chain.id, node.id, { enabled });
+          this.snackBar.open(enabled ? 'Node started' : 'Node stopped', 'OK', { duration: 2500 });
+        },
+        error: (e) => {
+          this.snackBar.open(this.errorMessage(e, 'Failed to update node'), 'OK', { duration: 5000 });
+          this.refresh();
+        },
+      });
+    }, () => this.refresh());
   }
 
   toggleExclusive(chain: ChainHealth, node: RpcNode) {
     const newValue = !node.exclusive;
-    this.chainService.setExclusive(chain.id, node.id, newValue).subscribe({
-      next: () => {
-        this.updateNode(chain.id, node.id, { exclusive: newValue });
-        this.snackBar.open(
-          newValue ? 'Node pinned — all traffic routed here' : 'Node unpinned',
-          'OK', { duration: 2500 });
-      },
-      error: () => this.snackBar.open('Failed to update pin', 'OK', { duration: 3000 }),
-    });
+    this.withDualControl(`${newValue ? 'Pin all traffic to' : 'Unpin'} RPC node ${node.url}`, tokens =>
+      this.chainService.setExclusive(chain.id, node.id, newValue, tokens).subscribe({
+        next: () => {
+          this.updateNode(chain.id, node.id, { exclusive: newValue });
+          this.snackBar.open(
+            newValue ? 'Node pinned — all traffic routed here' : 'Node unpinned',
+            'OK', { duration: 2500 });
+        },
+        error: (e) => this.snackBar.open(this.errorMessage(e, 'Failed to update pin'), 'OK', { duration: 5000 }),
+      }));
   }
 
   deleteNode(chain: ChainHealth, node: RpcNode) {
     if (!confirm(`Remove node "${node.url}"?\n\nThis cannot be undone.`)) return;
 
-    this.chainService.deleteNode(chain.id, node.id).subscribe({
-      next: () => {
-        this.chains.update((chains) => chains.map((current) => current.id === chain.id
-          ? { ...current, nodes: current.nodes.filter((candidate) => candidate.id !== node.id) }
-          : current));
-        this.snackBar.open('Node removed', 'OK', { duration: 2500 });
-      },
-      error: () => this.snackBar.open('Failed to remove node', 'OK', { duration: 3000 }),
-    });
+    this.withDualControl(`Remove RPC node ${node.url}`, tokens =>
+      this.chainService.deleteNode(chain.id, node.id, tokens).subscribe({
+        next: () => {
+          this.chains.update((chains) => chains.map((current) => current.id === chain.id
+            ? { ...current, nodes: current.nodes.filter((candidate) => candidate.id !== node.id) }
+            : current));
+          this.snackBar.open('Node removed', 'OK', { duration: 2500 });
+        },
+        error: (e) => this.snackBar.open(this.errorMessage(e, 'Failed to remove node'), 'OK', { duration: 5000 }),
+      }));
+  }
+
+  resetGenesisPin(chain: ChainHealth) {
+    if (!confirm(`Reset the pinned genesis hash of "${chain.displayName}"?\n\nOnly do this after a legitimate network reset (devnet). The next health round pins the genesis hash reported by a node whose chain id matches.`)) return;
+    this.withDualControl(`Reset genesis pin of ${chain.displayName}`, tokens =>
+      this.chainService.resetGenesisPin(chain.id, tokens).subscribe({
+        next: () => {
+          this.snackBar.open('Genesis pin cleared — it is re-captured on the next health round', 'OK', { duration: 4000 });
+          this.refresh();
+        },
+        error: (e) => this.snackBar.open(this.errorMessage(e, 'Failed to reset genesis pin'), 'OK', { duration: 5000 }),
+      }));
   }
 
   openAddNode(chain: ChainHealth) {
@@ -763,19 +839,20 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
 
     ref.afterClosed().subscribe((result: RpcNodeWriteRequest | undefined) => {
       if (!result) return;
-      this.chainService.addNode(chain.id, result).subscribe({
-        next: node => {
-          this.chains.update((chains) => chains.map((current) => current.id === chain.id
-            ? { ...current, nodes: [...current.nodes, node] }
-            : current));
-          this.snackBar.open(
-            node.kind === 'CHAINCACHE' && !node.capabilities
-              ? 'Node added — chaincache capability probe failed, will retry on refresh'
-              : 'Node added — health check will run shortly',
-            'OK', { duration: 3500 });
-        },
-        error: () => this.snackBar.open('Failed to add node', 'OK', { duration: 3000 }),
-      });
+      this.withDualControl(`Add RPC node ${result.url} to ${chain.displayName}`, tokens =>
+        this.chainService.addNode(chain.id, result, tokens).subscribe({
+          next: node => {
+            this.chains.update((chains) => chains.map((current) => current.id === chain.id
+              ? { ...current, nodes: [...current.nodes, node] }
+              : current));
+            this.snackBar.open(
+              node.kind === 'CHAINCACHE' && !node.capabilities
+                ? 'Node added — chaincache capability probe failed, will retry on refresh'
+                : 'Node added — health check will run shortly',
+              'OK', { duration: 3500 });
+          },
+          error: (e) => this.snackBar.open(this.errorMessage(e, 'Failed to add node'), 'OK', { duration: 6000 }),
+        }));
     });
   }
 
@@ -787,13 +864,14 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
 
     ref.afterClosed().subscribe((result: RpcNodeWriteRequest | undefined) => {
       if (!result) return;
-      this.chainService.updateNode(chain.id, node.id, result).subscribe({
-        next: updated => {
-          this.updateNode(chain.id, node.id, updated);
-          this.snackBar.open('Node updated', 'OK', { duration: 2500 });
-        },
-        error: () => this.snackBar.open('Failed to update node', 'OK', { duration: 3000 }),
-      });
+      this.withDualControl(`Change RPC node ${node.url}`, tokens =>
+        this.chainService.updateNode(chain.id, node.id, result, tokens).subscribe({
+          next: updated => {
+            this.updateNode(chain.id, node.id, updated);
+            this.snackBar.open('Node updated', 'OK', { duration: 2500 });
+          },
+          error: (e) => this.snackBar.open(this.errorMessage(e, 'Failed to update node'), 'OK', { duration: 6000 }),
+        }));
     });
   }
 
@@ -831,7 +909,7 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
       textarea.select();
       try {
         const copied = document.execCommand('copy');
-        copied ? resolve() : reject(new Error('execCommand copy returned false'));
+        if (copied) resolve(); else reject(new Error('execCommand copy returned false'));
       } catch (error) {
         reject(error);
       } finally {

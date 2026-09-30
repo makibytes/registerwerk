@@ -8,6 +8,8 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatDialog } from '@angular/material/dialog';
+import { StepUpDialogComponent, StepUpDialogResult } from '../../../../shared/components/step-up/step-up-dialog.component';
 import { DecimalPipe } from '@angular/common';
 import { SlotService } from '../../../../core/api/slot.service';
 import { AssetSlot } from '../../../../core/models';
@@ -72,7 +74,7 @@ import { AssetSlot } from '../../../../core/models';
                 </mat-form-field>
                 <mat-form-field appearance="outline">
                   <mat-label>Value</mat-label>
-                  <input matInput type="number" [(ngModel)]="mintForm.value" min="1" />
+                  <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="mintForm.value" />
                 </mat-form-field>
                 <button type="button" mat-flat-button class="btn-accent"
                         [disabled]="busy || !mintForm.toAddress || !mintForm.value"
@@ -90,7 +92,7 @@ import { AssetSlot } from '../../../../core/models';
       <div class="inline-form">
         <mat-form-field appearance="outline">
           <mat-label>Slot ID</mat-label>
-          <input matInput type="number" [(ngModel)]="createForm.slotId" min="1" />
+          <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="createForm.slotId" />
         </mat-form-field>
         <mat-form-field appearance="outline" class="grow">
           <mat-label>Name (e.g. "Tranche A — 2030")</mat-label>
@@ -98,7 +100,7 @@ import { AssetSlot } from '../../../../core/models';
         </mat-form-field>
         <mat-form-field appearance="outline">
           <mat-label>Supply cap (optional)</mat-label>
-          <input matInput type="number" [(ngModel)]="createForm.supplyCap" min="1" />
+          <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="createForm.supplyCap" />
         </mat-form-field>
         <button type="button" mat-flat-button class="btn-accent"
                 [disabled]="busy || !createForm.slotId"
@@ -117,7 +119,7 @@ import { AssetSlot } from '../../../../core/models';
       <div class="inline-form">
         <mat-form-field appearance="outline">
           <mat-label>Token ID</mat-label>
-          <input matInput type="number" [(ngModel)]="tokenOps.tokenId" min="1" />
+          <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="tokenOps.tokenId" />
         </mat-form-field>
         <mat-form-field appearance="outline" class="grow">
           <mat-label>Reason / legal basis</mat-label>
@@ -134,15 +136,15 @@ import { AssetSlot } from '../../../../core/models';
       <div class="inline-form">
         <mat-form-field appearance="outline">
           <mat-label>From token ID</mat-label>
-          <input matInput type="number" [(ngModel)]="forcedForm.tokenId" min="1" />
+          <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="forcedForm.tokenId" />
         </mat-form-field>
         <mat-form-field appearance="outline">
           <mat-label>To token ID</mat-label>
-          <input matInput type="number" [(ngModel)]="forcedForm.toTokenId" min="1" />
+          <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="forcedForm.toTokenId" />
         </mat-form-field>
         <mat-form-field appearance="outline">
           <mat-label>Value</mat-label>
-          <input matInput type="number" [(ngModel)]="forcedForm.value" min="1" />
+          <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="forcedForm.value" />
         </mat-form-field>
         <mat-form-field appearance="outline" class="grow">
           <mat-label>Legal basis</mat-label>
@@ -203,6 +205,7 @@ export class SlotAdminComponent implements OnInit {
 
   private readonly slotService = inject(SlotService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
   private readonly cdr = inject(ChangeDetectorRef);
 
   slots: AssetSlot[] = [];
@@ -269,14 +272,39 @@ export class SlotAdminComponent implements OnInit {
         `Unfreeze of token #${this.tokenOps.tokenId} submitted.`);
   }
 
+  private isUint(v: unknown): boolean {
+    return /^[1-9]\d*$/.test(String(v ?? '').trim());
+  }
+
   forcedTransfer(): void {
+    const f = this.forcedForm;
+    if (!this.isUint(f.tokenId) || !this.isUint(f.toTokenId) || !this.isUint(f.value)) {
+      this.snackBar.open('Token IDs and value must be whole numbers greater than 0.', 'Dismiss', { duration: 5000 });
+      return;
+    }
+    if (f.legalBasis.trim().length < 10) {
+      this.snackBar.open('The legal basis needs at least 10 characters.', 'Dismiss', { duration: 5000 });
+      return;
+    }
     if (!confirm('Execute a forced value transfer? This is a regulatory intervention and is fully audited.')) return;
-    this.run(this.slotService.forcedValueTransfer(this.deploymentId, String(this.forcedForm.tokenId), {
-      toTokenId: String(this.forcedForm.toTokenId),
-      value: String(this.forcedForm.value),
-      legalBasis: this.forcedForm.legalBasis,
-    }), 'Forced value transfer submitted.', () => {
-      this.forcedForm = { tokenId: '', toTokenId: '', value: '', legalBasis: '' };
+    // ERC-3525 forced value transfer: step-up + second approver.
+    this.dialog.open(StepUpDialogComponent, {
+      data: {
+        requireDualControl: true,
+        reason: `Forced value transfer ${f.value} from token #${f.tokenId} to token #${f.toTokenId}`,
+        action: 'ERC3525_FORCED_VALUE_TRANSFER_EWG24',
+      },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (!result?.stepUpToken || !result.dualControlToken) return;
+      this.run(this.slotService.forcedValueTransfer(this.deploymentId, String(f.tokenId).trim(), {
+        toTokenId: String(f.toTokenId).trim(),
+        value: String(f.value).trim(),
+        legalBasis: f.legalBasis.trim(),
+      }, { stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken }), 'Forced value transfer submitted.', () => {
+        this.forcedForm = { tokenId: '', toTokenId: '', value: '', legalBasis: '' };
+      });
     });
   }
 

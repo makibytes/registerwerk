@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { AssetSlot } from '../models';
+import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 
 @Injectable({ providedIn: 'root' })
 export class SlotService {
@@ -42,11 +43,13 @@ export class SlotService {
     return this.http.post<{ txId: string }>(`${this.base}/deployments/${deploymentId}/tokens/${tokenId}/unfreeze`, {});
   }
 
+  /** Step-up + second approver (`ERC3525_FORCED_VALUE_TRANSFER_EWG24`); values are decimal strings. */
   forcedValueTransfer(deploymentId: string, tokenId: string, body: {
     toTokenId: string;
     value: string;
     legalBasis: string;
-  }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/deployments/${deploymentId}/tokens/${tokenId}/forced-value-transfer`, body);
+  }, tokens: DualControlTokens): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/deployments/${deploymentId}/tokens/${tokenId}/forced-value-transfer`, body,
+      { headers: dualControlHeaders(tokens) });
   }
 }

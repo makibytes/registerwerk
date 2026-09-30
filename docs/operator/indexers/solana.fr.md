@@ -158,3 +158,6 @@ Un job `@Scheduled` séparé s'exécute toutes les 10 minutes :
 ## Enregistrement d'un nouveau jeton SPL
 
 Lorsqu'un déploiement d'actifs Solana est créé via l'API, le backend commence automatiquement à surveiller son adresse de mint. Aucune configuration manuelle nécessaire.
+
+!!! warning "Statut de couverture : observation partielle"
+    L'indexeur liste les signatures par **adresse de mint**. Une instruction SPL `transfer` classique ne référence pas le compte mint ; ces mouvements entre détenteurs ne sont donc pas vus. Registerwerk signale par conséquent les déploiements Solana comme *partiellement observés* (`plain SPL transfers not observable`) : la synchronisation des détenteurs reste BLOCKED et le registre n'est jamais marqué comme rapproché à partir de l'historique Solana indexé, tant que les comptes de jetons ne sont pas indexés.

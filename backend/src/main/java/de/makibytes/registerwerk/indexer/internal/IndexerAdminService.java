@@ -30,10 +30,16 @@ public class IndexerAdminService {
 
     private final IndexerStateRepository repository;
     private final ApplicationEventPublisher events;
+    private final SolanaMintSyncCursorRepository solanaMintCursors;
+    private final IndexerDeploymentCursorRepository deploymentCursors;
 
-    public IndexerAdminService(IndexerStateRepository repository, ApplicationEventPublisher events) {
+    public IndexerAdminService(IndexerStateRepository repository, ApplicationEventPublisher events,
+                               SolanaMintSyncCursorRepository solanaMintCursors,
+                               IndexerDeploymentCursorRepository deploymentCursors) {
         this.repository = repository;
         this.events = events;
+        this.solanaMintCursors = solanaMintCursors;
+        this.deploymentCursors = deploymentCursors;
     }
 
     /**
@@ -60,6 +66,12 @@ public class IndexerAdminService {
             state.setLastSyncedBlock(null);
             state.setLastFinalBlock(null);
             state.setLastSyncedSignature(null);
+            // The per-mint (Solana) and per-deployment (Stellar) positions live outside indexer_state.
+            if (state.getIndexerType() == IndexerState.IndexerType.SOLANA_POLL) {
+                solanaMintCursors.clearPositions(state.getChainConfigId());
+            } else if (state.getIndexerType() == IndexerState.IndexerType.STELLAR_HORIZON) {
+                deploymentCursors.clearPositions(state.getChainConfigId());
+            }
         }
         IndexerState saved = repository.save(state);
 

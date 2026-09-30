@@ -1,0 +1,23 @@
+{
+  "blockTime": 1767225900,
+  "slot": 310000150,
+  "version": 0,
+  "meta": {
+    "err": null,
+    "fee": 5000,
+    "preTokenBalances": [
+      {"accountIndex": 1, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerAlice1111111111111111111111111111111111",
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+       "uiTokenAmount": {"amount": "1000", "decimals": 0, "uiAmount": 1000.0, "uiAmountString": "1000"}}
+    ],
+    "postTokenBalances": [
+      {"accountIndex": 1, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerAlice1111111111111111111111111111111111",
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+       "uiTokenAmount": {"amount": "900", "decimals": 0, "uiAmount": 900.0, "uiAmountString": "900"}},
+      {"accountIndex": 2, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerBob111111111111111111111111111111111111",
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+       "uiTokenAmount": {"amount": "98", "decimals": 0, "uiAmount": 98.0, "uiAmountString": "98"}}
+    ]
+  },
+  "transaction": {"message": {"accountKeys": [], "instructions": []}, "signatures": ["sigFee"]}
+}

@@ -16,8 +16,21 @@ import java.util.UUID;
  * event fully audits the whole EVM admin/correction surface from a single chokepoint.
  */
 public record TokenAdminActionEvent(
-        UUID deploymentId, String methodName, UUID actorId, String actorRole, Map<String, Object> params)
+        UUID deploymentId, String methodName, UUID actorId, String actorRole, Map<String, Object> params,
+        UUID approverId, UUID requestId)
         implements AuditableEvent {
+
+    /** Event without dual-control evidence (single-actor actions, system actors). */
+    public TokenAdminActionEvent(
+            UUID deploymentId, String methodName, UUID actorId, String actorRole, Map<String, Object> params) {
+        this(deploymentId, methodName, actorId, actorRole, params, null, null);
+    }
+
+    /** P4C-4: the validated second approver, recorded in the audit payload by {@code AuditEvent.from}. */
+    @Override public UUID dualControlApproverId() { return approverId; }
+
+    /** Links to the generic {@code DUAL_CONTROL_APPROVED} entry of the same request. */
+    @Override public UUID correlationId() { return requestId; }
 
     public String eventType()   { return "TOKEN_ADMIN_" + toScreamingSnakeCase(methodName); }
     public String subjectType() { return "AssetDeployment"; }

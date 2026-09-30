@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.web.dto;
 
+import de.makibytes.registerwerk.shared.api.StrictAmount;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
@@ -16,7 +18,7 @@ import java.util.UUID;
  */
 public record NavStrikeRequest(
         @NotNull @Positive
-        BigDecimal navPerShare,
+        @JsonDeserialize(using = StrictAmount.BigDecimalAmount.class) BigDecimal navPerShare,
 
         @NotNull
         Instant effectiveAt,

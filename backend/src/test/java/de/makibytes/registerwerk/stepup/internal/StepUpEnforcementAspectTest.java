@@ -39,6 +39,7 @@ class StepUpEnforcementAspectTest {
     private StepUpEntraProperties entraProperties;
     private StepUpTokenValidator validator;
     private StepUpEnforcementAspect aspect;
+    private org.springframework.context.ApplicationEventPublisher publisher;
 
     @BeforeEach
     void setUp() {
@@ -46,12 +47,15 @@ class StepUpEnforcementAspectTest {
         entraProperties = new StepUpEntraProperties();
         entraProperties.setAuthContextId("c1");
         validator = mock(StepUpTokenValidator.class);
-        aspect = new StepUpEnforcementAspect(validator, new StepUpPolicy(authProperties, entraProperties));
+        publisher = mock(org.springframework.context.ApplicationEventPublisher.class);
+        aspect = new StepUpEnforcementAspect(validator, new StepUpPolicy(authProperties, entraProperties),
+                publisher, mock(org.springframework.transaction.PlatformTransactionManager.class));
     }
 
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();
     }
 
     // ── LOCAL_TOTP ────────────────────────────────────────────────────────────
@@ -211,6 +215,66 @@ class StepUpEnforcementAspectTest {
         assertThatThrownBy(() -> aspect.enforce(joinPoint())).isInstanceOf(AccessDeniedException.class);
     }
 
+    // ── P4C-4 dual-control evidence ───────────────────────────────────────────
+
+    @Test
+    @DisplayName("P4C-4: a 4-eyes request publishes DualControlApprovedEvent (approver + initiator) before proceeding")
+    void dualControl_publishesEvidenceBeforeProceed() throws Throwable {
+        authProperties.setEntraEnabled(false);
+        authenticate(jwt(Map.of("acr", "stepup"), Instant.now()));
+        UUID approver = UUID.randomUUID();
+        when(validator.validateDualControlToken(org.mockito.ArgumentMatchers.eq("dc-token"),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(ACTION))).thenReturn(approver);
+        bindRequest();
+
+        ProceedingJoinPoint pjp = dualControlJoinPoint();
+        assertThat(aspect.enforce(pjp)).isEqualTo("ok");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(Object.class);
+        var order = org.mockito.Mockito.inOrder(publisher, pjp);
+        order.verify(publisher).publishEvent(captor.capture());
+        order.verify(pjp).proceed();
+        var event = (de.makibytes.registerwerk.stepup.events.DualControlApprovedEvent) captor.getValue();
+        assertThat(event.dualControlApproverId()).isEqualTo(approver);
+        assertThat(event.reason()).isEqualTo(ACTION);
+        assertThat(event.requestPath()).isEqualTo("/api/v1/x");
+        assertThat(event.payload()).containsEntry("stepUpMode", "LOCAL_TOTP");
+    }
+
+    @Test
+    @DisplayName("P4C-4: if the evidence event cannot be written, the guarded action does not run")
+    void dualControl_failedEvidenceWriteBlocksAction() throws Throwable {
+        authProperties.setEntraEnabled(false);
+        authenticate(jwt(Map.of("acr", "stepup"), Instant.now()));
+        when(validator.validateDualControlToken(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(UUID.randomUUID());
+        bindRequest();
+        org.mockito.Mockito.doThrow(new IllegalStateException("audit down")).when(publisher)
+                .publishEvent(org.mockito.ArgumentMatchers.any(Object.class));
+
+        ProceedingJoinPoint pjp = dualControlJoinPoint();
+        assertThatThrownBy(() -> aspect.enforce(pjp)).isInstanceOf(IllegalStateException.class);
+        org.mockito.Mockito.verify(pjp, org.mockito.Mockito.never()).proceed();
+    }
+
+    private static void bindRequest() {
+        var req = new org.springframework.mock.web.MockHttpServletRequest("POST", "/api/v1/x");
+        req.addHeader("X-Dual-Control-Token", "dc-token");
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
+                new org.springframework.web.context.request.ServletRequestAttributes(req));
+    }
+
+    private static ProceedingJoinPoint dualControlJoinPoint() throws Throwable {
+        ProceedingJoinPoint pjp = mock(ProceedingJoinPoint.class);
+        MethodSignature signature = mock(MethodSignature.class);
+        when(signature.getMethod()).thenReturn(ProtectedTarget.class.getMethod("dualAction"));
+        when(pjp.getSignature()).thenReturn(signature);
+        when(pjp.proceed()).thenReturn("ok");
+        when(pjp.getTarget()).thenReturn(new ProtectedTarget());
+        return pjp;
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private static void authenticate(Jwt jwt) {
@@ -241,6 +305,11 @@ class StepUpEnforcementAspectTest {
     public static class ProtectedTarget {
         @RequiresStepUp(reason = ACTION, maxAgeMinutes = 10)
         public String protectedAction() {
+            return "ok";
+        }
+
+        @RequiresStepUp(reason = ACTION, maxAgeMinutes = 10, requireSecondApprover = true)
+        public String dualAction() {
             return "ok";
         }
     }

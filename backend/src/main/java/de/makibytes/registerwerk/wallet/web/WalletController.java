@@ -1,10 +1,13 @@
 package de.makibytes.registerwerk.wallet.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.wallet.api.WalletBalancePort;
 import de.makibytes.registerwerk.wallet.internal.WalletDefaultService;
 import de.makibytes.registerwerk.wallet.internal.WalletService;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import de.makibytes.registerwerk.wallet.api.OperatorWallet;
 import de.makibytes.registerwerk.wallet.api.WalletChainDefault;
 import de.makibytes.registerwerk.wallet.web.dto.*;
@@ -63,6 +66,7 @@ public class WalletController {
     }
 
     @PostMapping("/generate")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_GENERATE")
     public ResponseEntity<WalletResponse> generate(@RequestBody @Valid WalletGenerateRequest req, Authentication auth) {
         OperatorWallet w = walletService.generate(
                 req.name(), OperatorWallet.WalletType.valueOf(req.type()),
@@ -70,8 +74,9 @@ public class WalletController {
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(w, defaultService.listAll()));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/import-raw")
-    @RequiresStepUp(reason = "WALLET_IMPORT_RAW")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_IMPORT_RAW")
     public ResponseEntity<WalletResponse> importRaw(@RequestBody @Valid WalletImportRawRequest req, Authentication auth) {
         OperatorWallet w = walletService.importRaw(
                 req.name(), OperatorWallet.WalletType.valueOf(req.type()), req.privateKey(),
@@ -80,7 +85,7 @@ public class WalletController {
     }
 
     @PostMapping("/attach-hsm")
-    @RequiresStepUp(reason = "WALLET_ATTACH_HSM")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_ATTACH_HSM")
     public ResponseEntity<WalletResponse> attachHsm(
             @RequestBody @Valid WalletAttachHsmRequest req, Authentication auth) {
         OperatorWallet wallet = walletService.attachHsm(
@@ -90,8 +95,9 @@ public class WalletController {
                 .body(toResponse(wallet, defaultService.listAll()));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping(value = "/import-keystore", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @RequiresStepUp(reason = "WALLET_IMPORT_KEYSTORE")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_IMPORT_KEYSTORE")
     public ResponseEntity<WalletResponse> importKeystore(
             @RequestParam String name,
             @RequestParam String password,
@@ -151,14 +157,29 @@ public class WalletController {
     /**
      * Destroys an operator signing key. Guarded by step-up MFA plus a second approver
      * (4-eyes): losing the key that controls a deployed security must not be a one-click,
-     * single-actor operation. On-chain authority should be handed over (transferRegistry)
-     * before a still-in-use wallet is deleted.
+     * single-actor operation. P4C-5: a soft delete (key kept for the retention window); refused for
+     * a chain default or a key that ever signed on chain — hand the authority over first.
      */
     @DeleteMapping("/{id}")
     @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_DELETE")
-    public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication auth) {
-        walletService.delete(id, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+    public ResponseEntity<Void> delete(
+            @PathVariable UUID id,
+            @RequestAttribute(value = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId,
+            Authentication auth) {
+        walletService.delete(id, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"), approverId);
         return ResponseEntity.noContent().build();
+    }
+
+    /** Reverses a soft delete inside the retention window (key material is still stored). */
+    @PostMapping("/{id}/restore")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_RESTORE")
+    public ResponseEntity<WalletResponse> restore(
+            @PathVariable UUID id,
+            @RequestAttribute(value = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId,
+            Authentication auth) {
+        OperatorWallet w = walletService.restore(id, SecurityUtils.extractUserId(auth),
+                SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"), approverId);
+        return ResponseEntity.ok(toResponse(w, defaultService.listAll()));
     }
 
     /**

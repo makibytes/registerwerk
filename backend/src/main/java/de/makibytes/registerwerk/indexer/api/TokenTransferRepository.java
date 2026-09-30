@@ -48,6 +48,14 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
      */
     boolean existsByChainConfigIdAndTxHashAndLogIndex(UUID chainConfigId, String txHash, Integer logIndex);
 
+    /**
+     * Deduplication check for multi-contract / multi-row-per-transaction ingesters (Solana balance
+     * deltas, Canton updates, Starknet events, Stellar operations): the emitting contract is part of
+     * the key, mirroring {@code uq_transfer_evm} (K2/V19).
+     */
+    boolean existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(
+            UUID chainConfigId, String txHash, Integer logIndex, String contractAddress);
+
     /** T3-17: every indexed transfer of one transaction at the given finality (case-insensitive hash). */
     List<TokenTransfer> findByTxHashIgnoreCaseAndFinalityStatus(String txHash, FinalityLevel finalityStatus);
 
@@ -65,6 +73,18 @@ public interface TokenTransferRepository extends JpaRepository<TokenTransfer, UU
      * for the next sync window.
      */
     Optional<TokenTransfer> findTopByChainConfigIdOrderByBlockNumberDesc(UUID chainConfigId);
+
+    /**
+     * P4-06 link-repair: attributes rows indexed before their deployment was known
+     * ({@code deployment_id IS NULL}) to the deployment at {@code (chain, address)}. Idempotent; a
+     * row already linked is never touched. {@code lowerAddress} must already be lower-case (EVM).
+     */
+    @Modifying
+    @Query(value = "UPDATE token_transfer SET deployment_id = :deploymentId, asset_id = :assetId "
+            + "WHERE chain_config_id = :chainConfigId AND lower(contract_address) = :lowerAddress "
+            + "AND deployment_id IS NULL", nativeQuery = true)
+    int linkUnlinkedTransfers(@Param("chainConfigId") UUID chainConfigId, @Param("lowerAddress") String lowerAddress,
+            @Param("deploymentId") UUID deploymentId, @Param("assetId") UUID assetId);
 
     // ── Reorg / finality (ReorgGuard) ───────────────────────────────────────
 

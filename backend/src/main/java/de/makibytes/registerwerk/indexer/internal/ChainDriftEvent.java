@@ -76,6 +76,11 @@ public class ChainDriftEvent {
     @Column(name = "confirmed", nullable = false)
     private boolean confirmed = false;
 
+    /** {@code DRIFT}: the chain disagrees with the register. {@code NOT_INDEXED}: no transfer history
+     *  is indexed for the holder at all, so nothing can be compared (P4-01). */
+    @Column(name = "kind", nullable = false, length = 20)
+    private String kind = "DRIFT";
+
     @Column(name = "resolved_at")
     private Instant resolvedAt;
 
@@ -123,6 +128,9 @@ public class ChainDriftEvent {
 
     public boolean isConfirmed() { return confirmed; }
     public void setConfirmed(boolean confirmed) { this.confirmed = confirmed; }
+
+    public String getKind() { return kind; }
+    public void setKind(String kind) { this.kind = kind; }
 
     public Instant getResolvedAt() { return resolvedAt; }
     public void setResolvedAt(Instant resolvedAt) { this.resolvedAt = resolvedAt; }

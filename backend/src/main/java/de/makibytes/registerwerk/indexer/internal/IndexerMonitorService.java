@@ -229,6 +229,14 @@ public class IndexerMonitorService {
                     IndexerState.IndexerStatus.ACTIVE, staleThreshold);
             problematic.addAll(stale);
 
+            // P4B-6: an ACTIVE indexer that has NEVER completed a pass (last_synced_at NULL) is
+            // invisible to the query above; it is just as dead as one that stopped syncing.
+            states.stream()
+                    .filter(st -> st.getStatus() == IndexerState.IndexerStatus.ACTIVE
+                            && st.getLastSyncedAt() == null
+                            && st.getCreatedAt() != null && st.getCreatedAt().isBefore(staleThreshold))
+                    .forEach(problematic::add);
+
             if (problematic.isEmpty()) {
                 log.debug("IndexerMonitor: all indexers are healthy.");
                 return;

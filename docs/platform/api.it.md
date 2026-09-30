@@ -73,6 +73,16 @@ Le risposte includono un'intestazione `X-Total-Count` con il conteggio totale de
 
 ---
 
+## Idempotency-Key e importi { #idempotency-key-and-amounts }
+
+Gli endpoint di amministrazione/emittente che muovono fondi o modificano lo stato richiedono l'header `Idempotency-Key`: mint, burn, trasferimenti/approvazioni forzati, force-burn, modifiche di blocco e whitelist, operazioni su slot e vault, azioni agente ERC-3643, modifiche ai mezzi di pagamento, importazione di wallet, consegna/completamento dei trasferimenti di registro e rimborso di un asset. Un `POST`, `PUT`, `PATCH` o `DELETE` senza una chiave valida viene rifiutato con `400` e il codice `IDEMPOTENCY_KEY_REQUIRED` (o `IDEMPOTENCY_KEY_INVALID`) prima che venga eseguito qualcosa. Gli altri endpoint restano facoltativi.
+
+- Invii un valore univoco per ogni azione dell'utente (UUID; da 8 a 255 caratteri tra `A-Za-z0-9._:-`) e **riutilizzi lo stesso valore quando ripete la stessa richiesta** dopo un timeout o un `5xx`. La ripetizione restituisce allora il risultato originale (`X-Idempotent-Replay: true`) o la stessa transazione invece di eseguirsi due volte.
+- La chiave è riferita al chiamante: l'entità giuridica per i token cliente, l'utente che agisce per i token operatore. La stessa chiave con un altro metodo, percorso o corpo riceve `422`; una richiesta ancora in corso riceve `409`.
+- La chiave viene inoltre salvata nella riga outbox della transazione on-chain, così una ripetizione corrisponde alla stessa transazione firmata anche dopo la scadenza della risposta in cache. Le risposte `401`/`403` (comprese le sfide di step-up) e `5xx` non vengono messe in cache: ripetere la richiesta dopo uno step-up con la stessa chiave è sicuro.
+
+**Gli importi sono stringhe decimali.** Invii gli importi dei token (`amount`, `value`, `newCap`, `navPerShare`, ...) come stringhe JSON, ad esempio `"1000000000000000000000"`. Un numero JavaScript perde precisione oltre 2^53. Per una release un numero JSON è ancora accettato se è rappresentabile esattamente (intero inferiore a 2^53 o decimale con al massimo 15 cifre significative) e viene registrato un avviso di deprecazione; tutto il resto riceve `400` con `Invalid amount: ...`.
+
 ## Gruppi API principali { #key-api-groups }
 
 ### Asset (`/api/v1/assets`) { #assets-apiv1assets }

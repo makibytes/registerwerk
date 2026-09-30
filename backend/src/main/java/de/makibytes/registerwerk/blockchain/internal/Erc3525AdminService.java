@@ -73,6 +73,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
     private final ApplicationEventPublisher eventPublisher;
     private final StarknetErc3525AdminService starknetErc3525AdminService;
     private final HolderBlockGate holderBlockGate;
+    private final de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate;
     private final AssetLookupPort assetLookupPort;
 
     public Erc3525AdminService(
@@ -85,7 +86,9 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
             ApplicationEventPublisher eventPublisher,
             StarknetErc3525AdminService starknetErc3525AdminService,
             HolderBlockGate holderBlockGate,
-            AssetLookupPort assetLookupPort) {
+            AssetLookupPort assetLookupPort,
+            de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate) {
+        this.destinationGate = destinationGate;
         this.deploymentRepository = deploymentRepository;
         this.slotRepository = slotRepository;
         this.tokenUnitRepository = tokenUnitRepository;
@@ -214,6 +217,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
         AssetDeployment dep = requireDeployment(deploymentId);
         requireEvm(dep, "mintIntoSlot");
         requireRegisterOpen(dep, "mintIntoSlot");
+        destinationGate.require(dep.getAssetId(), toAddress, "mintIntoSlot");
         log.info("ERC-3525 mint slot={} to={} value={} on deployment={}", slotId, toAddress, value, deploymentId);
 
         return submitEvm(dep,
@@ -301,6 +305,7 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
         AssetDeployment dep = requireDeployment(deploymentId);
         requireHolderAddress(dep, address);
         requireNotBlocked(address);
+        destinationGate.require(dep.getAssetId(), address, "whitelist");
         log.info("ERC-3525 whitelist={} on deployment={}", address, deploymentId);
         Map<String, Object> params = Map.of("address", address);
         if (isStarknet(dep)) {

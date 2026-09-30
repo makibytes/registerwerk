@@ -85,6 +85,16 @@ Paginierung). Der Antwortkörper ist immer ein Array (nie ein Wrapper-Objekt).
 
 ---
 
+## Idempotency-Key und Beträge { #idempotency-key-and-amounts }
+
+Geld- und zustandsverändernde Admin-/Emittenten-Endpunkte verlangen den Header `Idempotency-Key`: Mint, Burn, erzwungene Übertragungen/Freigaben, Force-Burn, Sperr- und Whitelist-Änderungen, Slot- und Vault-Operationen, ERC-3643-Agentenaktionen, Änderungen an Zahlungswegen, Wallet-Import, Übergabe/Abschluss von Registerübertragungen und Tilgung eines Assets. Ein `POST`, `PUT`, `PATCH` oder `DELETE` ohne gültigen Schlüssel wird mit `400` und dem Code `IDEMPOTENCY_KEY_REQUIRED` (bzw. `IDEMPOTENCY_KEY_INVALID`) abgewiesen, bevor etwas ausgeführt wird. Andere Endpunkte bleiben optional.
+
+- Senden Sie pro Benutzeraktion einen eindeutigen Wert (UUID; 8-255 Zeichen aus `A-Za-z0-9._:-`) und **verwenden Sie denselben Wert erneut, wenn Sie dieselbe Anfrage wiederholen** (nach Timeout oder `5xx`). Die Wiederholung liefert dann das ursprüngliche Ergebnis (`X-Idempotent-Replay: true`) bzw. dieselbe Transaktion statt einer doppelten Ausführung.
+- Der Schlüssel gilt je Aufrufer: Rechtsträger bei Kundentokens, handelnder Benutzer bei Operator-Tokens. Derselbe Schlüssel mit anderer Methode, anderem Pfad oder Body wird mit `422` beantwortet; eine noch laufende Anfrage mit `409`.
+- Der Schlüssel wird zusätzlich an der Outbox-Zeile der Chain-Transaktion gespeichert, sodass eine Wiederholung auch nach Ablauf der gecachten Antwort auf dieselbe signierte Transaktion abgebildet wird. Antworten `401`/`403` (auch Step-up-Challenges) und `5xx` werden nicht gecacht; die Wiederholung nach einem Step-up mit demselben Schlüssel ist daher sicher.
+
+**Beträge sind Dezimalzeichenketten.** Senden Sie Token-Beträge (`amount`, `value`, `newCap`, `navPerShare`, ...) als JSON-Strings wie `"1000000000000000000000"`. Eine JavaScript-Zahl verliert oberhalb von 2^53 an Genauigkeit. Für ein Release wird eine JSON-Zahl noch akzeptiert, wenn sie exakt darstellbar ist (Ganzzahl unter 2^53 oder Dezimalzahl mit höchstens 15 signifikanten Stellen); es wird eine Deprecation-Warnung protokolliert. Alles andere wird mit `400` und `Invalid amount: ...` beantwortet.
+
 ## Wichtige API-Gruppen { #key-api-groups }
 
 ### Assets (`/api/v1/assets`) { #assets-apiv1assets }

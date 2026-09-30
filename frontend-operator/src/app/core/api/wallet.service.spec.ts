@@ -4,12 +4,14 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideHttpClient } from '@angular/common/http';
 import { environment } from '../../../environments/environment';
 import { WalletService } from './wallet.service';
+import { DualControlTokens } from './dual-control-headers';
 
 describe('WalletService', () => {
     let service: WalletService;
     let httpMock: HttpTestingController;
     const base = `${environment.apiUrl}/admin/wallets`;
     const defaultsBase = `${environment.apiUrl}/admin/wallet-defaults`;
+    const tokens: DualControlTokens = { stepUpToken: 'su-token', dualControlToken: 'dc-token' };
 
     beforeEach(() => {
         TestBed.configureTestingModule({
@@ -29,22 +31,24 @@ describe('WalletService', () => {
     });
 
     it('generate() POSTs name and type to the generate sub-path', () => {
-        service.generate('Treasury EVM Wallet', 'EVM').subscribe();
+        service.generate('Treasury EVM Wallet', 'EVM', tokens).subscribe();
         const req = httpMock.expectOne(`${base}/generate`);
         expect(req.request.method).toBe('POST');
         expect(req.request.body).toEqual({ name: 'Treasury EVM Wallet', type: 'EVM' });
+        expect(req.request.headers.get('Authorization')).toBe('Bearer su-token');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('dc-token');
         req.flush({});
     });
 
     it('importRaw() includes partyId and jwt only when provided', () => {
-        service.importRaw('Canton Wallet', 'CANTON', '0xkey', 'party-1', 'jwt-1').subscribe();
+        service.importRaw('Canton Wallet', 'CANTON', '0xkey', tokens, 'party-1', 'jwt-1').subscribe();
         const req = httpMock.expectOne(`${base}/import-raw`);
         expect(req.request.body).toEqual({ name: 'Canton Wallet', type: 'CANTON', privateKey: '0xkey', partyId: 'party-1', jwt: 'jwt-1' });
         req.flush({});
     });
 
     it('importRaw() omits partyId/jwt when not provided', () => {
-        service.importRaw('EVM Wallet', 'EVM', '0xkey').subscribe();
+        service.importRaw('EVM Wallet', 'EVM', '0xkey', tokens).subscribe();
         const req = httpMock.expectOne(`${base}/import-raw`);
         expect(req.request.body).toEqual({ name: 'EVM Wallet', type: 'EVM', privateKey: '0xkey' });
         req.flush({});
@@ -52,7 +56,7 @@ describe('WalletService', () => {
 
     it('importKeystore() sends multipart FormData with name, password, and file', () => {
         const file = new File(['{}'], 'keystore.json');
-        service.importKeystore('Imported Wallet', 'secret', file).subscribe();
+        service.importKeystore('Imported Wallet', 'secret', file, tokens).subscribe();
 
         const req = httpMock.expectOne(`${base}/import-keystore`);
         expect(req.request.method).toBe('POST');
@@ -89,10 +93,18 @@ describe('WalletService', () => {
     });
 
     it('delete() DELETEs the wallet resource', () => {
-        service.delete('wallet-1').subscribe();
+        service.delete('wallet-1', tokens).subscribe();
         const req = httpMock.expectOne(`${base}/wallet-1`);
         expect(req.request.method).toBe('DELETE');
         req.flush(null);
+    });
+
+    it('restore() POSTs to the restore sub-path with step-up and dual-control headers', () => {
+        service.restore('wallet-1', tokens).subscribe();
+        const req = httpMock.expectOne(`${base}/wallet-1/restore`);
+        expect(req.request.method).toBe('POST');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('dc-token');
+        req.flush({});
     });
 
     it('getById() GETs a single wallet', () => {
@@ -117,7 +129,7 @@ describe('WalletService', () => {
     });
 
     it('setDefault() PUTs the walletId for a given chain', () => {
-        service.setDefault('chain-1', 'wallet-1').subscribe();
+        service.setDefault('chain-1', 'wallet-1', tokens).subscribe();
         const req = httpMock.expectOne(`${defaultsBase}/chain-1`);
         expect(req.request.method).toBe('PUT');
         expect(req.request.body).toEqual({ walletId: 'wallet-1' });

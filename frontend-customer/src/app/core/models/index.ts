@@ -306,6 +306,9 @@ export interface Asset {
   denomination: number | null;
   issueDate: string | null;
   maturityDate: string | null;
+  /** Register reconciliation: BLOCKED = the holder register could not be derived from the chain (read-only warning). */
+  holderSyncStatus?: 'OK' | 'BLOCKED';
+  holderSyncBlockedReason?: string | null;
 }
 
 export interface AssetDocument {

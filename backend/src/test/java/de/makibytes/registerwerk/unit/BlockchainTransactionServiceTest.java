@@ -10,6 +10,10 @@ import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransaction;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionCompletionWriter;
 import de.makibytes.registerwerk.blockchain.internal.tx.BlockchainTransactionRepository;
+import de.makibytes.registerwerk.blockchain.internal.tx.EvmSignedSubmission;
+import de.makibytes.registerwerk.blockchain.internal.tx.EvmSignedSubmissionRepository;
+import de.makibytes.registerwerk.blockchain.internal.tx.OutboxNonceResolver;
+import de.makibytes.registerwerk.blockchain.events.BlockchainTxLateMinedEvent;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -74,6 +78,9 @@ class BlockchainTransactionServiceTest {
     @Mock
     private de.makibytes.registerwerk.finality.api.ChainEffectRecorder chainEffectRecorder;
 
+    @Mock
+    private EvmSignedSubmissionRepository outboxRepository;
+
     private BlockchainTxProperties txProperties;
     private BlockchainTransactionService service;
 
@@ -97,7 +104,9 @@ class BlockchainTransactionServiceTest {
         // is a no-op (chainConfigId stays null) — chainEffectRecorder needs no stubbing either.
         EvmFinalityResolver finalityResolver = new EvmFinalityResolver(chainConfigRepository, txProperties);
         service = new BlockchainTransactionService(repository, clientRegistry, evmContractService,
-                eventPublisher, txProperties, completionWriter, finalityResolver, chainConfigRepository);
+                eventPublisher, txProperties, completionWriter, finalityResolver, chainConfigRepository,
+                new OutboxNonceResolver(outboxRepository),
+                new de.makibytes.registerwerk.blockchain.api.SecondSourceConfirmer(clientRegistry, new SimpleMeterRegistry()));
     }
 
     @AfterEach
@@ -473,17 +482,225 @@ class BlockchainTransactionServiceTest {
     }
 
     @Test
-    void isConfirmedFailure_trueForFailedAndTimedOutRows() {
+    void isConfirmedFailure_trueForFailedAndReplacedRows_butNeverForTimeout() {
         BlockchainTransaction failed = pendingTx("0xfailed", "ETHEREUM", "MAINNET", Instant.now());
         failed.setStatus(BlockchainTransaction.Status.FAILED);
+        BlockchainTransaction replaced = pendingTx("0xreplaced", "ETHEREUM", "MAINNET", Instant.now());
+        replaced.setStatus(BlockchainTransaction.Status.REPLACED);
         BlockchainTransaction timedOut = pendingTx("0xtimeout", "ETHEREUM", "MAINNET", Instant.now());
         timedOut.setStatus(BlockchainTransaction.Status.TIMEOUT);
         when(repository.findByTxHash("0xfailed")).thenReturn(Optional.of(failed));
+        when(repository.findByTxHash("0xreplaced")).thenReturn(Optional.of(replaced));
         when(repository.findByTxHash("0xtimeout")).thenReturn(Optional.of(timedOut));
 
         assertThat(service.isConfirmedFailure("0xfailed")).isTrue();
-        assertThat(service.isConfirmedFailure("0xtimeout")).isTrue();
+        assertThat(service.isConfirmedFailure("0xreplaced")).isTrue();
+        // P4B-5: not mined within the timeout is not a failure - it may still be mined.
+        assertThat(service.isConfirmedFailure("0xtimeout")).isFalse();
+        assertThat(service.isAwaitingChain("0xtimeout")).isTrue();
         assertThat(service.isConfirmedSuccess("0xfailed")).isFalse();
+    }
+
+    // ── P4B-5: TIMEOUT is reconciled, not terminal ─────────────────────────────
+
+    @Test
+    @DisplayName("a tx marked TIMEOUT that is mined later is completed as SUCCESS with a late-mined audit event")
+    void pollTimedOutTransactions_lateReceipt_completesAndAudits() throws java.io.IOException {
+        UUID chainConfigId = UUID.randomUUID();
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(3_600));
+        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        tx.setCompletedAt(Instant.now().minusSeconds(2_000));
+        tx.setChainConfigId(chainConfigId);
+        tx.setErrorMessage("Transaction not mined within 900s");
+        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+                .thenReturn(List.of(tx));
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100a");
+        receipt.setStatus("0x1");
+        receipt.setGasUsed("0x5208");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(200));
+
+        service.pollTimedOutTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.SUCCESS);
+        assertThat(tx.getLateMinedAt()).isNotNull();
+        assertThat(tx.getErrorMessage()).isNull();
+        verify(eventPublisher).publishEvent(any(BlockchainTxLateMinedEvent.class));
+        assertThat(service.isConfirmedFailure("0xabc")).isFalse();
+    }
+
+    @Test
+    @DisplayName("a TIMEOUT tx whose receipt is a revert becomes FAILED (a confirmed failure) - late")
+    void pollTimedOutTransactions_lateRevert_becomesFailed() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(3_600));
+        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        tx.setCompletedAt(Instant.now().minusSeconds(2_000));
+        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+                .thenReturn(List.of(tx));
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100a");
+        receipt.setStatus("0x0");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(200));
+
+        service.pollTimedOutTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.FAILED);
+    }
+
+    @Test
+    void pollTimedOutTransactions_stillUnmined_staysTimeout() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(3_600));
+        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        tx.setCompletedAt(Instant.now().minusSeconds(2_000));
+        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+                .thenReturn(List.of(tx));
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
+                .thenReturn(Optional.empty());
+
+        service.pollTimedOutTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.TIMEOUT);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a TIMEOUT tx whose nonce was consumed by an operator cancel is REPLACED (safe to resubmit)")
+    void pollTimedOutTransactions_cancelMined_marksReplacedAndAbandonsOutbox() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(3_600));
+        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        tx.setCompletedAt(Instant.now().minusSeconds(2_000));
+        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+                .thenReturn(List.of(tx));
+        EvmSignedSubmission original = outboxRow("0xabc", EvmSignedSubmission.Kind.OPERATION,
+                EvmSignedSubmission.Status.SUPERSEDED);
+        EvmSignedSubmission cancel = outboxRow("0xcancel", EvmSignedSubmission.Kind.CANCEL,
+                EvmSignedSubmission.Status.BROADCAST);
+        when(outboxRepository.findByTxHash("0xabc")).thenReturn(Optional.of(original));
+        when(outboxRepository.findByChainIdAndSenderAddressIgnoreCaseAndNonceOrderByCreatedAtAsc(
+                any(), any(), any())).thenReturn(List.of(original, cancel));
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt()).thenReturn(Optional.empty());
+        TransactionReceipt cancelReceipt = new TransactionReceipt();
+        cancelReceipt.setBlockNumber("0x64");
+        cancelReceipt.setBlockHash("0xblock100a");
+        cancelReceipt.setStatus("0x1");
+        when(web3j.ethGetTransactionReceipt("0xcancel").send().getTransactionReceipt())
+                .thenReturn(Optional.of(cancelReceipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(200));
+
+        service.pollTimedOutTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.REPLACED);
+        assertThat(tx.getReplacedByTxHash()).isEqualTo("0xcancel");
+        assertThat(original.getStatus()).isEqualTo(EvmSignedSubmission.Status.ABANDONED);
+        assertThat(cancel.getStatus()).isEqualTo(EvmSignedSubmission.Status.BROADCAST);
+    }
+
+    @Test
+    @DisplayName("a re-priced replacement mined instead of the original completes the ORIGINAL record (same call)")
+    void pollTimedOutTransactions_repriceMined_completesOriginalWithMinedHash() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(3_600));
+        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        tx.setCompletedAt(Instant.now().minusSeconds(2_000));
+        tx.setChainConfigId(UUID.randomUUID());
+        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+                .thenReturn(List.of(tx));
+        EvmSignedSubmission original = outboxRow("0xabc", EvmSignedSubmission.Kind.OPERATION,
+                EvmSignedSubmission.Status.SUPERSEDED);
+        EvmSignedSubmission reprice = outboxRow("0xreprice", EvmSignedSubmission.Kind.REPRICE,
+                EvmSignedSubmission.Status.BROADCAST);
+        when(outboxRepository.findByTxHash("0xabc")).thenReturn(Optional.of(original));
+        when(outboxRepository.findByChainIdAndSenderAddressIgnoreCaseAndNonceOrderByCreatedAtAsc(
+                any(), any(), any())).thenReturn(List.of(original, reprice));
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt()).thenReturn(Optional.empty());
+        TransactionReceipt r = new TransactionReceipt();
+        r.setBlockNumber("0x64");
+        r.setBlockHash("0xblock100a");
+        r.setStatus("0x1");
+        r.setGasUsed("0x5208");
+        when(web3j.ethGetTransactionReceipt("0xreprice").send().getTransactionReceipt()).thenReturn(Optional.of(r));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(200));
+
+        service.pollTimedOutTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.SUCCESS);
+        assertThat(tx.getTxHash()).isEqualTo("0xabc");
+        assertThat(tx.getMinedTxHash()).isEqualTo("0xreprice");
+        assertThat(tx.getLateMinedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a TIMEOUT tx whose nonce the chain irreversibly passed without any hash of ours is REPLACED")
+    void pollTimedOutTransactions_nonceConsumedElsewhere_marksReplaced() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(7_200));
+        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        tx.setCompletedAt(Instant.now().minusSeconds(3_600)); // beyond the 10 min confirmation period
+        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+                .thenReturn(List.of(tx));
+        EvmSignedSubmission original = outboxRow("0xabc", EvmSignedSubmission.Kind.OPERATION,
+                EvmSignedSubmission.Status.BROADCAST);
+        when(outboxRepository.findByTxHash("0xabc")).thenReturn(Optional.of(original));
+        when(outboxRepository.findByChainIdAndSenderAddressIgnoreCaseAndNonceOrderByCreatedAtAsc(
+                any(), any(), any())).thenReturn(List.of(original));
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt()).thenReturn(Optional.empty());
+        // nonce 7 is behind the signer's finalized transaction count of 9
+        when(web3j.ethGetTransactionCount(any(String.class),
+                eq(org.web3j.protocol.core.DefaultBlockParameterName.FINALIZED)).send().getTransactionCount())
+                .thenReturn(BigInteger.valueOf(9));
+
+        service.pollTimedOutTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.REPLACED);
+        assertThat(original.getStatus()).isEqualTo(EvmSignedSubmission.Status.ABANDONED);
+        assertThat(original.getAbandonReason()).contains("consumed by another transaction");
+    }
+
+    @Test
+    @DisplayName("a TIMEOUT tx whose nonce is NOT yet consumed stays TIMEOUT (may still be mined)")
+    void pollTimedOutTransactions_nonceStillOpen_staysTimeout() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(7_200));
+        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        tx.setCompletedAt(Instant.now().minusSeconds(3_600));
+        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+                .thenReturn(List.of(tx));
+        EvmSignedSubmission original = outboxRow("0xabc", EvmSignedSubmission.Kind.OPERATION,
+                EvmSignedSubmission.Status.BROADCAST);
+        when(outboxRepository.findByTxHash("0xabc")).thenReturn(Optional.of(original));
+        when(outboxRepository.findByChainIdAndSenderAddressIgnoreCaseAndNonceOrderByCreatedAtAsc(
+                any(), any(), any())).thenReturn(List.of(original));
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt()).thenReturn(Optional.empty());
+        when(web3j.ethGetTransactionCount(any(String.class),
+                eq(org.web3j.protocol.core.DefaultBlockParameterName.FINALIZED)).send().getTransactionCount())
+                .thenReturn(BigInteger.valueOf(7)); // == tx nonce: the slot is still free
+
+        service.pollTimedOutTransactions();
+
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.TIMEOUT);
+        assertThat(original.getStatus()).isEqualTo(EvmSignedSubmission.Status.BROADCAST);
+    }
+
+    private static EvmSignedSubmission outboxRow(String hash, EvmSignedSubmission.Kind kind,
+            EvmSignedSubmission.Status status) {
+        EvmSignedSubmission row = new EvmSignedSubmission();
+        row.setChainId(BigInteger.ONE);
+        row.setSenderAddress("0x" + "cd".repeat(20));
+        row.setNonce(BigInteger.valueOf(7));
+        row.setTxHash(hash);
+        row.setKind(kind);
+        row.setStatus(status);
+        return row;
     }
 
     // ── record ────────────────────────────────────────────────────────────────

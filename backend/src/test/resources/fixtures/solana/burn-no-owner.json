@@ -1,0 +1,18 @@
+{
+  "blockTime": 1767226000,
+  "slot": 310000200,
+  "version": 0,
+  "meta": {
+    "err": null,
+    "fee": 5000,
+    "preTokenBalances": [
+      {"accountIndex": 1, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+       "uiTokenAmount": {"amount": "30", "decimals": 0, "uiAmount": 30.0, "uiAmountString": "30"}}
+    ],
+    "postTokenBalances": [
+      {"accountIndex": 1, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+       "uiTokenAmount": {"amount": "0", "decimals": 0, "uiAmount": null, "uiAmountString": "0"}}
+    ]
+  },
+  "transaction": {"message": {"accountKeys": ["FeePayer", "LegacyTokenAccountAaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], "instructions": []}, "signatures": ["sigBurn"]}
+}

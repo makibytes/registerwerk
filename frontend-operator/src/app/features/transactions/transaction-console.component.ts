@@ -9,6 +9,7 @@ import {
   inject,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
@@ -42,6 +43,7 @@ import { Subscription } from 'rxjs';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DatePipe,
+    RouterLink,
     FormsModule,
     MatButtonModule,
     MatButtonToggleModule,
@@ -59,11 +61,23 @@ import { Subscription } from 'rxjs';
       subtitle="Every on-chain transaction submitted by the registry, across all assets">
       <mat-button-toggle-group [value]="statusFilter" (change)="onStatusChange($event.value)">
         <mat-button-toggle value="FAILED">Failed</mat-button-toggle>
-        <mat-button-toggle value="TIMEOUT">Timed Out</mat-button-toggle>
+        <mat-button-toggle value="TIMEOUT" matTooltip="Not yet mined — may still execute">Awaiting chain</mat-button-toggle>
+        <mat-button-toggle value="REPLACED">Replaced</mat-button-toggle>
         <mat-button-toggle value="PENDING">Pending</mat-button-toggle>
         <mat-button-toggle value="SUCCESS">Success</mat-button-toggle>
       </mat-button-toggle-group>
+      <a mat-stroked-button routerLink="/transactions/outbox" class="outbox-link">
+        <mat-icon>outbox</mat-icon> Stuck outbox
+      </a>
     </app-page-header>
+
+    @if (statusFilter === 'TIMEOUT') {
+      <p class="timeout-note" role="note" data-testid="timeout-note">
+        These transactions were not mined within the wait window. That is not a failure: they may still execute.
+        Do not resubmit the underlying action. Use <a routerLink="/transactions/outbox">Stuck outbox</a> to
+        cancel or re-price a signed payload; late confirmations are picked up automatically.
+      </p>
+    }
 
     <rw-data-table
       [columns]="columns"
@@ -81,10 +95,10 @@ import { Subscription } from 'rxjs';
     </rw-data-table>
 
     <ng-template #rowActions let-tx>
-      @if ((tx.status === 'FAILED' || tx.status === 'TIMEOUT') && !tx.opsReviewedAt) {
+      @if ((tx.status === 'FAILED' || tx.status === 'TIMEOUT' || tx.status === 'REPLACED') && !tx.opsReviewedAt) {
         <button type="button" mat-stroked-button color="primary" (click)="openReviewDialog(tx)">
           <mat-icon>fact_check</mat-icon>
-          Resolve
+          {{ tx.status === 'TIMEOUT' ? 'Acknowledge' : 'Resolve' }}
         </button>
       } @else if (tx.opsReviewedAt) {
         <span class="reviewed-note" [matTooltip]="tx.opsNote ?? ''">
@@ -99,10 +113,22 @@ import { Subscription } from 'rxjs';
         @if (selected) {
           <div class="tx-summary">
             <div><span class="label">Method</span>{{ selected.methodName }}</div>
-            <div><span class="label">Status</span>{{ selected.status }}</div>
+            <div><span class="label">Status</span>{{ selected.status === 'TIMEOUT' ? 'Awaiting chain (not yet mined, may still execute)' : selected.status }}</div>
             <div><span class="label">Tx hash</span><code>{{ selected.txHash ?? '—' }}</code></div>
+            @if (selected.replacedByTxHash) {
+              <div><span class="label">Replaced by</span><code>{{ selected.replacedByTxHash }}</code></div>
+            }
+            @if (selected.minedTxHash && selected.minedTxHash !== selected.txHash) {
+              <div><span class="label">Mined as</span><code>{{ selected.minedTxHash }}</code></div>
+            }
+            @if (selected.lateMinedAt) {
+              <div><span class="label">Mined late</span>{{ selected.lateMinedAt | date:'medium' }}</div>
+            }
             <div><span class="label">Error</span>{{ selected.errorMessage ?? '—' }}</div>
           </div>
+        }
+        @if (selected?.status === 'TIMEOUT') {
+          <p class="timeout-note">This transaction is only awaiting the chain. Acknowledging records a note; it does not cancel or resubmit anything.</p>
         }
         <mat-form-field appearance="outline">
           <mat-label>Resolution notes</mat-label>
@@ -120,6 +146,12 @@ import { Subscription } from 'rxjs';
     </ng-template>
   `,
   styles: [`
+    .timeout-note {
+      font-size: 13px;
+      color: var(--rw-text-secondary);
+      margin: 0 0 12px;
+    }
+    .outbox-link { margin-left: 12px; }
     .reviewed-note {
       font-size: 12px;
       color: var(--rw-text-secondary);
@@ -174,7 +206,7 @@ export class TransactionConsoleComponent implements OnInit, OnDestroy {
   private loadSubscription?: Subscription;
 
   readonly columns: TableColumn[] = [
-    { key: 'status', header: 'Status', cell: (t: TxRecord) => t.status, type: 'badge' },
+    { key: 'status', header: 'Status', cell: (t: TxRecord) => this.displayStatus(t), type: 'badge' },
     { key: 'methodName', header: 'Method', cell: (t: TxRecord) => t.methodName },
     { key: 'chain', header: 'Chain', cell: (t: TxRecord) => `${t.chain} / ${t.network}` },
     { key: 'txHash', header: 'Tx Hash', cell: (t: TxRecord) => t.txHash, type: 'mono' },
@@ -182,6 +214,12 @@ export class TransactionConsoleComponent implements OnInit, OnDestroy {
     { key: 'errorMessage', header: 'Error', cell: (t: TxRecord) => t.errorMessage },
     { key: 'createdAt', header: 'Submitted', cell: (t: TxRecord) => t.createdAt, type: 'date' },
   ];
+
+  /** TIMEOUT is not a failure: the transaction may still be mined (P4B-5). */
+  displayStatus(t: TxRecord): string {
+    if (t.status === 'TIMEOUT') return 'AWAITING_CHAIN';
+    return t.status;
+  }
 
   ngOnInit(): void {
     this.load();

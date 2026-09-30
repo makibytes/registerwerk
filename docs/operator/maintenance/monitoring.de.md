@@ -114,6 +114,22 @@ mögliche Abfrage.
 |--------|-------------|----------------|
 | `registerwerk_notification_email_send_failures_total{context}` | E-Mail-Versandfehler seit Start, getaggt mit `generic` (Fire-and-Forget) oder `statement_pdf` (§19-Zustellung von Registerauszügen) | `increase(...)[1h]` > 5 = WARN (`EmailDeliveryFailuresElevated`) |
 
+### Durable EVM-Outbox und TIMEOUT-Semantik (Modul `blockchain`)
+
+Eine signierte Transaktion, die kein Node je annimmt, oder eine aus dem Mempool verdrängte Transaktion blockiert alle späteren Transaktionen ihres Signers. Die Outbox wird deshalb je Signer überwacht; für festhängende Payloads gibt es einen Operator-Ablauf.
+
+| Metrik | Beschreibung | Alarmschwelle |
+|--------|--------------|---------------|
+| `registerwerk_outbox_oldest_prepared_age_seconds{chain_id,signer}` | Alter der ältesten signierten Payload, die noch kein Node angenommen hat | > 10 Min = CRITICAL (`EvmOutboxPreparedStuck`) |
+| `registerwerk_outbox_prepared_count{chain_id,signer}` | Signierte Payloads, die auf den Broadcast warten | informativ |
+| `registerwerk_outbox_stuck_count{chain_id,signer}` | Payloads ohne Receipt seit mehr als 10 Minuten | > 0 für 5 Min = WARN (`EvmOutboxBroadcastStuck`) |
+| `registerwerk_outbox_lease_repaired_total{chain}` | Ein veralteter Nonce-Lease wurde auf den Chain-Wert zurückgesetzt (verlorene Transaktion) | jeder Wert = WARN (`EvmNonceLeaseRepaired`) |
+| `registerwerk_blockchain_tx_late_mined_total{outcome}` | Eine als `TIMEOUT` markierte Transaktion wurde doch noch gemined | jeder Wert = INFO (`BlockchainTxLateMined`) |
+
+- **`TIMEOUT` ist kein Fehlschlag.** Es bedeutet „innerhalb der Frist nicht gemined"; die Transaktion kann noch ausgeführt werden. Der Poller liest `TIMEOUT`-Zeilen weiter für `registerwerk.blockchain.tx.late-mined-window-seconds` (7 Tage) und schließt sie mit `SUCCESS`/`FAILED` ab, sobald ein Receipt vorliegt. Nur `FAILED` (Revert) und `REPLACED` (der Nonce wurde von einer anderen Transaktion verbraucht) gelten als bestätigter Fehlschlag; fachlicher Zustand wird allein wegen `TIMEOUT` nie zurückgesetzt und nichts erneut gesendet.
+- **Automatische Maßnahmen** sind bewusst eng gefasst: die gespeicherten Bytes einer verlorenen Transaktion werden nach 10 Minuten erneut gesendet, und ein Aufruf aus der Positivliste ohne regulatorischen Charakter (`registerwerk.outbox.auto-reprice-methods`, z. B. Identity Registry, Claims, dApp-Verankerung), der wiederholt an der Gebühr scheitert, wird mit demselben Nonce innerhalb der Gebührenobergrenze der Chain neu signiert. Regulatorische Operationen (Zwangsübertragung, Burn, Freeze, Recovery, Pause) werden nie automatisch ersetzt.
+- **Operator-Aktionen** (Step-up-Token und zweiter Freigeber, im Audit-Trail festgehalten): `GET /api/v1/admin/chains/{chainConfigId}/outbox/stuck`, `POST .../outbox/{id}/reprice` (derselbe Aufruf, Gebühr mindestens 15 % höher) und `POST .../outbox/{id}/cancel` (Selbstüberweisung mit Wert 0 auf demselben Nonce; die Operation wird nicht ausgeführt). Sobald der Cancel final ist, wird die ursprüngliche Transaktion `REPLACED`, und ihr fachlicher Eigentümer darf erneut einreichen.
+
 ### API-Fehlerraten und Latenz
 
 | Metrik | Beschreibung | Alarmschwelle |

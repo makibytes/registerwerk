@@ -1,0 +1,23 @@
+{
+  "blockTime": 1767225800,
+  "slot": 310000100,
+  "version": 0,
+  "meta": {
+    "err": null,
+    "fee": 5000,
+    "preTokenBalances": [
+      {"accountIndex": 2, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerBob111111111111111111111111111111111111",
+       "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+       "uiTokenAmount": {"amount": "400", "decimals": 0, "uiAmount": 400.0, "uiAmountString": "400"}}
+    ],
+    "postTokenBalances": [
+      {"accountIndex": 2, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerBob111111111111111111111111111111111111",
+       "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+       "uiTokenAmount": {"amount": "900", "decimals": 0, "uiAmount": 900.0, "uiAmountString": "900"}}
+    ]
+  },
+  "transaction": {"message": {"accountKeys": [], "instructions": [
+    {"program": "spl-token", "parsed": {"type": "mintTo", "info": {"account": "AtaBob", "amount": "500",
+      "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "mintAuthority": "Authority"}}}
+  ]}, "signatures": ["sigMint"]}
+}

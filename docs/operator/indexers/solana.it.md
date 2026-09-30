@@ -158,3 +158,6 @@ Un job `@Scheduled` separato viene eseguito ogni 10 minuti:
 ## Registrazione di un nuovo token SPL
 
 Quando viene creato un deployment di asset Solana tramite l'API, il backend inizia automaticamente a monitorare il relativo indirizzo mint. Non è necessaria alcuna configurazione manuale.
+
+!!! warning "Stato di copertura: osservazione parziale"
+    L'indicizzatore elenca le firme per **indirizzo del mint**. Un'istruzione SPL `transfer` classica non referenzia l'account mint, quindi questi movimenti tra titolari non vengono visti. Registerwerk segnala perciò i deployment Solana come *osservati parzialmente* (`plain SPL transfers not observable`): la sincronizzazione dei titolari resta BLOCKED e il registro non viene mai marcato come riconciliato dalla cronologia Solana indicizzata finché i token account non sono indicizzati.

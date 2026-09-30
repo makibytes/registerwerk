@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.asset.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetSlot;
 import de.makibytes.registerwerk.deployment.api.AssetSlotRepository;
@@ -39,6 +40,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/deployments/{depId}")
 @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+@RequiresIdempotencyKey
 public class Erc3525SlotController {
 
     private final Erc3525AdminPort erc3525AdminService;

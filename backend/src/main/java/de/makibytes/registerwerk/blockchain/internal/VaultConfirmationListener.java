@@ -163,6 +163,16 @@ class VaultConfirmationListener {
                 CompensationCategory.INVERSE_FLIP));
     }
 
+    /** The request's chain is part of its identity; a tx confirmed on another chain must not resolve it. */
+    private boolean chainMismatch(VaultRequest request, BlockchainTransactionService.ConfirmedTxLocation location) {
+        if (request.getChainConfigId() != null && !request.getChainConfigId().equals(location.chainConfigId())) {
+            log.error("VaultRequest={} is bound to chain {} but tx confirmed on chain {} - not resolving.",
+                    request.getId(), request.getChainConfigId(), location.chainConfigId());
+            return true;
+        }
+        return false;
+    }
+
     private void resolveFulfillment(VaultRequest request) throws IOException {
         String txHash = request.getFulfilledTx();
         if (blockchainTransactionService.isConfirmedFailure(txHash)) {
@@ -175,7 +185,7 @@ class VaultConfirmationListener {
         }
         Optional<BlockchainTransactionService.ConfirmedTxLocation> location =
                 blockchainTransactionService.confirmedLocation(txHash);
-        if (location.isEmpty()) {
+        if (location.isEmpty() || chainMismatch(request, location.get())) {
             return;
         }
         // Throws (→ retried next tick) if the receipt cannot be fetched; empty only if the
@@ -221,7 +231,7 @@ class VaultConfirmationListener {
         }
         Optional<BlockchainTransactionService.ConfirmedTxLocation> location =
                 blockchainTransactionService.confirmedLocation(txHash);
-        if (location.isEmpty()) {
+        if (location.isEmpty() || chainMismatch(request, location.get())) {
             return;
         }
         // forcedToAddr is only ever set by Erc7540AdminService#forceCancelRequest.

@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -20,6 +21,7 @@ import de.makibytes.registerwerk.blockchain.web.dto.ForcedTransferRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.MintRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.TxSubmissionResponse;
 import de.makibytes.registerwerk.deployment.api.ForcedOpTargetGuard;
+import de.makibytes.registerwerk.kyc.api.OutboundDestinationGate;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import jakarta.validation.Valid;
@@ -50,25 +52,37 @@ import jakarta.validation.Valid;
 @RequestMapping("/api/v1/assets/{assetId}/deployments/{depId}/issuer")
 @PreAuthorize("@deploymentAccessChecker.belongsToAsset(#depId, #assetId) and " +
         "(hasRole('REGISTRY_ADMIN') or @assetAccessChecker.canActAsIssuer(#assetId, authentication))")
+@RequiresIdempotencyKey
 public class IssuerTokenController {
 
     private static final Logger log = LoggerFactory.getLogger(IssuerTokenController.class);
 
     private final TokenAdminService adminService;
     private final ForcedOpTargetGuard targetGuard;
+    private final OutboundDestinationGate destinationGate;
 
-    public IssuerTokenController(TokenAdminService adminService, ForcedOpTargetGuard targetGuard) {
+    public IssuerTokenController(TokenAdminService adminService, ForcedOpTargetGuard targetGuard,
+                                 OutboundDestinationGate destinationGate) {
+        this.destinationGate = destinationGate;
         this.adminService = adminService;
         this.targetGuard = targetGuard;
     }
 
+    /**
+     * Mint creates supply at a destination the issuer names: step-up + a second approver who must be
+     * REGISTRY_ADMIN/COMPLIANCE_OFFICER (an issuer cannot approve its own mint), and the destination
+     * must be a screened register holder of this asset (P4C-2).
+     */
     @PostMapping("/mint")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ISSUER_MINT")
     public ResponseEntity<TxSubmissionResponse> mint(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid MintRequest request, Authentication auth) {
         log.info("ISSUER mint to={} amount={} on deployment={} by actor={}",
                 request.toAddress(), request.amount(), depId, actorName(auth));
-        return accepted(adminService.mint(depId, request.toAddress(), request.amount(), actorId(auth), SecurityUtils.primaryRole(auth, "ISSUER")));
+        var resolved = destinationGate.require(assetId, request.toAddress(), "mint");
+        UUID txId = adminService.mint(depId, request.toAddress(), request.amount(), actorId(auth), SecurityUtils.primaryRole(auth, "ISSUER"));
+        return ResponseEntity.accepted().body(new TxSubmissionResponse(txId, resolved != null ? resolved.holderName() : null));
     }
 
     @PostMapping("/burn")

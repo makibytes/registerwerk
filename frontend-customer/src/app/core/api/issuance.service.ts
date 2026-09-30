@@ -124,8 +124,18 @@ export class IssuanceService {
 
   // ── Issuer token operations ────────────────────────────────────────────────
 
-  mint(assetId: string, depId: string, body: { toAddress: string; amount: string; reason?: string }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/mint`, body);
+  /**
+   * Mint needs step-up and a second approver (`ISSUER_MINT`, P4C-2); the recipient must be a registered,
+   * KYC-approved, screened holder of the asset. Same token handling as {@link burn}.
+   */
+  mint(assetId: string, depId: string, body: { toAddress: string; amount: string; reason?: string },
+       approval: { approvalToken: string; stepUpToken?: string }): Observable<{ txId: string; destinationHolder?: string | null }> {
+    let headers = new HttpHeaders({ 'X-Dual-Control-Token': approval.approvalToken });
+    if (approval.stepUpToken) {
+      headers = headers.set('Authorization', `Bearer ${approval.stepUpToken}`);
+    }
+    return this.http.post<{ txId: string; destinationHolder?: string | null }>(
+      `${this.base}/${assetId}/deployments/${depId}/issuer/mint`, body, { headers });
   }
 
   /**
@@ -149,12 +159,29 @@ export class IssuanceService {
       { code: totpCode, method: 'TOTP', action });
   }
 
-  forceTransfer(assetId: string, depId: string, body: { from: string; to: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/forced-transfer`, body);
+  /**
+   * Issuer forced transfer (`ISSUER_FORCED_TRANSFER_EWG24`): step-up + second approver, like {@link burn};
+   * the destination must be a registered, KYC-approved, screened holder (P4C-2); legal basis >= 10 chars.
+   */
+  forceTransfer(assetId: string, depId: string, body: { from: string; to: string; value: string; legalBasis: string },
+                approval: { approvalToken: string; stepUpToken?: string }): Observable<{ txId: string; destinationHolder?: string | null }> {
+    return this.http.post<{ txId: string; destinationHolder?: string | null }>(
+      `${this.base}/${assetId}/deployments/${depId}/issuer/forced-transfer`, body, { headers: this.approvalHeaders(approval) });
   }
 
-  forceApprove(assetId: string, depId: string, body: { owner: string; spender: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/forced-approve`, body);
+  /** Issuer forced allowance override (`ISSUER_FORCED_APPROVE_OVERRIDE`): step-up + second approver. */
+  forceApprove(assetId: string, depId: string, body: { owner: string; spender: string; value: string; legalBasis: string },
+               approval: { approvalToken: string; stepUpToken?: string }): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(
+      `${this.base}/${assetId}/deployments/${depId}/issuer/forced-approve`, body, { headers: this.approvalHeaders(approval) });
+  }
+
+  private approvalHeaders(approval: { approvalToken: string; stepUpToken?: string }): HttpHeaders {
+    let headers = new HttpHeaders({ 'X-Dual-Control-Token': approval.approvalToken });
+    if (approval.stepUpToken) {
+      headers = headers.set('Authorization', `Bearer ${approval.stepUpToken}`);
+    }
+    return headers;
   }
 
   /**

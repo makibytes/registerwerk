@@ -76,7 +76,7 @@ public class CorporateAction {
     @Column(name = "amount_per_unit", precision = 38, scale = 18)
     private BigDecimal amountPerUnit;
 
-    @Column(name = "total_amount", precision = 38, scale = 18)
+    @Column(name = "total_amount", precision = 96, scale = 18)
     private BigDecimal totalAmount;
 
     @Column(name = "currency", length = 3)
@@ -138,7 +138,7 @@ public class CorporateAction {
 
     /** T3-05: Σ unrounded − Σ rounded payable entitlements. Entitlements are rounded per holder to
      *  the currency's minor unit, so the paid total differs from amountPerUnit × nominal by this. */
-    @Column(name = "rounding_residual", precision = 38, scale = 18)
+    @Column(name = "rounding_residual", precision = 96, scale = 18)
     private BigDecimal roundingResidual;
 
     /** T3-02: SETTLED, but nominee-pool (HELD_LOOK_THROUGH) entitlements are unresolved

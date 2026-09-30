@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.erc3643.web.dto;
 
+import de.makibytes.registerwerk.shared.api.StrictAmount;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
@@ -28,14 +30,14 @@ public final class Erc3643AgentRequests {
     public record ForcedTransfer(
             @NotBlank @Pattern(regexp = EVM_ADDRESS) String from,
             @NotBlank @Pattern(regexp = EVM_ADDRESS) String to,
-            @NotNull @Positive BigDecimal amount,
+            @JsonDeserialize(using = StrictAmount.BigDecimalAmount.class) @NotNull @Positive BigDecimal amount,
             @NotBlank @Size(max = 2000) String reason
     ) {}
 
     public record ForcedApprove(
             @NotBlank @Pattern(regexp = EVM_ADDRESS) String owner,
             @NotBlank @Pattern(regexp = EVM_ADDRESS) String spender,
-            @NotNull @Positive BigDecimal amount,
+            @JsonDeserialize(using = StrictAmount.BigDecimalAmount.class) @NotNull @Positive BigDecimal amount,
             @NotBlank @Size(max = 2000) String reason
     ) {}
 
@@ -45,14 +47,14 @@ public final class Erc3643AgentRequests {
 
     public record ForceBurn(
             @NotBlank @Pattern(regexp = EVM_ADDRESS) String from,
-            @NotNull @Positive BigDecimal amount,
+            @JsonDeserialize(using = StrictAmount.BigDecimalAmount.class) @NotNull @Positive BigDecimal amount,
             @NotBlank @Size(max = 2000) String legalBasis
     ) {}
 
     public record BatchTransfer(
             @NotEmpty @Size(max = 200) List<@NotBlank @Pattern(regexp = EVM_ADDRESS) String> froms,
             @NotEmpty @Size(max = 200) List<@NotBlank @Pattern(regexp = EVM_ADDRESS) String> tos,
-            @NotEmpty @Size(max = 200) List<@NotNull @Positive BigDecimal> amounts
+            @JsonDeserialize(contentUsing = StrictAmount.BigDecimalAmount.class) @NotEmpty @Size(max = 200) List<@NotNull @Positive BigDecimal> amounts
     ) {
         @AssertTrue(message = "froms, tos and amounts must have the same size")
         public boolean isAligned() {
@@ -63,7 +65,7 @@ public final class Erc3643AgentRequests {
 
     public record BatchAmounts(
             @NotEmpty @Size(max = 200) List<@NotBlank @Pattern(regexp = EVM_ADDRESS) String> addresses,
-            @NotEmpty @Size(max = 200) List<@NotNull @Positive BigDecimal> amounts
+            @JsonDeserialize(contentUsing = StrictAmount.BigDecimalAmount.class) @NotEmpty @Size(max = 200) List<@NotNull @Positive BigDecimal> amounts
     ) {
         @AssertTrue(message = "addresses and amounts must have the same size")
         public boolean isAligned() {

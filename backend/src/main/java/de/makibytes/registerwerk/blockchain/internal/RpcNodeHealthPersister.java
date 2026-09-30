@@ -33,7 +33,8 @@ class RpcNodeHealthPersister {
         for (RpcNode node : nodes) {
             rpcNodeRepository.updateHealthFields(node.getId(), node.getLatestBlockNumber(),
                     node.getBlockLastAdvancedAt(), node.getLastCheckedAt(), node.getLastSuccessAt(),
-                    node.isHealthy(), node.getConsecutiveFailures(), node.getLagFromBest(), node.isSyncing());
+                    node.isHealthy(), node.getConsecutiveFailures(), node.getLagFromBest(), node.isSyncing(),
+                    node.getHealthReason(), node.getConsecutiveSuccesses());
         }
     }
 }

@@ -44,9 +44,14 @@ if [ "${#NEW_FILES[@]}" -eq 0 ]; then
   exit 0
 fi
 
+ALLOWLIST="scripts/destructive-migrations-allowlist.txt"
 FAILED=0
 for FILE in "${NEW_FILES[@]}"; do
   [ -f "$FILE" ] || continue
+  if [ -f "$ALLOWLIST" ] && grep -E -v '^[[:space:]]*(#|$)' "$ALLOWLIST" | awk '{print $1}' | grep -qxF "$(basename "$FILE")"; then
+    echo "Skipping $FILE (allowlisted in $ALLOWLIST)"
+    continue
+  fi
   echo "Checking $FILE..."
   ACKED=0
   LINE_NO=0

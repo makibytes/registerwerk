@@ -98,6 +98,7 @@ class TokenAdminControllerIT {
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(bearerToken);
         h.setContentType(MediaType.APPLICATION_JSON);
+        h.set("Idempotency-Key", java.util.UUID.randomUUID().toString()); // P4B-7: mandatory on these endpoints
         ResponseEntity<StepUpResponse> stepUp = rest.postForEntity(
                 "/api/v1/auth/step-up",
                 new HttpEntity<>(new StepUpRequest("123456", "TOTP", null), h),
@@ -112,6 +113,7 @@ class TokenAdminControllerIT {
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(bearerToken); // regular token, no acr=stepup
         h.setContentType(MediaType.APPLICATION_JSON);
+        h.set("Idempotency-Key", java.util.UUID.randomUUID().toString()); // P4B-7: mandatory on these endpoints
 
         var response = rest.postForEntity(
                 "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/admin/set-supply-cap",
@@ -128,6 +130,7 @@ class TokenAdminControllerIT {
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(stepUpToken); // token with acr=stepup
         h.setContentType(MediaType.APPLICATION_JSON);
+        h.set("Idempotency-Key", java.util.UUID.randomUUID().toString()); // P4B-7: mandatory on these endpoints
 
         var response = rest.postForEntity(
                 "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/admin/set-supply-cap",
@@ -145,6 +148,7 @@ class TokenAdminControllerIT {
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(bearerToken);
         h.setContentType(MediaType.APPLICATION_JSON);
+        h.set("Idempotency-Key", java.util.UUID.randomUUID().toString()); // P4B-7: mandatory on these endpoints
 
         // Valid body to pass @Valid — the step-up aspect should then return 403
         var body = Map.of(
@@ -178,6 +182,7 @@ class TokenAdminControllerIT {
         HttpHeaders h = new HttpHeaders();
         h.setBearerAuth(stepUpToken); // acr=stepup, but no X-Dual-Control-Token
         h.setContentType(MediaType.APPLICATION_JSON);
+        h.set("Idempotency-Key", java.util.UUID.randomUUID().toString()); // P4B-7: mandatory on these endpoints
         return rest.postForEntity(path, new HttpEntity<>(body, h), Map.class).getStatusCode().value();
     }
 

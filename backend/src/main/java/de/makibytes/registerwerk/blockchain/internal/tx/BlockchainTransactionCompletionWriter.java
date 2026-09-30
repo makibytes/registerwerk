@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.internal.tx;
 
+import de.makibytes.registerwerk.blockchain.events.BlockchainTxLateMinedEvent;
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
@@ -48,6 +49,18 @@ public class BlockchainTransactionCompletionWriter {
 
     @Transactional
     public void complete(BlockchainTransaction tx, TransactionReceipt receipt) {
+        complete(tx, receipt, null);
+    }
+
+    /**
+     * Completes {@code tx} from a receipt. {@code minedTxHash} is the hash the receipt belongs to when
+     * it is not {@code tx}'s own (a re-priced replacement at the same nonce carrying the same call);
+     * {@code tx} keeps the hash the business layer holds. A receipt arriving for a row already marked
+     * TIMEOUT (P4B-5) goes through this same path, and additionally leaves a late-mined audit event.
+     */
+    @Transactional
+    public void complete(BlockchainTransaction tx, TransactionReceipt receipt, String minedTxHash) {
+        boolean late = tx.getStatus() == BlockchainTransaction.Status.TIMEOUT;
         boolean success = "0x1".equals(receipt.getStatus());
         tx.setStatus(success ? BlockchainTransaction.Status.SUCCESS : BlockchainTransaction.Status.FAILED);
         Instant completedAt = Instant.now();
@@ -55,12 +68,26 @@ public class BlockchainTransactionCompletionWriter {
         if (receipt.getGasUsed() != null) tx.setGasUsed(receipt.getGasUsed().longValue());
         if (receipt.getBlockNumber() != null) tx.setBlockNumber(receipt.getBlockNumber().longValue());
         if (receipt.getBlockHash() != null) tx.setBlockHash(receipt.getBlockHash());
-        if (!success) tx.setErrorMessage("Transaction reverted on-chain");
+        if (minedTxHash != null && !minedTxHash.equalsIgnoreCase(tx.getTxHash())) {
+            tx.setMinedTxHash(minedTxHash);
+        }
+        tx.setErrorMessage(success ? null : "Transaction reverted on-chain");
+        if (late) tx.setLateMinedAt(completedAt);
         repository.save(tx);
 
         recordSubmissionToConfirmationLatency(tx, completedAt);
         publishCompletionAuditEvent(tx);
         recordChainEffectIfCompensable(tx);
+        if (late) {
+            Map<String, Object> details = new HashMap<>();
+            details.put("txHash", tx.getTxHash());
+            if (tx.getMinedTxHash() != null) details.put("minedTxHash", tx.getMinedTxHash());
+            if (tx.getBlockNumber() != null) details.put("blockNumber", tx.getBlockNumber());
+            details.put("methodName", tx.getMethodName());
+            eventPublisher.publishEvent(new BlockchainTxLateMinedEvent(tx.getId(), tx.getStatus().name(), details));
+            meterRegistry.counter("registerwerk.blockchain.tx.late_mined", "outcome", tx.getStatus().name()).increment();
+            log.warn("Blockchain tx={} was mined after being marked TIMEOUT: status={}", tx.getTxHash(), tx.getStatus());
+        }
         log.info("Blockchain tx={} completed status={}", tx.getTxHash(), tx.getStatus());
     }
 
@@ -86,7 +113,8 @@ public class BlockchainTransactionCompletionWriter {
                     "Cannot complete a successful blockchain transaction without chain and block provenance");
         }
         chainEffectRecorder.recordFinalized(ChainEffectDescriptor.of(
-                tx.getChainConfigId(), tx.getBlockNumber(), tx.getBlockHash(), tx.getTxHash(),
+                tx.getChainConfigId(), tx.getBlockNumber(), tx.getBlockHash(),
+                tx.getMinedTxHash() != null ? tx.getMinedTxHash() : tx.getTxHash(),
                 "blockchain", BlockchainTxRevertCompensator.EFFECT_TYPE, "BlockchainTransaction", tx.getId(),
                 tx.getAssetId(), CompensationCategory.INVERSE_FLIP));
     }
@@ -96,12 +124,32 @@ public class BlockchainTransactionCompletionWriter {
         tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
         Instant completedAt = Instant.now();
         tx.setCompletedAt(completedAt);
-        tx.setErrorMessage("Transaction not mined within " + timeoutSeconds + "s");
+        tx.setErrorMessage("Transaction not mined within " + timeoutSeconds
+                + "s - it may still be mined; awaiting chain (not a confirmed failure)");
         repository.save(tx);
 
         recordSubmissionToConfirmationLatency(tx, completedAt);
         publishCompletionAuditEvent(tx);
         log.warn("Blockchain tx={} timed out", tx.getTxHash());
+    }
+
+    /**
+     * The transaction's nonce was consumed by a different transaction (a cancel replacement, or an
+     * outside signer), so this payload can never be mined: the only non-revert "confirmed failure"
+     * (P4B-5). Callers may treat the business intent as not executed and resubmit.
+     */
+    @Transactional
+    public void markReplaced(BlockchainTransaction tx, String replacingTxHash, String reason) {
+        tx.setStatus(BlockchainTransaction.Status.REPLACED);
+        Instant completedAt = Instant.now();
+        tx.setCompletedAt(completedAt);
+        if (replacingTxHash != null) tx.setReplacedByTxHash(replacingTxHash);
+        tx.setErrorMessage("Transaction replaced: " + reason);
+        repository.save(tx);
+
+        recordSubmissionToConfirmationLatency(tx, completedAt);
+        publishCompletionAuditEvent(tx);
+        log.warn("Blockchain tx={} replaced ({})", tx.getTxHash(), reason);
     }
 
     /**

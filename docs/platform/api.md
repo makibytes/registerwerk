@@ -73,6 +73,16 @@ Responses include a `X-Total-Count` header with the total record count (before p
 
 ---
 
+## Idempotency-Key and amounts { #idempotency-key-and-amounts }
+
+Money- and state-moving admin/issuer endpoints require an `Idempotency-Key` header: mint, burn, forced transfers/approvals, force-burn, freeze/whitelist changes, slot and vault operations, ERC-3643 agent actions, payment-rail changes, wallet import, register-transfer handover/completion and asset redemption. A `POST`, `PUT`, `PATCH` or `DELETE` without a valid key is rejected with `400` and the code `IDEMPOTENCY_KEY_REQUIRED` (or `IDEMPOTENCY_KEY_INVALID`) before anything runs. Other endpoints stay opt-in.
+
+- Send a unique value per user action (a UUID; 8-255 characters of `A-Za-z0-9._:-`) and **reuse the same value when you retry the same request** after a timeout or a `5xx`. A retry then returns the original result (`X-Idempotent-Replay: true`) or the same transaction instead of executing twice.
+- The key is scoped to the caller: the legal entity for customer tokens, the acting user for operator tokens. The same key with a different method, path or body is answered `422`; a request that is still running is answered `409`.
+- The key is also stored on the outbox row of the resulting chain transaction, so a replay maps to the same signed transaction even after the cached response has expired. `401`/`403` (including step-up challenges) and `5xx` responses are not cached, so repeating the request after a step-up with the same key is safe.
+
+**Amounts are decimal strings.** Send token amounts (`amount`, `value`, `newCap`, `navPerShare`, ...) as JSON strings such as `"1000000000000000000000"`. A JavaScript number loses precision above 2^53. For one release a JSON number is still accepted if it is exactly representable (an integer below 2^53, or a decimal of at most 15 significant digits) and a deprecation warning is logged; anything else is answered `400` with `Invalid amount: ...`.
+
 ## Key API groups
 
 ### Assets (`/api/v1/assets`)

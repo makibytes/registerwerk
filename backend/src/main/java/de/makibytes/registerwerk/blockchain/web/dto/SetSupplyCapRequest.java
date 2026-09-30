@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.web.dto;
 
+import de.makibytes.registerwerk.shared.api.StrictAmount;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 
@@ -16,5 +18,5 @@ import java.math.BigInteger;
 public record SetSupplyCapRequest(
         @NotNull
         @PositiveOrZero
-        BigInteger newCap
+        @JsonDeserialize(using = StrictAmount.BigIntegerAmount.class) BigInteger newCap
 ) {}

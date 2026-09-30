@@ -1,10 +1,12 @@
 package de.makibytes.registerwerk.indexer.internal;
 
-import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ExplorerUrlBuilder;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
+import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,203 +14,167 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
-import java.util.HashMap;
+import java.io.IOException;
+import java.io.InputStream;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.when;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Unit tests for the polling-cursor fix : previously the cursor was set
- * only once ever (a one-shot latch) and shared across every mint tracked on a chain — this file
- * did not exist before this fix, per the review's own finding that no test coverage existed.
+ * Fixture based tests of the Solana balance-delta decoder (P4-02 / P4D-2): realistic
+ * {@code getTransaction} {@code jsonParsed} results for SPL Token and Token-2022, including a
+ * batched two-transfer transaction, mintTo, a transfer-fee transfer and legacy data without owner.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("SolanaTransferSyncService — per-mint polling cursor")
+@DisplayName("SolanaTransferSyncService - balance-delta decoding")
 class SolanaTransferSyncServiceTest {
 
-    private static final String RPC_URL = "http://solana-rpc:8899";
-    private static final String MINT_A = "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    private static final String MINT_B = "MintBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    private static final String MINT = "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    private static final String ALICE = "OwnerAlice1111111111111111111111111111111111";
+    private static final String BOB = "OwnerBob111111111111111111111111111111111111";
+    private static final String CAROL = "OwnerCarol11111111111111111111111111111111111";
 
     @Mock private ChainConfigRepository chainConfigRepository;
     @Mock private IndexerStateRepository indexerStateRepository;
     @Mock private TokenTransferRepository tokenTransferRepository;
     @Mock private SolanaMintSyncCursorRepository mintSyncCursorRepository;
+    @Mock private AssetDeploymentRepository assetDeploymentRepository;
+    @Mock private IndexerSyncSupport syncSupport;
 
-    /** In-memory backing store for the mocked cursor repository — keyed by (chainConfigId, mint). */
-    private final Map<String, SolanaMintSyncCursor> cursorStore = new HashMap<>();
-
-    private final RestClient.Builder restClientBuilder = RestClient.builder();
-    private MockRestServiceServer mockServer;
+    private final ObjectMapper mapper = new ObjectMapper();
     private SolanaTransferSyncService service;
-
     private ChainConfig chain;
+    private AssetDeployment deployment;
 
     @BeforeEach
     void setUp() {
-        mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
-
-        when(mintSyncCursorRepository.findByChainConfigIdAndMintAddress(any(), anyString()))
-                .thenAnswer(inv -> Optional.ofNullable(
-                        cursorStore.get(inv.getArgument(0) + "|" + inv.getArgument(1))));
-        when(mintSyncCursorRepository.save(any())).thenAnswer(inv -> {
-            SolanaMintSyncCursor c = inv.getArgument(0);
-            cursorStore.put(c.getChainConfigId() + "|" + c.getMintAddress(), c);
-            return c;
-        });
-
+        service = new SolanaTransferSyncService(chainConfigRepository, indexerStateRepository, tokenTransferRepository,
+                mintSyncCursorRepository, assetDeploymentRepository, syncSupport, new ExplorerUrlBuilder(),
+                RestClient.builder());
         chain = new ChainConfig();
         chain.setId(UUID.randomUUID());
         chain.setIdentifier("SOLANA_TESTNET");
         chain.setChainType(ChainConfig.ChainType.SOLANA);
-        chain.setRpcUrl(RPC_URL);
-
-        service = new SolanaTransferSyncService(
-                chainConfigRepository, indexerStateRepository, tokenTransferRepository,
-                mintSyncCursorRepository, new ExplorerUrlBuilder(), restClientBuilder);
-
-        service.registerMintAddress(chain.getIdentifier(), MINT_A);
+        deployment = new AssetDeployment();
+        deployment.setId(UUID.randomUUID());
+        deployment.setAssetId(UUID.randomUUID());
+        deployment.setContractAddress(MINT);
     }
 
-    private void stubIndexerState() {
-        when(indexerStateRepository.findByChainConfigIdAndIndexerType(any(), any()))
-                .thenReturn(Optional.empty());
-        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    private Map<String, Object> fixture(String name) throws IOException {
+        try (InputStream in = getClass().getResourceAsStream("/fixtures/solana/" + name)) {
+            return mapper.readValue(in, new TypeReference<Map<String, Object>>() {});
+        }
     }
 
-    private void expectSignaturesRequest(String responseSignature, long slot) {
-        mockServer.expect(requestTo(RPC_URL))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("getSignaturesForAddress")))
-                .andRespond(withSuccess("""
-                    {"jsonrpc":"2.0","id":1,"result":[
-                      {"signature":"%s","slot":%d,"err":null,"blockTime":1700000000}
-                    ]}
-                    """.formatted(responseSignature, slot), MediaType.APPLICATION_JSON));
-    }
-
-    private void expectEmptySignaturesRequest() {
-        mockServer.expect(requestTo(RPC_URL))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("getSignaturesForAddress")))
-                .andRespond(withSuccess("""
-                    {"jsonrpc":"2.0","id":1,"result":[]}
-                    """, MediaType.APPLICATION_JSON));
-    }
-
-    private void expectTransactionRequest(String signature) {
-        mockServer.expect(requestTo(RPC_URL))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("getTransaction")))
-                .andRespond(withSuccess("""
-                    {"jsonrpc":"2.0","id":1,"result":{
-                      "blockTime":1700000000,
-                      "transaction":{"message":{"instructions":[]}}
-                    }}
-                    """, MediaType.APPLICATION_JSON));
+    private List<TokenTransfer> decode(String fixture, String signature) throws IOException {
+        return service.toTransfers(chain, deployment, signature, Map.of("signature", signature), fixture(fixture));
     }
 
     @Test
-    @DisplayName("cursor advances to the newest signature after a poll with results")
-    void cursorAdvances_afterPollWithResults() {
-        stubIndexerState();
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(any(), anyString(), any()))
-                .thenReturn(false);
+    @DisplayName("transferChecked on spl-token books one TRANSFER between the two OWNERS with amount, deployment, slot and blockTime")
+    void transferChecked() throws IOException {
+        List<TokenTransfer> rows = decode("transferchecked-spl-token.json", "sigTransferChecked");
 
-        expectSignaturesRequest("sig1", 100);
-        expectTransactionRequest("sig1");
-
-        service.pollChain(chain);
-
-        Optional<SolanaMintSyncCursor> cursor =
-                mintSyncCursorRepository.findByChainConfigIdAndMintAddress(chain.getId(), MINT_A);
-        assertThat(cursor).isPresent();
-        assertThat(cursor.get().getLastSyncedSignature()).isEqualTo("sig1");
-        mockServer.verify();
+        assertThat(rows).hasSize(1); // the unrelated mint's balance is ignored
+        TokenTransfer t = rows.get(0);
+        assertThat(t.getEventType()).isEqualTo(TokenTransfer.EventType.TRANSFER);
+        assertThat(t.getFromAddress()).isEqualTo(ALICE);
+        assertThat(t.getToAddress()).isEqualTo(BOB);
+        assertThat(t.getAmount()).isEqualByComparingTo("400");
+        assertThat(t.getContractAddress()).isEqualTo(MINT);
+        assertThat(t.getDeploymentId()).isEqualTo(deployment.getId());
+        assertThat(t.getAssetId()).isEqualTo(deployment.getAssetId());
+        assertThat(t.getSlot()).isEqualTo(310000001L);
+        assertThat(t.getBlockNumber()).isEqualTo(310000001L);
+        assertThat(t.getLogIndex()).isZero();
+        assertThat(t.getOccurredAt()).isEqualTo(Instant.ofEpochSecond(1767225600L));
+        assertThat(t.getTxHash()).isEqualTo("sigTransferChecked");
     }
 
     @Test
-    @DisplayName("a second poll advances the cursor again (not frozen after the first poll)")
-    void cursorAdvances_onEverySubsequentPoll() {
-        stubIndexerState();
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(any(), anyString(), any()))
-                .thenReturn(false);
+    @DisplayName("a Token-2022 batch with two transfers books two rows with distinct log indexes and 18-decimal raw amounts")
+    void batchTwoTransfersToken2022() throws IOException {
+        List<TokenTransfer> rows = decode("batch-two-transfers-token2022.json", "sigBatch");
 
-        // MockRestServiceServer requires all expectations registered before any request is made —
-        // register both polls' worth up front; the default expectation manager matches them in
-        // registration (FIFO) order as the two sequential pollChain() calls below issue them.
-        expectSignaturesRequest("sig1", 100);
-        expectTransactionRequest("sig1");
-        expectSignaturesRequest("sig2", 200);
-        expectTransactionRequest("sig2");
-
-        service.pollChain(chain);
-        assertThat(mintSyncCursorRepository.findByChainConfigIdAndMintAddress(chain.getId(), MINT_A)
-                .orElseThrow().getLastSyncedSignature()).isEqualTo("sig1");
-
-        // 's core regression: before the fix, this second poll would never update the
-        // cursor again because the "only set if null" latch had already fired once.
-        service.pollChain(chain);
-
-        assertThat(mintSyncCursorRepository.findByChainConfigIdAndMintAddress(chain.getId(), MINT_A)
-                .orElseThrow().getLastSyncedSignature()).isEqualTo("sig2");
-        mockServer.verify();
+        assertThat(rows).hasSize(2);
+        assertThat(rows).extracting(TokenTransfer::getLogIndex).containsExactly(0, 1);
+        assertThat(rows).allSatisfy(r -> {
+            assertThat(r.getEventType()).isEqualTo(TokenTransfer.EventType.TRANSFER);
+            assertThat(r.getFromAddress()).isEqualTo(ALICE);
+            assertThat(r.getSlot()).isEqualTo(310000050L);
+        });
+        // Largest counterparty first; amounts are raw base units and net to Alice's -150 * 10^18.
+        assertThat(rows.get(0).getToAddress()).isEqualTo(BOB);
+        assertThat(rows.get(0).getAmount()).isEqualByComparingTo(new BigDecimal("100000000000000000000"));
+        assertThat(rows.get(1).getToAddress()).isEqualTo(CAROL);
+        assertThat(rows.get(1).getAmount()).isEqualByComparingTo(new BigDecimal("50000000000000000000"));
     }
 
     @Test
-    @DisplayName("an empty poll leaves the existing cursor untouched")
-    void emptyPoll_doesNotResetCursor() {
-        stubIndexerState();
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(any(), anyString(), any()))
-                .thenReturn(false);
+    @DisplayName("mintTo with no counterparty is a MINT to the owner")
+    void mintTo() throws IOException {
+        List<TokenTransfer> rows = decode("mint-to.json", "sigMint");
 
-        expectSignaturesRequest("sig1", 100);
-        expectTransactionRequest("sig1");
-        expectEmptySignaturesRequest();
-
-        service.pollChain(chain);
-        service.pollChain(chain);
-
-        assertThat(mintSyncCursorRepository.findByChainConfigIdAndMintAddress(chain.getId(), MINT_A)
-                .orElseThrow().getLastSyncedSignature()).isEqualTo("sig1");
-        mockServer.verify();
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getEventType()).isEqualTo(TokenTransfer.EventType.MINT);
+        assertThat(rows.get(0).getFromAddress()).isNull();
+        assertThat(rows.get(0).getToAddress()).isEqualTo(BOB);
+        assertThat(rows.get(0).getAmount()).isEqualByComparingTo("500");
     }
 
     @Test
-    @DisplayName("two mints on the same chain get independent cursors, not a shared one")
-    void twoMints_getIndependentCursors() {
-        stubIndexerState();
-        service.registerMintAddress(chain.getIdentifier(), MINT_B);
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(any(), anyString(), any()))
-                .thenReturn(false);
+    @DisplayName("a Token-2022 transfer fee is the balance delta: TRANSFER of the received part plus a small BURN")
+    void transferFeeShowsAsBurn() throws IOException {
+        List<TokenTransfer> rows = decode("token2022-transfer-fee.json", "sigFee");
 
-        // One request per mint, order not guaranteed by the underlying Set — stub both patterns.
-        expectSignaturesRequest("sigA", 100);
-        expectTransactionRequest("sigA");
-        expectSignaturesRequest("sigB", 101);
-        expectTransactionRequest("sigB");
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).getEventType()).isEqualTo(TokenTransfer.EventType.TRANSFER);
+        assertThat(rows.get(0).getAmount()).isEqualByComparingTo("98");
+        assertThat(rows.get(1).getEventType()).isEqualTo(TokenTransfer.EventType.BURN);
+        assertThat(rows.get(1).getFromAddress()).isEqualTo(ALICE);
+        assertThat(rows.get(1).getAmount()).isEqualByComparingTo("2");
+    }
 
-        service.pollChain(chain);
+    @Test
+    @DisplayName("legacy balances without owner fall back to the token account address and book a BURN")
+    void burnWithoutOwner() throws IOException {
+        List<TokenTransfer> rows = decode("burn-no-owner.json", "sigBurn");
 
-        Optional<SolanaMintSyncCursor> cursorA =
-                mintSyncCursorRepository.findByChainConfigIdAndMintAddress(chain.getId(), MINT_A);
-        Optional<SolanaMintSyncCursor> cursorB =
-                mintSyncCursorRepository.findByChainConfigIdAndMintAddress(chain.getId(), MINT_B);
-        assertThat(cursorA).isPresent();
-        assertThat(cursorB).isPresent();
-        // The two mints' cursors must be distinct entries, each holding one of the two responses
-        // (order between the two mints isn't guaranteed, so just assert they differ from each other
-        // and each is one of the expected signatures).
-        assertThat(cursorA.get().getLastSyncedSignature())
-                .isNotEqualTo(cursorB.get().getLastSyncedSignature());
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getEventType()).isEqualTo(TokenTransfer.EventType.BURN);
+        assertThat(rows.get(0).getFromAddress()).isEqualTo("LegacyTokenAccountAaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assertThat(rows.get(0).getToAddress()).isNull();
+        assertThat(rows.get(0).getAmount()).isEqualByComparingTo("30");
+    }
+
+    @Test
+    @DisplayName("a transaction whose meta.err is set books nothing")
+    void failedTransactionBooksNothing() throws IOException {
+        Map<String, Object> tx = fixture("transferchecked-spl-token.json");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> meta = (Map<String, Object>) tx.get("meta");
+        meta.put("err", Map.of("InstructionError", List.of(0, "Custom")));
+
+        assertThat(service.toTransfers(chain, deployment, "sigFailed", Map.of(), tx)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a result without any block time is refused instead of being stamped with processing time")
+    void missingBlockTimeIsRefused() throws IOException {
+        Map<String, Object> tx = fixture("transferchecked-spl-token.json");
+        tx.remove("blockTime");
+
+        assertThatThrownBy(() -> service.toTransfers(chain, deployment, "sigNoTime", Map.of(), tx))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("blockTime");
     }
 }

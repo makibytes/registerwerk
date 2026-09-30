@@ -133,9 +133,19 @@ export class BulkErc3643OpsComponent {
       .filter(row => row.from && row.to && row.amount);
   }
 
+  /** Amounts travel as exact decimal strings (P4B-7); reject anything else before it reaches the API. */
+  private invalidAmount(amounts: string[]): boolean {
+    const bad = amounts.find(a => !/^[1-9]\d*$/.test(a));
+    if (bad !== undefined) {
+      this.snackBar.open(`Invalid amount "${bad}": use whole base units greater than 0.`, 'Dismiss', { duration: 6000 });
+      return true;
+    }
+    return false;
+  }
+
   submitBatchMint(): void {
     const rows = this.parseAddressAmount(this.mintCsv);
-    if (rows.length === 0) return;
+    if (rows.length === 0 || this.invalidAmount(rows.map(r => r.amount))) return;
     if (!confirm(`Mint to ${rows.length} holder(s)?`)) return;
 
     this.erc3643Service.batchMint(this.assetId, this.deploymentId, {
@@ -153,7 +163,7 @@ export class BulkErc3643OpsComponent {
 
   submitBatchForcedTransfer(): void {
     const rows = this.parseFromToAmount(this.transferCsv);
-    if (rows.length === 0) return;
+    if (rows.length === 0 || this.invalidAmount(rows.map(r => r.amount))) return;
 
     const ref = this.dialog.open(StepUpDialogComponent, {
       data: {
@@ -185,7 +195,7 @@ export class BulkErc3643OpsComponent {
 
   submitBatchBurn(): void {
     const rows = this.parseAddressAmount(this.burnCsv);
-    if (rows.length === 0) return;
+    if (rows.length === 0 || this.invalidAmount(rows.map(r => r.amount))) return;
 
     const ref = this.dialog.open(StepUpDialogComponent, {
       data: {

@@ -103,6 +103,19 @@ Le SPA décode `claims`, appelle `acquireTokenRedirect({ claims })`, puis réess
 
 ---
 
+## Opérations on-chain : contrôle de destination, preuve de double contrôle, cycle de vie des signataires { #chain-operations }
+
+**Contrôle de destination.** Whitelist, mint, transfert forcé (unitaire, par lot, Canton, Solana, confidentiel) et approbation forcée n'acceptent qu'une destination qui est un **détenteur actif du registre du même actif**, dont l'entité juridique est ACTIVE et approuvée KYC, sans résultat de filtrage des sanctions non résolu (entité ou bénéficiaire effectif) et sans blocage (Sperrvermerk) §16 eWpG. Sinon l'API répond `403` avec le motif ; il n'existe aucune voie d'exception — intégrez d'abord la nouvelle partie comme détenteur. Les adresses EVM en casse mixte doivent respecter la somme de contrôle EIP-55. Les réponses de whitelist et de mint renvoient le nom du détenteur résolu (`destinationHolder`). Interrupteur : `registerwerk.chain.destination-gate.enabled` (défaut `true` ; ne le désactivez que dans un profil de démonstration). Les opérations forcées exigent une `legalBasis` d'au moins 10 caractères ; un en-tête optionnel `X-Case-Reference` est conservé avec la transaction.
+
+**Preuve de double contrôle.** `/whitelist`, `/unwhitelist` et le `/mint` émetteur exigent un step-up plus un second approbateur (REGISTRY_ADMIN ou COMPLIANCE_OFFICER ; l'initiateur ne peut pas approuver). Pour chaque requête à quatre yeux, l'aspect step-up écrit *avant* l'action un événement d'audit `DUAL_CONTROL_APPROVED` (initiateur, approbateur, action, chemin) ; si cette écriture échoue, l'action n'est pas exécutée. L'identifiant de l'approbateur figure aussi dans `blockchain_transaction.approver_id` et dans l'événement d'audit métier.
+
+**Claims.** Les claims KYC et AML ne sont émis que pour une entité au KYC APPROVED, sans résultat de filtrage non résolu ni blocage. Leur expiration correspond à la prochaine date de revue périodique (une date absente est refusée). `registerwerk.claims.allow-unapproved-in-nonprod=true` n'assouplit cette règle que hors profils de production.
+
+**Cycle de vie des signataires.** La génération, l'import (brut, keystore) et le rattachement HSM exigent un step-up plus un second approbateur ; un nouveau wallet n'est jamais promu automatiquement par défaut de chaîne (seul le tout premier wallet d'une installation neuve l'est) ; modifiez les défauts avec l'action à quatre yeux *définir par défaut*. La suppression d'un wallet est une **suppression logique** : la clé chiffrée est conservée pendant `registerwerk.wallet.retention-days` (90 par défaut) et peut être restaurée ; une tâche de purge la détruit ensuite. La suppression est refusée tant que le wallet est un défaut de chaîne ou que son adresse a déjà signé une transaction (elle peut détenir des droits de déployeur, de registre ou d'émetteur de claims).
+
+!!! warning "Procédure de rotation du signataire (manuelle)"
+    Il n'existe pas encore de transfert automatique. Pour remplacer un signataire du registre : (1) créez ou rattachez le nouveau wallet (quatre yeux) ; (2) avec l'ancienne clé, accordez à la nouvelle adresse les rôles nécessaires on-chain avec Foundry `cast send` (`grantRole` / `transferRegistry` / `addKey` de l'émetteur de claims), en présence d'une seconde personne ; (3) vérifiez avec `cast call` que la nouvelle adresse détient tous les rôles ; (4) basculez le défaut de chaîne vers le nouveau wallet (quatre yeux) ; (5) révoquez l'ancienne clé on-chain (`revokeRole` / `removeKey`) et vérifiez ; (6) seulement ensuite, supprimez l'ancien wallet — il reste restaurable pendant la durée de conservation.
+
 ## Contrôle des rôles { #role-enforcement }
 
 Chaque méthode de contrôleur nécessitant une autorisation est annotée avec `@PreAuthorize` :

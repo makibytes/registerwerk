@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.shared.InvalidCredentialsException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.shared.LoginDisabledException;
 import de.makibytes.registerwerk.shared.SecurityUtils;
+import de.makibytes.registerwerk.shared.TransientChainException;
 import de.makibytes.registerwerk.shared.api.ErrorResponse;
 import de.makibytes.registerwerk.shared.events.RejectedActionEvent;
 import jakarta.validation.ConstraintViolationException;
@@ -15,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -111,6 +113,16 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.CONFLICT, ex.getMessage(), request.getRequestURI());
     }
 
+    /** Chain capacity/availability condition; nothing was signed, the caller may retry. */
+    @ExceptionHandler(TransientChainException.class)
+    public ResponseEntity<ErrorResponse> handleTransientChain(TransientChainException ex, HttpServletRequest request) {
+        ErrorResponse body = new ErrorResponse(HttpStatus.SERVICE_UNAVAILABLE.value(), ex.getMessage(),
+                Instant.now(), request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
+                .body(body);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest request) {
         return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage(), request.getRequestURI());
@@ -165,6 +177,14 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleUnreadableMessage(
             HttpMessageNotReadableException ex, HttpServletRequest request) {
         log.debug("Unreadable request body on {}: {}", request.getRequestURI(), ex.getMessage());
+        // P4B-7: an amount rejected by StrictAmount tells the client exactly why (send a decimal string).
+        for (Throwable cause = ex.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof tools.jackson.core.JacksonException je && je.getOriginalMessage() != null
+                    && je.getOriginalMessage().startsWith(de.makibytes.registerwerk.shared.api.StrictAmount.MESSAGE_PREFIX)) {
+                return buildResponse(HttpStatus.BAD_REQUEST, je.getOriginalMessage(), request.getRequestURI());
+            }
+            if (cause.getCause() == cause) break;
+        }
         return buildResponse(HttpStatus.BAD_REQUEST, "Request body is missing or malformed", request.getRequestURI());
     }
 

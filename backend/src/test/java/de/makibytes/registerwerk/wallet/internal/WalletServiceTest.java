@@ -48,6 +48,7 @@ class WalletServiceTest {
     @Mock private WalletSigner walletSigner;
     @Mock private Pkcs11HsmService pkcs11HsmService;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private de.makibytes.registerwerk.wallet.api.WalletUsagePort usagePort;
 
     private WalletService service;
 
@@ -56,7 +57,7 @@ class WalletServiceTest {
     @BeforeEach
     void setUp() {
         service = new WalletService(walletRepository, walletStorage, defaultService, walletSigner,
-                pkcs11HsmService, eventPublisher);
+                pkcs11HsmService, eventPublisher, usagePort);
         lenient().when(walletRepository.save(any(OperatorWallet.class))).thenAnswer(inv -> {
             OperatorWallet w = inv.getArgument(0);
             if (w.getId() == null) {
@@ -87,7 +88,7 @@ class WalletServiceTest {
 
         assertThat(result.getName()).isEqualTo("my-wallet");
         assertThat(result.getType()).isEqualTo(WalletType.EVM);
-        verify(defaultService).autoPromoteIfFirstOfType(result);
+        verify(defaultService).bootstrapDefaultIfFirstWalletEver(result);
         ArgumentCaptor<WalletGeneratedEvent> captor = ArgumentCaptor.forClass(WalletGeneratedEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().actorId()).isEqualTo(actorId);
@@ -198,37 +199,59 @@ class WalletServiceTest {
     // ── delete ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("delete removes chain defaults, evicts the signer cache, and publishes an event carrying the real actor")
-    void delete_removesDefaultsEvictsSignerAndPublishesEvent() {
+    @DisplayName("P4C-5: delete is a soft delete — tombstone + event with approver, key material kept")
+    void delete_softDeletesAndKeepsKeyMaterial() {
         UUID id = UUID.randomUUID();
+        UUID approver = UUID.randomUUID();
         OperatorWallet w = wallet(id, WalletType.EVM, id + ".json");
         when(walletRepository.findById(id)).thenReturn(Optional.of(w));
+        when(defaultService.findDefaultChainIds(id)).thenReturn(List.of());
+        when(usagePort.hasSignedOnChain(w.getAddress())).thenReturn(false);
 
-        service.delete(id, actorId, "REGISTRY_ADMIN");
+        service.delete(id, actorId, "REGISTRY_ADMIN", approver);
 
-        verify(defaultService).removeDefaultsForWallet(id);
         verify(walletSigner).evict(id);
-        verify(walletStorage).delete(id + ".json");
+        verify(walletRepository).softDelete(id, actorId, approver);
+        verify(walletRepository, org.mockito.Mockito.never()).delete(any(OperatorWallet.class));
+        verifyNoInteractions(walletStorage);
         ArgumentCaptor<WalletDeletedEvent> captor = ArgumentCaptor.forClass(WalletDeletedEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().actorId()).isEqualTo(actorId);
+        assertThat(captor.getValue().dualControlApproverId()).isEqualTo(approver);
     }
 
     @Test
-    @DisplayName("deleting HSM wallet metadata does not delete the PKCS#11 key")
-    void delete_hsmWallet_preservesTokenKey() {
+    @DisplayName("P4C-5: delete is refused for a chain default")
+    void delete_refusedForChainDefault() {
         UUID id = UUID.randomUUID();
-        OperatorWallet hsmWallet = wallet(id, WalletType.EVM, null);
-        hsmWallet.setCustodyType(OperatorWallet.CustodyType.PKCS11);
-        hsmWallet.setKeyReference("registerwerk-operator");
-        when(walletRepository.findById(id)).thenReturn(Optional.of(hsmWallet));
+        when(walletRepository.findById(id)).thenReturn(Optional.of(wallet(id, WalletType.EVM, id + ".json")));
+        when(defaultService.findDefaultChainIds(id)).thenReturn(List.of(UUID.randomUUID()));
 
-        service.delete(id, actorId, "REGISTRY_ADMIN");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.delete(id, actorId, "REGISTRY_ADMIN", null))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        verify(walletRepository, org.mockito.Mockito.never()).softDelete(any(), any(), any());
+    }
 
-        verify(defaultService).removeDefaultsForWallet(id);
-        verify(walletSigner).evict(id);
-        verify(walletRepository).delete(hsmWallet);
-        verifyNoInteractions(walletStorage);
+    @Test
+    @DisplayName("P4C-5: delete is refused for a key that ever signed on chain (deployer/registry/claim-issuer authority)")
+    void delete_refusedForOnChainSigner() {
+        UUID id = UUID.randomUUID();
+        OperatorWallet w = wallet(id, WalletType.EVM, id + ".json");
+        when(walletRepository.findById(id)).thenReturn(Optional.of(w));
+        when(defaultService.findDefaultChainIds(id)).thenReturn(List.of());
+        when(usagePort.hasSignedOnChain(w.getAddress())).thenReturn(true);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.delete(id, actorId, "REGISTRY_ADMIN", null))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class)
+                .hasMessageContaining("signer-rotation");
+        verify(walletRepository, org.mockito.Mockito.never()).softDelete(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("P4C-5: generate goes through the bootstrap-only default promotion")
+    void generate_usesBootstrapPromotionOnly() {
+        service.generate("fresh", WalletType.EVM, actorId, "REGISTRY_ADMIN");
+        verify(defaultService).bootstrapDefaultIfFirstWalletEver(any(OperatorWallet.class));
     }
 
     // ── KEK rotation  ─────────────────────────────────────
@@ -281,5 +304,48 @@ class WalletServiceTest {
 
         assertThat(rotated).containsExactly(rotatedId);
         verify(eventPublisher, org.mockito.Mockito.times(2)).publishEvent(any(WalletKekRotatedEvent.class));
+    }
+
+    private OperatorWallet tomb() {
+        UUID id = UUID.randomUUID();
+        OperatorWallet t = wallet(id, WalletType.EVM, id + ".json");
+        t.setCustodyType(OperatorWallet.CustodyType.SOFTWARE);
+        return t;
+    }
+
+    @Test
+    @DisplayName("purgeExpired keeps the keystore when the DELETE hit no row (restore won the race)")
+    void purgeExpired_restoredMeanwhile_keepsKeystore() {
+        OperatorWallet t = tomb();
+        when(walletRepository.findDeletedBefore(any())).thenReturn(List.of(t));
+        when(walletRepository.purge(t.getId())).thenReturn(0);
+
+        assertThat(service.purgeExpired(java.time.Instant.now())).isZero();
+
+        verifyNoInteractions(walletStorage);
+    }
+
+    @Test
+    @DisplayName("purgeExpired destroys the keystore only after the DB delete commits, never on rollback")
+    void purgeExpired_keystoreDeletedAfterCommitOnly() {
+        OperatorWallet t = tomb();
+        when(walletRepository.findDeletedBefore(any())).thenReturn(List.of(t, tomb()));
+        when(walletRepository.purge(any())).thenReturn(1);
+
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThat(service.purgeExpired(java.time.Instant.now())).isEqualTo(2);
+            verifyNoInteractions(walletStorage); // still inside the transaction
+            var syncs = org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations();
+            // rollback: afterCommit is never invoked
+            syncs.forEach(sync -> sync.afterCompletion(
+                    org.springframework.transaction.support.TransactionSynchronization.STATUS_ROLLED_BACK));
+            verifyNoInteractions(walletStorage);
+            // commit path
+            syncs.forEach(org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clear();
+        }
+        verify(walletStorage, org.mockito.Mockito.times(2)).delete(any());
     }
 }

@@ -158,3 +158,6 @@ A separate `@Scheduled` job runs every 10 minutes:
 ## Registering a new SPL token
 
 When a Solana asset deployment is created via the API, the backend automatically starts monitoring its mint address. No manual configuration needed.
+
+!!! warning "Coverage status: partial observation"
+    The indexer lists signatures by **mint address**. A plain (legacy) SPL `transfer` instruction does not reference the mint account, so such holder-to-holder movements are not seen. Registerwerk therefore reports Solana deployments as *partially observed* (`plain SPL transfers not observable`): holder sync stays BLOCKED and the register is never marked reconciled from indexed Solana history until token accounts are indexed.

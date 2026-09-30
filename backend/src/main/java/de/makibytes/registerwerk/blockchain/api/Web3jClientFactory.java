@@ -91,6 +91,16 @@ public class Web3jClientFactory {
         return Web3j.build(new HttpService(rpcUrl, httpClient, false), POLLING_INTERVAL_MS, scheduler);
     }
 
+    /** A raw service bound to one endpoint (used to compose failover services; see {@link FailoverWeb3jService}). */
+    public org.web3j.protocol.Web3jService createService(String rpcUrl) {
+        return new HttpService(rpcUrl, httpClient, false);
+    }
+
+    /** A Web3j client over a caller-supplied service (same shared scheduler as {@link #createClient(String)}). */
+    public Web3j createClient(org.web3j.protocol.Web3jService service) {
+        return Web3j.build(service, POLLING_INTERVAL_MS, scheduler);
+    }
+
     @PreDestroy
     void close() {
         scheduler.shutdownNow();

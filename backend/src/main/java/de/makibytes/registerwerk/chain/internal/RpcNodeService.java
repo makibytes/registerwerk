@@ -4,12 +4,15 @@ import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChaincacheCredentials;
 import de.makibytes.registerwerk.chain.api.RpcNode;
+import de.makibytes.registerwerk.chain.api.RpcNodeActor;
+import de.makibytes.registerwerk.chain.api.RpcNodeChainVerifier;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.ChaincacheStreamStatus;
 import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
 import de.makibytes.registerwerk.chain.web.dto.RpcNodeResponse;
 import de.makibytes.registerwerk.chain.events.RpcNodeChangedEvent;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +25,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -48,11 +52,14 @@ public class RpcNodeService {
     private final ObjectMapper objectMapper;
     private final ChaincacheStreamStatus streamStatus;
     private final ChaincacheCredentials chaincacheCredentials;
+    private final RpcNodeUrlPolicy urlPolicy;
+    private final ObjectProvider<RpcNodeChainVerifier> chainVerifier;
 
     public RpcNodeService(RpcNodeRepository rpcNodeRepository, ChainConfigRepository chainConfigRepository,
                           ApplicationEventPublisher events, ChaincacheClient chaincacheClient,
                           ObjectMapper objectMapper, ChaincacheStreamStatus streamStatus,
-                          ChaincacheCredentials chaincacheCredentials) {
+                          ChaincacheCredentials chaincacheCredentials, RpcNodeUrlPolicy urlPolicy,
+                          ObjectProvider<RpcNodeChainVerifier> chainVerifier) {
         this.rpcNodeRepository = rpcNodeRepository;
         this.chainConfigRepository = chainConfigRepository;
         this.events = events;
@@ -60,6 +67,8 @@ public class RpcNodeService {
         this.objectMapper = objectMapper;
         this.streamStatus = streamStatus;
         this.chaincacheCredentials = chaincacheCredentials;
+        this.urlPolicy = urlPolicy;
+        this.chainVerifier = chainVerifier;
     }
 
     @Transactional(readOnly = true)
@@ -80,9 +89,11 @@ public class RpcNodeService {
      * {@code DIRECT_RPC} and the periodic redetection job (see {@link #redetectAll}) will pick it
      * up the moment it becomes reachable, exactly as it would for any other add-before-ready race.
      */
-    public RpcNode addNode(UUID chainConfigId, String url, String label) {
+    public RpcNode addNode(UUID chainConfigId, String url, String label, RpcNodeActor actor) {
         ChainConfig chain = chainConfigRepository.findById(chainConfigId)
                 .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainConfigId));
+        urlPolicy.validate(chain, url);
+        requireChainIdentity(chain, url);
 
         RpcNode node = new RpcNode();
         node.setChainConfig(chain);
@@ -92,8 +103,9 @@ public class RpcNodeService {
         applyDetection(node, chaincacheClient.detect(url));
 
         RpcNode saved = rpcNodeRepository.save(node);
-        events.publishEvent(new RpcNodeChangedEvent(saved.getId(), null, null, "ADDED", chainConfigId));
-        log.info("Added RPC node: id={}, url={}, chain={}, kind={}", saved.getId(), url, chain.getIdentifier(), node.getKind());
+        publish(saved.getId(), "ADDED", chainConfigId, RpcNodeUrlPolicy.redact(url), null, actor);
+        log.info("Added RPC node: id={}, url={}, chain={}, kind={}", saved.getId(), RpcNodeUrlPolicy.redact(url),
+                chain.getIdentifier(), node.getKind());
         recomputeFinalitySource(chain);
         return saved;
     }
@@ -103,15 +115,26 @@ public class RpcNodeService {
      * made a misconfigured URL impossible to correct without deleting and re-adding the node and
      * losing its health history. Re-detects on every update since the URL may have changed.
      */
-    public RpcNode updateNode(UUID chainId, UUID nodeId, String url, String label) {
+    public RpcNode updateNode(UUID chainId, UUID nodeId, String url, String label, RpcNodeActor actor) {
         RpcNode node = getById(chainId, nodeId);
+        String oldUrl = node.getUrl();
+        boolean urlChanged = !Objects.equals(oldUrl, url);
+        if (urlChanged) {
+            urlPolicy.validate(node.getChainConfig(), url);
+            requireChainIdentity(node.getChainConfig(), url);
+            // The new endpoint must prove itself again: no inherited health, hysteresis restarts.
+            node.setHealthy(false);
+            node.setConsecutiveSuccesses(0);
+            node.setHealthReason(RpcNode.HealthReason.RECOVERING);
+        }
         node.setUrl(url);
         node.setLabel(label != null && !label.isBlank() ? label : node.getLabel());
         applyDetection(node, chaincacheClient.detect(url));
 
         RpcNode saved = rpcNodeRepository.save(node);
-        events.publishEvent(new RpcNodeChangedEvent(nodeId, null, null, "UPDATED", chainId));
-        log.info("Updated RPC node: id={}, url={}", nodeId, url);
+        publish(nodeId, "UPDATED", chainId, RpcNodeUrlPolicy.redact(url), RpcNodeUrlPolicy.redact(oldUrl), actor);
+        log.info("Updated RPC node: id={}, url={} (was {})", nodeId, RpcNodeUrlPolicy.redact(url),
+                RpcNodeUrlPolicy.redact(oldUrl));
         recomputeFinalitySource(node.getChainConfig());
         return saved;
     }
@@ -241,21 +264,21 @@ public class RpcNodeService {
         }
     }
 
-    public void enable(UUID chainId, UUID nodeId) {
+    public void enable(UUID chainId, UUID nodeId, RpcNodeActor actor) {
         RpcNode node = getById(chainId, nodeId);
         node.setEnabled(true);
         rpcNodeRepository.save(node);
-        events.publishEvent(new RpcNodeChangedEvent(nodeId, null, null, "ENABLED", chainId));
-        log.info("Enabled RPC node: id={}, url={}", nodeId, node.getUrl());
+        publish(nodeId, "ENABLED", chainId, RpcNodeUrlPolicy.redact(node.getUrl()), null, actor);
+        log.info("Enabled RPC node: id={}, url={}", nodeId, RpcNodeUrlPolicy.redact(node.getUrl()));
         recomputeFinalitySource(node.getChainConfig());
     }
 
-    public void disable(UUID chainId, UUID nodeId) {
+    public void disable(UUID chainId, UUID nodeId, RpcNodeActor actor) {
         RpcNode node = getById(chainId, nodeId);
         node.setEnabled(false);
         rpcNodeRepository.save(node);
-        events.publishEvent(new RpcNodeChangedEvent(nodeId, null, null, "DISABLED", chainId));
-        log.info("Disabled RPC node: id={}, url={}", nodeId, node.getUrl());
+        publish(nodeId, "DISABLED", chainId, RpcNodeUrlPolicy.redact(node.getUrl()), null, actor);
+        log.info("Disabled RPC node: id={}, url={}", nodeId, RpcNodeUrlPolicy.redact(node.getUrl()));
         recomputeFinalitySource(node.getChainConfig());
     }
 
@@ -263,22 +286,54 @@ public class RpcNodeService {
      * Toggles the exclusive flag for a node. When exclusive is set, only nodes
      * with exclusive=true (per chain) are considered for routing.
      */
-    public void setExclusive(UUID chainId, UUID nodeId, boolean exclusive) {
+    public void setExclusive(UUID chainId, UUID nodeId, boolean exclusive, RpcNodeActor actor) {
         RpcNode node = getById(chainId, nodeId);
         node.setExclusive(exclusive);
         rpcNodeRepository.save(node);
-        events.publishEvent(new RpcNodeChangedEvent(nodeId, null, null,
-                exclusive ? "PINNED" : "UNPINNED", chainId));
-        log.info("Set RPC node exclusive={}: id={}, url={}", exclusive, nodeId, node.getUrl());
+        publish(nodeId, exclusive ? "PINNED" : "UNPINNED", chainId, RpcNodeUrlPolicy.redact(node.getUrl()), null, actor);
+        log.info("Set RPC node exclusive={}: id={}, url={}", exclusive, nodeId, RpcNodeUrlPolicy.redact(node.getUrl()));
     }
 
-    public void delete(UUID chainId, UUID nodeId) {
+    public void delete(UUID chainId, UUID nodeId, RpcNodeActor actor) {
         RpcNode node = getById(chainId, nodeId);
         ChainConfig chain = node.getChainConfig();
         rpcNodeRepository.delete(node);
-        events.publishEvent(new RpcNodeChangedEvent(nodeId, null, null, "DELETED", chainId));
-        log.info("Deleted RPC node: id={}, url={}", nodeId, node.getUrl());
+        publish(nodeId, "DELETED", chainId, RpcNodeUrlPolicy.redact(node.getUrl()), null, actor);
+        log.info("Deleted RPC node: id={}, url={}", nodeId, RpcNodeUrlPolicy.redact(node.getUrl()));
         recomputeFinalitySource(chain);
+    }
+
+    /**
+     * Clears the pinned genesis hash so the next health round re-captures it from a node whose chain
+     * id matches the pin. The recovery path after a legitimate devnet reset or a chain migration; a
+     * change of the pin is as sensitive as a node change and is gated the same way.
+     */
+    public void resetGenesisPin(UUID chainId, RpcNodeActor actor) {
+        ChainConfig chain = chainConfigRepository.findById(chainId)
+                .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainId));
+        String previous = chain.getGenesisHash();
+        chainConfigRepository.clearGenesisHash(chainId);
+        publish(chainId, "GENESIS_PIN_RESET", chainId, previous, null, actor);
+        log.warn("Genesis pin of chain {} reset (was {})", chain.getIdentifier(), previous);
+    }
+
+    /** Refuses a node whose endpoint definitively serves another chain than the pinned one; an
+     *  unreachable endpoint is accepted (add-before-ready) but stays unhealthy until it proves itself. */
+    private void requireChainIdentity(ChainConfig chain, String url) {
+        RpcNodeChainVerifier verifier = chainVerifier.getIfAvailable();
+        if (verifier == null) return;
+        RpcNodeChainVerifier.Verdict verdict = verifier.verify(chain, url);
+        if (verdict.outcome() == RpcNodeChainVerifier.Outcome.MISMATCH) {
+            throw new IllegalArgumentException("RPC node does not serve chain " + chain.getIdentifier()
+                    + ": " + verdict.detail());
+        }
+    }
+
+    private void publish(UUID subjectId, String operation, UUID chainId, String url, String oldUrl,
+                         RpcNodeActor actor) {
+        RpcNodeActor a = actor != null ? actor : RpcNodeActor.system();
+        events.publishEvent(new RpcNodeChangedEvent(subjectId, a.actorId(), a.actorRole(), operation, chainId,
+                url, oldUrl, a.approverId(), a.requestId()));
     }
 
     public RpcNodeResponse toResponse(RpcNode node) {
@@ -303,7 +358,9 @@ public class RpcNodeService {
                 node.getRemoteChainKey(),
                 node.getCapabilities(),
                 node.getKind() == RpcNode.NodeKind.CHAINCACHE
-                        && streamStatus.isConnected(node.getChainConfig().getId())
+                        && streamStatus.isConnected(node.getChainConfig().getId()),
+                node.getHealthReason(),
+                node.getChainConfig().getGenesisHash()
         );
     }
 

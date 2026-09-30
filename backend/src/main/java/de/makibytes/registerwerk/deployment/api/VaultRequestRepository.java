@@ -10,7 +10,15 @@ public interface VaultRequestRepository extends JpaRepository<VaultRequest, UUID
 
     List<VaultRequest> findByAssetIdAndRequestStatus(UUID assetId, VaultRequestStatus status);
 
-    Optional<VaultRequest> findByAssetIdAndRequestId(UUID assetId, java.math.BigInteger requestId);
+    /** Request ids are per vault contract, so the key is (asset, chain, request id): the same asset
+     *  can be deployed on several chains and each vault counts its own requests from 1. */
+    Optional<VaultRequest> findByAssetIdAndChainConfigIdAndRequestId(
+            UUID assetId, UUID chainConfigId, java.math.BigInteger requestId);
+
+    /** Legacy/demo rows whose chain was never recorded (V18 could not derive it); a chain-aware
+     *  lookup falls back to these and attaches the chain on first touch. */
+    Optional<VaultRequest> findByAssetIdAndChainConfigIdIsNullAndRequestId(
+            UUID assetId, java.math.BigInteger requestId);
 
     /** Requests with a submitted fulfil/cancel tx not yet resolved — scoped so each query shrinks
      *  over time instead of re-scanning every request ever made (see

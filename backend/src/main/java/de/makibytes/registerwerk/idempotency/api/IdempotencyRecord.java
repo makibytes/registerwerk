@@ -20,13 +20,22 @@ import java.util.UUID;
  * the action. See {@code IdempotencyFilter} for the request lifecycle.
  */
 @Entity
-@Table(name = "idempotency_record", uniqueConstraints = @UniqueConstraint(columnNames = {"entity_id", "idempotency_key"}))
+@Table(name = "idempotency_record", uniqueConstraints = @UniqueConstraint(columnNames = {"scope", "entity_id", "idempotency_key"}))
 public class IdempotencyRecord {
+
+    public static final String SCOPE_ENTITY = "ENTITY";
+    public static final String SCOPE_USER = "USER";
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    /** ENTITY (customer tenant, {@link #entityId} = legal entity) or USER (operator token without
+     *  an entity_id claim, {@link #entityId} = acting user). */
+    @Column(nullable = false, length = 10)
+    private String scope = SCOPE_ENTITY;
+
+    /** Scope id — the legal entity for ENTITY scope, the acting user for USER scope. */
     @Column(name = "entity_id", nullable = false)
     private UUID entityId;
 
@@ -56,6 +65,9 @@ public class IdempotencyRecord {
     private Instant completedAt;
 
     public UUID getId() { return id; }
+
+    public String getScope() { return scope; }
+    public void setScope(String scope) { this.scope = scope; }
 
     public UUID getEntityId() { return entityId; }
     public void setEntityId(UUID entityId) { this.entityId = entityId; }

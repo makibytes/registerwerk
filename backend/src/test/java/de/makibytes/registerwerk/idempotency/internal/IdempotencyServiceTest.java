@@ -40,10 +40,10 @@ class IdempotencyServiceTest {
     @Test
     @DisplayName("checkOrStart creates a new IN_PROGRESS record and returns Proceed when no prior record exists")
     void checkOrStart_noExistingRecord_proceeds() {
-        when(repository.findForUpdate(entityId, key)).thenReturn(Optional.empty());
+        when(repository.findForUpdate("ENTITY", entityId, key)).thenReturn(Optional.empty());
         when(repository.saveAndFlush(any(IdempotencyRecord.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        IdempotencyService.Outcome outcome = service.checkOrStart(entityId, key, hash);
+        IdempotencyService.Outcome outcome = service.checkOrStart("ENTITY", entityId, key, hash);
 
         assertThat(outcome).isInstanceOf(IdempotencyService.Outcome.Proceed.class);
         verify(repository).saveAndFlush(any(IdempotencyRecord.class));
@@ -57,9 +57,9 @@ class IdempotencyServiceTest {
         existing.setStatus(IdempotencyStatus.COMPLETED);
         existing.setResponseStatus(201);
         existing.setResponseBody("{\"id\":\"abc\"}");
-        when(repository.findForUpdate(entityId, key)).thenReturn(Optional.of(existing));
+        when(repository.findForUpdate("ENTITY", entityId, key)).thenReturn(Optional.of(existing));
 
-        IdempotencyService.Outcome outcome = service.checkOrStart(entityId, key, hash);
+        IdempotencyService.Outcome outcome = service.checkOrStart("ENTITY", entityId, key, hash);
 
         assertThat(outcome).isInstanceOf(IdempotencyService.Outcome.Replay.class);
         IdempotencyService.Outcome.Replay replay = (IdempotencyService.Outcome.Replay) outcome;
@@ -73,9 +73,9 @@ class IdempotencyServiceTest {
         IdempotencyRecord existing = new IdempotencyRecord();
         existing.setRequestHash("different-hash");
         existing.setStatus(IdempotencyStatus.COMPLETED);
-        when(repository.findForUpdate(entityId, key)).thenReturn(Optional.of(existing));
+        when(repository.findForUpdate("ENTITY", entityId, key)).thenReturn(Optional.of(existing));
 
-        IdempotencyService.Outcome outcome = service.checkOrStart(entityId, key, hash);
+        IdempotencyService.Outcome outcome = service.checkOrStart("ENTITY", entityId, key, hash);
 
         assertThat(outcome).isInstanceOf(IdempotencyService.Outcome.Conflict.class);
         assertThat(((IdempotencyService.Outcome.Conflict) outcome).httpStatus()).isEqualTo(422);
@@ -87,9 +87,9 @@ class IdempotencyServiceTest {
         IdempotencyRecord existing = new IdempotencyRecord();
         existing.setRequestHash(hash);
         existing.setStatus(IdempotencyStatus.IN_PROGRESS);
-        when(repository.findForUpdate(entityId, key)).thenReturn(Optional.of(existing));
+        when(repository.findForUpdate("ENTITY", entityId, key)).thenReturn(Optional.of(existing));
 
-        IdempotencyService.Outcome outcome = service.checkOrStart(entityId, key, hash);
+        IdempotencyService.Outcome outcome = service.checkOrStart("ENTITY", entityId, key, hash);
 
         assertThat(outcome).isInstanceOf(IdempotencyService.Outcome.Conflict.class);
         assertThat(((IdempotencyService.Outcome.Conflict) outcome).httpStatus()).isEqualTo(409);
@@ -98,10 +98,10 @@ class IdempotencyServiceTest {
     @Test
     @DisplayName("checkOrStart returns a 409 Conflict when it loses the insert race to a concurrent duplicate")
     void checkOrStart_raceOnInsert_conflict409() {
-        when(repository.findForUpdate(entityId, key)).thenReturn(Optional.empty());
+        when(repository.findForUpdate("ENTITY", entityId, key)).thenReturn(Optional.empty());
         when(repository.saveAndFlush(any(IdempotencyRecord.class))).thenThrow(new DataIntegrityViolationException("dup"));
 
-        IdempotencyService.Outcome outcome = service.checkOrStart(entityId, key, hash);
+        IdempotencyService.Outcome outcome = service.checkOrStart("ENTITY", entityId, key, hash);
 
         assertThat(outcome).isInstanceOf(IdempotencyService.Outcome.Conflict.class);
         assertThat(((IdempotencyService.Outcome.Conflict) outcome).httpStatus()).isEqualTo(409);
@@ -147,5 +147,47 @@ class IdempotencyServiceTest {
 
         verify(repository, never()).save(any());
         verify(repository, never()).delete(any(IdempotencyRecord.class));
+    }
+
+    @Test
+    @DisplayName("complete releases the record on a handler 4xx so the identical retry executes after the state is fixed")
+    void complete_notExecutedBusinessStatus_deletesRecord() {
+        for (int status : new int[] {400, 404, 408, 409, 422, 429}) {
+            UUID recordId = UUID.randomUUID();
+            IdempotencyRecord record = new IdempotencyRecord();
+            when(repository.findById(recordId)).thenReturn(Optional.of(record));
+
+            service.complete(recordId, status, "{\"message\":\"asset is paused\"}");
+
+            verify(repository).delete(record);
+        }
+    }
+
+    @Test
+    @DisplayName("complete releases the record on 401/403 so the retry after a step-up is not served the challenge")
+    void complete_authChallenge_deletesRecord() {
+        for (int status : new int[] {401, 403}) {
+            UUID recordId = UUID.randomUUID();
+            IdempotencyRecord record = new IdempotencyRecord();
+            when(repository.findById(recordId)).thenReturn(Optional.of(record));
+
+            service.complete(recordId, status, "{\"message\":\"step-up required\"}");
+
+            verify(repository).delete(record);
+        }
+    }
+
+    @Test
+    @DisplayName("checkOrStart stamps the scope on the new record (USER scope for operator tokens)")
+    void checkOrStart_userScope_isStored() {
+        when(repository.findForUpdate("USER", entityId, key)).thenReturn(Optional.empty());
+        when(repository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.checkOrStart("USER", entityId, key, hash);
+
+        org.mockito.ArgumentCaptor<IdempotencyRecord> saved = org.mockito.ArgumentCaptor.forClass(IdempotencyRecord.class);
+        verify(repository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getScope()).isEqualTo("USER");
+        assertThat(saved.getValue().getEntityId()).isEqualTo(entityId);
     }
 }

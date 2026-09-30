@@ -557,10 +557,28 @@ export interface AssetDeployment {
   txHash?: string;
 }
 
+/** Raw register row of `GET /assets/{id}/holders` (backend `HolderResponse`). */
+export interface HolderRegisterRow {
+  id: string;
+  assetId: string;
+  investorId: string | null;
+  walletAddress: string | null;
+  whitelisted: boolean | null;
+  nominalAmount: number | string | null;
+  entryType?: string | null;
+}
+
+/** Display model of one register holder; `percentage` is computed client-side from the listed rows. */
 export interface AssetHolder {
+  id?: string;
+  investorId?: string | null;
+  /** Wallet address; '' for a register entry without a wallet. */
   address: string;
+  /** Same as `address`; kept explicit for wallet pickers. */
+  walletAddress?: string;
   balance: number;
   percentage: number;
+  whitelisted?: boolean | null;
 }
 
 /**
@@ -694,6 +712,8 @@ export interface ChainDriftEvent {
   resolvedAt: string | null;
   resolvedBy: string | null;
   resolutionNotes: string | null;
+  /** NOT_INDEXED = the chain history behind the holder is not indexed, so on-chain balance is unknown, not zero (P4-01). */
+  kind?: 'DRIFT' | 'NOT_INDEXED';
 }
 
 /** CONFIRMED is the legacy (pre-payment-flow) state; new orders end in SETTLED, LAPSED or RELEASED. */
@@ -855,6 +875,10 @@ export interface RpcNode {
    *  node's chaincache workload — see ChaincacheDurableStreamManager. Only meaningful for
    *  kind === 'CHAINCACHE'; always false otherwise. */
   streamConnected?: boolean;
+  /** Why the node is unhealthy/quarantined: CHAIN_MISMATCH, IMPLAUSIBLE_HEIGHT, RECOVERING, ... (P4C-1). */
+  healthReason?: string | null;
+  /** Genesis hash pinned for the node's chain (identical for every node of a chain). */
+  pinnedGenesisHash?: string | null;
 }
 
 export interface ChainHealth {

@@ -39,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("TokenAdminService unit tests — rejection paths for new token standards")
@@ -52,6 +53,7 @@ class TokenAdminServiceTest {
     @Mock private BlockchainTransactionService txService;
     @Mock private de.makibytes.registerwerk.travelrule.api.TravelRuleGate travelRuleGate;
     @Mock private HolderBlockGate holderBlockGate;
+    @Mock private de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private ZamaRelayerClient zamaRelayerClient;
 
@@ -629,5 +631,44 @@ class TokenAdminServiceTest {
                     .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
             verify(durableTransactions, never()).submit(any(), any(), any(), any());
         }
+    }
+
+    // ── Phase 4 K6 (P4C-2): outbound destination gate + legalBasis ─────────────
+
+    @Test
+    @DisplayName("P4C-2: mint / whitelist / forcedTransfer / forcedApprove are refused when the destination gate refuses; nothing is submitted")
+    void destinationGateRefusal_blocksEveryOutboundOperation() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.ERC20);
+        String unknown = "0x" + "9".repeat(40);
+        String other = "0x" + "1".repeat(40);
+        org.mockito.Mockito.doThrow(new org.springframework.security.access.AccessDeniedException("not a holder"))
+                .when(destinationGate).require(eq(assetId), eq(unknown), any());
+
+        assertThatThrownBy(() -> tokenAdminService.mint(dep.getId(), unknown, BigInteger.TEN, UUID.randomUUID(), "ISSUER"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThatThrownBy(() -> tokenAdminService.whitelist(dep.getId(), unknown, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThatThrownBy(() -> tokenAdminService.forcedTransfer(dep.getId(), other, unknown, BigInteger.TEN,
+                "Court order 12 O 345/26", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThatThrownBy(() -> tokenAdminService.forcedApprove(dep.getId(), other, unknown, BigInteger.TEN,
+                "Court order 12 O 345/26", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        verify(durableTransactions, never()).submit(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("P4C-2: a forced operation needs a real legalBasis (trimmed >= 10 chars)")
+    void forcedOperations_requireRealLegalBasis() {
+        UUID assetId = UUID.randomUUID();
+        AssetDeployment dep = deploymentFor(assetId, TokenStandard.ERC20);
+        assertThatThrownBy(() -> tokenAdminService.forcedTransfer(dep.getId(), "0x" + "1".repeat(40),
+                "0x" + "2".repeat(40), BigInteger.TEN, "  n/a  ", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("legalBasis");
+        assertThatThrownBy(() -> tokenAdminService.forceBurn(dep.getId(), "0x" + "1".repeat(40),
+                BigInteger.TEN, "", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("legalBasis");
+        verify(durableTransactions, never()).submit(any(), any(), any(), any());
     }
 }

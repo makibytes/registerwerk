@@ -45,6 +45,44 @@ public class BlockchainTxProperties {
      */
     private long timeoutSeconds = 900;
 
+    /**
+     * How long after being marked TIMEOUT a transaction is still polled for a late receipt (P4B-5).
+     * TIMEOUT is "not yet mined", not "failed": a transaction stuck behind a low fee or a nonce gap
+     * can be mined days later, so it is reconciled instead of forgotten. Default 7 days.
+     */
+    private long lateMinedWindowSeconds = 7 * 24 * 3600L;
+
+    /**
+     * A TIMEOUT transaction whose outbox nonce is proven consumed by a different transaction is
+     * only declared REPLACED after the chain has reported the nonce as used for this long, so a
+     * shallow reorg or a lagging node cannot turn a live transaction into a "confirmed failure".
+     */
+    private long replacedConfirmationSeconds = 600;
+
+    /**
+     * Function-name fragments (case-insensitive "contains") of registry-mutating transactions that need a
+     * second-source receipt confirmation before completion (P4C-6). {@code *} requires it for every
+     * transaction. Finality depth itself always comes from {@code chain_config} / this class, never from
+     * a node's or chaincache's self-declared capabilities.
+     */
+    private java.util.List<String> secondSourceMethods = java.util.List.of(
+            "forced", "forceburn", "burn", "mint", "freeze", "pause", "recovery", "claim", "identity",
+            "whitelist", "trustedissuer", "ownership", "grantrole", "revokerole", "compliance", "anchor");
+
+    public boolean requiresSecondSource(String methodName) {
+        if (methodName == null) return false;
+        String lower = methodName.toLowerCase(Locale.ROOT);
+        for (String fragment : secondSourceMethods) {
+            if (fragment.equals("*") || lower.contains(fragment.toLowerCase(Locale.ROOT))) return true;
+        }
+        return false;
+    }
+
+    public java.util.List<String> getSecondSourceMethods() { return secondSourceMethods; }
+    public void setSecondSourceMethods(java.util.List<String> secondSourceMethods) {
+        this.secondSourceMethods = java.util.List.copyOf(secondSourceMethods);
+    }
+
     public int confirmationsFor(String chain) {
         if (chain == null) {
             return defaultConfirmations;
@@ -62,6 +100,12 @@ public class BlockchainTxProperties {
                 : safeConfirmationsByChain.getOrDefault(chain.toUpperCase(Locale.ROOT), defaultSafeConfirmations);
         return Math.min(safe, confirmationsFor(chain));
     }
+
+    public long getLateMinedWindowSeconds() { return lateMinedWindowSeconds; }
+    public void setLateMinedWindowSeconds(long lateMinedWindowSeconds) { this.lateMinedWindowSeconds = lateMinedWindowSeconds; }
+
+    public long getReplacedConfirmationSeconds() { return replacedConfirmationSeconds; }
+    public void setReplacedConfirmationSeconds(long replacedConfirmationSeconds) { this.replacedConfirmationSeconds = replacedConfirmationSeconds; }
 
     public int getDefaultConfirmations() { return defaultConfirmations; }
     public void setDefaultConfirmations(int defaultConfirmations) { this.defaultConfirmations = defaultConfirmations; }

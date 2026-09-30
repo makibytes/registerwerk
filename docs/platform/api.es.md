@@ -73,6 +73,16 @@ Las respuestas incluyen un encabezado `X-Total-Count` con el recuento total de r
 
 ---
 
+## Idempotency-Key e importes { #idempotency-key-and-amounts }
+
+Los endpoints de administración/emisor que mueven fondos o cambian el estado exigen la cabecera `Idempotency-Key`: mint, burn, transferencias/aprobaciones forzosas, force-burn, cambios de congelación y de lista blanca, operaciones de slot y de vault, acciones de agente ERC-3643, cambios de medios de pago, importación de wallets, entrega/finalización de transferencias de registro y amortización de un activo. Un `POST`, `PUT`, `PATCH` o `DELETE` sin una clave válida se rechaza con `400` y el código `IDEMPOTENCY_KEY_REQUIRED` (o `IDEMPOTENCY_KEY_INVALID`) antes de ejecutar nada. Los demás endpoints siguen siendo opcionales.
+
+- Envíe un valor único por acción del usuario (UUID; de 8 a 255 caracteres de `A-Za-z0-9._:-`) y **reutilice el mismo valor al repetir la misma solicitud** tras un timeout o un `5xx`. La repetición devuelve entonces el resultado original (`X-Idempotent-Replay: true`) o la misma transacción, en lugar de ejecutarse dos veces.
+- La clave es propia de cada llamante: la entidad jurídica para tokens de cliente, el usuario que actúa para tokens de operador. La misma clave con otro método, ruta o cuerpo recibe `422`; una solicitud aún en curso recibe `409`.
+- La clave se guarda además en la fila de outbox de la transacción on-chain, de modo que una repetición corresponde a la misma transacción firmada incluso tras caducar la respuesta en caché. Las respuestas `401`/`403` (incluidos los desafíos de step-up) y `5xx` no se almacenan en caché; repetir la solicitud tras un step-up con la misma clave es seguro.
+
+**Los importes son cadenas decimales.** Envíe los importes de tokens (`amount`, `value`, `newCap`, `navPerShare`, ...) como cadenas JSON, por ejemplo `"1000000000000000000000"`. Un número de JavaScript pierde precisión por encima de 2^53. Durante una versión se sigue aceptando un número JSON si es exactamente representable (entero inferior a 2^53 o decimal de como máximo 15 cifras significativas) y se registra un aviso de obsolescencia; todo lo demás recibe `400` con `Invalid amount: ...`.
+
 ## Grupos clave de la API { #key-api-groups }
 
 ### Activos (`/api/v1/assets`) { #assets-apiv1assets }

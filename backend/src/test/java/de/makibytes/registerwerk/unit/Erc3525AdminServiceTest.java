@@ -70,7 +70,7 @@ class Erc3525AdminServiceTest {
         service = new Erc3525AdminService(
                 deploymentRepository, slotRepository, tokenUnitRepository, couponPaymentRepository,
                 evmTransactions, txService, eventPublisher, starknetErc3525AdminService, holderBlockGate,
-                assetLookupPort);
+                assetLookupPort, org.mockito.Mockito.mock(de.makibytes.registerwerk.kyc.api.OutboundDestinationGate.class));
     }
 
     private AssetDeployment deployment(Chain chain) {

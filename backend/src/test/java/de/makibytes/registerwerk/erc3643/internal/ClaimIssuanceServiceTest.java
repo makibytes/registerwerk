@@ -34,8 +34,14 @@ class ClaimIssuanceServiceTest {
     @Mock OnchainClaimRepository claimRepository;
     @Mock Erc3643DeploymentService deploymentService;
     @Mock ApplicationEventPublisher eventPublisher;
+    @Mock de.makibytes.registerwerk.customer.api.LegalEntityRepository entityRepository;
+    @Mock de.makibytes.registerwerk.screening.api.ScreeningGate screeningGate;
+    @Mock de.makibytes.registerwerk.kyc.api.HolderBlockGate holderBlockGate;
+    private final org.springframework.mock.env.MockEnvironment environment = new org.springframework.mock.env.MockEnvironment();
 
     private ClaimIssuanceService service;
+    private static final java.time.LocalDate REVIEW = java.time.LocalDate.now().plusYears(1);
+    private static final Instant REVIEW_INSTANT = REVIEW.atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
     private final UUID legalEntityId = UUID.randomUUID();
     private final UUID chainConfigId = UUID.randomUUID();
     private final UUID identityId = UUID.randomUUID();
@@ -43,7 +49,61 @@ class ClaimIssuanceServiceTest {
     @BeforeEach
     void setUp() {
         service = new ClaimIssuanceService(identityRepository, claimRepository, deploymentService,
-                eventPublisher);
+                eventPublisher, entityRepository, screeningGate, holderBlockGate, environment, false);
+        approvedEntity(REVIEW);
+    }
+
+    private de.makibytes.registerwerk.customer.api.LegalEntity approvedEntity(java.time.LocalDate expiry) {
+        var e = new de.makibytes.registerwerk.customer.api.LegalEntity();
+        e.setKycStatus(de.makibytes.registerwerk.customer.api.KycStatus.APPROVED);
+        e.setKycExpiryDate(expiry);
+        org.mockito.Mockito.lenient().when(entityRepository.findById(legalEntityId)).thenReturn(java.util.Optional.of(e));
+        return e;
+    }
+
+    @Test
+    @DisplayName("P4C-3: a REJECTED entity cannot be issued a claim")
+    void issueClaim_rejectedEntityRefused() {
+        approvedEntity(java.time.LocalDate.now().plusYears(1)).setKycStatus(de.makibytes.registerwerk.customer.api.KycStatus.REJECTED);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                service.issueKycClaim(legalEntityId, chainConfigId, null, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class);
+        org.mockito.Mockito.verifyNoInteractions(deploymentService);
+    }
+
+    @Test
+    @DisplayName("P4C-3: an unresolved screening hit, a block or a missing review date refuse issuance")
+    void issueClaim_screeningBlockAndMissingReviewRefused() {
+        org.mockito.Mockito.when(screeningGate.hasUnresolvedHit(legalEntityId)).thenReturn(true);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                service.issueAmlClaim(legalEntityId, chainConfigId, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class);
+        org.mockito.Mockito.when(screeningGate.hasUnresolvedHit(legalEntityId)).thenReturn(false);
+        org.mockito.Mockito.when(holderBlockGate.isBlocked(legalEntityId, null)).thenReturn(true);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                service.issueAmlClaim(legalEntityId, chainConfigId, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class);
+        org.mockito.Mockito.when(holderBlockGate.isBlocked(legalEntityId, null)).thenReturn(false);
+        approvedEntity(null);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                service.issueAmlClaim(legalEntityId, chainConfigId, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class)
+                .hasMessageContaining("review date");
+    }
+
+    @Test
+    @DisplayName("P4C-3: the AML claim expiry is derived from the next periodic review date")
+    void issueAmlClaim_expiryFromReviewDate() {
+        java.time.LocalDate review = java.time.LocalDate.now().plusMonths(6);
+        approvedEntity(review);
+        when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId)).thenReturn(java.util.Optional.of(identity()));
+        var expected = review.atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        when(deploymentService.issueKycClaim(identityId, ClaimIssuanceService.CLAIM_TOPIC_AML, expected)).thenReturn("0xabc");
+        when(claimRepository.save(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
+
+        OnchainClaim saved = service.issueAmlClaim(legalEntityId, chainConfigId, UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(saved.getExpiresAt()).isEqualTo(expected);
     }
 
     private OnchainIdentity identity() {
@@ -60,7 +120,7 @@ class ClaimIssuanceServiceTest {
     void issueKycClaim_persistsUnconfirmed() {
         when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
                 .thenReturn(Optional.of(identity()));
-        when(deploymentService.issueKycClaim(identityId, ClaimIssuanceService.CLAIM_TOPIC_KYC, null))
+        when(deploymentService.issueKycClaim(identityId, ClaimIssuanceService.CLAIM_TOPIC_KYC, REVIEW_INSTANT))
                 .thenReturn("0xissuetx");
         when(claimRepository.save(any(OnchainClaim.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -79,10 +139,10 @@ class ClaimIssuanceServiceTest {
         String claimIssuer = "0x00000000000000000000000000000000000000c1";
         when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
                 .thenReturn(Optional.of(identity));
-        when(deploymentService.issueKycClaim(identityId, ClaimIssuanceService.CLAIM_TOPIC_KYC, null))
+        when(deploymentService.issueKycClaim(identityId, ClaimIssuanceService.CLAIM_TOPIC_KYC, REVIEW_INSTANT))
                 .thenReturn("0xissuetx");
         when(deploymentService.signClaim(chainConfigId, identity.getIdentityAddress(),
-                ClaimIssuanceService.CLAIM_TOPIC_KYC, null))
+                ClaimIssuanceService.CLAIM_TOPIC_KYC, REVIEW_INSTANT))
                 .thenReturn(new ClaimSigningService.SignedClaim("0xdata", "0xsig", claimIssuer));
         when(claimRepository.save(any(OnchainClaim.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -97,7 +157,7 @@ class ClaimIssuanceServiceTest {
     void issueKycClaim_persistsNothingWhenSubmissionFails() {
         when(identityRepository.findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId))
                 .thenReturn(Optional.of(identity()));
-        when(deploymentService.issueKycClaim(identityId, ClaimIssuanceService.CLAIM_TOPIC_KYC, null))
+        when(deploymentService.issueKycClaim(identityId, ClaimIssuanceService.CLAIM_TOPIC_KYC, REVIEW_INSTANT))
                 .thenThrow(new IllegalStateException("identity not yet deployed"));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->

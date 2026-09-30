@@ -26,7 +26,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.web3j.protocol.Web3j;
 
 import java.math.BigDecimal;
@@ -76,6 +75,7 @@ public class GraphNodeSyncService {
     private final BlockchainClientRegistry clientRegistry;
     private final RpcNodeRepository rpcNodeRepository;
     private final ChaincacheFinalityProbe chaincacheFinalityProbe;
+    private final IndexerSyncSupport syncSupport;
 
     public GraphNodeSyncService(
             ChainConfigRepository chainConfigRepository,
@@ -88,7 +88,8 @@ public class GraphNodeSyncService {
             ReorgGuard reorgGuard,
             BlockchainClientRegistry clientRegistry,
             RpcNodeRepository rpcNodeRepository,
-            ChaincacheFinalityProbe chaincacheFinalityProbe) {
+            ChaincacheFinalityProbe chaincacheFinalityProbe,
+            IndexerSyncSupport syncSupport) {
         this.chainConfigRepository = chainConfigRepository;
         this.indexerStateRepository = indexerStateRepository;
         this.tokenTransferRepository = tokenTransferRepository;
@@ -100,6 +101,7 @@ public class GraphNodeSyncService {
         this.clientRegistry = clientRegistry;
         this.rpcNodeRepository = rpcNodeRepository;
         this.chaincacheFinalityProbe = chaincacheFinalityProbe;
+        this.syncSupport = syncSupport;
     }
 
     // ── Scheduling ────────────────────────────────────────────────────────────
@@ -139,8 +141,24 @@ public class GraphNodeSyncService {
 
     // ── Per-chain sync ────────────────────────────────────────────────────────
 
-    @Transactional
+    /**
+     * One sync pass for {@code chain}. The pass itself runs in a single transaction; a failure rolls
+     * it back completely and is then counted in a <em>separate</em> transaction (P4B-6). Counting it
+     * inside the failed transaction lost the bookkeeping whenever the failure was a database error
+     * (e.g. {@code numeric field overflow} on a huge uint256 amount): the transaction was aborted,
+     * {@code consecutive_errors}/{@code ERROR} never persisted, and the chain silently stopped
+     * indexing while still reporting {@code ACTIVE}.
+     */
     public void syncChain(ChainConfig chain) {
+        try {
+            syncSupport.inTransaction(() -> syncChainOnce(chain));
+        } catch (Exception e) {
+            syncSupport.recordFailure(chain.getId(), chain.getIdentifier(),
+                    IndexerState.IndexerType.GRAPH_NODE, e, MAX_CONSECUTIVE_ERRORS);
+        }
+    }
+
+    private void syncChainOnce(ChainConfig chain) {
         IndexerState state = loadOrCreateState(chain);
 
         if (state.getStatus() == IndexerState.IndexerStatus.ERROR
@@ -177,20 +195,18 @@ public class GraphNodeSyncService {
         final Long finalizedBlockNumber = resolveFinalizedBlockNumber(chain, effectiveHead);
         final Long safeBlockNumber = resolveSafeBlockNumber(chain, effectiveHead);
 
-        // Load all deployments once per sync call (not once per transfer, which would be an
-        // O(page_size × total_deployments) full-table scan per PAGE_SIZE=1000 batch), keyed by
-        // lowercased contract address to match the existing case-insensitive lookup.
+        // Load this chain's deployments once per sync call (not once per transfer), keyed by
+        // lowercased contract address. P4-06: the map is scoped to the chain being synced — the same
+        // address may be deployed on several EVM chains (CREATE2, test networks) for different
+        // assets, and a global address map attributed every chain's transfers to whichever
+        // deployment came first. FAILED attempts are excluded; the deployment-tx mint is indexed
+        // before the row flips to CONFIRMED, so PENDING must stay eligible (CONFIRMED wins a tie).
         Map<String, de.makibytes.registerwerk.deployment.api.AssetDeployment> deploymentsByAddress =
-                assetDeploymentRepository.findAll().stream()
-                        .filter(d -> d.getContractAddress() != null)
-                        .collect(java.util.stream.Collectors.toMap(
-                                d -> d.getContractAddress().toLowerCase(java.util.Locale.ROOT),
-                                d -> d,
-                                (first, second) -> first));
+                deploymentsByAddress(chain);
 
         Map<Long, String> hashCache = new HashMap<>();
 
-        try {
+        {
             int skip = 0;
             int totalSaved = 0;
             long highestBlock = fromBlock == 0 ? -1 : fromBlock - 1;
@@ -242,7 +258,8 @@ public class GraphNodeSyncService {
             Long forkBlock = null;
             if (effectiveHead != null) {
                 ReorgGuard.FinalityProbe probe = chaincacheProbeFor(chain)
-                        .<ReorgGuard.FinalityProbe>map(node -> blockNumber -> probeChaincacheBlock(chain, node, blockNumber))
+                        .<ReorgGuard.FinalityProbe>map(node -> blockNumber -> probeChaincacheBlock(chain, node, blockNumber,
+                                effectiveHead, required, safeRequired, safeBlockNumber, finalizedBlockNumber))
                         .orElse(blockNumber -> probeEvmBlock(chain, blockNumber, effectiveHead, required, safeRequired,
                                 safeBlockNumber, finalizedBlockNumber, hashCache));
                 VerifyResult result = reorgGuard.reverifyUnsettledWindow(chain.getId(), probe);
@@ -294,20 +311,64 @@ public class GraphNodeSyncService {
             } else {
                 log.debug("Chain {}: no new transfers found from block {}.", chain.getIdentifier(), fromBlock);
             }
+            linkUnlinkedTransfers(chain, deploymentsByAddress);
 
-        } catch (Exception e) {
-            int errors = state.getConsecutiveErrors() + 1;
-            state.setConsecutiveErrors(errors);
-            state.setLastError(truncate(e.getMessage(), 2000));
-            if (errors >= MAX_CONSECUTIVE_ERRORS) {
-                state.setStatus(IndexerState.IndexerStatus.ERROR);
-                log.error("Chain {}: indexer set to ERROR after {} consecutive failures. Last error: {}",
-                        chain.getIdentifier(), errors, e.getMessage());
-            } else {
-                log.warn("Chain {}: sync error ({}/{}): {}",
-                        chain.getIdentifier(), errors, MAX_CONSECUTIVE_ERRORS, e.getMessage());
+        }
+    }
+
+    // ── Deployment attribution (P4-06) ────────────────────────────────────────
+
+    private Map<String, de.makibytes.registerwerk.deployment.api.AssetDeployment> deploymentsByAddress(
+            ChainConfig chain) {
+        Map<String, de.makibytes.registerwerk.deployment.api.AssetDeployment> byAddress = new HashMap<>();
+        for (de.makibytes.registerwerk.deployment.api.AssetDeployment d
+                : assetDeploymentRepository.findByChainConfigId(chain.getId())) {
+            if (d.getContractAddress() == null
+                    || d.getDeploymentStatus() == de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.FAILED) {
+                continue;
             }
-            indexerStateRepository.save(state);
+            byAddress.merge(d.getContractAddress().toLowerCase(java.util.Locale.ROOT), d,
+                    (first, second) -> second.getDeploymentStatus()
+                            == de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.CONFIRMED
+                            && first.getDeploymentStatus()
+                            != de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.CONFIRMED
+                            ? second : first);
+        }
+        return byAddress;
+    }
+
+    /**
+     * Link-repair: rows indexed before their deployment row existed (or before it was known on
+     * this chain) keep {@code deployment_id NULL} forever otherwise, and the holder sync — which
+     * pages strictly by deployment — never sees them. Idempotent; runs after every successful pass.
+     * The scheduled holder sync picks up the repaired rows on its next run.
+     */
+    private void linkUnlinkedTransfers(ChainConfig chain,
+            Map<String, de.makibytes.registerwerk.deployment.api.AssetDeployment> deploymentsByAddress) {
+        int linked = 0;
+        for (var deployment : deploymentsByAddress.values()) {
+            linked += tokenTransferRepository.linkUnlinkedTransfers(chain.getId(),
+                    deployment.getContractAddress().toLowerCase(java.util.Locale.ROOT),
+                    deployment.getId(), deployment.getAssetId());
+        }
+        if (linked > 0) {
+            log.info("Chain {}: linked {} previously unattributed transfer row(s) to their deployment.",
+                    chain.getIdentifier(), linked);
+        }
+    }
+
+    /** One-time (idempotent) repair at startup for every EVM chain, independent of a Graph Node. */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void repairUnlinkedTransfersOnStartup() {
+        try {
+            for (ChainConfig chain : chainConfigRepository.findAll()) {
+                if (chain.getChainType() != ChainConfig.ChainType.EVM) {
+                    continue;
+                }
+                syncSupport.inTransaction(() -> linkUnlinkedTransfers(chain, deploymentsByAddress(chain)));
+            }
+        } catch (Exception e) {
+            log.warn("Startup repair of unlinked transfers failed (will retry after the next sync): {}", e.getMessage());
         }
     }
 
@@ -333,7 +394,8 @@ public class GraphNodeSyncService {
      *  hash against whatever baseline is already stored is identical to {@code probeEvmBlock}'s
      *  own logic — chaincache reports what it currently has on record; recognizing that it
      *  changed from Registerwerk's own stored baseline is this class's job either way. */
-    private ProbeOutcome probeChaincacheBlock(ChainConfig chain, RpcNode chaincacheNode, long blockNumber) {
+    private ProbeOutcome probeChaincacheBlock(ChainConfig chain, RpcNode chaincacheNode, long blockNumber,
+            long headBlock, int required, int safeRequired, Long safeBlockNumber, Long finalizedBlockNumber) {
         Optional<ChaincacheFinalityProbe.Observation> observation =
                 chaincacheFinalityProbe.observe(chaincacheNode, blockNumber);
         if (observation.isEmpty()) {
@@ -348,7 +410,24 @@ public class GraphNodeSyncService {
         if (stored.isEmpty()) {
             tokenTransferRepository.backfillBlockHashAtBlock(chain.getId(), blockNumber, freshHash);
         }
-        return new ProbeOutcome(observation.get().level(), freshHash);
+        // P4C-6 / T4-08: chaincache's self-declared level is never trusted beyond what the chain_config
+        // finality parameters (depth / tags) allow for this block. It stays a source for fast hash
+        // (reorg) detection; it cannot promote a row to SAFE/FINALIZED on its own word.
+        FinalityLevel configured = EvmUtils.finalityOf(chain.getFinalityModel(), blockNumber, headBlock,
+                safeBlockNumber, finalizedBlockNumber, required, safeRequired);
+        ProbeResult cap = switch (configured) {
+            case FINALIZED -> ProbeResult.FINALIZED;
+            case SAFE -> ProbeResult.SAFE;
+            case PROVISIONAL, ORPHANED -> ProbeResult.PROVISIONAL;
+        };
+        ProbeResult declared = observation.get().level();
+        ProbeResult effective = declared.ordinal() > cap.ordinal() ? declared : cap;
+        // enum order: FINALIZED(0) < SAFE(1) < PROVISIONAL(2): the numerically larger is the weaker level
+        if (effective != declared) {
+            log.debug("Chain {} block {}: chaincache declared {} but chain_config finality allows only {}",
+                    chain.getIdentifier(), blockNumber, declared, effective);
+        }
+        return new ProbeOutcome(effective, freshHash);
     }
 
     /** EVM {@link ReorgGuard.FinalityProbe}: compares a freshly re-fetched canonical hash for
@@ -537,10 +616,5 @@ public class GraphNodeSyncService {
             return TokenTransfer.EventType.BURN;
         }
         return TokenTransfer.EventType.TRANSFER;
-    }
-
-    private String truncate(String s, int max) {
-        if (s == null) return null;
-        return s.length() <= max ? s : s.substring(0, max);
     }
 }

@@ -2,6 +2,8 @@ package de.makibytes.registerwerk.blockchain.internal;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ConnectionCallback;
@@ -56,11 +58,13 @@ import java.util.Locale;
  * <p><strong>Failure handling.</strong> The lease is advanced only after {@link NonceCallback}
  * returns successfully — if signing or broadcast fails, the row is left untouched so the exact
  * same nonce is correctly retried on the next call, matching the pre-existing single-instance
- * behavior of always re-reading the pending chain nonce fresh on every attempt. This coordinator
- * does not itself detect or repair a nonce that was successfully broadcast but never mined (a
- * stuck transaction) — that is a separate concern (fee-bump resubmit / cancel-by-self-send),
- * deliberately left to a later piece of work; see {@code blockchain_transaction.block_hash} and
- * {@code BlockchainTransactionCompletionWriter} for the reorg/finality half of that story.
+ * behavior of always re-reading the pending chain nonce fresh on every attempt.
+ *
+ * <p><strong>Stuck nonces (P4B-4).</strong> A nonce that was broadcast but never mined is handled by
+ * {@code OutboxRecoveryService} (re-broadcast, re-price, operator cancel). What this coordinator adds
+ * is <em>lease repair</em>: a lease that leads the chain's pending count while no outbox row holds a
+ * nonce in the gap (the transaction was dropped) would otherwise stay ahead forever, because the lease
+ * only ever grew; see {@code effectiveNonce}.
  */
 @Component
 public class NonceCoordinator {
@@ -79,10 +83,20 @@ public class NonceCoordinator {
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbcTemplate;
+    private final MeterRegistry meters;
+    private final java.time.Duration leaseRepairGrace;
 
-    public NonceCoordinator(DataSource dataSource) {
+    @Autowired
+    public NonceCoordinator(DataSource dataSource, MeterRegistry meters, OutboxProperties properties) {
         this.dataSource = dataSource;
         this.jdbcTemplate = new JdbcTemplate(dataSource);
+        this.meters = meters;
+        this.leaseRepairGrace = properties.getLeaseRepairGrace();
+    }
+
+    /** Without metrics wiring and with default lease-repair settings (unit tests, tooling). */
+    public NonceCoordinator(DataSource dataSource) {
+        this(dataSource, null, new OutboxProperties());
     }
 
     /**
@@ -118,7 +132,8 @@ public class NonceCoordinator {
                 rs -> rs.next() ? rs.getBigDecimal(1).toBigInteger() : null,
                 chainId, normalizedAddress);
         BigInteger chainNonce = chainNonceSupplier.fetch();
-        BigInteger nonce = leased == null ? chainNonce : leased.max(chainNonce);
+        BigInteger nonce = jdbcTemplate.execute((ConnectionCallback<BigInteger>) connection ->
+                effectiveNonce(connection, chainId, normalizedAddress, leased, chainNonce));
 
         T result = callback.withNonce(nonce);
         jdbcTemplate.update("""
@@ -149,7 +164,7 @@ public class NonceCoordinator {
             try {
                 BigInteger leased = readLease(conn, chainId, normalizedAddress);
                 BigInteger chainNonce = chainNonceSupplier.fetch();
-                BigInteger nonce = (leased == null) ? chainNonce : leased.max(chainNonce);
+                BigInteger nonce = effectiveNonce(conn, chainId, normalizedAddress, leased, chainNonce);
 
                 if (leased != null && chainNonce.compareTo(leased) > 0) {
                     log.info("NonceCoordinator: chain-reported PENDING nonce {} for {}/{} is ahead of the "
@@ -167,6 +182,62 @@ public class NonceCoordinator {
                 releaseAdvisoryLock(conn, lockKey);
             }
         }
+    }
+
+    /**
+     * The nonce to use: normally {@code max(lease, chainPending)}. A lease that leads the chain
+     * (P4B-4, scenario "dropped tx after TIMEOUT") would otherwise stay ahead forever - every later
+     * transaction sits behind a nonce gap no transaction will ever fill. It is capped back to the
+     * chain's pending count only when (a) it has not moved for {@code leaseRepairGrace} and (b) no local
+     * outbox row still holds a nonce in {@code [chainPending, lease)}; anything else in that range is
+     * either alive or a stuck row the outbox recovery handles explicitly. The caller's upsert then
+     * writes {@code nonce + 1}, which is the repair.
+     */
+    private BigInteger effectiveNonce(Connection conn, long chainId, String address,
+            BigInteger leased, BigInteger chainNonce) throws SQLException {
+        if (leased == null) {
+            return chainNonce;
+        }
+        if (leased.compareTo(chainNonce) <= 0) {
+            return chainNonce;
+        }
+        Instant updatedAt = null;
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT updated_at FROM wallet_nonce_lease WHERE chain_id = ? AND sender_address = ?")) {
+            ps.setLong(1, chainId);
+            ps.setString(2, address);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next() && rs.getTimestamp(1) != null) updatedAt = rs.getTimestamp(1).toInstant();
+            }
+        }
+        if (updatedAt == null || updatedAt.plus(leaseRepairGrace).isAfter(Instant.now())) {
+            return leased;
+        }
+        long occupying;
+        try (PreparedStatement ps = conn.prepareStatement("""
+                SELECT count(*) FROM evm_signed_submission
+                WHERE chain_id = ? AND lower(sender_address) = ? AND status IN ('PREPARED', 'BROADCAST')
+                  AND nonce >= ? AND nonce < ?
+                """)) {
+            ps.setBigDecimal(1, new BigDecimal(BigInteger.valueOf(chainId)));
+            ps.setString(2, address);
+            ps.setBigDecimal(3, new BigDecimal(chainNonce));
+            ps.setBigDecimal(4, new BigDecimal(leased));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                occupying = rs.getLong(1);
+            }
+        }
+        if (occupying > 0) {
+            return leased;
+        }
+        log.error("NonceCoordinator: nonce lease {} for {}/{} leads the chain's pending count {} but no outbox "
+                        + "row holds a nonce in [{}, {}) - the lease is stale (dropped transaction); capping it "
+                        + "back to the chain value.", leased, chainId, address, chainNonce, chainNonce, leased);
+        if (meters != null) {
+            meters.counter("registerwerk.outbox.lease_repaired", "chain", String.valueOf(chainId)).increment();
+        }
+        return chainNonce;
     }
 
     private void acquireAdvisoryLock(Connection conn, String lockKey) throws SQLException {

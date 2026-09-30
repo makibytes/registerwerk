@@ -27,6 +27,25 @@ public class RpcNode {
      *  guarantees it actually provides. */
     public enum NodeKind { DIRECT_RPC, CHAINCACHE }
 
+    /** Reasons recorded in {@link #getHealthReason()}. {@link #CHAIN_MISMATCH} and
+     *  {@link #IMPLAUSIBLE_HEIGHT} quarantine a node: it is excluded from routing even as the
+     *  "least bad" last resort, because it is answering for another chain or lying about its height. */
+    public static final class HealthReason {
+        public static final String CHAIN_MISMATCH = "CHAIN_MISMATCH";
+        public static final String IMPLAUSIBLE_HEIGHT = "IMPLAUSIBLE_HEIGHT";
+        public static final String PROBE_FAILED = "PROBE_FAILED";
+        public static final String SYNCING = "SYNCING";
+        public static final String LAGGING = "LAGGING";
+        public static final String STALLED = "STALLED";
+        public static final String RECOVERING = "RECOVERING";
+
+        private HealthReason() {}
+
+        public static boolean isQuarantine(String reason) {
+            return CHAIN_MISMATCH.equals(reason) || IMPLAUSIBLE_HEIGHT.equals(reason);
+        }
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -114,6 +133,14 @@ public class RpcNode {
     @Column(nullable = false)
     private boolean syncing = false;
 
+    /** Why the node is not healthy right now (null while healthy) - see {@link HealthReason}. */
+    @Column(name = "health_reason", length = 40)
+    private String healthReason;
+
+    /** Consecutive good probes; an unhealthy node needs 2 to come back (hysteresis). */
+    @Column(name = "consecutive_successes", nullable = false)
+    private int consecutiveSuccesses = 0;
+
     // ── Timestamps ────────────────────────────────────────────────────────────
 
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -181,6 +208,12 @@ public class RpcNode {
 
     public Integer getLagFromBest() { return lagFromBest; }
     public void setLagFromBest(Integer lagFromBest) { this.lagFromBest = lagFromBest; }
+
+    public String getHealthReason() { return healthReason; }
+    public void setHealthReason(String healthReason) { this.healthReason = healthReason; }
+
+    public int getConsecutiveSuccesses() { return consecutiveSuccesses; }
+    public void setConsecutiveSuccesses(int consecutiveSuccesses) { this.consecutiveSuccesses = consecutiveSuccesses; }
 
     public boolean isSyncing() { return syncing; }
     public void setSyncing(boolean syncing) { this.syncing = syncing; }

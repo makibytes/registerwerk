@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 import {
@@ -8,6 +8,7 @@ import {
   AssetDeployment,
   AssetDocument,
   AssetHolder,
+  HolderRegisterRow,
   KycComplianceResponse,
   PageResponse,
   AssetFilterParams,
@@ -70,16 +71,42 @@ export class AssetService {
     return this.http.get<AssetDeployment[]>(`${this.base}/${assetId}/deployments`);
   }
 
+  /**
+   * The endpoint returns a `PageResponse` of register rows (`walletAddress`, `nominalAmount`, ...), not a
+   * plain array; map it to the display model and compute each holder's share of the listed total.
+   */
   getHolders(assetId: string): Observable<AssetHolder[]> {
-    return this.http.get<AssetHolder[]>(`${this.base}/${assetId}/holders`);
+    return this.http.get<PageResponse<HolderRegisterRow>>(`${this.base}/${assetId}/holders`, {
+      params: new HttpParams().set('size', '1000'),
+    }).pipe(map(page => AssetService.toHolders(page?.content ?? [])));
   }
 
-  mint(assetId: string, deploymentId: string, body: { toAddress: string; amount: number }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${deploymentId}/issuer/mint`, body);
+  static toHolders(rows: HolderRegisterRow[]): AssetHolder[] {
+    const balances = rows.map(r => Number(r.nominalAmount ?? 0) || 0);
+    const total = balances.reduce((a, b) => a + b, 0);
+    return rows.map((r, i) => ({
+      id: r.id,
+      investorId: r.investorId,
+      address: r.walletAddress ?? '',
+      walletAddress: r.walletAddress ?? '',
+      balance: balances[i],
+      percentage: total > 0 ? (balances[i] / total) * 100 : 0,
+      whitelisted: r.whitelisted,
+    }));
+  }
+
+  /**
+   * Step-up + second approver (`ISSUER_MINT`, P4C-2). The destination must be a registered, KYC-approved,
+   * screened holder of the asset; the response echoes the resolved holder for confirmation.
+   */
+  mint(assetId: string, deploymentId: string, body: { toAddress: string; amount: string }, tokens: DualControlTokens):
+      Observable<{ txId: string; destinationHolder?: string | null }> {
+    return this.http.post<{ txId: string; destinationHolder?: string | null }>(
+      `${this.base}/${assetId}/deployments/${deploymentId}/issuer/mint`, body, { headers: dualControlHeaders(tokens) });
   }
 
   /** Burn from any address is a §26 Einziehung: step-up + 4-eyes (`ISSUER_BURN_EWG26`, T3-01). */
-  burn(assetId: string, deploymentId: string, body: { fromAddress: string; amount: number }, tokens: DualControlTokens): Observable<{ txId: string }> {
+  burn(assetId: string, deploymentId: string, body: { fromAddress: string; amount: string }, tokens: DualControlTokens): Observable<{ txId: string }> {
     return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${deploymentId}/issuer/burn`, body,
       { headers: dualControlHeaders(tokens) });
   }

@@ -469,6 +469,10 @@ services:
       REGISTERWERK_CORS_ALLOWED_ORIGINS: ${REGISTERWERK_CORS_ALLOWED_ORIGINS:-${OPERATOR_FRONTEND_URL:-http://localhost:44200},${CUSTOMER_FRONTEND_URL:-http://localhost:44201}}
       CUSTOMER_FRONTEND_URL: ${CUSTOMER_FRONTEND_URL:-http://localhost:44201}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      # P4-01: the holder sync refuses (BLOCKED) any deployment without a live indexer. This demo
+      # stack ships no Graph Node and seeds its transfer history directly, so it opts out of the
+      # guard; a real deployment must leave it at the application default (true).
+      REGISTERWERK_INDEXER_COVERAGE_ENFORCE: ${REGISTERWERK_INDEXER_COVERAGE_ENFORCE:-false}
       # T3-09: the simulated trading venue settles by rewriting register rows only (no on-chain
       # leg yet). Off by default in application.yml; the demo stack, whose seeded assets are all
       # chain-deployed, opts in and the trading desk shows a "simulated settlement" notice.

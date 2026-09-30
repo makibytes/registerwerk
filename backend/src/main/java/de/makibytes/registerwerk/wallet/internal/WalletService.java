@@ -16,6 +16,8 @@ import de.makibytes.registerwerk.wallet.api.OperatorWalletRepository;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.wallet.api.WalletStorage;
 import de.makibytes.registerwerk.wallet.api.WalletManagement;
+import de.makibytes.registerwerk.wallet.api.WalletUsagePort;
+import de.makibytes.registerwerk.wallet.events.WalletRestoredEvent;
 import org.p2p.solanaj.core.Account;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +52,7 @@ public class WalletService implements WalletManagement {
     private final WalletSigner             walletSigner;
     private final Pkcs11HsmService         pkcs11HsmService;
     private final ApplicationEventPublisher eventPublisher;
+    private final WalletUsagePort          usagePort;
 
     public WalletService(
             OperatorWalletRepository walletRepository,
@@ -57,7 +60,9 @@ public class WalletService implements WalletManagement {
             WalletDefaultService defaultService,
             WalletSigner walletSigner,
             Pkcs11HsmService pkcs11HsmService,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            WalletUsagePort usagePort) {
+        this.usagePort          = usagePort;
         this.walletRepository   = walletRepository;
         this.walletStorage      = walletStorage;
         this.defaultService     = defaultService;
@@ -103,7 +108,7 @@ public class WalletService implements WalletManagement {
         }
 
         OperatorWallet wallet = persist(id, name, type, address, relativePath);
-        defaultService.autoPromoteIfFirstOfType(wallet);
+        defaultService.bootstrapDefaultIfFirstWalletEver(wallet);
 
         eventPublisher.publishEvent(new WalletGeneratedEvent(wallet.getId(), actorId, actorRole));
         log.info("Generated {} wallet '{}': address={}", type, name, address);
@@ -132,7 +137,7 @@ public class WalletService implements WalletManagement {
         }
 
         OperatorWallet wallet = persist(id, name, type, address, relativePath);
-        defaultService.autoPromoteIfFirstOfType(wallet);
+        defaultService.bootstrapDefaultIfFirstWalletEver(wallet);
 
         eventPublisher.publishEvent(new WalletImportedRawEvent(wallet.getId(), actorId, actorRole));
         log.info("Imported raw {} key as wallet '{}': address={}", type, name, address);
@@ -154,7 +159,7 @@ public class WalletService implements WalletManagement {
         String address = credentials.getAddress();
 
         OperatorWallet wallet = persist(id, name, WalletType.EVM, address, relativePath);
-        defaultService.autoPromoteIfFirstOfType(wallet);
+        defaultService.bootstrapDefaultIfFirstWalletEver(wallet);
 
         eventPublisher.publishEvent(new WalletImportedKeystoreEvent(wallet.getId(), actorId, actorRole));
         log.info("Imported keystore as wallet '{}': address={}", name, address);
@@ -183,7 +188,7 @@ public class WalletService implements WalletManagement {
         wallet.setKeyReference(keyAlias);
         wallet.setCreatedBy(actorId);
         OperatorWallet saved = walletRepository.save(wallet);
-        defaultService.autoPromoteIfFirstOfType(saved);
+        defaultService.bootstrapDefaultIfFirstWalletEver(saved);
         eventPublisher.publishEvent(new WalletGeneratedEvent(saved.getId(), actorId, actorRole));
         return saved;
     }
@@ -238,22 +243,84 @@ public class WalletService implements WalletManagement {
         return saved;
     }
 
-    // ── Delete ────────────────────────────────────────────────────────────────
+    // ── Delete (soft, P4C-5) ──────────────────────────────────────────────────
 
     /**
-     * Deletes a wallet. Removes all chain defaults pointing to it first (the operator
-     * is responsible for setting a replacement default before any chain operation runs).
+     * Soft-deletes a wallet: the row is tombstoned and its encrypted key material is KEPT until
+     * {@code registerwerk.wallet.retention-days} have passed ({@link WalletPurgeJob}), so the
+     * address stays visible for forensics and the deletion is reversible via {@link #restore}.
+     *
+     * <p>Refused while (1) the wallet is the default signer of any chain, or (2) its address ever
+     * signed a chain transaction (it may be deployer / registry / claim-issuer key with on-chain
+     * authority; no on-chain handover tooling exists yet — see the signer-rotation runbook).
+     * Rotation: create + approve the new wallet, grant it on chain, switch the default with
+     * {@code setDefault} (4-eyes), revoke the old key on chain, then delete.
      */
-    public void delete(UUID walletId, UUID actorId, String actorRole) {
+    public void delete(UUID walletId, UUID actorId, String actorRole, UUID dualControlApproverId) {
         OperatorWallet wallet = getById(walletId);
-        defaultService.removeDefaultsForWallet(walletId);
-        walletSigner.evict(walletId);
-        if (wallet.getCustodyType() == OperatorWallet.CustodyType.SOFTWARE) {
-            walletStorage.delete(wallet.getKeystorePath());
+        if (!defaultService.findDefaultChainIds(walletId).isEmpty()) {
+            throw new de.makibytes.registerwerk.shared.InvalidStateTransitionException(
+                    "Wallet '" + wallet.getName() + "' is the default signer of a chain — switch the default "
+                    + "(4-eyes) before deleting it.");
         }
-        walletRepository.delete(wallet);
-        eventPublisher.publishEvent(new WalletDeletedEvent(walletId, actorId, actorRole));
-        log.info("Deleted wallet '{}' ({})", wallet.getName(), walletId);
+        if (usagePort.hasSignedOnChain(wallet.getAddress())) {
+            throw new de.makibytes.registerwerk.shared.InvalidStateTransitionException(
+                    "Wallet '" + wallet.getName() + "' (" + wallet.getAddress() + ") has signed chain transactions and "
+                    + "may hold on-chain authority (deployer/registry/claim-issuer key). Hand the authority over and "
+                    + "revoke the key on chain first (signer-rotation runbook); deletion is refused.");
+        }
+        walletSigner.evict(walletId);
+        walletRepository.softDelete(walletId, actorId, dualControlApproverId);
+        eventPublisher.publishEvent(new WalletDeletedEvent(walletId, actorId, actorRole,
+                dualControlApproverId, wallet.getAddress(), wallet.getName()));
+        log.info("Soft-deleted wallet '{}' ({}); key material retained until purge", wallet.getName(), walletId);
+    }
+
+    /** Reverses a soft delete within the retention window (key material is still stored). */
+    public OperatorWallet restore(UUID walletId, UUID actorId, String actorRole, UUID dualControlApproverId) {
+        OperatorWallet tomb = walletRepository.findDeletedById(walletId)
+                .orElseThrow(() -> new EntityNotFoundException("Deleted OperatorWallet", walletId));
+        String original = tomb.getName().replaceFirst("#deleted-[0-9a-f]{8}$", "");
+        String name = walletRepository.findByName(original).isPresent() ? original + "#restored-" + walletId.toString().substring(0, 8) : original;
+        walletRepository.restore(walletId, name);
+        eventPublisher.publishEvent(new WalletRestoredEvent(walletId, actorId, actorRole, dualControlApproverId));
+        log.info("Restored wallet {} as '{}'", walletId, name);
+        return getById(walletId);
+    }
+
+    /** Destroys key material and removes the row of tombstones older than the retention window. */
+    public int purgeExpired(java.time.Instant cutoff) {
+        int purged = 0;
+        for (OperatorWallet tomb : walletRepository.findDeletedBefore(cutoff)) {
+            // DB row first, key material only AFTER the delete commits and only when the DELETE hit a row:
+            // a rollback, or a restore that won the race (purge returns 0), can never leave a live wallet
+            // row whose keystore is already destroyed.
+            int deleted = walletRepository.purge(tomb.getId());
+            if (deleted > 0 && tomb.getCustodyType() == OperatorWallet.CustodyType.SOFTWARE
+                    && tomb.getKeystorePath() != null) {
+                String keystorePath = tomb.getKeystorePath();
+                runAfterCommit(() -> walletStorage.delete(keystorePath));
+            }
+            purged += deleted;
+            if (deleted > 0) {
+                log.info("Purged wallet {} ({}) after retention", tomb.getId(), tomb.getAddress());
+            }
+        }
+        return purged;
+    }
+
+    private static void runAfterCommit(Runnable action) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            action.run();
+                        }
+                    });
+        } else {
+            action.run();
+        }
     }
 
     // ── KEK rotation ──────────────────────────────────────────────────────────

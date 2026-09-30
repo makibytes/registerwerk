@@ -12,6 +12,8 @@ import { MatChipsModule } from '@angular/material/chips';
 import { WalletService } from '../../core/api/wallet.service';
 import { OperatorWallet, WalletDefault } from '../../core/models';
 import { AddressComponent } from '../../shared/components/address.component';
+import { DualControlTokens } from '../../core/api/dual-control-headers';
+import { StepUpDialogComponent, StepUpDialogResult } from '../../shared/components/step-up/step-up-dialog.component';
 import { GenerateWalletDialogComponent } from './dialogs/generate-wallet-dialog.component';
 import { ImportRawDialogComponent } from './dialogs/import-raw-dialog.component';
 import { ImportKeystoreDialogComponent } from './dialogs/import-keystore-dialog.component';
@@ -189,40 +191,40 @@ export class WalletsListComponent implements OnInit {
   openGenerate() {
     this.dialog.open(GenerateWalletDialogComponent, { width: '440px' }).afterClosed().subscribe(r => {
       if (!r) return;
-      this.walletService.generate(r.name, r.type).subscribe({
+      this.withDualControl('WALLET_GENERATE', `Generate signing wallet "${r.name}"`, tokens => this.walletService.generate(r.name, r.type, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('Wallet generated', 'OK', { duration: 3000 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'Failed to generate wallet', 'OK', { duration: 4000 }),
-      });
+      }));
     });
   }
 
   openImportRaw() {
     this.dialog.open(ImportRawDialogComponent, { width: '440px' }).afterClosed().subscribe(r => {
       if (!r) return;
-      this.walletService.importRaw(r.name, r.type, r.privateKey).subscribe({
+      this.withDualControl('WALLET_IMPORT_RAW', `Import signing key "${r.name}"`, tokens => this.walletService.importRaw(r.name, r.type, r.privateKey, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('Wallet imported', 'OK', { duration: 3000 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'Import failed', 'OK', { duration: 4000 }),
-      });
+      }));
     });
   }
 
   openImportKeystore() {
     this.dialog.open(ImportKeystoreDialogComponent, { width: '440px' }).afterClosed().subscribe(r => {
       if (!r) return;
-      this.walletService.importKeystore(r.name, r.password, r.file).subscribe({
+      this.withDualControl('WALLET_IMPORT_KEYSTORE', `Import keystore "${r.name}"`, tokens => this.walletService.importKeystore(r.name, r.password, r.file, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('Keystore imported', 'OK', { duration: 3000 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'Import failed — check your password', 'OK', { duration: 4000 }),
-      });
+      }));
     });
   }
 
   openAttachHsm() {
     this.dialog.open(AttachHsmDialogComponent, { width: '480px' }).afterClosed().subscribe(r => {
       if (!r) return;
-      this.walletService.attachHsm(r.name, r.keyAlias, r.address).subscribe({
+      this.withDualControl('WALLET_ATTACH_HSM', `Attach HSM key "${r.name}"`, tokens => this.walletService.attachHsm(r.name, r.keyAlias, r.address, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('HSM key verified and attached', 'OK', { duration: 3500 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'HSM key verification failed', 'OK', { duration: 5000 }),
-      });
+      }));
     });
   }
 
@@ -244,10 +246,12 @@ export class WalletsListComponent implements OnInit {
   openSetDefault(wallet: OperatorWallet) {
     this.dialog.open(SetDefaultDialogComponent, { width: '460px', data: { wallet } }).afterClosed().subscribe(chainIds => {
       if (!chainIds || (chainIds as string[]).length === 0) return;
-      const calls = (chainIds as string[]).map(cid => this.walletService.setDefault(cid, wallet.id));
-      forkJoin(calls).subscribe({
-        next: () => { this.load(); this.snackBar.open('Defaults updated', 'OK', { duration: 2500 }); },
-        error: () => this.snackBar.open('Failed to update some defaults', 'OK', { duration: 3000 }),
+      this.withDualControl('WALLET_DEFAULT_CHANGED', `Set "${wallet.name}" as chain default signer`, tokens => {
+        const calls = (chainIds as string[]).map(cid => this.walletService.setDefault(cid, wallet.id, tokens));
+        forkJoin(calls).subscribe({
+          next: () => { this.load(); this.snackBar.open('Defaults updated', 'OK', { duration: 2500 }); },
+          error: e => this.snackBar.open(e.error?.message ?? 'Failed to update some defaults', 'OK', { duration: 3000 }),
+        });
       });
     });
   }
@@ -262,10 +266,25 @@ export class WalletsListComponent implements OnInit {
   }
 
   delete(wallet: OperatorWallet) {
-    if (!confirm(`Delete wallet "${wallet.name}"?\n\nThis also removes its chain defaults. Ensure another wallet is set as default before deleting.`)) return;
-    this.walletService.delete(wallet.id).subscribe({
-      next: () => { this.load(); this.snackBar.open('Wallet deleted', 'OK', { duration: 2500 }); },
-      error: e => this.snackBar.open(e.error?.message ?? 'Delete failed', 'OK', { duration: 3000 }),
+    if (!confirm(`Delete wallet "${wallet.name}"?\n\nThis is a soft delete: the encrypted key is kept for the retention period (default 90 days). `
+        + `Deletion is refused for a chain default or for a key that has signed on-chain transactions — hand the authority over first (signer-rotation runbook).`)) return;
+    this.withDualControl('WALLET_DELETE', `Delete signing wallet "${wallet.name}"`, tokens =>
+      this.walletService.delete(wallet.id, tokens).subscribe({
+        next: () => { this.load(); this.snackBar.open('Wallet deleted (retained for recovery)', 'OK', { duration: 3000 }); },
+        error: e => this.snackBar.open(e.error?.message ?? 'Delete failed', 'OK', { duration: 6000 }),
+      }));
+  }
+
+  /** Step-up + second approver (4-eyes) for the signer-lifecycle actions (P4C-5). */
+  private withDualControl(action: string, reason: string, run: (tokens: DualControlTokens) => void): void {
+    this.dialog.open(StepUpDialogComponent, {
+      data: { requireDualControl: true, reason, action },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (result?.stepUpToken && result.dualControlToken) {
+        run({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
+      }
     });
   }
 }

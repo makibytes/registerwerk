@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent;
 import de.makibytes.registerwerk.blockchain.internal.SolanaTokenAdminService;
@@ -42,18 +43,22 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/assets/{assetId}/deployments/{depId}/solana-admin")
 @PreAuthorize("hasRole('REGISTRY_ADMIN') and @deploymentAccessChecker.belongsToAsset(#depId, #assetId)")
+@RequiresIdempotencyKey
 public class SolanaTokenAdminController {
 
     private final SolanaTokenAdminService adminService;
     private final AssetDeploymentRepository deploymentRepository;
     private final BlockchainTransactionService txService;
     private final ApplicationEventPublisher eventPublisher;
+    private final de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate;
 
     public SolanaTokenAdminController(
             SolanaTokenAdminService adminService,
             AssetDeploymentRepository deploymentRepository,
             BlockchainTransactionService txService,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate) {
+        this.destinationGate = destinationGate;
         this.adminService = adminService;
         this.deploymentRepository = deploymentRepository;
         this.txService = txService;
@@ -66,11 +71,13 @@ public class SolanaTokenAdminController {
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @Valid @RequestBody SolanaForcedTransferRequest request, Authentication auth) {
         AssetDeployment deployment = loadDeployment(assetId, depId);
+        destinationGate.require(assetId, request.toOwnerWallet(), "solanaForcedTransfer");
         String txHash = adminService.permanentDelegateTransfer(
                 depId, request.fromTokenAccount(), request.toTokenAccount(), request.amount(), request.decimals()).join();
         return accepted(recordAndAudit(deployment, txHash, "solanaForcedTransfer", Map.of(
                 "fromTokenAccount", request.fromTokenAccount(),
                 "toTokenAccount", request.toTokenAccount(),
+                "toOwnerWallet", request.toOwnerWallet(),
                 "amount", request.amount().toString(),
                 "legalBasis", request.legalBasis()
         ), auth));

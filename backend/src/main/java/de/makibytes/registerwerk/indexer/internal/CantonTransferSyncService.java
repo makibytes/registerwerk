@@ -4,6 +4,8 @@ import com.daml.ledger.javaapi.data.*;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.api.CantonTokenService;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.IndexerState;
@@ -15,9 +17,10 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
+import io.micrometer.core.instrument.MeterRegistry;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -27,55 +30,47 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Indexes Canton token transfers by streaming the Ledger API transaction feed.
  *
- * <p>Mirrors {@link SolanaTransferSyncService} in structure. At startup, opens one
- * {@code TransactionService.getTransactions} gRPC stream per enabled CANTON chain config.
- * Resumes from the last persisted offset stored in {@code indexer_state.last_synced_signature}.
+ * <p>At startup, opens one {@code TransactionService.getTransactions} gRPC stream per enabled
+ * CANTON chain config and resumes from the last persisted offset in
+ * {@code indexer_state.last_synced_signature}. We filter for {@code Created} and {@code Archived}
+ * events on the Daml Token Standard {@code Holding} template. Daml's Archived event carries only the
+ * consumed contract's ID, never its former argument payload, so {@link CantonHoldingSnapshot} is a
+ * durable mirror of the currently open Holdings, keyed by contract ID.
  *
- * <p>The stream emits {@link Transaction} events. We filter for {@code Created} and
- * {@code Archived} events on the Daml Token Standard {@code Holding} template. Daml's Archived
- * event carries only the consumed contract's ID, never its former argument payload — so on its
- * own it cannot tell us which instrument/owner/amount was actually consumed. {@link
- * CantonHoldingSnapshot} is a durable (restart-surviving) mirror of "currently open Holdings" the
- * indexer has seen Created, keyed by contract ID, so an Archived event can resolve what it's
- * consuming before the snapshot is deleted.
+ * <p>Movements are derived per update from the net change per (instrument, owner)
+ * ({@link CantonHoldingMovements}): a split books one TRANSFER of the moved part (the change stays
+ * with the sender and books nothing), a merge books nothing, real issuance/redemption remain
+ * MINT/BURN. Every row carries an increasing {@code log_index} within the update, so several rows
+ * for one update id no longer collide, and the {@code deployment_id}/{@code asset_id} resolved from
+ * the instrument. An instrument no CONFIRMED deployment on the chain maps to is not booked (counted
+ * in {@code registerwerk.indexer.canton.untracked_instrument}); its snapshots are still maintained
+ * so a later deployment does not start from unknown holdings.
  *
- * <p>Within one transaction, an Archived Holding is matched to a Created Holding of the same
- * instrument (in order) as a single {@code TRANSFER} row — this is the common shape of a Daml
- * Token Standard transfer choice (archive sender's holding, create recipient's, atomically).
- * Unmatched Archives become {@code BURN} rows using the resolved snapshot; unmatched Creates
- * become {@code MINT} rows. A resolvable-but-missing snapshot (e.g. the holding was created
- * before this indexer ever ran, so no snapshot row exists) is recorded as a {@code BURN} of
- * unknown amount rather than silently dropped, and logged at WARN for investigation.
- *
- * <p>For reconnect resilience, errors bump {@code consecutive_errors} and set
- * {@code status = ERROR} after {@link #MAX_CONSECUTIVE_ERRORS} failures.
+ * <p>Coverage evidence: the stream only produces state writes when the ledger is busy, so a
+ * scheduled heartbeat re-stamps {@code last_synced_at} while the subscription is alive and the
+ * indexer is ACTIVE. A broken stream drops its subscription, stops the heartbeat and lets the
+ * coverage guard go stale.
  */
 @Service
 public class CantonTransferSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(CantonTransferSyncService.class);
 
-    private static final int MAX_CONSECUTIVE_ERRORS = 5;
+    static final int MAX_CONSECUTIVE_ERRORS = 5;
 
     /** Ledger API v2 offsets are monotonically increasing int64 values; zero starts at genesis. */
     private static final long LEDGER_BEGIN = 0L;
-
-    private static final String ZERO_ADDRESS = "0x0";
 
     private final BlockchainClientRegistry registry;
     private final ChainConfigRepository chainConfigRepository;
     private final IndexerStateRepository indexerStateRepository;
     private final TokenTransferRepository tokenTransferRepository;
     private final CantonHoldingSnapshotRepository holdingSnapshotRepository;
+    private final AssetDeploymentRepository assetDeploymentRepository;
+    private final IndexerSyncSupport syncSupport;
+    private final MeterRegistry meterRegistry;
 
-    /** Lazily-injected self-reference so {@code handleTransaction} is invoked THROUGH the Spring
-     *  proxy (required for {@code @Transactional} to actually apply) rather than via a direct
-     *  {@code this.handleTransaction(...)} call from the RxJava subscribe lambda below, which
-     *  bypasses the proxy entirely and silently turns the annotation into a no-op. */
-    @Lazy
-    private final CantonTransferSyncService self;
-
-    /** chainConfigId → active stream subscription (for cleanup on shutdown). */
+    /** chainConfigId -> active stream subscription (for cleanup on shutdown). */
     private final Map<UUID, CantonLedgerClient.Subscription> activeSubscriptions =
             new ConcurrentHashMap<>();
 
@@ -85,13 +80,17 @@ public class CantonTransferSyncService {
             IndexerStateRepository indexerStateRepository,
             TokenTransferRepository tokenTransferRepository,
             CantonHoldingSnapshotRepository holdingSnapshotRepository,
-            @Lazy CantonTransferSyncService self) {
-        this.registry                 = registry;
-        this.chainConfigRepository    = chainConfigRepository;
-        this.indexerStateRepository   = indexerStateRepository;
-        this.tokenTransferRepository  = tokenTransferRepository;
+            AssetDeploymentRepository assetDeploymentRepository,
+            IndexerSyncSupport syncSupport,
+            MeterRegistry meterRegistry) {
+        this.registry                  = registry;
+        this.chainConfigRepository     = chainConfigRepository;
+        this.indexerStateRepository    = indexerStateRepository;
+        this.tokenTransferRepository   = tokenTransferRepository;
         this.holdingSnapshotRepository = holdingSnapshotRepository;
-        this.self                    = self;
+        this.assetDeploymentRepository = assetDeploymentRepository;
+        this.syncSupport               = syncSupport;
+        this.meterRegistry             = meterRegistry;
     }
 
     // ── Startup ───────────────────────────────────────────────────────────────
@@ -121,6 +120,28 @@ public class CantonTransferSyncService {
         log.info("Canton indexer subscriptions stopped.");
     }
 
+    /**
+     * Liveness evidence for the coverage guard: while the stream subscription is up and the indexer
+     * is ACTIVE the ledger is being followed, even when it is quiet and no update arrives.
+     */
+    @SchedulerLock(name = "cantonStreamHeartbeat", lockAtMostFor = "PT4M")
+    @Scheduled(fixedDelay = 300_000, initialDelay = 120_000)
+    public void heartbeat() {
+        for (UUID chainId : activeSubscriptions.keySet()) {
+            try {
+                syncSupport.inTransaction(() -> indexerStateRepository
+                        .findByChainConfigIdAndIndexerType(chainId, IndexerState.IndexerType.CANTON_STREAM)
+                        .filter(s -> s.getStatus() == IndexerState.IndexerStatus.ACTIVE)
+                        .ifPresent(s -> {
+                            s.setLastSyncedAt(Instant.now());
+                            indexerStateRepository.save(s);
+                        }));
+            } catch (Exception e) {
+                log.warn("Canton heartbeat failed for chain {}: {}", chainId, e.getMessage());
+            }
+        }
+    }
+
     // ── Per-chain subscription ────────────────────────────────────────────────
 
     private void subscribeToChain(ChainConfig chain) {
@@ -131,8 +152,8 @@ public class CantonTransferSyncService {
         long beginOffset = resolveBeginOffset(state);
         CantonLedgerClient.Subscription sub = client.subscribeTransactions(
                 beginOffset,
-                tx -> self.handleTransaction(chain, state, tx),
-                err -> handleStreamError(chain, state, err));
+                tx -> handleTransaction(chain, tx),
+                err -> handleStreamError(chain, err));
 
         activeSubscriptions.put(chain.getId(), sub);
         log.info("Canton stream subscription started for chain {}", chain.getIdentifier());
@@ -140,18 +161,18 @@ public class CantonTransferSyncService {
 
     // ── Transaction processing ────────────────────────────────────────────────
 
-    /** One Holding Created event's extracted fields, pending resolution against any matching
-     *  Archived event in the same transaction (see class-level note on transfer matching). */
-    private record HoldingCreate(String contractId, String owner, String instrument, BigDecimal amount) {}
-
-    @Transactional
-    protected void handleTransaction(ChainConfig chain, IndexerState state, Transaction tx) {
-        List<HoldingCreate> creates = new ArrayList<>();
+    /**
+     * Applies one update atomically (rows, snapshots and offset in one transaction). A failure
+     * rolls everything back and propagates so the gRPC stream errors out and reconnects from the
+     * last committed offset instead of silently skipping the update.
+     */
+    void handleTransaction(ChainConfig chain, Transaction tx) {
+        List<CantonHoldingMovements.Holding> creates = new ArrayList<>();
         List<String> archivedContractIds = new ArrayList<>();
 
         for (Event event : tx.getEvents()) {
             if (event instanceof CreatedEvent created && isHoldingTemplate(created.getTemplateId())) {
-                creates.add(new HoldingCreate(
+                creates.add(new CantonHoldingMovements.Holding(
                         created.getContractId(),
                         extractPartyField(created.getArguments(), "owner"),
                         extractInstrumentField(created.getArguments()),
@@ -160,92 +181,85 @@ public class CantonTransferSyncService {
                 archivedContractIds.add(archived.getContractId());
             }
         }
-
         Instant occurredAt = resolveOccurredAt(tx);
 
-        // Match each Archived Holding to a same-instrument Created Holding in this same
-        // transaction, in order — the common shape of a Daml Token Standard transfer choice
-        // (archive sender's holding, create recipient's, atomically). Whatever's left over is an
-        // independent mint/burn.
-        Map<String, Deque<HoldingCreate>> createsByInstrument = new HashMap<>();
-        for (HoldingCreate c : creates) {
-            createsByInstrument.computeIfAbsent(c.instrument(), k -> new ArrayDeque<>()).add(c);
-        }
-        Set<String> matchedContractIds = new HashSet<>();
+        syncSupport.inTransaction(() -> {
+            Map<String, AssetDeployment> deployments = deploymentsByInstrument(chain);
+            CantonHoldingMovements.Plan plan = CantonHoldingMovements.plan(creates, archivedContractIds,
+                    id -> holdingSnapshotRepository.findById(id).map(snap -> new CantonHoldingMovements.Holding(
+                            snap.getContractId(), snap.getOwner(), snap.getInstrument(), snap.getAmount())));
 
-        for (String contractId : archivedContractIds) {
-            CantonHoldingSnapshot snapshot = holdingSnapshotRepository.findById(contractId).orElse(null);
-            if (snapshot == null) {
-                log.warn("Canton Holding archived with no known snapshot (created before this "
-                                + "indexer started, or snapshot already consumed) chain={} contractId={} "
-                                + "— recording as a burn of unknown amount for investigation.",
+            for (String contractId : plan.unresolved()) {
+                log.warn("Canton Holding archived with no known snapshot (created before this indexer started) "
+                        + "chain={} contractId={} - balance effect unknown, nothing booked.",
                         chain.getIdentifier(), contractId);
-                recordTransfer(chain, tx, occurredAt, "unknown", "unknown", ZERO_ADDRESS, BigDecimal.ZERO,
-                        TokenTransfer.EventType.BURN);
-                continue;
+                meterRegistry.counter("registerwerk.indexer.canton.unresolved_archive").increment();
             }
-
-            Deque<HoldingCreate> candidates = createsByInstrument.get(snapshot.getInstrument());
-            HoldingCreate match = (candidates != null) ? candidates.poll() : null;
-            if (match != null) {
-                matchedContractIds.add(match.contractId());
-                recordTransfer(chain, tx, occurredAt, snapshot.getInstrument(), snapshot.getOwner(), match.owner(),
-                        match.amount(), TokenTransfer.EventType.TRANSFER);
+            for (CantonHoldingMovements.Movement m : plan.movements()) {
+                AssetDeployment deployment = deployments.get(m.instrument());
+                if (deployment == null) {
+                    log.warn("Canton instrument {} on chain {} maps to no CONFIRMED deployment; movement not booked.",
+                            m.instrument(), chain.getIdentifier());
+                    meterRegistry.counter("registerwerk.indexer.canton.untracked_instrument").increment();
+                    continue;
+                }
+                recordTransfer(chain, deployment, tx, occurredAt, m);
+            }
+            plan.consumed().forEach(holdingSnapshotRepository::deleteById);
+            for (CantonHoldingMovements.Holding h : plan.survivors()) {
                 holdingSnapshotRepository.save(new CantonHoldingSnapshot(
-                        match.contractId(), chain.getId(), match.instrument(), match.owner(), match.amount()));
-            } else {
-                recordTransfer(chain, tx, occurredAt, snapshot.getInstrument(), snapshot.getOwner(), ZERO_ADDRESS,
-                        snapshot.getAmount(), TokenTransfer.EventType.BURN);
+                        h.contractId(), chain.getId(), h.instrument(), h.owner(), h.amount()));
             }
-            holdingSnapshotRepository.deleteById(contractId);
-        }
 
-        // Unmatched creates are fresh issuance (mint) — persist a snapshot so a later Archive of
-        // this same contract can resolve it.
-        for (HoldingCreate c : creates) {
-            if (matchedContractIds.contains(c.contractId())) continue;
-            recordTransfer(chain, tx, occurredAt, c.instrument(), ZERO_ADDRESS, c.owner(), c.amount(),
-                    TokenTransfer.EventType.MINT);
-            holdingSnapshotRepository.save(
-                    new CantonHoldingSnapshot(c.contractId(), chain.getId(), c.instrument(), c.owner(), c.amount()));
-        }
-
-        // Advance the cursor
-        state.setLastSyncedSignature(Long.toString(tx.getOffset()));
-        state.setLastSyncedAt(Instant.now());
-        state.setConsecutiveErrors(0);
-        state.setStatus(IndexerState.IndexerStatus.ACTIVE);
-        indexerStateRepository.save(state);
+            IndexerState state = getOrCreateIndexerState(chain);
+            state.setLastSyncedSignature(Long.toString(tx.getOffset()));
+            state.setLastSyncedAt(Instant.now());
+            state.setConsecutiveErrors(0);
+            state.setLastError(null);
+            state.setStatus(IndexerState.IndexerStatus.ACTIVE);
+            indexerStateRepository.save(state);
+        });
     }
 
-    private void recordTransfer(ChainConfig chain, Transaction tx, Instant occurredAt, String instrument,
-                                 String from, String to, BigDecimal amount, TokenTransfer.EventType eventType) {
+    private Map<String, AssetDeployment> deploymentsByInstrument(ChainConfig chain) {
+        Map<String, AssetDeployment> byInstrument = new HashMap<>();
+        for (AssetDeployment d : assetDeploymentRepository.findByChainConfigId(chain.getId())) {
+            if (d.getDeploymentStatus() == AssetDeployment.DeploymentStatus.CONFIRMED
+                    && d.getContractAddress() != null && !d.getContractAddress().isBlank()) {
+                byInstrument.putIfAbsent(d.getContractAddress(), d);
+            }
+        }
+        return byInstrument;
+    }
+
+    private void recordTransfer(ChainConfig chain, AssetDeployment deployment, Transaction tx, Instant occurredAt,
+                                CantonHoldingMovements.Movement m) {
+        String txHash = tx.getUpdateId();
+        if (tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(
+                chain.getId(), txHash, m.index(), m.instrument())) {
+            return; // replay of an already booked update
+        }
         TokenTransfer tt = new TokenTransfer();
         tt.setChainConfigId(chain.getId());
-        tt.setContractAddress(instrument);
-        tt.setFromAddress(from);
-        tt.setToAddress(to);
-        tt.setAmount(amount);
-        tt.setEventType(eventType);
+        tt.setDeploymentId(deployment.getId());
+        tt.setAssetId(deployment.getAssetId());
+        tt.setContractAddress(m.instrument());
+        tt.setFromAddress(m.from());
+        tt.setToAddress(m.to());
+        tt.setAmount(m.amount());
+        tt.setEventType(m.type());
         tt.setOccurredAt(occurredAt);
-        tt.setTxHash(tx.getUpdateId());
-        // a Canton synchronizer commits transactions atomically — once a participant
-        // observes a transaction on the Ledger API stream, that commit is final; there is no
-        // probabilistic-finality/reorg model for a permissioned synchronizer's confirmed offsets
-        // the way there is for EVM/Starknet. FINAL matches the entity default; set explicitly
-        // here for clarity/documentation, mirroring the same reasoning applied to Stellar.
+        tt.setTxHash(txHash);
+        tt.setLogIndex(m.index());
+        // A Canton synchronizer commits transactions atomically - once a participant observes an update on
+        // the Ledger API stream, that commit is final; there is no probabilistic-finality/reorg model.
         tt.setFinalityStatus(FinalityLevel.FINALIZED);
         tokenTransferRepository.save(tt);
         log.debug("Canton transfer recorded: chain={} type={} instrument={} from={} to={} amount={}",
-                chain.getIdentifier(), eventType, instrument, from, to, amount);
+                chain.getIdentifier(), m.type(), m.instrument(), m.from(), m.to(), m.amount());
     }
 
-    /** Daml's {@code Transaction} carries the ledger's effective time for the commit — falls back
-     *  to processing time only if that's ever unavailable (should not happen in practice), rather
-     *  than silently discarding a real chain timestamp. Could not be compiled/verified against the
-     *  actual {@code com.daml.ledger.javaapi.data.Transaction} class in this environment (no
-     *  network access to resolve the DAML SDK here) — flagged as a best-effort fix pending a real
-     *  {@code -Pcanton} build. */
+    /** Daml's {@code Transaction} carries the ledger's effective time for the commit. */
     private Instant resolveOccurredAt(Transaction tx) {
         try {
             return tx.getEffectiveAt();
@@ -258,21 +272,20 @@ public class CantonTransferSyncService {
 
     // ── Error handling ────────────────────────────────────────────────────────
 
-    private void handleStreamError(ChainConfig chain, IndexerState state, Throwable err) {
+    private void handleStreamError(ChainConfig chain, Throwable err) {
         log.error("Canton stream error for chain {}: {}", chain.getIdentifier(), err.getMessage(), err);
-
-        int errors = state.getConsecutiveErrors() + 1;
-        state.setConsecutiveErrors(errors);
-        state.setLastError(err.getMessage());
-        if (errors >= MAX_CONSECUTIVE_ERRORS) {
-            state.setStatus(IndexerState.IndexerStatus.ERROR);
-            log.error("Canton indexer for chain {} set to ERROR after {} consecutive failures",
-                    chain.getIdentifier(), errors);
+        CantonLedgerClient.Subscription broken = activeSubscriptions.remove(chain.getId());
+        if (broken != null) {
+            broken.close();
         }
-        indexerStateRepository.save(state);
+        syncSupport.recordFailure(chain.getId(), chain.getIdentifier(), IndexerState.IndexerType.CANTON_STREAM,
+                err instanceof Exception ex ? ex : new IllegalStateException(err), MAX_CONSECUTIVE_ERRORS);
 
-        // Attempt reconnect after a brief delay unless too many errors
-        if (errors < MAX_CONSECUTIVE_ERRORS) {
+        boolean inError = indexerStateRepository
+                .findByChainConfigIdAndIndexerType(chain.getId(), IndexerState.IndexerType.CANTON_STREAM)
+                .map(s -> s.getStatus() == IndexerState.IndexerStatus.ERROR).orElse(false);
+        // Attempt reconnect after a brief delay unless the indexer is in ERROR
+        if (!inError) {
             try {
                 Thread.sleep(5_000);
                 subscribeToChain(chain);

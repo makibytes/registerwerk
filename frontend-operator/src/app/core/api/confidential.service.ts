@@ -84,13 +84,15 @@ export class ConfidentialService {
       tokens ? { headers: dualControlHeaders(tokens) } : {});
   }
 
-  forceBurn(assetId: string, depId: string, body: { from: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
+  /** Step-up + 4-eyes (`FORCE_BURN_EWG26`). */
+  forceBurn(assetId: string, depId: string, body: { from: string; value: string; legalBasis: string }, tokens: DualControlTokens): Observable<{ txId: string }> {
     return this.http.post<{ txId: string }>(
-      `${this.base}/${assetId}/deployments/${depId}/admin/force-burn-confidential`, body);
+      `${this.base}/${assetId}/deployments/${depId}/admin/force-burn-confidential`, body, { headers: dualControlHeaders(tokens) });
   }
 
-  forcedTransfer(assetId: string, depId: string, body: { from: string; to: string; value: string; legalBasis: string }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(
-      `${this.base}/${assetId}/deployments/${depId}/admin/confidential-forced-transfer`, body);
+  /** Step-up + 4-eyes (`FORCED_TRANSFER_EWG24`); `to` must be an ACTIVE registered holder (P4C-2). */
+  forcedTransfer(assetId: string, depId: string, body: { from: string; to: string; value: string; legalBasis: string }, tokens: DualControlTokens): Observable<{ txId: string; destinationHolder?: string | null }> {
+    return this.http.post<{ txId: string; destinationHolder?: string | null }>(
+      `${this.base}/${assetId}/deployments/${depId}/admin/confidential-forced-transfer`, body, { headers: dualControlHeaders(tokens) });
   }
 }

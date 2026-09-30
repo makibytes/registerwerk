@@ -14,10 +14,11 @@ import java.util.UUID;
 public interface IdempotencyRecordRepository extends JpaRepository<IdempotencyRecord, UUID> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT r FROM IdempotencyRecord r WHERE r.entityId = :entityId AND r.idempotencyKey = :key")
-    Optional<IdempotencyRecord> findForUpdate(@Param("entityId") UUID entityId, @Param("key") String key);
+    @Query("SELECT r FROM IdempotencyRecord r WHERE r.scope = :scope AND r.entityId = :entityId AND r.idempotencyKey = :key")
+    Optional<IdempotencyRecord> findForUpdate(@Param("scope") String scope, @Param("entityId") UUID entityId,
+                                              @Param("key") String key);
 
-    Optional<IdempotencyRecord> findByEntityIdAndIdempotencyKey(UUID entityId, String idempotencyKey);
+    Optional<IdempotencyRecord> findByScopeAndEntityIdAndIdempotencyKey(String scope, UUID entityId, String idempotencyKey);
 
     /** Input for {@code IdempotencyCleanupJob} — records older than the retention window,
      *  regardless of status (a crashed IN_PROGRESS row must not block its key forever). */

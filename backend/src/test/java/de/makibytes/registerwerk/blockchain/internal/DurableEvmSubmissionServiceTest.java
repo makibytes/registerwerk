@@ -51,7 +51,8 @@ class DurableEvmSubmissionServiceTest {
     @BeforeEach
     void setUp() {
         service = new DurableEvmSubmissionService(
-                repository, chainConfigRepository, clientRegistry, evmContractService, txService);
+                repository, chainConfigRepository, clientRegistry, evmContractService, txService,
+                new OutboxProperties());
     }
 
     @Test
@@ -77,7 +78,73 @@ class DurableEvmSubmissionServiceTest {
         assertThat(prepared.txHash()).isEqualTo(txHash);
         verify(repository).saveAndFlush(any(EvmSignedSubmission.class));
         verify(evmContractService, never()).broadcastPrepared(any(), any(), any(), any());
-        verify(txService, never()).recordPrepared(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        // P4B-4: the blockchain_transaction row exists from the moment the bytes are durable, so a
+        // payload that can never be broadcast still times out and alerts.
+        verify(txService).recordPrepared(eq(txHash), eq("pause"), eq(chainId),
+                eq("ETHEREUM"), eq("TESTNET"), any(), any(), any(), any());
+    }
+
+    @Test
+    void prepareStoresTheRequestIdempotencyKeyOnTheOutboxRowAndTheTransactionRecord() {
+        ChainConfig chain = chain();
+        when(chainConfigRepository.findById(chainId)).thenReturn(Optional.of(chain));
+        when(clientRegistry.getEvmClientByIdentifier("ETHEREUM_TESTNET")).thenReturn(web3j);
+        when(evmContractService.signer(chainId)).thenReturn(signer);
+        when(evmContractService.prepareDurable(eq(chainId), eq(web3j), eq(signer), any(), any()))
+                .thenReturn(new EvmContractService.PreparedRawTransaction(
+                        txHash, "0x010203", 11155111L, "0x" + "cd".repeat(20), BigInteger.valueOf(7)));
+        when(repository.findByIdempotencyKey(any())).thenReturn(Optional.empty());
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> {
+            EvmSignedSubmission row = invocation.getArgument(0);
+            ReflectionTestUtils.setField(row, "id", submissionId);
+            return row;
+        });
+
+        withRequestKey("USER", "u1", "mint-key-0001", () ->
+                service.prepare(chainId, "0x" + "ef".repeat(20), new Function("mint", List.of(), List.of()), Map.of()));
+
+        org.mockito.ArgumentCaptor<EvmSignedSubmission> saved = org.mockito.ArgumentCaptor.forClass(EvmSignedSubmission.class);
+        verify(repository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getIdempotencyKey()).isEqualTo("USER:u1:mint-key-0001#0");
+        verify(txService).tagIdempotencyKey(txHash, "USER:u1:mint-key-0001#0");
+    }
+
+    @Test
+    void prepareWithAnAlreadyUsedKeyReturnsTheExistingTransactionInsteadOfSigningAgain() {
+        EvmSignedSubmission existing = preparedRow();
+        when(repository.findByIdempotencyKey("USER:u1:mint-key-0001#0")).thenReturn(Optional.of(existing));
+
+        var prepared = withRequestKey("USER", "u1", "mint-key-0001", () ->
+                service.prepare(chainId, "0x" + "ef".repeat(20), new Function("mint", List.of(), List.of()), Map.of()));
+
+        assertThat(prepared.id()).isEqualTo(submissionId);
+        assertThat(prepared.txHash()).isEqualTo(txHash);
+        verify(evmContractService, never()).prepareDurable(any(), any(), any(), any(), any());
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void prepareNumbersSeveralSubmissionsOfOneRequestSoEachMapsToItsOwnRow() {
+        withRequestKey("ENTITY", "e1", "batch-key-0001", () -> {
+            assertThat(de.makibytes.registerwerk.idempotency.api.IdempotencyContext.nextSubmissionKey())
+                    .isEqualTo("ENTITY:e1:batch-key-0001#0");
+            assertThat(de.makibytes.registerwerk.idempotency.api.IdempotencyContext.nextSubmissionKey())
+                    .isEqualTo("ENTITY:e1:batch-key-0001#1");
+            return null;
+        });
+    }
+
+    private static <T> T withRequestKey(String scope, String scopeId, String key, java.util.function.Supplier<T> body) {
+        org.springframework.mock.web.MockHttpServletRequest request = new org.springframework.mock.web.MockHttpServletRequest();
+        de.makibytes.registerwerk.idempotency.api.IdempotencyContext.bind(request,
+                new de.makibytes.registerwerk.idempotency.api.IdempotencyContext.Key(scope, scopeId, key));
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
+                new org.springframework.web.context.request.ServletRequestAttributes(request));
+        try {
+            return body.get();
+        } finally {
+            org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();
+        }
     }
 
     @Test
@@ -118,8 +185,46 @@ class DurableEvmSubmissionServiceTest {
 
         assertThat(row.getStatus()).isEqualTo(EvmSignedSubmission.Status.PREPARED);
         assertThat(row.getLastError()).contains("provider unavailable");
+        assertThat(row.getLastErrorClass()).isEqualTo(EvmSignedSubmission.ErrorClass.TRANSPORT);
+        assertThat(row.getFirstFailedAt()).isNotNull();
+        assertThat(row.getNextAttemptAt()).isAfter(java.time.Instant.now());
         assertThat(row.getAttemptCount()).isOne();
         verify(txService, never()).recordPrepared(any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void underpricedFailureIsClassifiedAndBacksOffExponentially() throws Exception {
+        EvmSignedSubmission row = preparedRow();
+        when(repository.findByIdForUpdate(submissionId)).thenReturn(Optional.of(row));
+        when(chainConfigRepository.findById(chainId)).thenReturn(Optional.of(chain()));
+        when(clientRegistry.getEvmClientByIdentifier("ETHEREUM_TESTNET")).thenReturn(web3j);
+        when(web3j.ethGetTransactionReceipt(txHash).send().getTransactionReceipt()).thenReturn(Optional.empty());
+        when(web3j.ethGetTransactionByHash(txHash).send().getTransaction()).thenReturn(Optional.empty());
+        when(evmContractService.broadcastPrepared(chainId, web3j, "0x010203", txHash))
+                .thenThrow(new RuntimeException("Prepared transaction submission error: transaction underpriced"));
+
+        var first = service.dispatchWithOutcome(submissionId);
+        java.time.Instant afterFirst = row.getNextAttemptAt();
+        var second = service.dispatchWithOutcome(submissionId);
+
+        assertThat(first).isEqualTo(DurableEvmSubmissionService.DispatchOutcome.FAILED);
+        assertThat(second).isEqualTo(DurableEvmSubmissionService.DispatchOutcome.FAILED);
+        assertThat(row.getLastErrorClass()).isEqualTo(EvmSignedSubmission.ErrorClass.UNDERPRICED);
+        assertThat(row.getAttemptCount()).isEqualTo(2);
+        // 15 s, then 30 s: the retry delay grows instead of hammering the node every cycle
+        assertThat(java.time.Duration.between(java.time.Instant.now(), row.getNextAttemptAt()).getSeconds())
+                .isGreaterThan(java.time.Duration.between(java.time.Instant.now(), afterFirst).getSeconds());
+    }
+
+    @Test
+    void supersededOrAbandonedRowsAreNeverBroadcast() {
+        EvmSignedSubmission row = preparedRow();
+        row.setStatus(EvmSignedSubmission.Status.SUPERSEDED);
+        when(repository.findByIdForUpdate(submissionId)).thenReturn(Optional.of(row));
+
+        assertThat(service.dispatchWithOutcome(submissionId))
+                .isEqualTo(DurableEvmSubmissionService.DispatchOutcome.SKIPPED);
+        verify(evmContractService, never()).broadcastPrepared(any(), any(), any(), any());
     }
 
     private ChainConfig chain() {

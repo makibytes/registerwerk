@@ -44,4 +44,17 @@ public interface ChainConfigRepository extends JpaRepository<ChainConfig, UUID> 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE ChainConfig c SET c.finalitySource = :finalitySource WHERE c.id = :id")
     void updateFinalitySource(@Param("id") UUID id, @Param("finalitySource") ChainConfig.FinalitySource finalitySource);
+
+    /** Compare-and-set pin of the genesis hash: only writes while none is pinned (P4C-1). Returns
+     *  the number of rows changed (0 = a hash was already pinned). */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE ChainConfig c SET c.genesisHash = :hash WHERE c.id = :id AND c.genesisHash IS NULL")
+    int pinGenesisHashIfAbsent(@Param("id") UUID id, @Param("hash") String hash);
+
+    /** Clears the genesis pin (operator action with step-up + second approver). */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE ChainConfig c SET c.genesisHash = NULL WHERE c.id = :id")
+    int clearGenesisHash(@Param("id") UUID id);
 }

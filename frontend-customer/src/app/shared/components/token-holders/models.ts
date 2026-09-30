@@ -10,7 +10,12 @@ export interface LiveHolder {
 
 export interface MintAction {
   recipient: string;
-  amount: number;
+  /** Decimal string of base units (no precision loss above 2^53). */
+  amount: string;
+  /** Authenticator (TOTP) code for built-in sign-in; omitted under Entra (claims challenge instead). */
+  totpCode?: string;
+  /** Second approver's step-up token (registry administrator / compliance officer) scoped to `ISSUER_MINT`. */
+  approvalToken: string;
 }
 
 /**
@@ -18,7 +23,8 @@ export interface MintAction {
  * registry administrator's approval token scoped to `ISSUER_BURN_EWG26`.
  */
 export interface BurnAction {
-  amount: number;
+  /** Decimal string of base units (no precision loss above 2^53). */
+  amount: string;
   fromWallet: string;
   /** Authenticator (TOTP) code for built-in sign-in; omitted under Entra (claims challenge instead). */
   totpCode?: string;
@@ -29,13 +35,22 @@ export interface BurnAction {
 export interface ForceTransferAction {
   fromWallet: string;
   toWallet: string;
-  amount: number;
+  /** Decimal string of base units (no precision loss above 2^53). */
+  amount: string;
   legalBasis: string;
+  /** Authenticator (TOTP) code for built-in sign-in; omitted under Entra (claims challenge instead). */
+  totpCode?: string;
+  /** Second approver's step-up token scoped to `ISSUER_FORCED_TRANSFER_EWG24`. */
+  approvalToken: string;
 }
 
 export interface ForceApproveAction {
   ownerWallet: string;
   spenderWallet: string;
-  amount: number;
-  legalBasis: string;
+  /** Decimal string of base units (no precision loss above 2^53). */
+  amount: string;
+  legalBasis: string;  /** Authenticator (TOTP) code for built-in sign-in; omitted under Entra (claims challenge instead). */
+  totpCode?: string;
+  /** Second approver's step-up token scoped to `ISSUER_FORCED_APPROVE_OVERRIDE`. */
+  approvalToken: string;
 }

@@ -1,7 +1,10 @@
 package de.makibytes.registerwerk.stepup.internal;
 
 import de.makibytes.registerwerk.stepup.api.ClaimsChallengeException;
+import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
+import de.makibytes.registerwerk.stepup.events.DualControlApprovedEvent;
 import jakarta.servlet.http.HttpServletRequest;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -9,11 +12,14 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -56,10 +62,15 @@ class StepUpEnforcementAspect {
 
     private final StepUpTokenValidator validator;
     private final StepUpPolicy policy;
+    private final ApplicationEventPublisher eventPublisher;
+    private final TransactionTemplate transactionTemplate;
 
-    StepUpEnforcementAspect(StepUpTokenValidator validator, StepUpPolicy policy) {
+    StepUpEnforcementAspect(StepUpTokenValidator validator, StepUpPolicy policy,
+                            ApplicationEventPublisher eventPublisher, PlatformTransactionManager txManager) {
         this.validator = validator;
         this.policy = policy;
+        this.eventPublisher = eventPublisher;
+        this.transactionTemplate = new TransactionTemplate(txManager);
     }
 
     @Around("@annotation(de.makibytes.registerwerk.stepup.api.RequiresStepUp) || " +
@@ -91,14 +102,35 @@ class StepUpEnforcementAspect {
             }
             UUID approverId = validator.validateDualControlToken(dualControlToken, jwt.getSubject(), stepUp.reason());
             if (request != null) {
-                request.setAttribute(
-                        de.makibytes.registerwerk.stepup.api.StepUpAttributes.DUAL_CONTROL_APPROVER_ID, approverId);
+                request.setAttribute(StepUpAttributes.DUAL_CONTROL_APPROVER_ID, approverId);
             }
+            recordDualControl(auth, jwt, stepUp, approverId, request);
         }
 
         log.info("Step-up auth passed: mode={} sub={} action={} 4eyes={}",
                 policy.mode(), jwt.getSubject(), stepUp.reason(), stepUp.requireSecondApprover());
         return pjp.proceed();
+    }
+
+    /**
+     * P4C-4: writes the generic 4-eyes evidence event BEFORE the guarded method runs. The event is
+     * published inside a transaction so Spring Modulith's event-publication registry persists it
+     * synchronously; if that write fails the exception propagates and the action does not proceed
+     * (fail closed). The audit row itself is appended after commit by the audit module.
+     */
+    private void recordDualControl(Authentication auth, Jwt jwt, RequiresStepUp stepUp, UUID approverId,
+                                   HttpServletRequest request) {
+        UUID requestId = UUID.randomUUID();
+        if (request != null) {
+            request.setAttribute(StepUpAttributes.DUAL_CONTROL_REQUEST_ID, requestId);
+        }
+        DualControlApprovedEvent event = new DualControlApprovedEvent(
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"),
+                approverId, requestId, stepUp.reason(),
+                request != null ? request.getMethod() : null,
+                request != null ? request.getRequestURI() : null,
+                policy.mode().name());
+        transactionTemplate.executeWithoutResult(status -> eventPublisher.publishEvent(event));
     }
 
     /**

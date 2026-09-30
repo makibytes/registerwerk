@@ -81,7 +81,9 @@ public interface RpcNodeRepository extends JpaRepository<RpcNode, UUID> {
                 n.healthy = :healthy,
                 n.consecutiveFailures = :consecutiveFailures,
                 n.lagFromBest = :lagFromBest,
-                n.syncing = :syncing
+                n.syncing = :syncing,
+                n.healthReason = :healthReason,
+                n.consecutiveSuccesses = :consecutiveSuccesses
             WHERE n.id = :id
             """)
     void updateHealthFields(@Param("id") UUID id,
@@ -92,7 +94,9 @@ public interface RpcNodeRepository extends JpaRepository<RpcNode, UUID> {
             @Param("healthy") boolean healthy,
             @Param("consecutiveFailures") int consecutiveFailures,
             @Param("lagFromBest") Integer lagFromBest,
-            @Param("syncing") boolean syncing);
+            @Param("syncing") boolean syncing,
+            @Param("healthReason") String healthReason,
+            @Param("consecutiveSuccesses") int consecutiveSuccesses);
 
     /**
      * Targeted update of only the chaincache-detection-owned columns (the symmetric counterpart

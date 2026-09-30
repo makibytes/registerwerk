@@ -39,6 +39,10 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <input matInput [(ngModel)]="transferForm.toTokenAccount" placeholder="base58 account" />
             </mat-form-field>
             <mat-form-field appearance="outline">
+              <mat-label>Destination owner wallet (registered holder)</mat-label>
+              <input matInput [(ngModel)]="transferForm.toOwnerWallet" placeholder="base58 wallet of the holder owning the account" />
+            </mat-form-field>
+            <mat-form-field appearance="outline">
               <mat-label>Amount (smallest unit)</mat-label>
               <input matInput [(ngModel)]="transferForm.amount" />
             </mat-form-field>
@@ -51,7 +55,7 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
               <input matInput [(ngModel)]="transferForm.legalBasis" placeholder="e.g. BaFin Bescheid Az. 2025-001" />
             </mat-form-field>
             <button type="button" mat-raised-button color="warn"
-                    [disabled]="!transferForm.fromTokenAccount || !transferForm.toTokenAccount || !transferForm.amount || !transferForm.legalBasis"
+                    [disabled]="!transferForm.fromTokenAccount || !transferForm.toTokenAccount || !transferForm.toOwnerWallet || !transferForm.amount || !transferForm.legalBasis"
                     (click)="submitForcedTransfer()">
               <mat-icon>gavel</mat-icon>
               Forced Transfer (step-up + 4-eyes)
@@ -125,7 +129,7 @@ export class SolanaAdminComponent {
   private readonly dialog = inject(MatDialog);
   private readonly cdr = inject(ChangeDetectorRef);
 
-  transferForm = { fromTokenAccount: '', toTokenAccount: '', amount: '', decimals: 6, legalBasis: '' };
+  transferForm = { fromTokenAccount: '', toTokenAccount: '', toOwnerWallet: '', amount: '', decimals: 6, legalBasis: '' };
   burnForm = { tokenAccount: '', amount: '', decimals: 6, legalBasis: '' };
   freezeAccount = '';
 
@@ -145,7 +149,7 @@ export class SolanaAdminComponent {
       this.service.forcedTransfer(this.assetId, this.deploymentId, this.transferForm, result.stepUpToken, result.dualControlToken!).subscribe({
         next: (r) => {
           this.txService.track(r.txId, 'SPL forced transfer');
-          this.transferForm = { fromTokenAccount: '', toTokenAccount: '', amount: '', decimals: 6, legalBasis: '' };
+          this.transferForm = { fromTokenAccount: '', toTokenAccount: '', toOwnerWallet: '', amount: '', decimals: 6, legalBasis: '' };
           this.cdr.markForCheck();
         },
       });

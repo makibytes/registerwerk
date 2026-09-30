@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.registertransfer.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import de.makibytes.registerwerk.registertransfer.api.RegisterTransfer;
 import de.makibytes.registerwerk.registertransfer.internal.RegisterTransferService;
 import de.makibytes.registerwerk.shared.SecurityUtils;
@@ -58,6 +59,7 @@ public class RegisterTransferController {
                 .body(json);
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{transferId}/onchain-handover")
     @RequiresStepUp(requireSecondApprover = true, reason = "REGISTER_TRANSFER_ONCHAIN_HANDOVER")
     public RegisterTransfer recordOnchainHandover(
@@ -67,6 +69,7 @@ public class RegisterTransferController {
                 Boolean.TRUE.equals(request.attested()), SecurityUtils.extractUserId(auth));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/{transferId}/complete")
     @RequiresStepUp(requireSecondApprover = true, reason = "REGISTER_TRANSFER_COMPLETE")
     public RegisterTransfer complete(@PathVariable UUID transferId, Authentication auth) {

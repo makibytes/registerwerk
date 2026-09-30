@@ -1,6 +1,8 @@
 package de.makibytes.registerwerk.blockchain.api;
 
 import de.makibytes.registerwerk.blockchain.internal.NonceCoordinator;
+import de.makibytes.registerwerk.chain.api.ChainConfig;
+import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.finality.api.ChainQuarantinePort;
 import de.makibytes.registerwerk.finality.api.ChainQuarantinedException;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
@@ -74,11 +76,31 @@ class EvmContractServiceTest {
     @Mock
     private ChainQuarantinePort chainQuarantine;
 
+    @Mock
+    private ChainConfigRepository chainConfigRepository;
+
     private EvmContractService service;
 
     private static final String CONTRACT = "0x" + "cc".repeat(20);
     private static final String FROM = "0x" + "aa".repeat(20);
     private static final UUID CHAIN_CONFIG_ID = UUID.randomUUID();
+    private static final long PINNED_CHAIN_ID = 11155111L;
+
+    private ChainConfig chainConfig = pinnedConfig(PINNED_CHAIN_ID);
+
+    private static ChainConfig pinnedConfig(Long chainId) {
+        ChainConfig config = new ChainConfig();
+        config.setIdentifier("ETHEREUM_SEPOLIA");
+        config.setChainId(chainId);
+        return config;
+    }
+
+    private EvmContractService newService(EvmSubmissionSettings settings) {
+        org.mockito.Mockito.lenient().when(chainConfigRepository.findById(CHAIN_CONFIG_ID))
+                .thenReturn(java.util.Optional.of(chainConfig));
+        return new EvmContractService(null, chainConfigRepository, null, nonceCoordinator, chainQuarantine,
+                null, null, null, settings);
+    }
 
     private void stubCommon() throws Exception {
         when(signer.address()).thenReturn(FROM);
@@ -133,7 +155,7 @@ class EvmContractServiceTest {
         doReturn(requestReturning(estimateResponse)).when(web3j).ethEstimateGas(any());
 
         Function function = new Function("pause", List.of(), List.of());
-        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
+        service = newService(EvmSubmissionSettings.defaults());
         String txHash = service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT, function);
 
         assertThat(txHash).isEqualTo("0xtxhash");
@@ -169,7 +191,7 @@ class EvmContractServiceTest {
         gasPriceResponse.setResult(toHex(10_000_000_000L)); // 10 gwei
         doReturn(requestReturning(gasPriceResponse)).when(web3j).ethGasPrice();
 
-        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
+        service = newService(EvmSubmissionSettings.defaults());
         BigInteger callerSuppliedGasLimit = BigInteger.valueOf(321_000L);
         String txHash = service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT,
                 "0xdeadbeef", callerSuppliedGasLimit);
@@ -205,7 +227,7 @@ class EvmContractServiceTest {
         EthGasPrice gasPriceResponse = new EthGasPrice();
         gasPriceResponse.setResult(toHex(10_000_000_000L));
         doReturn(requestReturning(gasPriceResponse)).when(web3j).ethGasPrice();
-        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
+        service = newService(EvmSubmissionSettings.defaults());
 
         var prepared = service.prepareDurable(CHAIN_CONFIG_ID, web3j, signer, CONTRACT,
                 new Function("pause", List.of(), List.of()));
@@ -220,7 +242,7 @@ class EvmContractServiceTest {
     @Test
     @DisplayName("the chain quarantine guard runs before nonce lookup, signing, or broadcast")
     void quarantinedChainCannotEnterTheSubmissionCriticalSection() {
-        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
+        service = newService(EvmSubmissionSettings.defaults());
         org.mockito.Mockito.doThrow(new ChainQuarantinedException(CHAIN_CONFIG_ID))
                 .when(chainQuarantine).requireSubmissionAllowed(CHAIN_CONFIG_ID);
 
@@ -236,7 +258,7 @@ class EvmContractServiceTest {
     @Test
     @DisplayName("synchronous receipt-waiting calls are guarded before any provider access")
     void quarantinedChainCannotEnterSynchronousSend() {
-        service = new EvmContractService(null, null, null, nonceCoordinator, chainQuarantine);
+        service = newService(EvmSubmissionSettings.defaults());
         org.mockito.Mockito.doThrow(new ChainQuarantinedException(CHAIN_CONFIG_ID))
                 .when(chainQuarantine).requireSubmissionAllowed(CHAIN_CONFIG_ID);
 

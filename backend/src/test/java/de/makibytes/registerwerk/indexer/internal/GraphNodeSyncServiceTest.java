@@ -85,9 +85,11 @@ class GraphNodeSyncServiceTest {
         service = new GraphNodeSyncService(chainConfigRepository, indexerStateRepository,
                 tokenTransferRepository, graphNodeClient, explorerUrlBuilder,
                 assetDeploymentRepository, txProperties, reorgGuard, clientRegistry,
-                rpcNodeRepository, chaincacheFinalityProbe);
+                rpcNodeRepository, chaincacheFinalityProbe,
+                new IndexerSyncSupport(org.mockito.Mockito.mock(org.springframework.transaction.PlatformTransactionManager.class),
+                        indexerStateRepository));
 
-        when(assetDeploymentRepository.findAll()).thenReturn(List.of());
+        when(assetDeploymentRepository.findByChainConfigId(any())).thenReturn(List.of());
     }
 
     private ChainConfig ethereumChain() {
@@ -307,6 +309,39 @@ class GraphNodeSyncServiceTest {
     }
 
     @Test
+    @DisplayName("chaincache's self-declared FINALIZED never exceeds what chain_config depth allows (P4C-6)")
+    void syncChain_chaincacheDeclaredFinalized_cappedByConfiguredDepth() {
+        ChainConfig chain = ethereumChain();
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                chain, "finalitySource", ChainConfig.FinalitySource.CHAINCACHE);
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE))
+                .thenReturn(Optional.of(freshState(200L, 40L)));
+        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(graphNodeClient.fetchMeta(chain, null))
+                .thenReturn(Optional.of(new BlockMeta(200, "0xheadhash", false)));
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(201L), anyInt(), eq(0))).thenReturn(List.of());
+        RpcNode chaincacheNode = new RpcNode();
+        chaincacheNode.setKind(RpcNode.NodeKind.CHAINCACHE);
+        chaincacheNode.setManagementUrl("http://chaincache-sepolia:8080");
+        chaincacheNode.setRemoteChainKey("sepolia");
+        when(rpcNodeRepository.findByChainConfig_IdAndKindAndEnabledTrue(chainConfigId, RpcNode.NodeKind.CHAINCACHE))
+                .thenReturn(List.of(chaincacheNode));
+        // Block 200 is the head (depth 1): below the configured FINALIZED depth of 2.
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of(200L));
+        when(chaincacheFinalityProbe.observe(chaincacheNode, 200L))
+                .thenReturn(Optional.of(new ChaincacheFinalityProbe.Observation("0xhash200", ReorgGuard.ProbeResult.FINALIZED)));
+        when(tokenTransferRepository.findDistinctBlockHashesAt(chainConfigId, 200L)).thenReturn(List.of("0xhash200"));
+
+        service.syncChain(chain);
+
+        verify(tokenTransferRepository, never()).markLevelAtBlock(
+                chainConfigId, 200L, FinalityLevel.PROVISIONAL, FinalityLevel.FINALIZED);
+        verify(tokenTransferRepository, never()).markLevelAtBlock(
+                chainConfigId, 200L, FinalityLevel.SAFE, FinalityLevel.FINALIZED);
+    }
+
+    @Test
     @DisplayName("a CHAINCACHE-sourced chain with no enabled chaincache node falls back to RPC "
             + "self-probing rather than skipping reorg verification entirely")
     void syncChain_chaincacheFinalitySource_noNode_fallsBackToRpcSelfProbe() {
@@ -471,5 +506,66 @@ class GraphNodeSyncServiceTest {
         assertThat(captor.getValue().getFinalityStatus()).isEqualTo(FinalityLevel.FINALIZED);
         assertThat(captor.getValue().getBlockHash()).isEqualTo("0xabcdef");
         verify(graphNodeClient).fetchMeta(chain, 70L);
+    }
+
+    @Test
+    @DisplayName("P4-06: attribution is chain-scoped, ignores FAILED attempts and prefers CONFIRMED; unlinked rows are repaired")
+    void syncChain_attributesByChainAndRepairsUnlinkedRows() {
+        ChainConfig chain = ethereumChain();
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE)).thenReturn(Optional.empty());
+        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(graphNodeClient.fetchMeta(chain, null)).thenReturn(Optional.of(new BlockMeta(100, "0xhead", false)));
+        when(graphNodeClient.fetchMeta(chain, 100L)).thenReturn(Optional.of(new BlockMeta(100, "0xb100", false)));
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(0L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0)))
+                .thenReturn(List.of(new GraphTransfer("0xtx-0", "0xTOKEN", "0xfrom", "0xto",
+                        null, "5", "TRANSFER", 100L, 1_700_000_000L, "0xtx", 0L)));
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
+
+        var failed = deployment("0xtoken", de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.FAILED);
+        var pending = deployment("0xToken", de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.PENDING);
+        var confirmed = deployment("0xTOKEN", de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.CONFIRMED);
+        when(assetDeploymentRepository.findByChainConfigId(chainConfigId)).thenReturn(List.of(failed, pending, confirmed));
+
+        service.syncChain(chain);
+
+        ArgumentCaptor<TokenTransfer> captor = ArgumentCaptor.forClass(TokenTransfer.class);
+        verify(tokenTransferRepository).save(captor.capture());
+        assertThat(captor.getValue().getDeploymentId()).isEqualTo(confirmed.getId());
+        assertThat(captor.getValue().getAssetId()).isEqualTo(confirmed.getAssetId());
+        verify(assetDeploymentRepository, never()).findAll();
+        verify(tokenTransferRepository).linkUnlinkedTransfers(chainConfigId, "0xtoken", confirmed.getId(), confirmed.getAssetId());
+        verify(tokenTransferRepository, never()).linkUnlinkedTransfers(any(), any(), eq(failed.getId()), any());
+    }
+
+    @Test
+    @DisplayName("P4B-6: a failed pass is counted in its own transaction and flips to ERROR at the threshold")
+    void syncChain_failureIsRecordedAndEscalatesToError() {
+        ChainConfig chain = ethereumChain();
+        IndexerState state = freshState(10L, 5L);
+        state.setConsecutiveErrors(GraphNodeSyncService.MAX_CONSECUTIVE_ERRORS - 1);
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE)).thenReturn(Optional.of(state));
+        when(graphNodeClient.fetchMeta(chain, null)).thenReturn(Optional.of(new BlockMeta(100, "0xhead", false)));
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(11L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0)))
+                .thenThrow(new IllegalStateException("numeric field overflow"));
+
+        service.syncChain(chain);
+
+        verify(indexerStateRepository).save(state);
+        assertThat(state.getStatus()).isEqualTo(IndexerState.IndexerStatus.ERROR);
+        assertThat(state.getConsecutiveErrors()).isEqualTo(GraphNodeSyncService.MAX_CONSECUTIVE_ERRORS);
+        assertThat(state.getLastError()).contains("numeric field overflow");
+        assertThat(state.getLastSyncedBlock()).isEqualTo(10L); // cursor untouched
+    }
+
+    private de.makibytes.registerwerk.deployment.api.AssetDeployment deployment(
+            String address, de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus status) {
+        var d = new de.makibytes.registerwerk.deployment.api.AssetDeployment();
+        d.setId(UUID.randomUUID());
+        d.setAssetId(UUID.randomUUID());
+        d.setContractAddress(address);
+        d.setDeploymentStatus(status);
+        return d;
     }
 }

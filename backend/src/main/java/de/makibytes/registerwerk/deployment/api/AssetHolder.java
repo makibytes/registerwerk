@@ -40,7 +40,7 @@ public class AssetHolder {
     @Column(name = "whitelist_tx_hash", length = 66)
     private String whitelistTxHash;
 
-    @Column(name = "nominal_amount", nullable = false, precision = 38, scale = 18)
+    @Column(name = "nominal_amount", nullable = false, precision = 96, scale = 18)
     private BigDecimal nominalAmount = BigDecimal.ZERO;
 
     /** True once {@code HolderDataService.syncHoldersFromBlockchain} has created or updated this

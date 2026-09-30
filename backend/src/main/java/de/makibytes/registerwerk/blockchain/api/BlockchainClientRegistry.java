@@ -78,6 +78,22 @@ public class BlockchainClientRegistry {
     /** nodeId → the RPC URL its cached client was built against, so URL edits invalidate it */
     private volatile Map<UUID, String>            nodeClientUrls = new ConcurrentHashMap<>();
 
+    /** nodeId → raw service bound to the node's endpoint (feeds the per-chain failover client). */
+    private volatile Map<UUID, org.web3j.protocol.Web3jService> nodeEvmServices = new ConcurrentHashMap<>();
+    /** chainIdentifier → failover client over all EVM nodes of the chain (only when it has >= 2). */
+    private final Map<String, Web3j> failoverEvmClients = new ConcurrentHashMap<>();
+    /** nodeId → until when a transport failure keeps the node at the back of the ranking. */
+    private final Map<UUID, Instant> suspectUntil = new ConcurrentHashMap<>();
+    /** chainIdentifier → node that accepted the latest write and until when reads prefer it. */
+    private final Map<String, WriteAffinity> writeAffinity = new ConcurrentHashMap<>();
+
+    /** How long a node that failed a call is ranked after every node that did not. */
+    static final java.time.Duration SUSPECT_DURATION = java.time.Duration.ofSeconds(30);
+    /** How long reads prefer the node that accepted a write (read-your-writes; P4B-8). */
+    static final java.time.Duration WRITE_AFFINITY = java.time.Duration.ofSeconds(120);
+
+    private record WriteAffinity(UUID nodeId, Instant until) {}
+
     private ChainConfigRepository chainConfigRepository;
     private Web3jClientFactory web3jClientFactory;
     private SolanaClientFactory solanaClientFactory;
@@ -114,6 +130,10 @@ public class BlockchainClientRegistry {
     public Web3j getEvmClientByIdentifier(String identifier) {
         List<NodeState> nodes = nodesByChain.get(identifier);
         if (nodes != null && !nodes.isEmpty()) {
+            Web3j failover = failoverEvmClients.get(identifier);
+            if (failover != null && rankedNodes(identifier, nodes).size() >= 2) {
+                return failover;
+            }
             return selectBestEvmNode(identifier, nodes);
         }
 
@@ -246,6 +266,7 @@ public class BlockchainClientRegistry {
         Map<UUID, CantonLedgerEndpoint> newCantonClients = new ConcurrentHashMap<>();
         Map<String, List<NodeState>>  newByChain       = new ConcurrentHashMap<>();
         Map<UUID, String>             newClientUrls    = new ConcurrentHashMap<>();
+        Map<UUID, org.web3j.protocol.Web3jService> newEvmServices = new ConcurrentHashMap<>();
 
         for (RpcNode node : nodes) {
             String identifier = node.getChainConfig().getIdentifier();
@@ -254,7 +275,8 @@ public class BlockchainClientRegistry {
 
             NodeState state = new NodeState(
                     node.getId(), node.isHealthy(), node.isEnabled(), node.isExclusive(),
-                    node.getConsecutiveFailures(), node.getLastSuccessAt(), node.getLagFromBest(), node.getKind());
+                    node.getConsecutiveFailures(), node.getLastSuccessAt(), node.getLagFromBest(), node.getKind(),
+                    node.getHealthReason());
 
             // NB: reuse must be lazy. `map.getOrDefault(id, factory.createClient(url))` reads as
             // "reuse, else create", but Java evaluates arguments eagerly — it built a client for
@@ -269,6 +291,10 @@ public class BlockchainClientRegistry {
                         : web3jClientFactory.createClient(url);
                 newEvmClients.put(node.getId(), client);
                 newClientUrls.put(node.getId(), url);
+                org.web3j.protocol.Web3jService service = reusable(nodeEvmServices, node.getId(), url)
+                        ? nodeEvmServices.get(node.getId())
+                        : web3jClientFactory.createService(url);
+                if (service != null) newEvmServices.put(node.getId(), service);
             } else if (type == ChainConfig.ChainType.SOLANA && solanaClientFactory != null) {
                 RpcClient client = reusable(nodeSolanaClients, node.getId(), url)
                         ? nodeSolanaClients.get(node.getId())
@@ -291,7 +317,9 @@ public class BlockchainClientRegistry {
         }
 
         Map<UUID, CantonLedgerEndpoint> previousCantonClients = this.nodeCantonClients;
+        suspectUntil.keySet().retainAll(newClientUrls.keySet());
 
+        this.nodeEvmServices   = newEvmServices;
         this.nodeEvmClients    = newEvmClients;
         this.nodeSolanaClients = newSolanaClients;
         this.nodeCantonClients = newCantonClients;
@@ -311,6 +339,29 @@ public class BlockchainClientRegistry {
                             previous.getKey(), e.getMessage());
                 }
             }
+        }
+
+        // One failover client per EVM chain with >= 2 nodes. It resolves its ranking on every call, so it
+        // survives refreshes and needs no rebuild when node health changes.
+        Map<String, Long> evmNodesPerChain = new HashMap<>();
+        for (RpcNode node : nodes) {
+            if (node.getChainConfig().getChainType() == ChainConfig.ChainType.EVM
+                    && newEvmServices.containsKey(node.getId())) {
+                evmNodesPerChain.merge(node.getChainConfig().getIdentifier(), 1L, Long::sum);
+            }
+        }
+        failoverEvmClients.keySet().removeIf(id -> evmNodesPerChain.getOrDefault(id, 0L) < 2);
+        if (web3jClientFactory != null) {
+            evmNodesPerChain.forEach((identifier, count) -> {
+                if (count >= 2 && !failoverEvmClients.containsKey(identifier)) {
+                    Web3j failover = web3jClientFactory.createClient(new FailoverWeb3jService(
+                            () -> failoverTargets(identifier),
+                            this::reportTransportFailure,
+                            nodeId -> writeAffinity.put(identifier,
+                                    new WriteAffinity(nodeId, Instant.now().plus(WRITE_AFFINITY)))));
+                    if (failover != null) failoverEvmClients.put(identifier, failover);
+                }
+            });
         }
 
         log.debug("Node pool refreshed: {} chains, {} EVM nodes, {} Solana nodes, {} Canton nodes",
@@ -393,44 +444,123 @@ public class BlockchainClientRegistry {
     }
 
     private UUID selectBestNodeId(String identifier, List<NodeState> nodes) {
-        // Determine candidate set: exclusive-enabled nodes take precedence
+        List<NodeState> ranked = rankedNodes(identifier, nodes);
+        NodeState first = ranked.getFirst();
+        if (!first.healthy()) {
+            log.warn("No healthy RPC node for chain '{}'; using fallback node {}", identifier, first.nodeId());
+        }
+        return first.nodeId();
+    }
+
+    /** True when a node must never be routed to, not even as the last resort (P4C-1). */
+    private static boolean quarantined(NodeState n) {
+        return RpcNode.HealthReason.isQuarantine(n.healthReason());
+    }
+
+    /**
+     * The routable nodes of a chain, best first: the node that accepted the latest write (while its
+     * affinity lasts), then healthy nodes without a recent call failure by smallest lag (a tie breaks
+     * toward a CHAINCACHE node), then healthy-but-suspect nodes, then unhealthy nodes by fewest failures
+     * and most recent success. Nodes quarantined for a chain/genesis mismatch or an implausible height
+     * are excluded entirely.
+     *
+     * @throws IllegalStateException if every node is manually disabled or quarantined
+     */
+    private List<NodeState> rankedNodes(String identifier, List<NodeState> nodes) {
         List<NodeState> exclusiveEnabled = nodes.stream()
                 .filter(n -> n.exclusive() && n.enabled()).toList();
-
         List<NodeState> candidates = exclusiveEnabled.isEmpty()
                 ? nodes.stream().filter(NodeState::enabled).toList()
                 : exclusiveEnabled;
-
         if (candidates.isEmpty()) {
             throw new IllegalStateException(
                     "All RPC nodes for chain '" + identifier + "' are manually disabled");
         }
-
-        // Prefer healthy with smallest lag; a tie (most commonly two nodes both fully caught up,
-        // lag 0) breaks toward a CHAINCACHE-kind node — its push-based, gap-free finality
-        // guarantees are strictly better than a DIRECT_RPC node's poll-based ones at equal lag,
-        // and this is the whole point of chaincache as a showcase: routed traffic should actually
-        // prefer it, not just coexist with it. Never overrides health/lag itself — an unhealthy
-        // or lagging chaincache node still loses to a healthy, caught-up direct node.
-        Optional<NodeState> best = candidates.stream()
-                .filter(NodeState::healthy)
-                .min(Comparator.<NodeState>comparingInt(n -> n.lagFromBest() != null ? n.lagFromBest() : 0)
-                        .thenComparing(n -> n.kind() == RpcNode.NodeKind.CHAINCACHE ? 0 : 1));
-
-        if (best.isPresent()) {
-            return best.get().nodeId();
+        List<NodeState> routable = candidates.stream().filter(n -> !quarantined(n)).toList();
+        if (routable.isEmpty()) {
+            throw new IllegalStateException("All RPC nodes for chain '" + identifier
+                    + "' are quarantined (chain id / genesis mismatch or implausible height)");
         }
+        Instant now = Instant.now();
+        java.util.function.Predicate<NodeState> suspect = n -> {
+            Instant until = suspectUntil.get(n.nodeId());
+            return until != null && until.isAfter(now);
+        };
+        Comparator<NodeState> byLag = Comparator.<NodeState>comparingInt(n -> n.lagFromBest() != null ? n.lagFromBest() : 0)
+                .thenComparing(n -> n.kind() == RpcNode.NodeKind.CHAINCACHE ? 0 : 1);
+        Comparator<NodeState> leastBad = Comparator.<NodeState>comparingInt(NodeState::consecutiveFailures)
+                .thenComparing(n -> n.lastSuccessAt() != null ? n.lastSuccessAt() : Instant.EPOCH,
+                        Comparator.reverseOrder());
 
-        // Last resort: fewest failures, most recent success
-        NodeState fallback = candidates.stream()
-                .min(Comparator.<NodeState>comparingInt(NodeState::consecutiveFailures)
-                        .thenComparing(
-                                n -> n.lastSuccessAt() != null ? n.lastSuccessAt() : Instant.EPOCH,
-                                Comparator.reverseOrder()))
-                .orElseThrow();
+        List<NodeState> ranked = new ArrayList<>();
+        WriteAffinity affinity = writeAffinity.get(identifier);
+        if (affinity != null && affinity.until().isAfter(now)) {
+            routable.stream().filter(n -> n.nodeId().equals(affinity.nodeId()) && n.healthy() && !suspect.test(n))
+                    .findFirst().ifPresent(ranked::add);
+        }
+        routable.stream().filter(n -> n.healthy() && !suspect.test(n) && !ranked.contains(n))
+                .sorted(byLag).forEach(ranked::add);
+        routable.stream().filter(n -> n.healthy() && suspect.test(n) && !ranked.contains(n))
+                .sorted(byLag).forEach(ranked::add);
+        routable.stream().filter(n -> !n.healthy() && !ranked.contains(n))
+                .sorted(leastBad).forEach(ranked::add);
+        return ranked;
+    }
 
-        log.warn("No healthy RPC node for chain '{}'; using fallback node {}", identifier, fallback.nodeId());
-        return fallback.nodeId();
+    private List<FailoverWeb3jService.Target> failoverTargets(String identifier) {
+        List<NodeState> nodes = nodesByChain.get(identifier);
+        if (nodes == null || nodes.isEmpty()) {
+            throw new IllegalStateException("No RPC nodes for chain '" + identifier + "'");
+        }
+        Map<UUID, org.web3j.protocol.Web3jService> services = nodeEvmServices;
+        return rankedNodes(identifier, nodes).stream()
+                .filter(n -> services.containsKey(n.nodeId()))
+                .map(n -> new FailoverWeb3jService.Target(n.nodeId(), services.get(n.nodeId())))
+                .toList();
+    }
+
+    /** Records a failed call so the node drops behind healthy nodes right away (before the next health round). */
+    void reportTransportFailure(UUID nodeId) {
+        suspectUntil.put(nodeId, Instant.now().plus(SUSPECT_DURATION));
+        log.warn("RPC call to node {} failed; ranking it last for {}s", nodeId, SUSPECT_DURATION.toSeconds());
+    }
+
+    /**
+     * Lag (blocks behind the reference) of the node currently ranked first for a chain, empty when the
+     * chain has no node pool or the node's lag is unknown. Lending uses it to refuse "reliable" prices
+     * read from a lagging node.
+     */
+    public Optional<Integer> routedNodeLag(String identifier) {
+        List<NodeState> nodes = nodesByChain.get(identifier);
+        if (nodes == null || nodes.isEmpty()) return Optional.empty();
+        try {
+            NodeState first = rankedNodes(identifier, nodes).getFirst();
+            return first.healthy() ? Optional.ofNullable(first.lagFromBest()) : Optional.of(Integer.MAX_VALUE);
+        } catch (IllegalStateException e) {
+            return Optional.of(Integer.MAX_VALUE);
+        }
+    }
+
+    /** A routable EVM node with its own (non-failover) client. */
+    public record EvmNodeClient(UUID nodeId, Web3j client, boolean healthy) {}
+
+    /**
+     * The routable EVM nodes of a chain, best first, each with a direct client bound to that single node.
+     * For second-source checks (receipt cross-check, fee cross-check): they need an answer from a
+     * <em>specific, different</em> node, which the failover client cannot give.
+     */
+    public List<EvmNodeClient> evmNodeClients(String identifier) {
+        List<NodeState> nodes = nodesByChain.get(identifier);
+        if (nodes == null || nodes.isEmpty()) return List.of();
+        List<NodeState> ranked;
+        try {
+            ranked = rankedNodes(identifier, nodes);
+        } catch (IllegalStateException e) {
+            return List.of();
+        }
+        Map<UUID, Web3j> clients = nodeEvmClients;
+        return ranked.stream().filter(n -> clients.containsKey(n.nodeId()))
+                .map(n -> new EvmNodeClient(n.nodeId(), clients.get(n.nodeId()), n.healthy())).toList();
     }
 
     // ── NodeState record ──────────────────────────────────────────────────────
@@ -443,5 +573,6 @@ public class BlockchainClientRegistry {
             int consecutiveFailures,
             Instant lastSuccessAt,
             Integer lagFromBest,
-            RpcNode.NodeKind kind) {}
+            RpcNode.NodeKind kind,
+            String healthReason) {}
 }

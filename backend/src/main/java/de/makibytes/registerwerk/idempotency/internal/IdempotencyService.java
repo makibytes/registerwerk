@@ -42,8 +42,8 @@ class IdempotencyService {
     }
 
     @Transactional
-    Outcome checkOrStart(UUID entityId, String key, String requestHash) {
-        Optional<IdempotencyRecord> existing = repository.findForUpdate(entityId, key);
+    Outcome checkOrStart(String scope, UUID scopeId, String key, String requestHash) {
+        Optional<IdempotencyRecord> existing = repository.findForUpdate(scope, scopeId, key);
         if (existing.isPresent()) {
             IdempotencyRecord record = existing.get();
             if (!record.getRequestHash().equals(requestHash)) {
@@ -56,7 +56,8 @@ class IdempotencyService {
         }
 
         IdempotencyRecord created = new IdempotencyRecord();
-        created.setEntityId(entityId);
+        created.setScope(scope);
+        created.setEntityId(scopeId);
         created.setIdempotencyKey(key);
         created.setRequestHash(requestHash);
         try {
@@ -73,7 +74,14 @@ class IdempotencyService {
      * Records the final response. A 5xx is deliberately NOT locked in — it's a server failure,
      * not a completed action the caller should be stuck replaying; deleting the row lets a retry
      * with the same key attempt the action fresh, matching the convention most idempotency-key
-     * implementations (e.g. Stripe's) follow.
+     * implementations (e.g. Stripe's) follow. The same holds for every 4xx (401/403 challenges, and business
+     * refusals such as 408/409/429 or "already exists"/"asset is paused" that depend on state): nothing was
+     * executed, and the operator fixes the state and clicks again with the same key (the frontends keep
+     * the key on those statuses) - replaying the stored 409 would make the action permanently
+     * un-retryable. (The "already in progress" 409 is produced by {@link #checkOrStart}, not here.) A
+     * step-up challenge likewise executed nothing; the client retries the identical request
+     * (same key) once it has stepped up. A durable chain submission made by a request that later
+     * failed is protected separately by the key stored on its outbox row.
      */
     @Transactional
     void complete(UUID recordId, int responseStatus, String responseBody) {
@@ -82,7 +90,7 @@ class IdempotencyService {
             log.warn("Idempotency record {} disappeared before completion — nothing to update.", recordId);
             return;
         }
-        if (responseStatus >= 500) {
+        if (responseStatus >= 400) {
             repository.delete(record);
             return;
         }

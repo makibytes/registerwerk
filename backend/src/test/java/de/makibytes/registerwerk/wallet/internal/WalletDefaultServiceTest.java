@@ -160,6 +160,32 @@ class WalletDefaultServiceTest {
     }
 
     @Test
+    @DisplayName("P4C-5: after bootstrap, a newly created wallet is NOT auto-promoted to default")
+    void bootstrapDefault_noopOnceBootstrapCompleted() {
+        when(walletRepository.bootstrapCompleted()).thenReturn(true);
+
+        service.bootstrapDefaultIfFirstWalletEver(wallet(UUID.randomUUID(), WalletType.EVM));
+
+        verify(defaultRepository, never()).save(any());
+        verify(walletRepository, never()).markBootstrapCompleted();
+    }
+
+    @Test
+    @DisplayName("P4C-5: the very first wallet ever is promoted and the bootstrap marker is set")
+    void bootstrapDefault_firstWalletEverPromoted() {
+        when(walletRepository.bootstrapCompleted()).thenReturn(false);
+        UUID chainId = UUID.randomUUID();
+        when(chainConfigRepository.findByChainTypeAndEnabledTrue(ChainConfig.ChainType.EVM))
+                .thenReturn(java.util.List.of(chain(chainId, ChainConfig.ChainType.EVM)));
+        when(defaultRepository.findByChainConfigId(chainId)).thenReturn(Optional.empty());
+
+        service.bootstrapDefaultIfFirstWalletEver(wallet(UUID.randomUUID(), WalletType.EVM));
+
+        verify(walletRepository).markBootstrapCompleted();
+        verify(defaultRepository).save(any(WalletChainDefault.class));
+    }
+
+    @Test
     @DisplayName("removeDefaultsForWallet deletes all defaults and evicts the signer cache")
     void removeDefaultsForWallet_deletesAndEvicts() {
         UUID walletId = UUID.randomUUID();

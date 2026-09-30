@@ -67,6 +67,7 @@ class BlockchainApiImpl implements BlockchainApi {
                 tx.getGasUsed(), tx.getBlockNumber(), tx.getErrorMessage(),
                 tx.getCreatedAt(), tx.getCompletedAt(),
                 tx.getOpsNote(), tx.getOpsReviewedAt(), tx.getOpsReviewedBy(),
-                tx.getExecutionOutcome());
+                tx.getExecutionOutcome(), tx.getLateMinedAt(), tx.getReplacedByTxHash(), tx.getMinedTxHash(),
+                tx.getStatus() == BlockchainTransaction.Status.TIMEOUT);
     }
 }

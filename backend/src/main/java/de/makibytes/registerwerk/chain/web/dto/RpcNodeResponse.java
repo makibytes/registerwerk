@@ -26,5 +26,9 @@ public record RpcNodeResponse(
         String managementUrl,
         String remoteChainKey,
         Map<String, Object> capabilities,
-        boolean streamConnected
+        boolean streamConnected,
+        /** Why the node is not healthy (e.g. {@code CHAIN_MISMATCH}); null while healthy. */
+        String healthReason,
+        /** The chain's pinned genesis hash, null until captured. */
+        String pinnedGenesisHash
 ) {}

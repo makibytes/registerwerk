@@ -35,6 +35,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
@@ -73,7 +74,7 @@ class StarknetTransferSyncServiceTest {
 
     @BeforeEach
     void setUp() {
-        mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
+        mockServer = MockRestServiceServer.bindTo(restClientBuilder).ignoreExpectOrder(true).build();
         // tokenTransferRepository.findDistinctUnsettledBlocks is left unstubbed on purpose in
         // every test below: Mockito's default answer for a List-returning method is an empty
         // list, so ReorgGuard.reverifyUnsettledWindow short-circuits to VerifyResult.NONE with
@@ -81,9 +82,13 @@ class StarknetTransferSyncServiceTest {
         // exercising the reorg-detection path itself.
         ReorgGuard reorgGuard = new ReorgGuard(tokenTransferRepository, blockFinalityFeed, blockFinalityPort,
                 chainEffectRecorder, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        IndexerSyncSupport syncSupport = new IndexerSyncSupport(
+                org.mockito.Mockito.mock(org.springframework.transaction.PlatformTransactionManager.class),
+                indexerStateRepository);
         service = new StarknetTransferSyncService(chainConfigRepository, indexerStateRepository,
                 tokenTransferRepository, assetDeploymentRepository, explorerUrlBuilder,
-                restClientBuilder, reorgGuard, io.github.resilience4j.bulkhead.BulkheadRegistry.ofDefaults());
+                restClientBuilder, reorgGuard, syncSupport,
+                io.github.resilience4j.bulkhead.BulkheadRegistry.ofDefaults());
     }
 
     /** Only needed by tests that reach past the "no watched deployments" early-return. */
@@ -115,7 +120,7 @@ class StarknetTransferSyncServiceTest {
      *  uses it unless the test cares specifically about the FINAL/L1 branch. */
     private static String blockStatusResponse(String status) {
         return """
-            {"jsonrpc":"2.0","id":1,"result":{"status":"%s"}}
+            {"jsonrpc":"2.0","id":1,"result":{"status":"%s","timestamp":1767225600}}
             """.formatted(status);
     }
 
@@ -126,7 +131,7 @@ class StarknetTransferSyncServiceTest {
         ChainConfig chain = starknetChain();
         when(assetDeploymentRepository.findByChainAndNetwork(Chain.STARKNET, Network.TESTNET))
                 .thenReturn(List.of(deployment("0x1a2b3c")));
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(any(), any(), any()))
+        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(any(), any(), any(), any()))
                 .thenReturn(false);
 
         mockServer.expect(requestTo(RPC_URL))
@@ -154,6 +159,8 @@ class StarknetTransferSyncServiceTest {
         assertThat(saved.getContractAddress()).isEqualTo("0x1a2b3c");
         assertThat(saved.getBlockNumber()).isEqualTo(10L);
         assertThat(saved.getLogIndex()).isEqualTo(0);
+        // P4D-3: occurred_at is the block header timestamp, never the poll time.
+        assertThat(saved.getOccurredAt()).isEqualTo(java.time.Instant.ofEpochSecond(1767225600L));
         assertThat(saved.getDeploymentId()).isEqualTo(deploymentId);
         assertThat(saved.getAssetId()).isEqualTo(assetId);
         // ACCEPTED_ON_L2 (not yet ACCEPTED_ON_L1) — a real intermediate guarantee, so SAFE rather
@@ -176,7 +183,7 @@ class StarknetTransferSyncServiceTest {
         ChainConfig chain = starknetChain();
         when(assetDeploymentRepository.findByChainAndNetwork(Chain.STARKNET, Network.TESTNET))
                 .thenReturn(List.of(deployment("0x1a2b3c")));
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(any(), any(), any()))
+        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(any(), any(), any(), any()))
                 .thenReturn(false);
 
         mockServer.expect(requestTo(RPC_URL))
@@ -214,7 +221,7 @@ class StarknetTransferSyncServiceTest {
         ChainConfig chain = starknetChain();
         when(assetDeploymentRepository.findByChainAndNetwork(Chain.STARKNET, Network.TESTNET))
                 .thenReturn(List.of(deployment("0x1a2b3c")));
-        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(eq(chainConfigId), eq("0xdeadbeef"), eq(0)))
+        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(eq(chainConfigId), eq("0xdeadbeef"), eq(0), eq("0x1a2b3c")))
                 .thenReturn(true);
 
         mockServer.expect(requestTo(RPC_URL))
@@ -235,6 +242,33 @@ class StarknetTransferSyncServiceTest {
     }
 
     @Test
+    @DisplayName("re-reading history whose events carry an RPC event_index keeps the per-(tx, contract) ordinal as log_index (V19 rewind is idempotent)")
+    void syncChain_eventIndexDoesNotChangeLogIndexScheme() {
+        stubEmptyIndexerState();
+        ChainConfig chain = starknetChain();
+        when(assetDeploymentRepository.findByChainAndNetwork(Chain.STARKNET, Network.TESTNET))
+                .thenReturn(List.of(deployment("0x1a2b3c")));
+        // the row written before the rewind: ordinal 0, although the RPC now reports event_index 3
+        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(eq(chainConfigId), eq("0xdeadbeef"), eq(0), eq("0x1a2b3c")))
+                .thenReturn(true);
+
+        mockServer.expect(requestTo(RPC_URL))
+                .andRespond(withSuccess("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":100}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(RPC_URL))
+                .andRespond(withSuccess("""
+                    {"jsonrpc":"2.0","id":1,"result":{"events":[
+                      {"from_address":"0x1a2b3c","keys":["%s","0x0","0xabc"],
+                       "data":["0x64","0x0"],"block_number":10,"transaction_hash":"0xdeadbeef","event_index":3}
+                    ]}}
+                    """.formatted(TRANSFER_SELECTOR), MediaType.APPLICATION_JSON));
+
+        service.syncChain(chain);
+
+        verify(tokenTransferRepository, never()).save(any());
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("syncChain no-ops when no Starknet deployment has a known contract address")
     void syncChain_noOpsWithoutWatchedDeployments() {
         ChainConfig chain = starknetChain();
@@ -245,5 +279,80 @@ class StarknetTransferSyncServiceTest {
 
         verify(tokenTransferRepository, never()).save(any());
         verify(indexerStateRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("two watched tokens emitting in one transaction are both saved (contract is part of the dedup key) with the block time")
+    void syncChain_twoTokensInOneTransactionBothSaved() {
+        stubEmptyIndexerState();
+        ChainConfig chain = starknetChain();
+        AssetDeployment second = deployment("0x4d5e6f");
+        second.setId(UUID.randomUUID());
+        second.setAssetId(UUID.randomUUID());
+        when(assetDeploymentRepository.findByChainAndNetwork(Chain.STARKNET, Network.TESTNET))
+                .thenReturn(List.of(deployment("0x1a2b3c"), second));
+        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(any(), any(), any(), any()))
+                .thenReturn(false);
+
+        mockServer.expect(requestTo(RPC_URL))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("starknet_blockNumber")))
+                .andRespond(withSuccess("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":100}", MediaType.APPLICATION_JSON));
+        for (String token : List.of("0x1a2b3c", "0x4d5e6f")) {
+            mockServer.expect(requestTo(RPC_URL))
+                    .andExpect(content().string(org.hamcrest.Matchers.containsString("\"address\":\"" + token + "\"")))
+                    .andRespond(withSuccess("""
+                        {"jsonrpc":"2.0","id":1,"result":{"events":[
+                          {"from_address":"%s","keys":["%s","0x0","0xabc"],
+                           "data":["0x64","0x0"],"block_number":10,"transaction_hash":"0xsametx"}
+                        ]}}
+                        """.formatted(token, TRANSFER_SELECTOR), MediaType.APPLICATION_JSON));
+        }
+        mockServer.expect(requestTo(RPC_URL))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("starknet_getBlockWithTxHashes")))
+                .andRespond(withSuccess(blockStatusResponse("ACCEPTED_ON_L2"), MediaType.APPLICATION_JSON));
+
+        service.syncChain(chain);
+
+        ArgumentCaptor<TokenTransfer> captor = ArgumentCaptor.forClass(TokenTransfer.class);
+        verify(tokenTransferRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+        assertThat(captor.getAllValues()).extracting(TokenTransfer::getContractAddress)
+                .containsExactly("0x1a2b3c", "0x4d5e6f");
+        assertThat(captor.getAllValues()).extracting(TokenTransfer::getLogIndex).containsExactly(0, 0);
+        assertThat(captor.getAllValues()).extracting(TokenTransfer::getOccurredAt)
+                .containsOnly(java.time.Instant.ofEpochSecond(1767225600L));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("an unreadable block header aborts the pass: nothing is booked with processing time and the cursor stays put")
+    void syncChain_unreadableBlockHeaderAbortsWithoutSaving() {
+        stubEmptyIndexerState();
+        ChainConfig chain = starknetChain();
+        when(assetDeploymentRepository.findByChainAndNetwork(Chain.STARKNET, Network.TESTNET))
+                .thenReturn(List.of(deployment("0x1a2b3c")));
+        when(tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(any(), any(), any(), any()))
+                .thenReturn(false);
+
+        mockServer.expect(requestTo(RPC_URL))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("starknet_blockNumber")))
+                .andRespond(withSuccess("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":100}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(RPC_URL))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("starknet_getEvents")))
+                .andRespond(withSuccess("""
+                    {"jsonrpc":"2.0","id":1,"result":{"events":[
+                      {"from_address":"0x1a2b3c","keys":["%s","0x0","0xabc"],
+                       "data":["0x64","0x0"],"block_number":10,"transaction_hash":"0xdeadbeef"}
+                    ]}}
+                    """.formatted(TRANSFER_SELECTOR), MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(RPC_URL))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("starknet_getBlockWithTxHashes")))
+                .andRespond(withSuccess("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":24,\"message\":\"Block not found\"}}",
+                        MediaType.APPLICATION_JSON));
+
+        // The unit-test IndexerSyncSupport has a mocked transaction manager, so the exception surfaces to
+        // recordFailure (which writes through the mocked repository) instead of being rolled back.
+        service.syncChain(chain);
+
+        verify(tokenTransferRepository, never()).save(any());
     }
 }

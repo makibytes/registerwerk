@@ -13,7 +13,13 @@ import java.util.UUID;
 @Table(name = "blockchain_transaction")
 public class BlockchainTransaction {
 
-    public enum Status { PENDING, SUCCESS, FAILED, TIMEOUT }
+    /**
+     * TIMEOUT is <em>not</em> a confirmed failure: the transaction was not mined within the timeout
+     * but may still be (the poller keeps reading TIMEOUT rows for the late-mined window). Only FAILED
+     * (reverted receipt) and REPLACED (the nonce was consumed by a different transaction, so this one
+     * can never mine) mean "it did not and will not happen".
+     */
+    public enum Status { PENDING, SUCCESS, FAILED, TIMEOUT, REPLACED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -62,6 +68,11 @@ public class BlockchainTransaction {
     @Column(name = "actor_role", length = 30)
     private String actorRole;
 
+    /** P4B-7: '<scope>:<scopeId>:<Idempotency-Key>#<n>' of the HTTP request that caused this
+     *  submission; unique on the outbox row so a replayed request maps to this very transaction. */
+    @Column(name = "idempotency_key", length = 400)
+    private String idempotencyKey;
+
     @Column(name = "gas_used")
     private Long gasUsed;
 
@@ -99,6 +110,26 @@ public class BlockchainTransaction {
     @Column(name = "ops_reviewed_by")
     private UUID opsReviewedBy;
 
+    /** P4C-4: validated second approver (4-eyes) of the request that submitted this tx; null when none was required. */
+    @Column(name = "approver_id")
+    private UUID approverId;
+
+    /** P4C-4: optional free-text case / order reference supplied with the request (parked T4-06). */
+    @Column(name = "case_reference", length = 200)
+    private String caseReference;
+
+    /** When a receipt finally arrived for a row that had already been marked TIMEOUT (P4B-5). */
+    @Column(name = "late_mined_at")
+    private Instant lateMinedAt;
+
+    /** Latest re-price / cancel replacement issued for this transaction's nonce (P4B-4). */
+    @Column(name = "replaced_by_tx_hash", length = 66)
+    private String replacedByTxHash;
+
+    /** The hash that actually mined, when it differs from {@link #txHash} (a re-priced replacement). */
+    @Column(name = "mined_tx_hash", length = 66)
+    private String minedTxHash;
+
     /**
      * Verified business outcome of a confidential forced operation, written by
      * {@code ConfidentialForcedOpVerifier}. {@link #status} SUCCESS only says the transaction did
@@ -121,6 +152,12 @@ public class BlockchainTransaction {
     public String getTxHash() { return txHash; }
     public void setTxHash(String txHash) { this.txHash = txHash; }
 
+    public Instant getLateMinedAt() { return lateMinedAt; }
+    public void setLateMinedAt(Instant lateMinedAt) { this.lateMinedAt = lateMinedAt; }
+    public String getReplacedByTxHash() { return replacedByTxHash; }
+    public void setReplacedByTxHash(String replacedByTxHash) { this.replacedByTxHash = replacedByTxHash; }
+    public String getMinedTxHash() { return minedTxHash; }
+    public void setMinedTxHash(String minedTxHash) { this.minedTxHash = minedTxHash; }
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }
 
@@ -153,6 +190,8 @@ public class BlockchainTransaction {
 
     public String getActorRole() { return actorRole; }
     public void setActorRole(String actorRole) { this.actorRole = actorRole; }
+    public String getIdempotencyKey() { return idempotencyKey; }
+    public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
 
     public Long getGasUsed() { return gasUsed; }
     public void setGasUsed(Long gasUsed) { this.gasUsed = gasUsed; }
@@ -176,6 +215,12 @@ public class BlockchainTransaction {
 
     public Instant getOpsReviewedAt() { return opsReviewedAt; }
     public void setOpsReviewedAt(Instant opsReviewedAt) { this.opsReviewedAt = opsReviewedAt; }
+
+    public UUID getApproverId() { return approverId; }
+    public void setApproverId(UUID approverId) { this.approverId = approverId; }
+
+    public String getCaseReference() { return caseReference; }
+    public void setCaseReference(String caseReference) { this.caseReference = caseReference; }
 
     public UUID getOpsReviewedBy() { return opsReviewedBy; }
     public void setOpsReviewedBy(UUID opsReviewedBy) { this.opsReviewedBy = opsReviewedBy; }

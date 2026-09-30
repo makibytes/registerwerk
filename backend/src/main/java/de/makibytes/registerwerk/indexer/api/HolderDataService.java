@@ -95,6 +95,16 @@ import java.util.UUID;
  *       positive nominal are counted and persisted per asset (operator banner + gauge), not
  *       BLOCKED — prevention sits at the write paths.</li>
  * </ul>
+ *
+ * <p>Phase 4 (K1) rules:
+ * <ul>
+ *   <li><b>Coverage guard (P4-01).</b> Every non-failed deployment with a contract address must
+ *       pass {@link IndexingCoverage}; otherwise the sync is refused (BLOCKED, "deployment ... is
+ *       not indexed"). An empty history on an unindexed chain is unknown, never zero.</li>
+ *   <li><b>No clamping (P4-04).</b> A negative net balance means the history is incomplete
+ *       (mint/burn counterparties are excluded, so a legitimate negative cannot arise) and refuses
+ *       the sync instead of being written as zero.</li>
+ * </ul>
  */
 @Service
 public class HolderDataService implements de.makibytes.registerwerk.indexer.IndexerApi {
@@ -114,6 +124,7 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
     private final AssetLookupPort assetLookupPort;
     private final ChainConfigRepository chainConfigRepository;
     private final GraphNodeClient graphNodeClient;
+    private final IndexingCoverage indexingCoverage;
 
     public HolderDataService(AssetDeploymentRepository deploymentRepository,
                              TokenTransferRepository tokenTransferRepository,
@@ -122,7 +133,8 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
                              HolderSyncStatusPort holderSyncStatusPort,
                              AssetLookupPort assetLookupPort,
                              ChainConfigRepository chainConfigRepository,
-                             GraphNodeClient graphNodeClient) {
+                             GraphNodeClient graphNodeClient,
+                             IndexingCoverage indexingCoverage) {
         this.deploymentRepository = deploymentRepository;
         this.tokenTransferRepository = tokenTransferRepository;
         this.assetHolderRepository = assetHolderRepository;
@@ -131,6 +143,7 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
         this.assetLookupPort = assetLookupPort;
         this.chainConfigRepository = chainConfigRepository;
         this.graphNodeClient = graphNodeClient;
+        this.indexingCoverage = indexingCoverage;
     }
 
     /** Synchronizes holder balances for one asset from the indexed transfer history. */
@@ -140,6 +153,24 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
         if (deployments.isEmpty()) {
             log.debug("Holder sync for asset={}: no deployments, nothing to do", assetId);
             return;
+        }
+        // P4-01: an empty transfer history is only "nothing happened" when something demonstrably
+        // indexes the deployment. Any deployment without reliable ingestion evidence refuses the
+        // whole sync (BLOCKED) before anything is netted or written.
+        List<String> notIndexed = new ArrayList<>();
+        for (AssetDeployment deployment : deployments) {
+            if (deployment.getDeploymentStatus() == AssetDeployment.DeploymentStatus.FAILED
+                    || deployment.getContractAddress() == null || deployment.getContractAddress().isBlank()) {
+                continue; // nothing on chain to index
+            }
+            IndexingCoverage.Coverage coverage = indexingCoverage.evaluate(deployment);
+            if (!coverage.covered()) {
+                notIndexed.add("deployment " + deployment.getId() + " on " + deployment.getChain()
+                        + " is not indexed: " + coverage.reason());
+            }
+        }
+        if (!notIndexed.isEmpty()) {
+            refuse(assetId, List.of(), String.join("; ", notIndexed));
         }
         TokenStandard standard = assetLookupPort.findById(assetId)
                 .map(AssetLookupPort.AssetInfo::tokenStandard)
@@ -152,9 +183,8 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
         Map<String, Instant> firstIncoming = new HashMap<>();
 
         long transferCount = 0;
-        boolean[] unindexedSkipped = {false};
         if (standard != null && VALUE_PROJECTION_STANDARDS.contains(standard)) {
-            transferCount = collectErc3525Values(assetId, deployments, balances, displayAddress, unindexedSkipped);
+            transferCount = collectErc3525Values(assetId, deployments, balances, displayAddress);
         } else {
             long transfersWithoutAmount = 0;
             for (AssetDeployment deployment : deployments) {
@@ -182,6 +212,20 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
                 refuse(assetId, List.of(), transfersWithoutAmount + " finalized transfer(s) without amount on a "
                         + standard + " asset — only ERC-721 transfers may omit the amount");
             }
+        }
+
+        // P4-04: a negative net balance is proof of missing history (a transfer out whose funding
+        // mint/transfer was never indexed), not a zero position. Mint/burn counterparties are
+        // already excluded from `balances`, so a legitimate negative cannot arise. Clamping it to
+        // zero used to hide the gap and mark the register reconciled.
+        List<String> negativeWallets = balances.entrySet().stream()
+                .filter(entry -> entry.getValue().signum() < 0)
+                .map(entry -> displayAddress.getOrDefault(entry.getKey(), entry.getKey()))
+                .sorted()
+                .toList();
+        if (!negativeWallets.isEmpty()) {
+            refuse(assetId, negativeWallets, "indexed history incomplete: negative net balance for wallet(s) "
+                    + negativeWallets + " — a funding transfer or mint is missing from the indexed history");
         }
 
         // T3-17: active and removed rows are keyed separately. idx_holder_wallet is unique over
@@ -243,7 +287,7 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
 
         int updated = 0;
         for (Map.Entry<String, BigDecimal> entry : balances.entrySet()) {
-            BigDecimal balance = entry.getValue().max(BigDecimal.ZERO);
+            BigDecimal balance = entry.getValue();
             AssetHolder holder = activeByWallet.get(entry.getKey());
             if (holder != null) {
                 boolean balanceChanged = holder.getNominalAmount() == null
@@ -273,16 +317,11 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
         // transfer for this asset was just orphaned) — a full recompute with nothing left to count
         // must still zero out every previously chain-derived holder, not silently no-op. Removed
         // rows are history and are never rewritten (T3-17).
-        // An ERC-3525 deployment on an unindexed chain contributed nothing to `balances`; that is
-        // "unknown", not "zero", so the pass must not wipe previously chain-derived holders.
+        // Every deployment passed the coverage guard above, so an absent wallet really is "zero".
         int zeroed = 0;
-        if (unindexedSkipped[0]) {
-            log.warn("Holder sync for asset={}: an ERC-3525 deployment is not indexed; "
-                    + "skipping the vanished-holder zeroing pass", assetId);
-        }
         for (Map.Entry<String, AssetHolder> existing : activeByWallet.entrySet()) {
             AssetHolder holder = existing.getValue();
-            if (!unindexedSkipped[0] && holder.isChainDerived() && !balances.containsKey(existing.getKey())
+            if (holder.isChainDerived() && !balances.containsKey(existing.getKey())
                     && holder.getNominalAmount() != null && holder.getNominalAmount().signum() != 0) {
                 holder.setNominalAmount(BigDecimal.ZERO);
                 assetHolderRepository.save(holder);
@@ -315,8 +354,7 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
      * @return number of projection rows read
      */
     private long collectErc3525Values(UUID assetId, List<AssetDeployment> deployments,
-                                      Map<String, BigDecimal> balances, Map<String, String> displayAddress,
-                                      boolean[] unindexedSkipped) {
+                                      Map<String, BigDecimal> balances, Map<String, String> displayAddress) {
         long rows = 0;
         List<String> incompleteOwners = new ArrayList<>();
         for (AssetDeployment deployment : deployments) {
@@ -326,13 +364,11 @@ public class HolderDataService implements de.makibytes.registerwerk.indexer.Inde
             ChainConfig chain = deployment.getChainConfigId() == null ? null
                     : chainConfigRepository.findById(deployment.getChainConfigId()).orElse(null);
             if (chain == null || chain.getGraphNodeUrl() == null || chain.getGraphSubgraphName() == null) {
-                // Same as the transfer path on an unindexed chain (nothing counted). Refusing here
-                // would BLOCK every ERC-3525 asset on a chain without a Graph Node; the coverage
-                // guard for unindexed deployments is Phase 4 work (T3-18), for all standards alike.
-                log.warn("Holder sync for asset={}: ERC-3525 deployment {} has no Graph Node configured; "
-                        + "its value projection is not counted", assetId, deployment.getId());
-                unindexedSkipped[0] = true;
-                continue;
+                // P4-01: unknown is not zero — the value projection cannot be read, so the asset is
+                // BLOCKED rather than reconciled against nothing.
+                refuse(assetId, List.of(), "deployment " + deployment.getId() + " on " + deployment.getChain()
+                        + " is not indexed: ERC-3525 value projection needs a Graph Node and subgraph "
+                        + "configured on the chain");
             }
             for (GraphNodeClient.Erc3525OwnerSlotBalance row
                     : graphNodeClient.fetchErc3525OwnerSlotBalances(chain, deployment.getContractAddress())) {

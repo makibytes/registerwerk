@@ -1,0 +1,47 @@
+{
+  "blockTime": 1767225600,
+  "slot": 310000001,
+  "version": 0,
+  "meta": {
+    "err": null,
+    "fee": 5000,
+    "preTokenBalances": [
+      {"accountIndex": 1, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerAlice1111111111111111111111111111111111",
+       "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+       "uiTokenAmount": {"amount": "1000", "decimals": 0, "uiAmount": 1000.0, "uiAmountString": "1000"}},
+      {"accountIndex": 2, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerBob111111111111111111111111111111111111",
+       "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+       "uiTokenAmount": {"amount": "0", "decimals": 0, "uiAmount": null, "uiAmountString": "0"}},
+      {"accountIndex": 3, "mint": "MintOtherOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO", "owner": "OwnerAlice1111111111111111111111111111111111",
+       "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+       "uiTokenAmount": {"amount": "77", "decimals": 0, "uiAmount": 77.0, "uiAmountString": "77"}}
+    ],
+    "postTokenBalances": [
+      {"accountIndex": 1, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerAlice1111111111111111111111111111111111",
+       "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+       "uiTokenAmount": {"amount": "600", "decimals": 0, "uiAmount": 600.0, "uiAmountString": "600"}},
+      {"accountIndex": 2, "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "owner": "OwnerBob111111111111111111111111111111111111",
+       "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+       "uiTokenAmount": {"amount": "400", "decimals": 0, "uiAmount": 400.0, "uiAmountString": "400"}},
+      {"accountIndex": 3, "mint": "MintOtherOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO", "owner": "OwnerAlice1111111111111111111111111111111111",
+       "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+       "uiTokenAmount": {"amount": "77", "decimals": 0, "uiAmount": 77.0, "uiAmountString": "77"}}
+    ]
+  },
+  "transaction": {
+    "message": {
+      "accountKeys": [
+        {"pubkey": "OwnerAlice1111111111111111111111111111111111", "signer": true, "writable": true},
+        {"pubkey": "AtaAlice", "signer": false, "writable": true},
+        {"pubkey": "AtaBob", "signer": false, "writable": true}
+      ],
+      "instructions": [
+        {"program": "spl-token", "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+         "parsed": {"type": "transferChecked", "info": {"authority": "OwnerAlice1111111111111111111111111111111111",
+           "destination": "AtaBob", "source": "AtaAlice", "mint": "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+           "tokenAmount": {"amount": "400", "decimals": 0}}}}
+      ]
+    },
+    "signatures": ["sigTransferChecked"]
+  }
+}

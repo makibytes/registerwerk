@@ -148,8 +148,13 @@ class VaultRequestIngestionIT {
 
     /** Recorded fixture shape of an eth_getLogs entry. */
     private EthLog.LogObject log(long block, String txHash, int logIndex, List<String> topics, String data) {
+        return logAt(vault, block, txHash, logIndex, topics, data);
+    }
+
+    private EthLog.LogObject logAt(String address, long block, String txHash, int logIndex, List<String> topics,
+                                   String data) {
         EthLog.LogObject l = new EthLog.LogObject();
-        l.setAddress(vault);
+        l.setAddress(address);
         l.setBlockNumber("0x" + Long.toHexString(block));
         l.setBlockHash("0x" + String.format("%064x", block));
         l.setTransactionHash(txHash);
@@ -182,7 +187,7 @@ class VaultRequestIngestionIT {
 
         ingestion.ingestDeployment(dep);
 
-        VaultRequest row = vaultRequestRepository.findByAssetIdAndRequestId(assetId, BigInteger.valueOf(7)).orElseThrow();
+        VaultRequest row = vaultRequestRepository.findByAssetIdAndChainConfigIdAndRequestId(assetId, chainConfigId, BigInteger.valueOf(7)).orElseThrow();
         assertThat(row.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
         assertThat(row.getRequestType()).isEqualTo(VaultRequestType.DEPOSIT);
         assertThat(row.getControllerAddr()).isEqualTo(CONTROLLER);
@@ -235,15 +240,107 @@ class VaultRequestIngestionIT {
 
         ingestion.ingestDeployment(deploymentRepository.findById(deploymentId).orElseThrow());
 
-        VaultRequest cancelled = vaultRequestRepository.findByAssetIdAndRequestId(assetId, BigInteger.valueOf(8)).orElseThrow();
+        VaultRequest cancelled = vaultRequestRepository.findByAssetIdAndChainConfigIdAndRequestId(assetId, chainConfigId, BigInteger.valueOf(8)).orElseThrow();
         assertThat(cancelled.getRequestStatus()).isEqualTo(VaultRequestStatus.CANCELLED);
         assertThat(cancelled.isConfirmed()).isTrue();
         assertThat(cancelled.getCancelledTx()).isEqualTo("0x" + "f".repeat(64));
 
-        VaultRequest forced = vaultRequestRepository.findByAssetIdAndRequestId(assetId, BigInteger.valueOf(9)).orElseThrow();
+        VaultRequest forced = vaultRequestRepository.findByAssetIdAndChainConfigIdAndRequestId(assetId, chainConfigId, BigInteger.valueOf(9)).orElseThrow();
         assertThat(forced.getRequestStatus()).isEqualTo(VaultRequestStatus.FORCE_CANCELLED);
         assertThat(forced.getForcedToAddr()).isEqualTo("0x00000000000000000000000000000000000000ee");
         assertThat(forced.getLegalBasis()).isEqualTo("LG Frankfurt 2-04 O 1/26");
         assertThat(forced.getShareAmount()).isEqualTo(BigInteger.valueOf(40L));
+    }
+
+    /** A second vault of the same asset on another chain, wired to its own mocked node. */
+    private record SecondVault(UUID deploymentId, UUID chainConfigId, String vault, List<EthLog.LogResult<?>> logs) {}
+
+    private SecondVault secondVaultOnOtherChain() throws Exception {
+        UUID depB = UUID.randomUUID();
+        UUID chainB = UUID.randomUUID();
+        String vaultB = "0x" + (UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", "").substring(0, 40);
+        jdbc.update("""
+                INSERT INTO chain_config (id, identifier, display_name, chain_type, network_type, rpc_url, enabled)
+                VALUES (?, ?, 'Vault IT Chain B', 'EVM', 'TESTNET', 'http://localhost:8546', true)
+                """, chainB, "vault-it-" + chainB);
+        jdbc.update("""
+                INSERT INTO asset_deployment (id, asset_id, chain, network, contract_address, deployment_status,
+                                              chain_config_id, block_number)
+                VALUES (?, ?, 'POLYGON', 'TESTNET', ?, 'CONFIRMED', ?, 100)
+                """, depB, assetId, vaultB, chainB);
+        Web3j web3jB = mock(Web3j.class);
+        List<EthLog.LogResult<?>> logsB = new ArrayList<>();
+        when(evmContractService.evmClient(chainB)).thenReturn(web3jB);
+        when(finalityResolver.finalizedHead(any(), eq(web3jB))).thenReturn(Optional.of(150L));
+        when(evmContractService.call(eq(web3jB), eq(vaultB), any(Function.class))).thenAnswer(inv -> {
+            Function fn = inv.getArgument(2);
+            return switch (fn.getName()) {
+                case "depositRequestPayer" -> List.<Type>of(new Address(PAYER));
+                case "isFrozen" -> List.<Type>of(new Bool(false));
+                default -> throw new IllegalArgumentException(fn.getName());
+            };
+        });
+        EthLog ethLog = new EthLog();
+        ethLog.setResult(logsB);
+        @SuppressWarnings("unchecked")
+        Request<?, EthLog> logsRequest = mock(Request.class);
+        when(logsRequest.send()).thenReturn(ethLog);
+        doReturn(logsRequest).when(web3jB).ethGetLogs(any());
+        EthBlock.Block block = new EthBlock.Block();
+        block.setTimestamp("0x" + Long.toHexString(1_760_000_000L));
+        EthBlock ethBlock = new EthBlock();
+        ethBlock.setResult(block);
+        @SuppressWarnings("unchecked")
+        Request<?, EthBlock> blockRequest = mock(Request.class);
+        when(blockRequest.send()).thenReturn(ethBlock);
+        doReturn(blockRequest).when(web3jB).ethGetBlockByHash(any(), eq(false));
+        return new SecondVault(depB, chainB, vaultB, logsB);
+    }
+
+    @Test
+    @DisplayName("P4-05: the same request id on two chains is two rows; fulfil/cancel on one never touches the other")
+    void sameRequestIdOnTwoChainsIsKeptApart() throws Exception {
+        SecondVault b = secondVaultOnOtherChain();
+        logs.add(depositRequested(5, 111L));
+        b.logs().add(logAt(b.vault(), 120, "0x" + "c".repeat(64), 0,
+                List.of(Erc7540Events.DEPOSIT_REQUESTED_TOPIC, topicOf(BigInteger.valueOf(5)),
+                        topicOf(CONTROLLER), topicOf(OWNER)),
+                "0x" + TypeEncoder.encode(new Uint256(222L))));
+
+        ingestion.ingestDeployment(deploymentRepository.findById(deploymentId).orElseThrow());
+        ingestion.ingestDeployment(deploymentRepository.findById(b.deploymentId()).orElseThrow());
+
+        VaultRequest rowA = vaultRequestRepository
+                .findByAssetIdAndChainConfigIdAndRequestId(assetId, chainConfigId, BigInteger.valueOf(5)).orElseThrow();
+        VaultRequest rowB = vaultRequestRepository
+                .findByAssetIdAndChainConfigIdAndRequestId(assetId, b.chainConfigId(), BigInteger.valueOf(5)).orElseThrow();
+        assertThat(rowA.getId()).isNotEqualTo(rowB.getId());
+        assertThat(rowA.getAssetAmount()).isEqualTo(BigInteger.valueOf(111L));
+        assertThat(rowB.getAssetAmount()).isEqualTo(BigInteger.valueOf(222L));
+
+        // Operator fulfils the request on chain B only.
+        when(durableTransactions.submit(eq(b.chainConfigId()), eq(b.vault()), any(Function.class), any()))
+                .thenReturn("0xfulfilB");
+        when(blockchainTransactionService.record(eq("0xfulfilB"), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(UUID.randomUUID());
+        adminService.fulfillRequest(b.deploymentId(), BigInteger.valueOf(5), UUID.randomUUID(), "REGISTRY_ADMIN");
+        assertThat(vaultRequestRepository.findById(rowB.getId()).orElseThrow().getFulfilledTx()).isEqualTo("0xfulfilB");
+        assertThat(vaultRequestRepository.findById(rowA.getId()).orElseThrow().getFulfilledTx()).isNull();
+
+        // Controller cancels request 5 on chain A on-chain: only A's row resolves.
+        logs.clear();
+        logs.add(log(130, "0x" + "f".repeat(64), 0,
+                List.of(Erc7540Events.REQUEST_CANCELLED_TOPIC, topicOf(BigInteger.valueOf(5)), topicOf(CONTROLLER)),
+                "0x"));
+        jdbc.update("UPDATE vault_request_ingest_cursor SET last_scanned_block = 125 WHERE asset_deployment_id = ?",
+                deploymentId);
+        ingestion.ingestDeployment(deploymentRepository.findById(deploymentId).orElseThrow());
+
+        VaultRequest afterA = vaultRequestRepository.findById(rowA.getId()).orElseThrow();
+        VaultRequest afterB = vaultRequestRepository.findById(rowB.getId()).orElseThrow();
+        assertThat(afterA.getRequestStatus()).isEqualTo(VaultRequestStatus.CANCELLED);
+        assertThat(afterB.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
+        assertThat(afterB.isConfirmed()).isFalse();
+        assertThat(afterB.getCancelledTx()).isNull();
     }
 }

@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.finality.api.ChainEffectRecord;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
 import de.makibytes.registerwerk.finality.api.CompensationOutcome;
 import de.makibytes.registerwerk.indexer.api.HolderDataService;
+import de.makibytes.registerwerk.indexer.api.UnmappedHolderIdentityException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -48,6 +49,16 @@ class HolderRecomputeCompensator implements ChainEffectCompensator {
                     "Holder balances recomputed for asset " + effect.entityId()
                             + " after reorg at chainConfigId=" + effect.chainConfigId()
                             + " block=" + effect.blockNumber());
+        } catch (UnmappedHolderIdentityException e) {
+            // P4-07: a refused recompute (unmapped identity, closed entry, missing amount, negative
+            // balance, deployment not indexed) has already persisted the BLOCKED marker
+            // (noRollbackFor). The register is flagged for the operator; failing here would roll
+            // back the orphaning and cursor rewind and loop the typed-reorg episode forever.
+            log.warn("HolderRecomputeCompensator: register BLOCKED for asset={}: {}",
+                    effect.entityId(), e.getMessage());
+            return new CompensationOutcome.Compensated(
+                    "holder balances not recomputed: register BLOCKED (" + e.getMessage()
+                            + "); orphaned rows already excluded");
         } catch (Exception e) {
             log.warn("HolderRecomputeCompensator: recompute failed for asset={}: {}",
                     effect.entityId(), e.getMessage(), e);

@@ -13,4 +13,8 @@ public final class StepUpAttributes {
     /** {@code UUID} of the validated dual-control approver; present only when {@code
      * requireSecondApprover = true} and validation succeeded. */
     public static final String DUAL_CONTROL_APPROVER_ID = "stepup.dualControlApproverId";
+
+    /** {@code UUID} correlating the {@code DUAL_CONTROL_APPROVED} audit entry with the request;
+     * set by the aspect (after argument resolution — read it from the request, not a parameter). */
+    public static final String DUAL_CONTROL_REQUEST_ID = "stepup.dualControlRequestId";
 }

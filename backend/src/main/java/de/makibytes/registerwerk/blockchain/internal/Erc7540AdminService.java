@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -244,6 +245,9 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
         AssetDeployment dep = deploymentRepository.findById(deploymentId)
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
         return vaultRequestRepository.findByAssetIdAndRequestStatus(dep.getAssetId(), status).stream()
+                // Request ids are per vault: show only this deployment's chain (legacy rows without one included).
+                .filter(r -> r.getChainConfigId() == null || dep.getChainConfigId() == null
+                        || r.getChainConfigId().equals(dep.getChainConfigId()))
                 .map(r -> {
                     if (r.getRequestStatus() != VaultRequestStatus.PENDING || dep.getContractAddress() == null) {
                         return VaultRequestView.of(r, false, null);
@@ -328,9 +332,16 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
     private VaultRequest requirePendingRequest(AssetDeployment deployment, BigInteger requestId,
                                                VaultRequestType expectedType) {
         VaultRequest request = vaultRequestRepository
-                .findByAssetIdAndRequestId(deployment.getAssetId(), requestId)
+                .findByAssetIdAndChainConfigIdAndRequestId(
+                        deployment.getAssetId(), deployment.getChainConfigId(), requestId)
+                .or(() -> deployment.getChainConfigId() == null ? Optional.empty()
+                        : vaultRequestRepository.findByAssetIdAndChainConfigIdIsNullAndRequestId(
+                                deployment.getAssetId(), requestId))
                 .orElseThrow(() -> new EntityNotFoundException(
                         "VaultRequest", "requestId", requestId.toString()));
+        if (request.getChainConfigId() == null) {
+            request.setChainConfigId(deployment.getChainConfigId()); // legacy row: attach the chain
+        }
         if (expectedType != null && request.getRequestType() != expectedType) {
             throw new IllegalArgumentException("Vault request " + requestId + " is "
                     + request.getRequestType() + ", not " + expectedType);

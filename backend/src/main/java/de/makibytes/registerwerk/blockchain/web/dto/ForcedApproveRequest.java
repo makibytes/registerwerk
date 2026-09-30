@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.web.dto;
 
+import de.makibytes.registerwerk.shared.api.StrictAmount;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import java.math.BigInteger;
 
 import jakarta.validation.constraints.NotBlank;
@@ -26,7 +28,7 @@ public record ForcedApproveRequest(
 
         @NotNull
         @Positive
-        BigInteger value,
+        @JsonDeserialize(using = StrictAmount.BigIntegerAmount.class) BigInteger value,
 
         @NotBlank(message = "legalBasis is required for forced approvals")
         String legalBasis

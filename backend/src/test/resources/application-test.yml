@@ -22,6 +22,11 @@ spring:
     port: 3025
 
 registerwerk:
+  indexer:
+    coverage:
+      # Most ITs seed deployments without a chain configuration or indexer state; the coverage
+      # guard itself is exercised by tests that switch it back on.
+      enforce: false
   sync:
     # HolderSyncScheduler actually activates now (its old @ConditionalOnProperty compared against
     # a regex literal and never matched). Keep it off in ITs; tests call the sync explicitly.

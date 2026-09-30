@@ -89,6 +89,9 @@ import { AuthService } from '../../../core/auth/auth.service';
             <div><span class="label">On-chain balance</span>{{ selected.onchainBalance }}</div>
             <div><span class="label">Delta</span>{{ selected.delta }}</div>
             <div><span class="label">Severity</span>{{ selected.severity }}</div>
+            @if (selected.kind === 'NOT_INDEXED') {
+              <div><span class="label">Kind</span>Not indexed — the on-chain balance is unknown (not zero); the chain history of this holder is not being indexed. Repair the indexer before resolving.</div>
+            }
           </div>
         }
         <mat-form-field appearance="outline">
@@ -150,6 +153,7 @@ export class ChainDriftQueueComponent implements OnInit {
 
   readonly columns: TableColumn[] = [
     { key: 'severity', header: 'Severity', cell: (e: ChainDriftEvent) => e.severity, type: 'badge' },
+    { key: 'kind', header: 'Kind', cell: (e: ChainDriftEvent) => e.kind === 'NOT_INDEXED' ? 'Not indexed' : 'Drift' },
     { key: 'walletAddress', header: 'Wallet', cell: (e: ChainDriftEvent) => e.walletAddress, type: 'mono' },
     { key: 'assetId', header: 'Asset', cell: (e: ChainDriftEvent) => e.assetId, type: 'mono' },
     { key: 'dbBalance', header: 'Registry Balance', cell: (e: ChainDriftEvent) => String(e.dbBalance), type: 'number' },

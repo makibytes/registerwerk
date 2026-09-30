@@ -829,6 +829,20 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
           </mat-card>
         }
 
+        @if (asset.holderSyncStatus === 'BLOCKED') {
+          <div class="register-warning" role="alert" data-testid="holder-sync-warning">
+            <mat-icon>warning</mat-icon>
+            <div>
+              <strong>Holder positions may be incomplete</strong>
+              <p>The registry could not reconcile the holder register of this issuance with the chain.
+                Displayed positions can be out of date; settlement and corporate actions are paused until the
+                operator has resolved it.
+                @if (asset.holderSyncBlockedReason) { <span class="register-warning-reason">{{ asset.holderSyncBlockedReason }}</span> }
+              </p>
+            </div>
+          </div>
+        }
+
         <!-- ── Token Holders (Live from Blockchain) ────────────────────────── -->
         <mat-card class="section-card">
           <mat-card-header>
@@ -912,6 +926,13 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
   styles: [`
     .back-link { margin-bottom: 16px; display: inline-flex; }
     .header-card, .timeline-card, .section-card { margin-bottom: 16px; }
+    .register-warning {
+      display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; padding: 12px 16px;
+      border: 1px solid var(--rw-text-danger); border-radius: 8px;
+      background: var(--rw-rejected-bg); color: var(--rw-rejected-fg);
+    }
+    .register-warning p { margin: 4px 0 0; font-size: 13px; }
+    .register-warning-reason { display: block; margin-top: 4px; overflow-wrap: anywhere; }
     .bond-terms-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1545,17 +1566,30 @@ export class IssuanceDetailComponent implements OnInit {
   onMint(action: MintAction): void {
     if (!this.asset?.id || this.deployments.length === 0 || this.tokenActionInProgress) return;
     this.tokenActionInProgress = true;
-    this.issuanceService.mint(this.asset.id, this.deployments[0].id, {
-      toAddress: action.recipient,
-      amount: action.amount.toString(),
-    }).subscribe({
+    const assetId = this.asset.id;
+    const depId = this.deployments[0].id;
+    const body = { toAddress: action.recipient, amount: action.amount };
+    const stepUp$: Observable<string | undefined> = action.totpCode
+      ? this.issuanceService.stepUp(action.totpCode, 'ISSUER_MINT').pipe(map(r => r.stepUpToken))
+      : of(undefined);
+    stepUp$.pipe(
+      switchMap(stepUpToken =>
+        this.issuanceService.mint(assetId, depId, body, { approvalToken: action.approvalToken, stepUpToken })),
+    ).subscribe({
       next: (r) => {
         this.tokenActionInProgress = false;
         this.txService.track(r.txId, `Mint ${action.amount} tokens`);
+        if (r.destinationHolder) {
+          this.snackBar.open(`Mint submitted to ${r.destinationHolder}`, 'Close', { duration: 5000 });
+        }
+        this.cdr.markForCheck();
       },
-      error: () => {
+      error: (err: HttpErrorResponse) => {
         this.tokenActionInProgress = false;
-        this.snackBar.open('Mint failed.', 'Close', { duration: 5000 });
+        this.snackBar.open(err?.status === 403
+          ? (err.error?.message ?? 'Mint refused: the recipient is not a registered, approved holder, or the second approval is missing.')
+          : 'Mint failed.', 'Close', { duration: 8000 });
+        this.cdr.markForCheck();
       },
     });
   }
@@ -1565,7 +1599,7 @@ export class IssuanceDetailComponent implements OnInit {
     this.tokenActionInProgress = true;
     const assetId = this.asset.id;
     const depId = this.deployments[0].id;
-    const body = { fromAddress: action.fromWallet, amount: action.amount.toString() };
+    const body = { fromAddress: action.fromWallet, amount: action.amount };
     // T3-01: step-up (built-in sign-in: TOTP → scoped token) + the operator's 4-eyes approval token.
     const stepUp$: Observable<string | undefined> = action.totpCode
       ? this.issuanceService.stepUp(action.totpCode, 'ISSUER_BURN_EWG26').pipe(map(r => r.stepUpToken))
@@ -1600,17 +1634,32 @@ export class IssuanceDetailComponent implements OnInit {
   onForceTransfer(action: ForceTransferAction): void {
     if (!this.asset?.id || this.deployments.length === 0 || this.tokenActionInProgress) return;
     this.tokenActionInProgress = true;
-    this.issuanceService.forceTransfer(this.asset.id, this.deployments[0].id, {
-      from: action.fromWallet, to: action.toWallet,
-      value: action.amount.toString(), legalBasis: action.legalBasis,
-    }).subscribe({
+    const assetId = this.asset.id;
+    const depId = this.deployments[0].id;
+    // Step-up (built-in sign-in: TOTP -> scoped token) + the operator's 4-eyes approval token.
+    const stepUp$: Observable<string | undefined> = action.totpCode
+      ? this.issuanceService.stepUp(action.totpCode, 'ISSUER_FORCED_TRANSFER_EWG24').pipe(map(r => r.stepUpToken))
+      : of(undefined);
+    stepUp$.pipe(
+      switchMap(stepUpToken => this.issuanceService.forceTransfer(assetId, depId, {
+        from: action.fromWallet, to: action.toWallet,
+        value: action.amount, legalBasis: action.legalBasis,
+      }, { approvalToken: action.approvalToken, stepUpToken })),
+    ).subscribe({
       next: (r) => {
         this.tokenActionInProgress = false;
         this.txService.track(r.txId, 'Forced transfer');
+        if (r.destinationHolder) {
+          this.snackBar.open(`Forced transfer submitted to ${r.destinationHolder}`, 'Close', { duration: 5000 });
+        }
+        this.cdr.markForCheck();
       },
-      error: () => {
+      error: (err: HttpErrorResponse) => {
         this.tokenActionInProgress = false;
-        this.snackBar.open('Force transfer failed.', 'Close', { duration: 5000 });
+        this.snackBar.open(err?.status === 403
+          ? (err.error?.message ?? 'Forced transfer refused: the destination is not a registered, approved holder, or the second approval / authenticator code is missing.')
+          : (err?.error?.message ?? 'Force transfer failed.'), 'Close', { duration: 8000 });
+        this.cdr.markForCheck();
       },
     });
   }
@@ -1618,17 +1667,28 @@ export class IssuanceDetailComponent implements OnInit {
   onForceApprove(action: ForceApproveAction): void {
     if (!this.asset?.id || this.deployments.length === 0 || this.tokenActionInProgress) return;
     this.tokenActionInProgress = true;
-    this.issuanceService.forceApprove(this.asset.id, this.deployments[0].id, {
-      owner: action.ownerWallet, spender: action.spenderWallet,
-      value: action.amount.toString(), legalBasis: action.legalBasis,
-    }).subscribe({
+    const assetId = this.asset.id;
+    const depId = this.deployments[0].id;
+    const stepUp$: Observable<string | undefined> = action.totpCode
+      ? this.issuanceService.stepUp(action.totpCode, 'ISSUER_FORCED_APPROVE_OVERRIDE').pipe(map(r => r.stepUpToken))
+      : of(undefined);
+    stepUp$.pipe(
+      switchMap(stepUpToken => this.issuanceService.forceApprove(assetId, depId, {
+        owner: action.ownerWallet, spender: action.spenderWallet,
+        value: action.amount, legalBasis: action.legalBasis,
+      }, { approvalToken: action.approvalToken, stepUpToken })),
+    ).subscribe({
       next: (r) => {
         this.tokenActionInProgress = false;
         this.txService.track(r.txId, 'Forced approve');
+        this.cdr.markForCheck();
       },
-      error: () => {
+      error: (err: HttpErrorResponse) => {
         this.tokenActionInProgress = false;
-        this.snackBar.open('Force approve failed.', 'Close', { duration: 5000 });
+        this.snackBar.open(err?.status === 403
+          ? (err.error?.message ?? 'Force approve refused: the spender is not a registered, approved holder, or the second approval / authenticator code is missing.')
+          : (err?.error?.message ?? 'Force approve failed.'), 'Close', { duration: 8000 });
+        this.cdr.markForCheck();
       },
     });
   }

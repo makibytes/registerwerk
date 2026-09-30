@@ -53,11 +53,22 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
 
             <mat-form-field class="full-width">
               <mat-label>Amount to Mint</mat-label>
-              <input matInput type="number"
+              <input matInput type="text" inputmode="numeric" autocomplete="off"
                 [(ngModel)]="mintForm.amount"
-                placeholder="0.00"
-                min="1"
-                step="1">
+                placeholder="Whole token units, e.g. 1000">
+            </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Authenticator code</mat-label>
+              <input matInput [(ngModel)]="mintForm.totpCode" inputmode="numeric" maxlength="6"
+                     autocomplete="one-time-code">
+              <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
+            </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Operator approval token (ISSUER_MINT)</mat-label>
+              <input matInput [(ngModel)]="mintForm.approvalToken" required class="address-input">
+              <mat-hint>A mint needs a second approver, and the recipient must be a registered, KYC-approved holder.</mat-hint>
             </mat-form-field>
 
             <div class="preview-box">
@@ -109,11 +120,9 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
 
             <mat-form-field class="full-width">
               <mat-label>Amount to Burn</mat-label>
-              <input matInput type="number"
+              <input matInput type="text" inputmode="numeric" autocomplete="off"
                 [(ngModel)]="burnForm.amount"
-                placeholder="0.00"
-                min="1"
-                step="1">
+                placeholder="Whole token units, e.g. 1000">
             </mat-form-field>
 
             <mat-form-field class="full-width">
@@ -180,18 +189,29 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
 
             <mat-form-field class="full-width">
               <mat-label>Amount to Transfer</mat-label>
-              <input matInput type="number"
+              <input matInput type="text" inputmode="numeric" autocomplete="off"
                 [(ngModel)]="forceTransferForm.amount"
-                placeholder="0.00"
-                min="1"
-                step="1">
+                placeholder="Whole token units, e.g. 1000">
             </mat-form-field>
 
             <mat-form-field class="full-width">
               <mat-label>Legal authority / reference</mat-label>
               <textarea matInput rows="2" maxlength="2000"
                 [(ngModel)]="forceTransferForm.legalBasis"
-                placeholder="e.g. BaFin decision, court order, or §24 eWpG correction reference"></textarea>
+                placeholder="e.g. BaFin decision, court order, or §24 eWpG correction reference (min. 10 characters)"></textarea>
+            </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Authenticator code</mat-label>
+              <input matInput [(ngModel)]="forceTransferForm.totpCode" inputmode="numeric" maxlength="6"
+                     autocomplete="one-time-code">
+              <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
+            </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Operator approval token (ISSUER_FORCED_TRANSFER_EWG24)</mat-label>
+              <input matInput [(ngModel)]="forceTransferForm.approvalToken" required class="address-input">
+              <mat-hint>A registry administrator issues this second-approver token; it is scoped to ISSUER_FORCED_TRANSFER_EWG24.</mat-hint>
             </mat-form-field>
 
             <div class="preview-box">
@@ -247,18 +267,29 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
 
             <mat-form-field class="full-width">
               <mat-label>Amount / Value</mat-label>
-              <input matInput type="number"
+              <input matInput type="text" inputmode="numeric" autocomplete="off"
                 [(ngModel)]="forceApproveForm.amount"
-                placeholder="0.00"
-                min="1"
-                step="1">
+                placeholder="Whole token units, e.g. 1000">
             </mat-form-field>
 
             <mat-form-field class="full-width">
               <mat-label>Legal authority / reference</mat-label>
               <textarea matInput rows="2" maxlength="2000"
                 [(ngModel)]="forceApproveForm.legalBasis"
-                placeholder="Reference authorizing this allowance override"></textarea>
+                placeholder="Reference authorizing this allowance override (min. 10 characters)"></textarea>
+            </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Authenticator code</mat-label>
+              <input matInput [(ngModel)]="forceApproveForm.totpCode" inputmode="numeric" maxlength="6"
+                     autocomplete="one-time-code">
+              <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
+            </mat-form-field>
+
+            <mat-form-field class="full-width">
+              <mat-label>Operator approval token (ISSUER_FORCED_APPROVE_OVERRIDE)</mat-label>
+              <input matInput [(ngModel)]="forceApproveForm.approvalToken" required class="address-input">
+              <mat-hint>A registry administrator issues this second-approver token; it is scoped to ISSUER_FORCED_APPROVE_OVERRIDE.</mat-hint>
             </mat-form-field>
 
             <div class="preview-box">
@@ -413,12 +444,14 @@ export class TokenAdminPanelComponent {
 
   mintForm = {
     recipient: '',
-    amount: 0,
+    amount: '',
+    totpCode: '',
+    approvalToken: '',
   };
 
   burnForm = {
     fromWallet: '',
-    amount: 0,
+    amount: '',
     totpCode: '',
     approvalToken: '',
   };
@@ -426,15 +459,19 @@ export class TokenAdminPanelComponent {
   forceTransferForm = {
     fromWallet: '',
     toWallet: '',
-    amount: 0,
+    amount: '',
     legalBasis: '',
+    totpCode: '',
+    approvalToken: '',
   };
 
   forceApproveForm = {
     ownerWallet: '',
     spenderWallet: '',
-    amount: 0,
+    amount: '',
     legalBasis: '',
+    totpCode: '',
+    approvalToken: '',
   };
 
   pickWallet(setter: (addr: string) => void): void {
@@ -450,7 +487,8 @@ export class TokenAdminPanelComponent {
   }
 
   isValidMintForm(): boolean {
-    return this.isValidAddress(this.mintForm.recipient) && this.isValidAmount(this.mintForm.amount);
+    return this.isValidAddress(this.mintForm.recipient) && this.isValidAmount(this.mintForm.amount)
+      && !!this.mintForm.approvalToken.trim();
   }
 
   isValidBurnForm(): boolean {
@@ -464,7 +502,8 @@ export class TokenAdminPanelComponent {
       this.isValidAddress(this.forceTransferForm.fromWallet) &&
       this.isValidAddress(this.forceTransferForm.toWallet) &&
       this.isValidAmount(this.forceTransferForm.amount) &&
-      !!this.forceTransferForm.legalBasis.trim()
+      this.forceTransferForm.legalBasis.trim().length >= 10 &&
+      !!this.forceTransferForm.approvalToken.trim()
     );
   }
 
@@ -473,7 +512,8 @@ export class TokenAdminPanelComponent {
       this.isValidAddress(this.forceApproveForm.ownerWallet) &&
       this.isValidAddress(this.forceApproveForm.spenderWallet) &&
       this.isValidAmount(this.forceApproveForm.amount) &&
-      !!this.forceApproveForm.legalBasis.trim()
+      this.forceApproveForm.legalBasis.trim().length >= 10 &&
+      !!this.forceApproveForm.approvalToken.trim()
     );
   }
 
@@ -481,20 +521,26 @@ export class TokenAdminPanelComponent {
     return /^0x[a-fA-F0-9]{40}$/.test(address.trim());
   }
 
-  private isValidAmount(amount: number): boolean {
-    return Number.isSafeInteger(amount) && amount > 0;
+  /** Amounts stay decimal STRINGS end to end (a JS number loses precision above 2^53, P4B-7). */
+  private isValidAmount(amount: string): boolean {
+    return /^[1-9]\d*$/.test((amount ?? '').trim());
   }
 
   submitMint(): void {
     if (this.busy || !this.isValidMintForm()) return;
-    this.mint.emit({ recipient: this.mintForm.recipient.trim(), amount: this.mintForm.amount });
+    this.mint.emit({
+      recipient: this.mintForm.recipient.trim(),
+      amount: this.mintForm.amount.trim(),
+      totpCode: this.mintForm.totpCode.trim() || undefined,
+      approvalToken: this.mintForm.approvalToken.trim(),
+    });
   }
 
   submitBurn(): void {
     if (this.busy || !this.isValidBurnForm()
         || !confirm('Burn these tokens? This action is irreversible.')) return;
     this.burn.emit({
-      amount: this.burnForm.amount,
+      amount: this.burnForm.amount.trim(),
       fromWallet: this.burnForm.fromWallet.trim(),
       totpCode: this.burnForm.totpCode.trim() || undefined,
       approvalToken: this.burnForm.approvalToken.trim(),
@@ -507,8 +553,10 @@ export class TokenAdminPanelComponent {
     this.forceTransfer.emit({
       fromWallet: this.forceTransferForm.fromWallet.trim(),
       toWallet: this.forceTransferForm.toWallet.trim(),
-      amount: this.forceTransferForm.amount,
+      amount: this.forceTransferForm.amount.trim(),
       legalBasis: this.forceTransferForm.legalBasis.trim(),
+      totpCode: this.forceTransferForm.totpCode.trim() || undefined,
+      approvalToken: this.forceTransferForm.approvalToken.trim(),
     });
   }
 
@@ -518,8 +566,10 @@ export class TokenAdminPanelComponent {
     this.forceApprove.emit({
       ownerWallet: this.forceApproveForm.ownerWallet,
       spenderWallet: this.forceApproveForm.spenderWallet,
-      amount: this.forceApproveForm.amount,
+      amount: this.forceApproveForm.amount.trim(),
       legalBasis: this.forceApproveForm.legalBasis.trim(),
+      totpCode: this.forceApproveForm.totpCode.trim() || undefined,
+      approvalToken: this.forceApproveForm.approvalToken.trim(),
     });
   }
 

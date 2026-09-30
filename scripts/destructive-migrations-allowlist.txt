@@ -1,0 +1,3 @@
+# Migrations that shipped (or were committed) before the ack convention was checked in CI and must
+# not be edited (a comment-only change alters the Flyway checksum). One "<file name>  # <reason>" per line.
+V14__register_handover_freeze.sql  # DROP CONSTRAINT chk_asset_status is re-created with a wider status list in the next statement

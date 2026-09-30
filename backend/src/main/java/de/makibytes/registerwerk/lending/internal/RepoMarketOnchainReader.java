@@ -11,6 +11,7 @@ import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.DefaultBlockParameter;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.request.Transaction;
 import org.web3j.protocol.core.methods.response.EthCall;
@@ -38,6 +39,37 @@ class RepoMarketOnchainReader {
         this.clientRegistry = clientRegistry;
     }
 
+    /**
+     * Scope of a block-pinned read (P4B-8): every {@code eth_call} of this thread between
+     * {@link #pinBlock} and {@code close()} runs at one block number obtained once, so a multi-call
+     * quote or position refresh cannot mix values from different nodes/heights. Nested pins restore the
+     * outer one on close.
+     */
+    interface Pin extends AutoCloseable {
+        @Override void close();
+    }
+
+    private static final ThreadLocal<BigInteger> PINNED_BLOCK = new ThreadLocal<>();
+
+    Pin pinBlock(String chainIdentifier) {
+        BigInteger previous = PINNED_BLOCK.get();
+        try {
+            BigInteger head = clientRegistry.getEvmClientByIdentifier(chainIdentifier)
+                    .ethBlockNumber().send().getBlockNumber();
+            PINNED_BLOCK.set(head);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read the block number of " + chainIdentifier, e);
+        }
+        return () -> {
+            if (previous == null) PINNED_BLOCK.remove(); else PINNED_BLOCK.set(previous);
+        };
+    }
+
+    private static DefaultBlockParameter readBlock() {
+        BigInteger pinned = PINNED_BLOCK.get();
+        return pinned != null ? DefaultBlockParameter.valueOf(pinned) : DefaultBlockParameterName.LATEST;
+    }
+
     /** {@code EwpgRepoMarket.debtOf(address) returns (uint256)} — actual, index-scaled debt. */
     BigInteger debtOf(String chainIdentifier, String marketAddress, String wallet) {
         return callUint256(chainIdentifier, marketAddress, "debtOf", List.of(new Address(wallet)));
@@ -59,7 +91,11 @@ class RepoMarketOnchainReader {
         if (decoded.size() < 2) {
             throw new IllegalStateException("Empty response calling healthFactor on " + marketAddress);
         }
-        return new HealthFactorReading((BigInteger) decoded.get(0).getValue(), (Boolean) decoded.get(1).getValue());
+        // The contract's own flag AND a node that is at most one block behind: a price mark read from a
+        // lagging node may already be stale on the chain, so it must not be reported as reliable.
+        boolean nodeCurrent = clientRegistry.routedNodeLag(chainIdentifier).map(lag -> lag <= 1).orElse(true);
+        return new HealthFactorReading((BigInteger) decoded.get(0).getValue(),
+                (Boolean) decoded.get(1).getValue() && nodeCurrent);
     }
 
     record HealthFactorReading(BigInteger factor, boolean priceReliable) {}
@@ -258,7 +294,7 @@ class RepoMarketOnchainReader {
         try {
             EthCall response = web3j.ethCall(
                     Transaction.createEthCallTransaction(null, contractAddress, FunctionEncoder.encode(fn)),
-                    DefaultBlockParameterName.LATEST).send();
+                    readBlock()).send();
 
             if (response.isReverted()) {
                 throw new IllegalStateException(

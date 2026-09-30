@@ -47,7 +47,9 @@ class RpcNodeServiceTest {
     @BeforeEach
     void setUp() {
         service = new RpcNodeService(rpcNodeRepository, chainConfigRepository, events, chaincacheClient,
-                new ObjectMapper(), streamStatus, chaincacheCredentials);
+                new ObjectMapper(), streamStatus, chaincacheCredentials, new RpcNodeUrlPolicy(true),
+                new org.springframework.beans.factory.support.StaticListableBeanFactory()
+                        .getBeanProvider(de.makibytes.registerwerk.chain.api.RpcNodeChainVerifier.class));
     }
 
     private ChainConfig chain() {
@@ -73,7 +75,7 @@ class RpcNodeServiceTest {
         when(rpcNodeRepository.existsByChainConfig_IdAndKindAndEnabledTrue(chainId, RpcNode.NodeKind.CHAINCACHE))
                 .thenReturn(false);
 
-        RpcNode node = service.addNode(chainId, "http://anvil:8545", "Anvil");
+        RpcNode node = service.addNode(chainId, "http://anvil:8545", "Anvil", null);
 
         assertThat(node.getKind()).isEqualTo(RpcNode.NodeKind.DIRECT_RPC);
         assertThat(node.getCapabilities()).isNull();
@@ -91,7 +93,7 @@ class RpcNodeServiceTest {
         when(rpcNodeRepository.existsByChainConfig_IdAndKindAndEnabledTrue(chainId, RpcNode.NodeKind.CHAINCACHE))
                 .thenReturn(true);
 
-        RpcNode node = service.addNode(chainId, "http://chaincache:8080/anvil/rpc", "Chaincache");
+        RpcNode node = service.addNode(chainId, "http://chaincache:8080/anvil/rpc", "Chaincache", null);
 
         assertThat(node.getKind()).isEqualTo(RpcNode.NodeKind.CHAINCACHE);
         assertThat(node.getManagementUrl()).isEqualTo("http://chaincache:8080");
@@ -111,7 +113,7 @@ class RpcNodeServiceTest {
         when(rpcNodeRepository.existsByChainConfig_IdAndKindAndEnabledTrue(chainId, RpcNode.NodeKind.CHAINCACHE))
                 .thenReturn(false);
 
-        RpcNode node = service.addNode(chainId, "http://chaincache:8080/anvil/rpc", "Chaincache");
+        RpcNode node = service.addNode(chainId, "http://chaincache:8080/anvil/rpc", "Chaincache", null);
 
         assertThat(node.getKind()).isEqualTo(RpcNode.NodeKind.DIRECT_RPC);
         assertThat(node.getCapabilities()).isNull();
@@ -130,7 +132,7 @@ class RpcNodeServiceTest {
         when(rpcNodeRepository.existsByChainConfig_IdAndKindAndEnabledTrue(chainId, RpcNode.NodeKind.CHAINCACHE))
                 .thenReturn(true);
 
-        service.addNode(chainId, "http://chaincache:8080/anvil/rpc", "Chaincache");
+        service.addNode(chainId, "http://chaincache:8080/anvil/rpc", "Chaincache", null);
 
         verify(chainConfigRepository).updateFinalitySource(chainId, ChainConfig.FinalitySource.CHAINCACHE);
     }
@@ -149,7 +151,7 @@ class RpcNodeServiceTest {
         when(rpcNodeRepository.existsByChainConfig_IdAndKindAndEnabledTrue(chainId, RpcNode.NodeKind.CHAINCACHE))
                 .thenReturn(false);
 
-        RpcNode updated = service.updateNode(chainId, nodeId, "http://anvil:8545", "Anvil");
+        RpcNode updated = service.updateNode(chainId, nodeId, "http://anvil:8545", "Anvil", null);
 
         assertThat(updated.getKind()).isEqualTo(RpcNode.NodeKind.DIRECT_RPC);
         assertThat(updated.getCapabilities()).isNull();
@@ -397,7 +399,7 @@ class RpcNodeServiceTest {
         when(rpcNodeRepository.existsByChainConfig_IdAndKindAndEnabledTrue(chainId, RpcNode.NodeKind.CHAINCACHE))
                 .thenReturn(false);
 
-        RpcNode node = service.addNode(chainId, "http://chaincache:8080/anvil/rpc", "Chaincache");
+        RpcNode node = service.addNode(chainId, "http://chaincache:8080/anvil/rpc", "Chaincache", null);
 
         assertThat(node.getKind()).isEqualTo(RpcNode.NodeKind.DIRECT_RPC);
         assertThat(node.getManagementUrl()).isNull();

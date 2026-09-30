@@ -317,7 +317,7 @@ class VaultRequestIngestionService {
             return;
         }
         BigInteger requestId = Erc7540Events.indexedUint(l, 1);
-        Optional<VaultRequest> existing = vaultRequestRepository.findByAssetIdAndRequestId(dep.getAssetId(), requestId);
+        Optional<VaultRequest> existing = lookup(dep, requestId);
         if (existing.isPresent()) {
             VaultRequest request = existing.get();
             if (request.getRequestedTx() == null) {
@@ -335,6 +335,7 @@ class VaultRequestIngestionService {
                 .get(0).getValue();
         VaultRequest request = new VaultRequest();
         request.setAssetId(dep.getAssetId());
+        request.setChainConfigId(dep.getChainConfigId());
         request.setRequestId(requestId);
         request.setRequestType(type);
         request.setControllerAddr(Erc7540Events.indexedAddress(l, 2));
@@ -356,8 +357,21 @@ class VaultRequestIngestionService {
                 VaultRequestIngestRevertCompensator.EFFECT_TYPE, saved));
     }
 
+    /** Chain-aware lookup; a legacy row without a chain is claimed for this deployment's chain. */
+    private Optional<VaultRequest> lookup(AssetDeployment dep, BigInteger requestId) {
+        Optional<VaultRequest> exact = vaultRequestRepository.findByAssetIdAndChainConfigIdAndRequestId(
+                dep.getAssetId(), dep.getChainConfigId(), requestId);
+        if (exact.isPresent() || dep.getChainConfigId() == null) {
+            return exact;
+        }
+        Optional<VaultRequest> legacy = vaultRequestRepository.findByAssetIdAndChainConfigIdIsNullAndRequestId(
+                dep.getAssetId(), requestId);
+        legacy.ifPresent(r -> r.setChainConfigId(dep.getChainConfigId()));
+        return legacy;
+    }
+
     private Optional<VaultRequest> findRequest(AssetDeployment dep, BigInteger requestId, Log l) {
-        Optional<VaultRequest> request = vaultRequestRepository.findByAssetIdAndRequestId(dep.getAssetId(), requestId);
+        Optional<VaultRequest> request = lookup(dep, requestId);
         if (request.isEmpty()) {
             log.warn("ERC-7540 lifecycle log for unknown request={} on deployment={} (tx={}) — "
                     + "the request event was never ingested; skipping.", requestId, dep.getId(), l.getTransactionHash());

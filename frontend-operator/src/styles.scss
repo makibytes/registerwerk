@@ -445,6 +445,11 @@ code {
   &.status-closed,
   &.status-redeemed,
   &.status-transferred-out { background: var(--rw-border-subtle); color: var(--rw-text-secondary); }
+  // Transaction record (blockchain_transaction.status): TIMEOUT is shown as AWAITING_CHAIN — not
+  // mined yet, may still execute (P4B-5); REPLACED = superseded on chain by another tx at the same nonce.
+  &.status-awaiting-chain { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
+  &.status-replaced       { background: var(--rw-border-subtle); color: var(--rw-text-secondary); }
+  &.status-success        { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   &.status-whitelisted  { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   // MiCA counterparty authorization (CASP register)
   &.status-authorized     { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }

@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.web.dto;
 
+import de.makibytes.registerwerk.shared.api.StrictAmount;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import java.math.BigDecimal;
 
 /**
@@ -12,5 +14,5 @@ import java.math.BigDecimal;
  */
 public record FulfillVaultRequestBody(
         @Deprecated
-        BigDecimal navAtFulfill
+        @JsonDeserialize(using = StrictAmount.BigDecimalAmount.class) BigDecimal navAtFulfill
 ) {}

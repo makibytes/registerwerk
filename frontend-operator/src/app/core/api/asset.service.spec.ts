@@ -20,6 +20,33 @@ describe('AssetService', () => {
 
     afterEach(() => httpMock.verify());
 
+    it('getHolders() unwraps the PageResponse and computes address/balance/percentage', () => {
+        let result: unknown;
+        service.getHolders('asset-1').subscribe(h => (result = h));
+        const req = httpMock.expectOne(r => r.url === `${base}/asset-1/holders`);
+        expect(req.request.params.get('size')).toBe('1000');
+        req.flush({
+            content: [
+                { id: 'h1', assetId: 'asset-1', investorId: 'i1', walletAddress: '0xAAA', whitelisted: true, nominalAmount: 750 },
+                { id: 'h2', assetId: 'asset-1', investorId: 'i2', walletAddress: null, whitelisted: null, nominalAmount: 250 },
+            ],
+            totalElements: 2, totalPages: 1, page: 0, size: 1000,
+        });
+        expect(result).toEqual([
+            expect.objectContaining({ id: 'h1', address: '0xAAA', walletAddress: '0xAAA', balance: 750, percentage: 75 }),
+            expect.objectContaining({ id: 'h2', address: '', balance: 250, percentage: 25 }),
+        ]);
+    });
+
+    it('getHolders() yields 0% for every holder of an empty-supply register', () => {
+        let result: { percentage: number }[] = [];
+        service.getHolders('asset-1').subscribe(h => (result = h));
+        httpMock.expectOne(r => r.url === `${base}/asset-1/holders`).flush({
+            content: [{ id: 'h1', assetId: 'asset-1', investorId: null, walletAddress: '0xAAA', whitelisted: false, nominalAmount: 0 }],
+        });
+        expect(result[0].percentage).toBe(0);
+    });
+
     it('getAssets() with no params issues a bare GET (no query string)', () => {
         service.getAssets().subscribe();
         const req = httpMock.expectOne(r => r.url === base);
@@ -98,17 +125,18 @@ describe('AssetService', () => {
     });
 
     it('mint() and burn() POST the correct issuer sub-paths with their bodies', () => {
-        service.mint('a-1', 'd-1', { toAddress: '0xabc', amount: 100 }).subscribe();
+        service.mint('a-1', 'd-1', { toAddress: '0xabc', amount: '100' },
+          { stepUpToken: 'su', dualControlToken: 'dc' }).subscribe();
         const mintReq = httpMock.expectOne(`${base}/a-1/deployments/d-1/issuer/mint`);
         expect(mintReq.request.method).toBe('POST');
-        expect(mintReq.request.body).toEqual({ toAddress: '0xabc', amount: 100 });
+        expect(mintReq.request.body).toEqual({ toAddress: '0xabc', amount: '100' });
         mintReq.flush({ txId: 'tx-1' });
 
-        service.burn('a-1', 'd-1', { fromAddress: '0xabc', amount: 50 },
+        service.burn('a-1', 'd-1', { fromAddress: '0xabc', amount: '50' },
           { stepUpToken: 'su', dualControlToken: 'dc' }).subscribe();
         const burnReq = httpMock.expectOne(`${base}/a-1/deployments/d-1/issuer/burn`);
         expect(burnReq.request.method).toBe('POST');
-        expect(burnReq.request.body).toEqual({ fromAddress: '0xabc', amount: 50 });
+        expect(burnReq.request.body).toEqual({ fromAddress: '0xabc', amount: '50' });
         expect(burnReq.request.headers.get('Authorization')).toBe('Bearer su');
         expect(burnReq.request.headers.get('X-Dual-Control-Token')).toBe('dc');
         burnReq.flush({ txId: 'tx-2' });

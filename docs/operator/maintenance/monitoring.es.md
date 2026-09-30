@@ -114,6 +114,22 @@ El único contador (no un indicador) de esta lista; ningún estado persistente r
 |--------|-------------|----------------|
 | `registerwerk_notification_email_send_failures_total{context}` | Errores en el envío de correo electrónico desde el inicio, etiquetados como `generic` (disparar y olvidar) o `statement_pdf` (entrega de declaración §19) | `increase(...)[1h]` > 5 = WARN (`EmailDeliveryFailuresElevated`) |
 
+### Outbox EVM duradera y semántica de TIMEOUT (módulo `blockchain`)
+
+Una transacción firmada que ningún nodo acepta, o una expulsada del mempool, bloquea todas las transacciones posteriores de su firmante. Por eso la outbox se supervisa por firmante y los payloads atascados tienen un flujo de trabajo para el operador.
+
+| Métrica | Descripción | Umbral de alerta |
+|---------|-------------|------------------|
+| `registerwerk_outbox_oldest_prepared_age_seconds{chain_id,signer}` | Antigüedad del payload firmado más antiguo que ningún nodo ha aceptado aún | > 10 min = CRITICAL (`EvmOutboxPreparedStuck`) |
+| `registerwerk_outbox_prepared_count{chain_id,signer}` | Payloads firmados a la espera de difusión | informativo |
+| `registerwerk_outbox_stuck_count{chain_id,signer}` | Payloads sin recibo desde hace más de 10 minutos | > 0 durante 5 min = WARN (`EvmOutboxBroadcastStuck`) |
+| `registerwerk_outbox_lease_repaired_total{chain}` | Un arrendamiento de nonce obsoleto se ajustó al valor de la cadena (transacción perdida) | cualquier valor = WARN (`EvmNonceLeaseRepaired`) |
+| `registerwerk_blockchain_tx_late_mined_total{outcome}` | Una transacción marcada como `TIMEOUT` fue minada finalmente | cualquier valor = INFO (`BlockchainTxLateMined`) |
+
+- **`TIMEOUT` no es un fallo.** Significa «no minada dentro del plazo»; la transacción aún puede ejecutarse. El poller sigue leyendo las filas `TIMEOUT` durante `registerwerk.blockchain.tx.late-mined-window-seconds` (7 días) y las cierra como `SUCCESS`/`FAILED` cuando llega un recibo. Solo `FAILED` (revertida) y `REPLACED` (el nonce fue consumido por otra transacción) cuentan como fallo confirmado; el estado de negocio nunca se borra, ni se reenvía nada, solo por `TIMEOUT`.
+- **Las acciones automáticas** son deliberadamente limitadas: los bytes almacenados de una transacción perdida se retransmiten tras 10 minutos, y una llamada de la lista permitida y no regulatoria (`registerwerk.outbox.auto-reprice-methods`, p. ej. registro de identidades, claims, anclaje de dApps) que falla repetidamente por comisiones se vuelve a firmar con el mismo nonce dentro del techo de comisiones de la cadena. Las operaciones regulatorias (transferencia forzosa, burn, congelación, recuperación, pausa) nunca se sustituyen automáticamente.
+- **Acciones del operador** (token step-up y segundo aprobador, registrados en la pista de auditoría): `GET /api/v1/admin/chains/{chainConfigId}/outbox/stuck`, `POST .../outbox/{id}/reprice` (misma llamada, comisión al menos un 15 % mayor) y `POST .../outbox/{id}/cancel` (autoenvío de valor 0 con el mismo nonce; la operación no se ejecutará). Cuando la cancelación es final, la transacción original pasa a `REPLACED` y su responsable de negocio puede volver a enviarla.
+
 ### Tasas de error y latencia de API { #api-error-rates-latency }
 
 | Métrica | Descripción | Umbral de alerta |

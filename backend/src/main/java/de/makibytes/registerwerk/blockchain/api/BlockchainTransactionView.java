@@ -27,5 +27,13 @@ public record BlockchainTransactionView(
         Instant opsReviewedAt,
         UUID opsReviewedBy,
         /** Verified outcome of a confidential forced op (see {@code ConfidentialForcedOpVerifier}); null otherwise. */
-        String executionOutcome
+        String executionOutcome,
+        /** When a receipt finally arrived for a row that had timed out (P4B-5); null otherwise. */
+        Instant lateMinedAt,
+        /** Latest re-price / cancel replacement issued at this transaction's nonce (P4B-4); null otherwise. */
+        String replacedByTxHash,
+        /** The hash that actually mined when it differs from {@code txHash} (a re-priced replacement). */
+        String minedTxHash,
+        /** True while TIMEOUT: not mined yet, may still execute - neither success nor failure. */
+        boolean awaitingChain
 ) {}

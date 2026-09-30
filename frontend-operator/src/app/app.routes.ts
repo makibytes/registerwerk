@@ -141,6 +141,15 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'transactions/outbox',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
+        loadComponent: () =>
+          import('./features/transactions/outbox-stuck.component').then(
+            (m) => m.OutboxStuckComponent
+          ),
+      },
+      {
         path: 'network-nodes',
         canActivate: [roleGuard],
         data: { roles: ['REGISTRY_ADMIN'] },

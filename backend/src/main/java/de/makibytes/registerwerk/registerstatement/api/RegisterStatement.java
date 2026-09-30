@@ -32,7 +32,7 @@ public class RegisterStatement {
     @Column(name = "trigger", nullable = false, length = 20)
     private StatementTrigger trigger;
 
-    @Column(name = "nominal_amount", nullable = false, precision = 38, scale = 18)
+    @Column(name = "nominal_amount", nullable = false, precision = 96, scale = 18)
     private BigDecimal nominalAmount;
 
     @Column(name = "wallet_address", length = 66)

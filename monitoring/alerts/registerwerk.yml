@@ -117,6 +117,134 @@ groups:
           summary: "DB connection pool > 80% utilized"
           description: "HikariCP pool is {{ $value | humanizePercentage }} utilized. Consider increasing maximum-pool-size."
 
+      # Threads waiting for a pooled connection. The immediate EVM submit/send/deploy paths hold
+      # two connections per call and are bounded by registerwerk.blockchain.immediate-submit-
+      # concurrency (default pool/4); sustained pending connections mean the pool is starved
+      # (Phase 4 P4B-1) - check for long receipt waits before raising maximum-pool-size.
+      - alert: DBConnectionsPending
+        expr: |
+          hikaricp_connections_pending{job="registerwerk-backend"} > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Threads are waiting for a DB connection"
+          description: "{{ $value }} thread(s) have waited for a HikariCP connection for 2+ minutes."
+
+      - alert: ImmediateEvmSubmissionRejected
+        expr: |
+          increase(registerwerk_tx_immediate_rejected_total{job="registerwerk-backend"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Immediate EVM submissions rejected (all slots busy)"
+          description: "Callers were turned away with HTTP 503 because every immediate submit/send/deploy slot was in use. Move the callers to the durable outbox or raise registerwerk.blockchain.immediate-submit-concurrency together with the pool size."
+
+      # ── EVM pre-signing refusals ──────────────────────────────────────────
+      - alert: EvmSubmissionRefused
+        expr: |
+          increase(registerwerk_tx_submission_refused_total{job="registerwerk-backend"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EVM transaction refused before signing ({{ $labels.kind }} on {{ $labels.chain }})"
+          description: "A transaction was refused by a hard safety check: FEE_CEILING/TIP_CEILING/GAS_CEILING (node-reported fees above chain_config.max_fee_per_gas_wei / max_priority_fee_per_gas_wei or the global default cap - a manipulated or broken RPC node, or a genuine fee spike that needs an operator decision) or CHAIN_ID_UNPINNED/CHAIN_ID_MISMATCH (chain_config.chain_id missing, or a node answers a different chain id). See the TX_SUBMISSION_REFUSED_* audit events."
+
+      # ── RPC node trust (Phase 4 K5) ───────────────────────────────────────
+      - alert: RpcSecondSourceMismatch
+        expr: |
+          increase(registerwerk_confirmation_second_source_mismatch_total{job="registerwerk-backend"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Two RPC nodes of {{ $labels.chain }} disagree about a registry-mutating transaction"
+          description: "A transaction is held because another healthy node reports a different block hash, recipient or sender than the receipt. Treat as a possible hostile or forked node: check RPC node health (health_reason), quarantine the suspect node under step-up + second approver, see the ERROR log line 'Second-source MISMATCH'."
+
+      - alert: RpcSecondSourceHoldOverdue
+        expr: |
+          increase(registerwerk_confirmation_second_source_hold_overdue_total{job="registerwerk-backend"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A registry transaction on {{ $labels.chain }} waits for a second RPC node that never answers"
+          description: "The transaction is mined and final but held (PENDING) because fewer than two healthy nodes confirm it. Repair or add an independent node; see the ERROR log 'Second-source confirmation ... still pending'."
+
+      - alert: RpcSingleSourceConfirmation
+        expr: |
+          increase(registerwerk_confirmation_single_source_total{job="registerwerk-backend"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Registry transactions on {{ $labels.chain }} were confirmed from a single RPC node"
+          description: "Fewer than two healthy nodes were available, so the second-source receipt cross-check was skipped. Add or repair a second independent node."
+
+      - alert: EvmChainIdUnpinned
+        expr: registerwerk_evm_chains_unpinned{job="registerwerk-backend"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "An EVM chain with confirmed deployments has no chain_id; all signing on it is refused"
+          description: "Transactions are pinned to chain_config.chain_id and refused when it is NULL. Set chainId on the chain (PATCH /api/v1/admin/chains/{id}); the ERROR log 'have CONFIRMED deployments but no chain_id' lists the chains."
+
+      - alert: RpcNodeChainMismatch
+        expr: |
+          increase(registerwerk_rpc_chain_mismatch_total{job="registerwerk-backend"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "An RPC node of {{ $labels.chain }} answers with another chain id or genesis hash"
+          description: "The node is quarantined (health_reason CHAIN_MISMATCH) and never routed to. Verify who configured it; after a legitimate devnet reset use POST /api/v1/admin/chains/{chainId}/nodes/genesis-pin/reset."
+
+      # ── Durable EVM outbox (P4B-4) ────────────────────────────────────────
+      # A signed payload that cannot be broadcast, or a transaction dropped from the mempool, blocks every
+      # later transaction of that signer. Gauges are refreshed every minute by OutboxRecoveryService.
+      - alert: EvmOutboxPreparedStuck
+        expr: |
+          registerwerk_outbox_oldest_prepared_age_seconds{job="registerwerk-backend"} > 600
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Signer {{ $labels.signer }} (chain id {{ $labels.chain_id }}) has a PREPARED payload older than 10 minutes"
+          description: "A signed transaction has not been accepted by any node for 10+ minutes. Fee-related failures of allow-listed non-regulatory calls are re-priced automatically; everything else (in particular regulatory operations) needs an operator: GET /api/v1/admin/chains/{chainConfigId}/outbox/stuck, then cancel or re-price under step-up + 4-eyes. See the EVM_OUTBOX_STUCK_DETECTED audit events."
+
+      - alert: EvmOutboxBroadcastStuck
+        expr: |
+          registerwerk_outbox_stuck_count{job="registerwerk-backend"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Signer {{ $labels.signer }} has {{ $value }} outbox transaction(s) without a receipt for 10+ minutes"
+          description: "Broadcast (or prepared) transactions are not being mined. The stored bytes are re-broadcast automatically; if the fee is too low the operator must re-price or cancel the payload. A timed-out transaction is not a failure and must not be resubmitted blindly."
+
+      - alert: EvmNonceLeaseRepaired
+        expr: |
+          increase(registerwerk_outbox_lease_repaired_total{job="registerwerk-backend"}[30m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A stale nonce lease was capped back to the chain value (chain id {{ $labels.chain }})"
+          description: "A signer's nonce lease led the chain's pending count with no outbox row holding the gap: a transaction was dropped from the mempool. The lease was repaired; check the affected TIMEOUT transactions."
+
+      - alert: BlockchainTxLateMined
+        expr: |
+          increase(registerwerk_blockchain_tx_late_mined_total{job="registerwerk-backend"}[30m]) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "A transaction marked TIMEOUT was mined after all ({{ $labels.outcome }})"
+          description: "TIMEOUT is not terminal: the poller reconciled a late receipt. See the BLOCKCHAIN_TX_LATE_MINED_* audit events."
+
       # ── Audit signing key age ─────────────────────────────────────────────
       # Renamed from "JwtSigningKeyAgeWarning": the JWT decoder's HS256 secret is a static
       # config value with no real "created at" concept to track. registerwerk_audit_signing_key

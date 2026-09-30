@@ -64,4 +64,18 @@ class HolderRecomputeCompensatorTest {
 
         assertThat(outcome).isInstanceOf(CompensationOutcome.Failed.class);
     }
+
+    @Test
+    @DisplayName("P4-07: a BLOCKED register (refused recompute) is Compensated, not Failed — the orphaning must stand")
+    void blockedRegisterIsCompensatedNotFailed() {
+        doThrow(new de.makibytes.registerwerk.indexer.api.UnmappedHolderIdentityException(
+                assetId, "deployment x is not indexed: no Graph Node"))
+                .when(holderDataService).syncHoldersFromBlockchain(assetId);
+
+        CompensationOutcome outcome = compensator.compensate(effect());
+
+        assertThat(outcome).isInstanceOf(CompensationOutcome.Compensated.class);
+        assertThat(((CompensationOutcome.Compensated) outcome).detail())
+                .contains("register BLOCKED").contains("orphaned rows already excluded");
+    }
 }

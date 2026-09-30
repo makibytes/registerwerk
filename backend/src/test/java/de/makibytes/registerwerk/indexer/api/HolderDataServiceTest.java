@@ -46,6 +46,7 @@ class HolderDataServiceTest {
     @Mock private de.makibytes.registerwerk.deployment.api.AssetLookupPort assetLookupPort;
     @Mock private de.makibytes.registerwerk.chain.api.ChainConfigRepository chainConfigRepository;
     @Mock private de.makibytes.registerwerk.indexer.internal.GraphNodeClient graphNodeClient;
+    @Mock private IndexingCoverage indexingCoverage;
 
     private HolderDataService service;
 
@@ -55,7 +56,8 @@ class HolderDataServiceTest {
     @BeforeEach
     void setUp() {
         service = new HolderDataService(deploymentRepository, tokenTransferRepository, assetHolderRepository, eventPublisher,
-                holderSyncStatusPort, assetLookupPort, chainConfigRepository, graphNodeClient);
+                holderSyncStatusPort, assetLookupPort, chainConfigRepository, graphNodeClient, indexingCoverage);
+        org.mockito.Mockito.lenient().when(indexingCoverage.evaluate(any())).thenReturn(IndexingCoverage.Coverage.ok());
     }
 
     private void givenStandard(de.makibytes.registerwerk.deployment.api.TokenStandard standard) {
@@ -510,18 +512,56 @@ class HolderDataServiceTest {
     }
 
     @Test
-    @DisplayName("N10: an unindexed ERC-3525 deployment does not zero previously chain-derived holders")
-    void erc3525UnindexedChainDoesNotZeroHolders() {
+    @DisplayName("P4-01: an ERC-3525 deployment without a Graph Node BLOCKS the sync instead of being skipped")
+    void erc3525UnindexedChainBlocks() {
         var chain = new de.makibytes.registerwerk.chain.api.ChainConfig(); // no Graph Node configured
         givenErc3525Deployment(chain);
         AssetHolder h = holder("0xaaa1", "500");
         h.setChainDerived(true);
-        when(assetHolderRepository.findByAssetId(eq(assetId), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(h)));
 
-        service.syncHoldersFromBlockchain(assetId);
+        assertThatThrownBy(() -> service.syncHoldersFromBlockchain(assetId))
+                .isInstanceOf(UnmappedHolderIdentityException.class)
+                .hasMessageContaining("is not indexed");
 
         assertThat(h.getNominalAmount()).isEqualByComparingTo("500");
+        verify(assetHolderRepository, never()).save(any());
+        verify(holderSyncStatusPort, never()).markReconciled(any(), any());
+    }
+
+    @Test
+    @DisplayName("P4-01: a deployment without indexing evidence BLOCKS the sync and never marks the register reconciled")
+    void notIndexedDeploymentBlocksInsteadOfReconciling() {
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setContractAddress("So1anaMint");
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment));
+        when(indexingCoverage.evaluate(deployment)).thenReturn(IndexingCoverage.Coverage.notIndexed("mint is not tracked"));
+        when(holderSyncStatusPort.markBlocked(eq(assetId), any(), eq(List.of()), any())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.syncHoldersFromBlockchain(assetId))
+                .isInstanceOf(UnmappedHolderIdentityException.class)
+                .hasMessageContaining("is not indexed: mint is not tracked");
+
+        verify(holderSyncStatusPort).markBlocked(eq(assetId), any(), eq(List.of()), any());
+        verify(holderSyncStatusPort, never()).markReconciled(any(), any());
+        verify(tokenTransferRepository, never()).findByDeploymentIdAndFinalityStatusOrderByOccurredAtDesc(any(), any(), any());
+        verify(assetHolderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("P4-04: a negative net balance BLOCKS the sync; it is not clamped to zero")
+    void negativeNetBalanceBlocks() {
+        Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
+        // A -> B with no mint anywhere in the indexed history: A nets to -300.
+        givenTransfers(transfer("0xAAA1", "0xBBB2", "300", t0));
+        when(holderSyncStatusPort.markBlocked(eq(assetId), any(), eq(List.of("0xAAA1")), any())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.syncHoldersFromBlockchain(assetId))
+                .isInstanceOf(UnmappedHolderIdentityException.class)
+                .hasMessageContaining("negative net balance");
+
+        verify(holderSyncStatusPort).markBlocked(eq(assetId), any(), eq(List.of("0xAAA1")), any());
+        verify(holderSyncStatusPort, never()).markReconciled(any(), any());
         verify(assetHolderRepository, never()).save(any());
     }
 

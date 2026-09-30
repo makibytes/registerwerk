@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.web.dto;
 
+import de.makibytes.registerwerk.shared.api.StrictAmount;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import java.math.BigInteger;
 
 import jakarta.validation.constraints.NotBlank;
@@ -13,5 +15,5 @@ public record BurnRequest(
     String fromAddress,
 
     @NotNull(message = "amount is required")
-    BigInteger amount
+    @JsonDeserialize(using = StrictAmount.BigIntegerAmount.class) BigInteger amount
 ) {}

@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.web.dto;
 
+import de.makibytes.registerwerk.shared.api.StrictAmount;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -23,11 +25,11 @@ public record ForcedTransferSingleRequest(
 
         @NotNull
         @PositiveOrZero
-        BigInteger id,
+        @JsonDeserialize(using = StrictAmount.BigIntegerAmount.class) BigInteger id,
 
         @NotNull
         @Positive
-        BigInteger amount,
+        @JsonDeserialize(using = StrictAmount.BigIntegerAmount.class) BigInteger amount,
 
         @NotBlank(message = "legalBasis is required for forced transfers")
         String legalBasis

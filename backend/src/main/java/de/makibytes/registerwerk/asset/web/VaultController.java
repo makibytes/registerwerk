@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.asset.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import de.makibytes.registerwerk.blockchain.api.Erc4626AdminPort;
 import de.makibytes.registerwerk.blockchain.api.Erc7540AdminPort;
 import de.makibytes.registerwerk.blockchain.api.VaultRequestView;
@@ -62,6 +63,7 @@ public class VaultController {
         this.vaultStateRepository = vaultStateRepository;
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/nav-strike")
     public ResponseEntity<TxSubmissionResponse> strikeNav(
             @PathVariable UUID depId,
@@ -109,6 +111,7 @@ public class VaultController {
         return ResponseEntity.ok(erc7540AdminService.listRequestViews(depId, status));
     }
 
+    @RequiresIdempotencyKey
     @PostMapping("/vault-requests/{requestId}/fulfill")
     public ResponseEntity<TxSubmissionResponse> fulfillVaultRequest(
             @PathVariable UUID depId,
@@ -140,6 +143,7 @@ public class VaultController {
      * escrow of a request held by a compliance freeze. REGISTRY_ADMIN (class level) + step-up +
      * a second approver, like every other forced operation.
      */
+    @RequiresIdempotencyKey
     @PostMapping("/vault-requests/{requestId}/force-cancel")
     @RequiresStepUp(requireSecondApprover = true, reason = "VAULT_REQUEST_FORCE_CANCEL")
     public ResponseEntity<TxSubmissionResponse> forceCancelVaultRequest(

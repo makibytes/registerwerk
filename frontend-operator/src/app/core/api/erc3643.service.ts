@@ -131,19 +131,23 @@ export class Erc3643Service {
     return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/unpause`, {});
   }
 
+  /** Step-up + 4-eyes (`FORCED_TRANSFER_EWG24`); `to` must be an ACTIVE registered holder (P4C-2); reason >= 10 chars. */
   forcedTransfer(assetId: string, deploymentId: string, body: {
-    from: string; to: string; amount: string; reason?: string;
-  }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/forced-transfer`, body);
+    from: string; to: string; amount: string; reason: string;
+  }, tokens: DualControlTokens): Observable<{ txId: string; destinationHolder?: string | null }> {
+    return this.http.post<{ txId: string; destinationHolder?: string | null }>(`${this.suiteUrl(assetId, deploymentId)}/forced-transfer`, body,
+      { headers: dualControlHeaders(tokens) });
   }
 
   // No forcedApprove(): T-REX/ERC-3643 has no forcedApprove agent operation — the backend
   // endpoint always returns 501 (see Erc3643LifecycleService.forcedApprove).
 
+  /** Step-up + 4-eyes (`FORCE_BURN_EWG26`). */
   forceBurn(assetId: string, deploymentId: string, body: {
     from: string; amount: string; legalBasis?: string;
-  }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/force-burn`, body);
+  }, tokens: DualControlTokens): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.suiteUrl(assetId, deploymentId)}/force-burn`, body,
+      { headers: dualControlHeaders(tokens) });
   }
 
   freezePartial(assetId: string, deploymentId: string, body: { address: string; amount: string }): Observable<{ txId: string }> {

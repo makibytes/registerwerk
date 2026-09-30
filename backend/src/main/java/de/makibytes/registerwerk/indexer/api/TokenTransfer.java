@@ -26,7 +26,7 @@ import java.util.UUID;
         // PostgreSQL requires every UNIQUE key on this RANGE-partitioned table to contain the
         // partition key (occurred_at). block_hash is part of the logical EVM occurrence: the same
         // tx/log may be mined into B after A was orphaned, while A itself may later return.
-        @Index(name = "idx_tt_evm_occurrence",      columnList = "chain_config_id, tx_hash, log_index, block_hash, occurred_at", unique = true)
+        @Index(name = "idx_tt_evm_occurrence",      columnList = "chain_config_id, tx_hash, log_index, block_hash, contract_address, occurred_at", unique = true)
     }
 )
 public class TokenTransfer {
@@ -65,7 +65,7 @@ public class TokenTransfer {
     private BigDecimal tokenId;
 
     /** Transfer amount. For ERC-721, typically 1. For ERC-1155 or ERC-20, the actual quantity. */
-    @Column(name = "amount", precision = 78, scale = 18)
+    @Column(name = "amount", precision = 96, scale = 18)
     private BigDecimal amount;
 
     @Enumerated(EnumType.STRING)

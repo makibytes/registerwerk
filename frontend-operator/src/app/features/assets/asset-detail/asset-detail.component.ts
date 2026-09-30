@@ -453,7 +453,9 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
               <table mat-table [dataSource]="holders">
                 <ng-container matColumnDef="address">
                   <th mat-header-cell *matHeaderCellDef>Address</th>
-                  <td mat-cell *matCellDef="let h"><app-address [address]="h.address" /></td>
+                  <td mat-cell *matCellDef="let h">
+                    @if (h.address) { <app-address [address]="h.address" /> } @else { <span class="text-muted">— (no wallet)</span> }
+                  </td>
                 </ng-container>
                 <ng-container matColumnDef="balance">
                   <th mat-header-cell *matHeaderCellDef>Balance</th>
@@ -625,19 +627,20 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
               <h3 style="font-size:16px;font-weight:500;margin-bottom:16px">Mint Tokens</h3>
               <div class="mint-form">
                 <mat-form-field appearance="outline">
-                  <mat-label>Recipient Address</mat-label>
-                  <input matInput [(ngModel)]="mintAddress" placeholder="0x..." />
-                  <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
-                          (click)="pickAddress('WALLET', 'Select recipient wallet', a => mintAddress = a)">
-                    <mat-icon style="font-size:18px">contacts</mat-icon>
-                  </button>
+                  <mat-label>Recipient (registered holder)</mat-label>
+                  <mat-select [(ngModel)]="mintAddress">
+                    @for (h of mintRecipients; track h.walletAddress) {
+                      <mat-option [value]="h.walletAddress">{{ h.walletAddress }}</mat-option>
+                    }
+                  </mat-select>
+                  <mat-hint>Only ACTIVE, KYC-approved, screened holders of this asset are accepted; onboard a new holder first.</mat-hint>
                 </mat-form-field>
                 <mat-form-field appearance="outline">
                   <mat-label>Amount</mat-label>
-                  <input matInput type="number" [(ngModel)]="mintAmount" min="1" />
+                  <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="mintAmount" placeholder="Base units, e.g. 1000" />
                 </mat-form-field>
                 <div>
-                  <button type="button" mat-raised-button color="primary" (click)="mintTokens()" [disabled]="!primaryDeploymentId || !mintAddress || !mintAmount">
+                  <button type="button" mat-raised-button color="primary" (click)="mintTokens()" [disabled]="!primaryDeploymentId || !mintAddress || !isWholeAmount(mintAmount)">
                     <mat-icon>add_circle</mat-icon>
                     Mint
                   </button>
@@ -658,10 +661,10 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                 </mat-form-field>
                 <mat-form-field appearance="outline">
                   <mat-label>Amount</mat-label>
-                  <input matInput type="number" [(ngModel)]="burnAmount" min="1" />
+                  <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="burnAmount" placeholder="Base units, e.g. 1000" />
                 </mat-form-field>
                 <div>
-                  <button type="button" mat-raised-button color="warn" (click)="burnTokens()" [disabled]="!primaryDeploymentId || !burnAddress || !burnAmount">
+                  <button type="button" mat-raised-button color="warn" (click)="burnTokens()" [disabled]="!primaryDeploymentId || !burnAddress || !isWholeAmount(burnAmount)">
                     <mat-icon>remove_circle</mat-icon>
                     Burn
                   </button>
@@ -1030,21 +1033,25 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                     </button>
                   </mat-form-field>
                   <mat-form-field appearance="outline">
-                    <mat-label>To Address</mat-label>
-                    <input matInput [(ngModel)]="forceTo" placeholder="0x..." />
-                    <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
-                            (click)="pickAddress('WALLET', 'Select destination wallet', a => forceTo = a)">
-                      <mat-icon style="font-size:18px">contacts</mat-icon>
-                    </button>
+                    <mat-label>To (registered holder)</mat-label>
+                    <mat-select [(ngModel)]="forceTo" data-testid="force-to">
+                      @if (forceTo && !isRecipient(forceTo)) {
+                        <mat-option [value]="forceTo">{{ forceTo }} (not in the register list)</mat-option>
+                      }
+                      @for (h of mintRecipients; track h.walletAddress) {
+                        <mat-option [value]="h.walletAddress">{{ h.walletAddress }}</mat-option>
+                      }
+                    </mat-select>
+                    <mat-hint>Only ACTIVE, KYC-approved, screened holders of this asset are accepted; onboard a new holder first.</mat-hint>
                   </mat-form-field>
                   <div class="form-row">
                     <mat-form-field appearance="outline">
                       <mat-label>Amount</mat-label>
-                      <input matInput [(ngModel)]="forceAmount" placeholder="0" />
+                      <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="forceAmount" placeholder="Base units, e.g. 1000" />
                     </mat-form-field>
                     <mat-form-field appearance="outline">
                       <mat-label>Legal Basis / Reason</mat-label>
-                      <input matInput [(ngModel)]="forceReason" placeholder="AWG §17" />
+                      <input matInput [(ngModel)]="forceReason" placeholder="AWG §17 … (min. 10 characters)" />
                     </mat-form-field>
                   </div>
                   <div>
@@ -1069,12 +1076,12 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                     </mat-form-field>
                     <mat-form-field appearance="outline">
                       <mat-label>Amount</mat-label>
-                      <input matInput [(ngModel)]="forceBurnAmount" placeholder="0" />
+                      <input matInput type="text" inputmode="numeric" autocomplete="off" [(ngModel)]="forceBurnAmount" placeholder="Base units, e.g. 1000" />
                     </mat-form-field>
                   </div>
                   <mat-form-field appearance="outline">
                     <mat-label>Legal Basis</mat-label>
-                    <input matInput [(ngModel)]="forceBurnLegalBasis" placeholder="eWpG §26" />
+                    <input matInput [(ngModel)]="forceBurnLegalBasis" placeholder="eWpG §26 … (min. 10 characters)" />
                   </mat-form-field>
                   <div>
                     <button type="button" mat-raised-button color="warn"
@@ -1178,9 +1185,10 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                   <ng-container matColumnDef="status">
                     <th mat-header-cell *matHeaderCellDef>Status</th>
                     <td mat-cell *matCellDef="let tx">
-                      <span [style.color]="tx.status === 'SUCCESS' ? 'green' : tx.status === 'PENDING' ? 'orange' : 'red'"
-                            style="font-weight:600;font-size:12px">
-                        {{ tx.status }}
+                      <span [style.color]="tx.status === 'SUCCESS' ? 'var(--rw-text-success)' : (tx.status === 'PENDING' || tx.status === 'TIMEOUT') ? 'var(--rw-text-warning)' : 'var(--rw-text-danger)'"
+                            style="font-weight:600;font-size:12px"
+                            [matTooltip]="tx.status === 'TIMEOUT' ? 'Not yet mined — may still execute. Not a failure.' : tx.status === 'REPLACED' ? 'Replaced on chain by another transaction at the same nonce.' : ''">
+                        {{ tx.status === 'TIMEOUT' ? 'AWAITING CHAIN' : tx.status }}
                       </span>
                     </td>
                   </ng-container>
@@ -1284,9 +1292,10 @@ export class AssetDetailComponent implements OnInit {
   readonly holderColumns = ['address', 'balance', 'percentage'];
 
   mintAddress = '';
-  mintAmount: number | null = null;
+  /** Decimal STRING (a JS number loses precision above 2^53 - P4B-7). */
+  mintAmount: string | null = null;
   burnAddress = '';
-  burnAmount: number | null = null;
+  burnAmount: string | null = null;
 
   // ── KYC Compliance ────────────────────────────────────────────────────────
   kycCompliance: KycComplianceResponse | null = null;
@@ -1829,22 +1838,31 @@ export class AssetDetailComponent implements OnInit {
   executeForceTransfer(): void {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.forceFrom || !this.forceTo || !this.forceAmount) return;
-    if (!confirm(`Execute forced transfer of ${this.forceAmount} from ${this.forceFrom} to ${this.forceTo}?`)) return;
-    // Confidential forced-transfer needs a Zama-relayer round-trip on the backend to encrypt the
-    // amount, so it carries the same step-up + 4-eyes gating as the plaintext endpoint.
-    const forcedTransfer$ = this.isConfidential
-      ? this.confidentialService.forcedTransfer(this.id, depId, {
-          from: this.forceFrom, to: this.forceTo, value: this.forceAmount, legalBasis: this.forceReason,
-        })
-      : this.erc3643Service.forcedTransfer(this.id, depId, {
-          from: this.forceFrom, to: this.forceTo, amount: this.forceAmount, reason: this.forceReason,
-        });
-    forcedTransfer$.subscribe({
-      next: (r) => {
-        this.txService.track(r.txId, 'Forced transfer');
-        this.forceFrom = ''; this.forceTo = ''; this.forceAmount = ''; this.forceReason = '';
-      },
-      error: (err) => this.showActionError('Forced transfer failed.', err),
+    if (!this.isWholeAmount(this.forceAmount)) {
+      this.snackBar.open('The amount must be a whole number greater than 0 (base units).', 'OK', { duration: 5000 });
+      return;
+    }
+    if ((this.forceReason ?? '').trim().length < 10) {
+      this.snackBar.open('The legal basis / reason needs at least 10 characters.', 'OK', { duration: 5000 });
+      return;
+    }
+    const from = this.forceFrom, to = this.forceTo, amount = this.forceAmount.trim(), reason = this.forceReason.trim();
+    if (!confirm(`Execute forced transfer of ${amount} from ${from} to ${this.holderLabel(to)}?`)) return;
+    // Step-up + 4-eyes (FORCED_TRANSFER_EWG24). The destination must be an ACTIVE registered holder (P4C-2);
+    // the confidential variant needs a Zama-relayer round-trip on the backend to encrypt the amount.
+    this.withDualControl('FORCED_TRANSFER_EWG24', `Forced transfer of ${amount} to ${this.holderLabel(to)}`, (tokens) => {
+      const forcedTransfer$ = this.isConfidential
+        ? this.confidentialService.forcedTransfer(this.id, depId, { from, to, value: amount, legalBasis: reason }, tokens)
+        : this.erc3643Service.forcedTransfer(this.id, depId, { from, to, amount, reason }, tokens);
+      forcedTransfer$.subscribe({
+        next: (r) => {
+          this.txService.track(r.txId, 'Forced transfer');
+          this.snackBar.open(`Forced transfer submitted to ${r.destinationHolder ?? this.holderLabel(to)}`, 'OK', { duration: 5000 });
+          this.forceFrom = ''; this.forceTo = ''; this.forceAmount = ''; this.forceReason = '';
+          this.cdr.markForCheck();
+        },
+        error: (err) => this.showActionError('Forced transfer failed.', err),
+      });
     });
   }
 
@@ -1852,20 +1870,28 @@ export class AssetDetailComponent implements OnInit {
   executeForceBurn(): void {
     const depId = this.primaryDeploymentId;
     if (!depId || !this.forceBurnFrom || !this.forceBurnAmount) return;
-    if (!confirm(`Force burn ${this.forceBurnAmount} from ${this.forceBurnFrom}?`)) return;
-    const forceBurn$ = this.isConfidential
-      ? this.confidentialService.forceBurn(this.id, depId, {
-          from: this.forceBurnFrom, value: this.forceBurnAmount, legalBasis: this.forceBurnLegalBasis,
-        })
-      : this.erc3643Service.forceBurn(this.id, depId, {
-          from: this.forceBurnFrom, amount: this.forceBurnAmount, legalBasis: this.forceBurnLegalBasis,
-        });
-    forceBurn$.subscribe({
-      next: (r) => {
-        this.txService.track(r.txId, 'Force burn');
-        this.forceBurnFrom = ''; this.forceBurnAmount = ''; this.forceBurnLegalBasis = '';
-      },
-      error: (err) => this.showActionError('Forced burn failed.', err),
+    if (!this.isWholeAmount(this.forceBurnAmount)) {
+      this.snackBar.open('The amount must be a whole number greater than 0 (base units).', 'OK', { duration: 5000 });
+      return;
+    }
+    if ((this.forceBurnLegalBasis ?? '').trim().length < 10) {
+      this.snackBar.open('The legal basis needs at least 10 characters.', 'OK', { duration: 5000 });
+      return;
+    }
+    const from = this.forceBurnFrom, amount = this.forceBurnAmount.trim(), legalBasis = this.forceBurnLegalBasis.trim();
+    if (!confirm(`Force burn ${amount} from ${from}?`)) return;
+    this.withDualControl('FORCE_BURN_EWG26', `Force burn of ${amount} from ${this.holderLabel(from)}`, (tokens) => {
+      const forceBurn$ = this.isConfidential
+        ? this.confidentialService.forceBurn(this.id, depId, { from, value: amount, legalBasis }, tokens)
+        : this.erc3643Service.forceBurn(this.id, depId, { from, amount, legalBasis }, tokens);
+      forceBurn$.subscribe({
+        next: (r) => {
+          this.txService.track(r.txId, 'Force burn');
+          this.forceBurnFrom = ''; this.forceBurnAmount = ''; this.forceBurnLegalBasis = '';
+          this.cdr.markForCheck();
+        },
+        error: (err) => this.showActionError('Forced burn failed.', err),
+      });
     });
   }
 
@@ -1937,24 +1963,52 @@ export class AssetDetailComponent implements OnInit {
     });
   }
 
+  isWholeAmount(v: string | null): boolean {
+    return /^[1-9]\d*$/.test((v ?? '').trim());
+  }
+
   mintTokens(): void {
     const depId = this.primaryDeploymentId;
-    if (!depId || !this.mintAddress || !this.mintAmount) return;
-    this.assetService.mint(this.id, depId, { toAddress: this.mintAddress, amount: this.mintAmount }).subscribe({
-      next: (r) => {
-        this.txService.track(r.txId, 'Mint');
-        this.mintAddress = '';
-        this.mintAmount = null;
-        this.loadHolders();
-      },
-      error: (err) => this.showActionError('Mint failed.', err),
-    });
+    if (!depId || !this.mintAddress || !this.isWholeAmount(this.mintAmount)) return;
+    const body = { toAddress: this.mintAddress, amount: this.mintAmount!.trim() };
+    // P4C-2: mint needs step-up + a second approver, and the recipient must be a registered holder.
+    this.withDualControl('ISSUER_MINT', `Mint ${body.amount} tokens to ${this.mintHolderLabel(body.toAddress)}`, (tokens) =>
+      this.assetService.mint(this.id, depId, body, tokens).subscribe({
+        next: (r) => {
+          this.txService.track(r.txId, 'Mint');
+          this.snackBar.open(`Mint submitted to ${r.destinationHolder ?? body.toAddress}`, 'OK', { duration: 5000 });
+          this.mintAddress = '';
+          this.mintAmount = null;
+          this.loadHolders();
+        },
+        error: (err) => this.showActionError('Mint failed.', err),
+      }));
+  }
+
+  /** Register holders (wallet) selectable as mint recipients; `holders` carries the register rows. */
+  get mintRecipients(): { walletAddress: string }[] {
+    return this.holders
+      .map(h => ({ walletAddress: h.address }))
+      .filter(h => !!h.walletAddress);
+  }
+
+  isRecipient(address: string): boolean {
+    return this.mintRecipients.some(h => h.walletAddress === address);
+  }
+
+  private mintHolderLabel(address: string): string {
+    return this.holderLabel(address);
+  }
+
+  /** Short address form; the register holder's investor id is not resolvable client-side. */
+  holderLabel(address: string): string {
+    return address.length > 14 ? `${address.slice(0, 8)}…${address.slice(-6)}` : address;
   }
 
   burnTokens(): void {
     const depId = this.primaryDeploymentId;
-    if (!depId || !this.burnAddress || !this.burnAmount) return;
-    const body = { fromAddress: this.burnAddress, amount: this.burnAmount };
+    if (!depId || !this.burnAddress || !this.isWholeAmount(this.burnAmount)) return;
+    const body = { fromAddress: this.burnAddress, amount: this.burnAmount!.trim() };
     // T3-01: burning from any address is a §26 Einziehung — step-up + second approver.
     this.withDualControl('ISSUER_BURN_EWG26', 'Burn tokens', (tokens) =>
       this.assetService.burn(this.id, depId, body, tokens).subscribe({

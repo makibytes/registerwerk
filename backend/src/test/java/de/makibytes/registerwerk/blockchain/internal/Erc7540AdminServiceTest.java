@@ -96,7 +96,7 @@ class Erc7540AdminServiceTest {
         BigInteger requestId = BigInteger.TEN;
         VaultRequest request = request(requestId, VaultRequestType.REDEEM, VaultRequestStatus.PENDING);
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
-        when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
+        when(requestRepository.findByAssetIdAndChainConfigIdAndRequestId(deployment.getAssetId(), deployment.getChainConfigId(), requestId))
                 .thenReturn(Optional.of(request));
         when(evmTransactions.submit(eq(deployment.getChainConfigId()),
                 eq(deployment.getContractAddress()), any(Function.class), any()))
@@ -126,7 +126,7 @@ class Erc7540AdminServiceTest {
         BigInteger requestId = BigInteger.ONE;
         VaultRequest request = request(requestId, VaultRequestType.DEPOSIT, VaultRequestStatus.FULFILLED);
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
-        when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
+        when(requestRepository.findByAssetIdAndChainConfigIdAndRequestId(deployment.getAssetId(), deployment.getChainConfigId(), requestId))
                 .thenReturn(Optional.of(request));
 
         assertThatThrownBy(() -> service.cancelRequest(
@@ -145,7 +145,7 @@ class Erc7540AdminServiceTest {
         VaultRequest request = request(requestId, VaultRequestType.DEPOSIT, VaultRequestStatus.PENDING);
         request.setFulfilledTx("0xalready-submitted");
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
-        when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
+        when(requestRepository.findByAssetIdAndChainConfigIdAndRequestId(deployment.getAssetId(), deployment.getChainConfigId(), requestId))
                 .thenReturn(Optional.of(request));
 
         assertThatThrownBy(() -> service.fulfillRequest(
@@ -160,7 +160,7 @@ class Erc7540AdminServiceTest {
         BigInteger requestId = BigInteger.valueOf(3);
         VaultRequest request = request(requestId, VaultRequestType.DEPOSIT, VaultRequestStatus.PENDING);
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
-        when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
+        when(requestRepository.findByAssetIdAndChainConfigIdAndRequestId(deployment.getAssetId(), deployment.getChainConfigId(), requestId))
                 .thenReturn(Optional.of(request));
         when(evmTransactions.submit(eq(deployment.getChainConfigId()),
                 eq(deployment.getContractAddress()), any(Function.class), any()))
@@ -314,7 +314,7 @@ class Erc7540AdminServiceTest {
     private VaultRequest stubPending(BigInteger requestId, VaultRequestType type) {
         VaultRequest request = request(requestId, type, VaultRequestStatus.PENDING);
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
-        when(requestRepository.findByAssetIdAndRequestId(deployment.getAssetId(), requestId))
+        when(requestRepository.findByAssetIdAndChainConfigIdAndRequestId(deployment.getAssetId(), deployment.getChainConfigId(), requestId))
                 .thenReturn(Optional.of(request));
         return request;
     }

@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.asset.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import de.makibytes.registerwerk.externalref.ExternalRefApi;
 import de.makibytes.registerwerk.asset.internal.AssetDeploymentService;
 import de.makibytes.registerwerk.asset.internal.AssetLifecycleService;
@@ -242,6 +243,7 @@ public class AssetController {
      * legal basis and reference; the service refuses while holders are unpaid (see
      * {@code AssetLifecycleService#redeem}).
      */
+    @RequiresIdempotencyKey
     @PostMapping("/{id}/redeem")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     @RequiresStepUp(requireSecondApprover = true, reason = "ASSET_REDEMPTION")

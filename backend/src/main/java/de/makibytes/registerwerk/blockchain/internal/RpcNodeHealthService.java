@@ -3,6 +3,8 @@ package de.makibytes.registerwerk.blockchain.internal;
 import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.RpcNode;
+import de.makibytes.registerwerk.chain.api.RpcUrls;
+import de.makibytes.registerwerk.chain.api.RpcNodeChainVerifier;
 import de.makibytes.registerwerk.chain.api.CantonClientProvider;
 import de.makibytes.registerwerk.chain.api.CantonLedgerEndpoint;
 import de.makibytes.registerwerk.blockchain.api.Web3jClientFactory;
@@ -39,8 +41,17 @@ import java.util.stream.Collectors;
  *   <li>Node responds within {@code rpc.health-check-timeout-seconds} (default 5s)</li>
  *   <li>Not reporting syncing mode (EVM: eth_syncing)</li>
  *   <li>Block number has advanced within {@code rpc.stall-threshold-seconds} (default 120s)</li>
- *   <li>Lag vs. best peer is ≤ {@code rpc.max-lag-blocks} (default 2)</li>
+ *   <li>Lag vs. the reference height is ≤ {@code rpc.max-lag-blocks} (default 2). The reference is
+ *       the <em>median</em> height of the routing candidates (lower median, {@code >= 3} candidates) or
+ *       the lower of two, never the maximum: one lying node cannot make every honest node look late.
+ *       A node ahead of the reference by more than {@code rpc.max-plausible-jump-blocks} is
+ *       quarantined (IMPLAUSIBLE_HEIGHT).</li>
+ *   <li>The node serves the pinned chain: {@code eth_chainId} equals {@code chain_config.chain_id} and
+ *       the genesis hash equals {@code chain_config.genesis_hash} (Solana: genesis hash). A mismatch
+ *       marks the node unhealthy with reason CHAIN_MISMATCH and it is never routed to (P4C-1).</li>
  * </ul>
+ * A single failed probe makes a node unhealthy immediately; coming back needs two consecutive good
+ * probes (P4B-8).
  */
 @Service
 public class RpcNodeHealthService {
@@ -56,11 +67,19 @@ public class RpcNodeHealthService {
     @Value("${registerwerk.rpc.max-lag-blocks:2}")
     private int maxLagBlocks;
 
+    /** A node reporting a height this far above the reference (median / lower peer) is not believed. */
+    @Value("${registerwerk.rpc.max-plausible-jump-blocks:1000}")
+    private long maxPlausibleJump;
+
+    /** Consecutive good probes an unhealthy node needs before it is routed to again. */
+    private static final int RECOVERY_SUCCESSES = 2;
+
     private final RpcNodeRepository rpcNodeRepository;
     private final RpcNodeHealthPersister healthPersister;
     private final Web3jClientFactory web3jClientFactory;
     private final SolanaClientFactory solanaClientFactory;
     private final BlockchainClientRegistry registry;
+    private final RpcChainIdentityChecker identityChecker;
 
     private final CantonClientProvider cantonClientFactory;
 
@@ -89,6 +108,7 @@ public class RpcNodeHealthService {
             SolanaClientFactory solanaClientFactory,
             @Nullable CantonClientProvider cantonClientFactory,
             BlockchainClientRegistry registry,
+            RpcChainIdentityChecker identityChecker,
             MeterRegistry meterRegistry) {
         this.rpcNodeRepository    = rpcNodeRepository;
         this.healthPersister      = healthPersister;
@@ -96,6 +116,7 @@ public class RpcNodeHealthService {
         this.solanaClientFactory  = solanaClientFactory;
         this.cantonClientFactory  = cantonClientFactory;
         this.registry             = registry;
+        this.identityChecker      = identityChecker;
 
         // Live-queried at scrape time over the real persisted health state — checkAllNodes()
         // already saveAll()s this every ~30s, but nothing ever counted it (repo-wide
@@ -173,7 +194,7 @@ public class RpcNodeHealthService {
     // ── EVM ───────────────────────────────────────────────────────────────────
 
     private void checkEvmNodes(ChainConfig chain, List<RpcNode> nodes) {
-        Map<UUID, Long> blockNumbers = new HashMap<>();
+        Probes probes = new Probes();
 
         for (RpcNode node : nodes) {
             if (skipProbe(node)) continue;
@@ -182,6 +203,7 @@ public class RpcNodeHealthService {
                     id -> web3jClientFactory.createClient(node.getUrl()));
 
             Instant checkStart = Instant.now();
+            if (node.getLastCheckedAt() == null) probes.firstProbe.add(node.getId());
             try {
                 // Check syncing status
                 boolean isSyncing = client.ethSyncing()
@@ -193,55 +215,139 @@ public class RpcNodeHealthService {
                         .sendAsync().get(timeoutSeconds, TimeUnit.SECONDS).getBlockNumber();
 
                 long bn = blockNum.longValue();
-                blockNumbers.put(node.getId(), bn);
 
-                if (node.getLatestBlockNumber() == null || bn > node.getLatestBlockNumber()) {
-                    node.setBlockLastAdvancedAt(checkStart);
+                // P4C-1: the endpoint must serve the pinned chain (chain id + genesis hash).
+                RpcNodeChainVerifier.Verdict identity = identityChecker.checkEvm(chain, client);
+                if (identity.outcome() == RpcNodeChainVerifier.Outcome.MISMATCH) {
+                    log.error("RPC node {} of chain {} serves another chain ({}); quarantined",
+                            RpcUrls.redact(node.getUrl()), chain.getIdentifier(), identity.detail());
+                    probes.mismatched.add(node.getId());
+                    node.setConsecutiveFailures(0);
+                    node.setLastSuccessAt(checkStart);
+                } else {
+                    probes.reported.put(node.getId(), bn);
+                    if (node.getLatestBlockNumber() == null || bn > node.getLatestBlockNumber()) {
+                        node.setBlockLastAdvancedAt(checkStart);
+                    }
+                    node.setLatestBlockNumber(bn);
+                    node.setLastSuccessAt(checkStart);
+                    node.setConsecutiveFailures(0);
                 }
-                node.setLatestBlockNumber(bn);
-                node.setLastSuccessAt(checkStart);
-                node.setConsecutiveFailures(0);
                 recordSuccess(node);
 
             } catch (Exception e) {
+                probes.failed.add(node.getId());
                 node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
                 recordFailure(node, chain, e);
             }
             node.setLastCheckedAt(checkStart);
         }
 
-        applyLagAndHealthEvm(nodes, blockNumbers);
+        applyLagAndHealth(nodes, probes, true);
     }
 
-    private void applyLagAndHealthEvm(List<RpcNode> nodes, Map<UUID, Long> blockNumbers) {
-        if (blockNumbers.isEmpty()) {
-            nodes.forEach(n -> n.setHealthy(false));
+    /** Outcome of one probe round for a chain. */
+    static final class Probes {
+        /** nodeId → reported height/slot, only for nodes that answered and serve the pinned chain. */
+        final Map<UUID, Long> reported = new HashMap<>();
+        final Set<UUID> mismatched = new HashSet<>();
+        final Set<UUID> failed = new HashSet<>();
+        /** Nodes probed for the first time ever: no hysteresis, they have no unhealthy history. */
+        final Set<UUID> firstProbe = new HashSet<>();
+    }
+
+    /**
+     * Applies health to every node of a chain from one probe round (EVM and Solana share the rules):
+     * a failed probe is unhealthy at once; a chain mismatch quarantines; lag is measured against the
+     * median/lower-peer reference (never the maximum); a node far ahead of it is quarantined; a node
+     * that was unhealthy needs {@link #RECOVERY_SUCCESSES} consecutive good probes to be healthy again.
+     */
+    /** The implausible-height quarantine needs at least this many comparable reliable nodes. */
+    static final int MIN_NODES_FOR_JUMP_QUARANTINE = 3;
+
+    void applyLagAndHealth(List<RpcNode> nodes, Probes probes, boolean checkSyncing) {
+        for (RpcNode node : nodes) {
+            UUID id = node.getId();
+            if (probes.mismatched.contains(id)) {
+                markUnhealthy(node, RpcNode.HealthReason.CHAIN_MISMATCH);
+            } else if (probes.failed.contains(id)) {
+                markUnhealthy(node, RpcNode.HealthReason.PROBE_FAILED);
+            }
+        }
+        if (probes.reported.isEmpty()) {
+            for (RpcNode node : nodes) {
+                if (!probes.mismatched.contains(node.getId()) && !probes.failed.contains(node.getId())) {
+                    markUnhealthy(node, RpcNode.HealthReason.PROBE_FAILED);
+                }
+            }
             return;
         }
 
-        long bestBlock = bestAmongCandidates(nodes, blockNumbers);
+        Set<UUID> reliable = reliableIds(nodes, probes.reported, checkSyncing);
+        long reference = referenceHeight(nodes, probes.reported, reliable);
+        int comparable = comparableCount(nodes, probes.reported, reliable);
+        List<RpcNode> implausible = new ArrayList<>();
 
         for (RpcNode node : nodes) {
-            Long nb = blockNumbers.get(node.getId());
-            if (nb == null) {
-                // Failed to respond — stalled if no success for a while
-                boolean stalled = isStalled(node);
-                if (stalled) node.setHealthy(false);
+            Long nb = probes.reported.get(node.getId());
+            if (nb == null) continue; // failed / mismatched (handled) or skipped by backoff (unchanged)
+
+            long lag = Math.max(0, reference - nb);
+            node.setLagFromBest((int) Math.min(lag, Integer.MAX_VALUE));
+
+            // A "too far ahead" verdict needs a real quorum: with 1-2 nodes the reference is a single
+            // peer, and a stalled/syncing peer would otherwise get the HONEST node quarantined (total
+            // outage). The reference itself is built from healthy, non-syncing, non-stalled nodes only.
+            if (comparable >= MIN_NODES_FOR_JUMP_QUARANTINE && nb - reference > maxPlausibleJump) {
+                log.error("RPC node {} reports height {} but the reference is {}; quarantined as implausible",
+                        RpcUrls.redact(node.getUrl()), nb, reference);
+                markUnhealthy(node, RpcNode.HealthReason.IMPLAUSIBLE_HEIGHT);
+                implausible.add(node);
                 continue;
             }
+            String problem = null;
+            if (checkSyncing && node.isSyncing()) problem = RpcNode.HealthReason.SYNCING;
+            else if (lag > maxLagBlocks) problem = RpcNode.HealthReason.LAGGING;
+            else if (isStalled(node)) problem = RpcNode.HealthReason.STALLED;
 
-            long lag = bestBlock - nb;
-            node.setLagFromBest((int) lag);
-
-            boolean stalled = isStalled(node);
-            node.setHealthy(lag <= maxLagBlocks && !node.isSyncing() && !stalled);
+            if (problem != null) {
+                markUnhealthy(node, problem);
+                continue;
+            }
+            int successes = node.getConsecutiveSuccesses() + 1;
+            node.setConsecutiveSuccesses(successes);
+            if (node.isHealthy() || successes >= RECOVERY_SUCCESSES || probes.firstProbe.contains(node.getId())) {
+                node.setHealthy(true);
+                node.setHealthReason(null);
+            } else {
+                node.setHealthy(false);
+                node.setHealthReason(RpcNode.HealthReason.RECOVERING);
+            }
         }
+
+        // Never leave zero routable nodes because of IMPLAUSIBLE_HEIGHT: if the quarantine emptied the
+        // healthy set, keep the node(s) in service (degrade to ERROR log + the unhealthy/alert metrics).
+        boolean anyHealthy = nodes.stream().anyMatch(n -> n.isEnabled() && n.isHealthy());
+        if (!implausible.isEmpty() && !anyHealthy) {
+            for (RpcNode node : implausible) {
+                log.error("RPC node {} would be the last routable node; keeping it in service despite an "
+                        + "implausible height (operator review needed)", RpcUrls.redact(node.getUrl()));
+                node.setHealthy(true);
+                node.setHealthReason(null);
+            }
+        }
+    }
+
+    private static void markUnhealthy(RpcNode node, String reason) {
+        node.setHealthy(false);
+        node.setHealthReason(reason);
+        node.setConsecutiveSuccesses(0);
     }
 
     // ── Solana ────────────────────────────────────────────────────────────────
 
     private void checkSolanaNodes(ChainConfig chain, List<RpcNode> nodes) {
-        Map<UUID, Long> slots = new HashMap<>();
+        Probes probes = new Probes();
 
         for (RpcNode node : nodes) {
             if (skipProbe(node)) continue;
@@ -250,48 +356,39 @@ public class RpcNodeHealthService {
                     id -> solanaClientFactory.createClient(node.getUrl()));
 
             Instant checkStart = Instant.now();
+            if (node.getLastCheckedAt() == null) probes.firstProbe.add(node.getId());
             try {
                 long slot = client.getApi().getSlot();
-                slots.put(node.getId(), slot);
 
-                if (node.getLatestBlockNumber() == null || slot > node.getLatestBlockNumber()) {
-                    node.setBlockLastAdvancedAt(checkStart);
+                // P4C-1: Solana has no chain id; the genesis hash identifies the cluster.
+                RpcNodeChainVerifier.Verdict identity = identityChecker.checkSolana(chain, client);
+                if (identity.outcome() == RpcNodeChainVerifier.Outcome.MISMATCH) {
+                    log.error("Solana RPC node {} of chain {} serves another cluster ({}); quarantined",
+                            RpcUrls.redact(node.getUrl()), chain.getIdentifier(), identity.detail());
+                    probes.mismatched.add(node.getId());
+                    node.setConsecutiveFailures(0);
+                    node.setLastSuccessAt(checkStart);
+                } else {
+                    probes.reported.put(node.getId(), slot);
+                    if (node.getLatestBlockNumber() == null || slot > node.getLatestBlockNumber()) {
+                        node.setBlockLastAdvancedAt(checkStart);
+                    }
+                    node.setLatestBlockNumber(slot);
+                    node.setLastSuccessAt(checkStart);
+                    node.setConsecutiveFailures(0);
+                    node.setSyncing(false);
                 }
-                node.setLatestBlockNumber(slot);
-                node.setLastSuccessAt(checkStart);
-                node.setConsecutiveFailures(0);
-                node.setSyncing(false);
                 recordSuccess(node);
 
             } catch (RpcException e) {
+                probes.failed.add(node.getId());
                 node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
                 recordFailure(node, chain, e);
             }
             node.setLastCheckedAt(checkStart);
         }
 
-        applySolanaLagAndHealth(nodes, slots);
-    }
-
-    private void applySolanaLagAndHealth(List<RpcNode> nodes, Map<UUID, Long> slots) {
-        if (slots.isEmpty()) {
-            nodes.forEach(n -> n.setHealthy(false));
-            return;
-        }
-
-        long bestSlot = bestAmongCandidates(nodes, slots);
-
-        for (RpcNode node : nodes) {
-            Long ns = slots.get(node.getId());
-            if (ns == null) {
-                if (isStalled(node)) node.setHealthy(false);
-                continue;
-            }
-
-            long lag = bestSlot - ns;
-            node.setLagFromBest((int) lag);
-            node.setHealthy(lag <= maxLagBlocks && !isStalled(node));
-        }
+        applyLagAndHealth(nodes, probes, false);
     }
 
     // ── Canton ────────────────────────────────────────────────────────────────
@@ -316,12 +413,14 @@ public class RpcNodeHealthService {
                 node.setConsecutiveFailures(0);
                 node.setSyncing(false);
                 node.setHealthy(true);
+                node.setHealthReason(null);
                 node.setLagFromBest(0);
                 recordSuccess(node);
 
             } catch (Exception e) {
                 node.setConsecutiveFailures(node.getConsecutiveFailures() + 1);
                 node.setHealthy(false);
+                node.setHealthReason(RpcNode.HealthReason.PROBE_FAILED);
                 recordFailure(node, chain, e);
                 // Unlike the EVM/Solana clients, a Canton endpoint owns a gRPC channel with its
                 // own event-loop threads, so it must be closed rather than simply dropped.
@@ -334,26 +433,53 @@ public class RpcNodeHealthService {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
-     * The best (highest) block/slot number reported by a node {@code selectBestNodeId} would
-     * actually route to — i.e. the routing candidate set (exclusive-and-enabled nodes if any
-     * exist, else every enabled node), matching {@code BlockchainClientRegistry.selectBestNodeId}'s
-     * own candidate derivation exactly. Computing this against every node on the chain (including
-     * ones outbound traffic would never be routed to — e.g. a real public mainnet node sitting on
-     * the same {@code ChainConfig} as this stack's own local devnet, or a node an operator disabled
-     * or didn't pin) previously made a node's lag look enormous, and therefore permanently
-     * "unhealthy", purely because of a node it will never be compared against for routing.
-     * Falls back to the best value among every node actually probed this tick if the candidate set
-     * itself reported nothing (e.g. every exclusive node happened to fail this one tick) — that's
-     * still a meaningfully-computed lag reference, just not the narrowest possible one, rather than
-     * silently reporting zero data.
+     * The reference height lag is measured against: the <em>median</em> of the heights reported by the
+     * routing candidates (exclusive-and-enabled nodes if any exist, else every enabled node - the same
+     * set {@code BlockchainClientRegistry.selectBestNodeId} routes among, so a real public node sitting
+     * on the same {@code ChainConfig} as a local devnet, or a node an operator disabled, cannot skew
+     * it). With three or more reports this is the lower median; with two it is the lower of the two;
+     * with one it is that value. Using the median instead of the maximum means a single lying node
+     * cannot make every honest node look late (P4C-1). Falls back to every node that reported this
+     * tick if the candidate set itself reported nothing.
      */
-    private static long bestAmongCandidates(List<RpcNode> nodes, Map<UUID, Long> reported) {
+    static long referenceHeight(List<RpcNode> nodes, Map<UUID, Long> reported, Set<UUID> reliable) {
+        List<Long> values = candidateValues(nodes, reported, reliable);
+        java.util.Collections.sort(values);
+        return values.get((values.size() - 1) / 2);
+    }
+
+    /** Nodes counted for the jump quarantine: only reliable candidates (0 when the fallback set is used). */
+    private static int comparableCount(List<RpcNode> nodes, Map<UUID, Long> reported, Set<UUID> reliable) {
         Set<UUID> candidateIds = routingCandidateIds(nodes);
-        return reported.entrySet().stream()
-                .filter(e -> candidateIds.contains(e.getKey()))
-                .mapToLong(Map.Entry::getValue)
-                .max()
-                .orElseGet(() -> reported.values().stream().mapToLong(Long::longValue).max().getAsLong());
+        return (int) reported.keySet().stream()
+                .filter(id -> candidateIds.contains(id) && reliable.contains(id)).count();
+    }
+
+    private static List<Long> candidateValues(List<RpcNode> nodes, Map<UUID, Long> reported, Set<UUID> reliable) {
+        Set<UUID> candidateIds = routingCandidateIds(nodes);
+        List<Long> values = reported.entrySet().stream()
+                .filter(e -> candidateIds.contains(e.getKey()) && reliable.contains(e.getKey()))
+                .map(Map.Entry::getValue)
+                .collect(Collectors.toCollection(ArrayList::new));
+        if (values.isEmpty()) {
+            values = reported.entrySet().stream()
+                    .filter(e -> candidateIds.contains(e.getKey()))
+                    .map(Map.Entry::getValue)
+                    .collect(Collectors.toCollection(ArrayList::new));
+        }
+        if (values.isEmpty()) values = new ArrayList<>(reported.values());
+        return values;
+    }
+
+    /** Reporting nodes that may serve as reference: not syncing (EVM) and not stalled. Their previous
+     *  LAGGING/STALLED verdict is not used, so a node can always recover. */
+    private Set<UUID> reliableIds(List<RpcNode> nodes, Map<UUID, Long> reported, boolean checkSyncing) {
+        return nodes.stream()
+                .filter(n -> reported.containsKey(n.getId()))
+                .filter(n -> !(checkSyncing && n.isSyncing()))
+                .filter(n -> !isStalled(n))
+                .map(RpcNode::getId)
+                .collect(Collectors.toSet());
     }
 
     /** Mirrors {@code BlockchainClientRegistry.selectBestNodeId}'s candidate-set derivation:
@@ -399,14 +525,14 @@ public class RpcNodeHealthService {
         int failures = node.getConsecutiveFailures();
         if (failures <= BACKOFF_AFTER_FAILURES) {
             log.warn("{} health check failed for node {} ({}): {}", chain.getChainType(),
-                    node.getUrl(), chain.getIdentifier(), e.getMessage());
+                    RpcUrls.redact(node.getUrl()), chain.getIdentifier(), e.getMessage());
             return;
         }
         int ticks = Math.min(1 << Math.min(failures - BACKOFF_AFTER_FAILURES, 5), MAX_BACKOFF_TICKS);
         skipTicks.put(node.getId(), ticks);
         log.warn("{} health check failed for node {} ({}) — {} consecutive failures, "
                         + "backing off for {} rounds: {}",
-                chain.getChainType(), node.getUrl(), chain.getIdentifier(), failures, ticks,
+                chain.getChainType(), RpcUrls.redact(node.getUrl()), chain.getIdentifier(), failures, ticks,
                 e.getMessage());
     }
 

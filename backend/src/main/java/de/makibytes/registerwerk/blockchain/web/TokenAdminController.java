@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.web;
 
+import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -24,6 +25,7 @@ import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import de.makibytes.registerwerk.deployment.api.ForcedOpTargetGuard;
+import de.makibytes.registerwerk.kyc.api.OutboundDestinationGate;
 import de.makibytes.registerwerk.blockchain.web.dto.CantonBurnRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.CantonForceTransferRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.CantonFreezeHoldingRequest;
@@ -81,6 +83,7 @@ import jakarta.validation.Valid;
 @RestController
 @RequestMapping("/api/v1/assets/{assetId}/deployments/{depId}/admin")
 @PreAuthorize("hasRole('REGISTRY_ADMIN') and @deploymentAccessChecker.belongsToAsset(#depId, #assetId)")
+@RequiresIdempotencyKey
 public class TokenAdminController {
 
     private static final Logger log = LoggerFactory.getLogger(TokenAdminController.class);
@@ -90,18 +93,21 @@ public class TokenAdminController {
     private final AssetDeploymentPort deploymentPort;
     private final CorrectionCapabilityService correctionCapabilityService;
     private final ForcedOpTargetGuard targetGuard;
+    private final OutboundDestinationGate destinationGate;
 
     public TokenAdminController(
             TokenAdminService adminService,
             CantonTokenOperations cantonTokenService,
             AssetDeploymentPort deploymentPort,
             CorrectionCapabilityService correctionCapabilityService,
-            ForcedOpTargetGuard targetGuard) {
+            ForcedOpTargetGuard targetGuard,
+            OutboundDestinationGate destinationGate) {
         this.adminService       = adminService;
         this.cantonTokenService = cantonTokenService;
         this.deploymentPort     = deploymentPort;
         this.correctionCapabilityService = correctionCapabilityService;
         this.targetGuard = targetGuard;
+        this.destinationGate = destinationGate;
     }
 
     /**
@@ -159,15 +165,20 @@ public class TokenAdminController {
         return accepted(adminService.unfreezeAddress(depId, request.address(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
     }
 
+    /** Whitelisting grants transfer rights: step-up + 4-eyes, destination must be a screened register holder (P4C-2). */
     @PostMapping("/whitelist")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WHITELIST_CHANGE")
     public ResponseEntity<TxSubmissionResponse> whitelist(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid UnwhitelistRequest request, Authentication auth) {
         log.info("ADMIN whitelist address={} on deployment={} by actor={}", request.address(), depId, actorName(auth));
-        return accepted(adminService.whitelist(depId, request.address(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
+        var resolved = destinationGate.require(assetId, request.address(), "whitelist");
+        UUID txId = adminService.whitelist(depId, request.address(), actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.accepted().body(new TxSubmissionResponse(txId, resolved != null ? resolved.holderName() : null));
     }
 
     @PostMapping("/unwhitelist")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WHITELIST_CHANGE")
     public ResponseEntity<TxSubmissionResponse> unwhitelist(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid UnwhitelistRequest request, Authentication auth) {
@@ -369,6 +380,7 @@ public class TokenAdminController {
             @RequestBody @Valid CantonIssueRequest request, Authentication auth) {
         log.info("ADMIN Canton issue recipient={} amount={} on deployment={} by actor={}",
                 request.recipientPartyId(), request.amount(), depId, actorName(auth));
+        destinationGate.require(assetId, request.recipientPartyId(), "cantonIssue");
         String updateId = cantonTokenService.issue(depId, request.recipientPartyId(), request.amount(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")).join();
         return cantonAccepted(updateId);
@@ -413,6 +425,7 @@ public class TokenAdminController {
             @RequestBody @Valid CantonForceTransferRequest request, Authentication auth) {
         log.info("ADMIN Canton force-transfer holdingCid={} to={} amount={} on deployment={} by actor={}",
                 request.holdingContractId(), request.toPartyId(), request.amount(), depId, actorName(auth));
+        destinationGate.require(assetId, request.toPartyId(), "cantonForceTransfer");
         String updateId = cantonTokenService.forceTransfer(
                 depId, request.holdingContractId(), request.toPartyId(), request.amount(), request.reason(),
                 actorId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")).join();

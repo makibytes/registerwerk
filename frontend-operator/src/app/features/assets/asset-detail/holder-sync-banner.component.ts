@@ -52,10 +52,24 @@ import { HolderSyncService, NomineePoolKind } from '../../../core/api/holder-syn
             {{ asset!.lastSuccessfulHolderSyncAt ? (asset!.lastSuccessfulHolderSyncAt | date:'medium') : 'never' }}
           </strong>
         </div>
-        <p class="sync-text">
-          Unmapped wallets hold finalized balances. Corporate-action snapshots and settlement confirmation
-          are refused until every wallet is registered as a pool or mapped to an investor.
-        </p>
+        @if (asset!.holderSyncBlockedReason) {
+          <p class="sync-text sync-reason" data-testid="holder-sync-reason">
+            <strong>Reason:</strong> {{ asset!.holderSyncBlockedReason }}
+          </p>
+        }
+        @if (isIndexingProblem()) {
+          <p class="sync-text">
+            The register cannot be derived from an incomplete chain history. Configure or repair the indexer for the
+            named deployment (Indexers screen), let it catch up, then re-run the holder sync. Corporate-action
+            snapshots and settlement confirmation are refused until then. Nothing is clamped or guessed.
+          </p>
+        }
+        @if ((asset!.holderSyncUnmappedWallets ?? []).length > 0) {
+          <p class="sync-text">
+            Unmapped wallets hold finalized balances. Corporate-action snapshots and settlement confirmation
+            are refused until every wallet is registered as a pool or mapped to an investor.
+          </p>
+        }
         <ul class="wallet-list">
           @for (w of asset!.holderSyncUnmappedWallets ?? []; track w) {
             <li class="wallet-row">
@@ -143,6 +157,7 @@ import { HolderSyncService, NomineePoolKind } from '../../../core/api/holder-syn
       background: var(--rw-surface-soft);
     }
     .offchain-banner .sync-text { margin: 4px 0 0; }
+    .sync-reason { overflow-wrap: anywhere; }
     .sync-head { display: flex; align-items: center; gap: 8px; }
     .sync-text { margin: 6px 0 10px; font-size: 13px; }
     .wallet-list { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 8px; }
@@ -170,6 +185,12 @@ export class HolderSyncBannerComponent {
   instructingParty = '';
   instructionReference = '';
   busy = false;
+
+  /** Reasons that are not about unmapped wallets: chain history not indexed / negative net balance (P4-01, P4-04). */
+  isIndexingProblem(): boolean {
+    const reason = this.asset?.holderSyncBlockedReason ?? '';
+    return /not indexed|indexed history incomplete|negative net balance/i.test(reason);
+  }
 
   startEdit(wallet: string): void {
     this.editing = wallet;

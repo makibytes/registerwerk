@@ -127,6 +127,13 @@ public class LendingPositionService {
     }
 
     private Optional<LendingPosition> refreshPosition(LendingMarket market, String chainIdentifier, String walletAddress) {
+        // One block number for every read of this refresh (collateral, debt, health factor, surplus).
+        try (RepoMarketOnchainReader.Pin pin = onchainReader.pinBlock(chainIdentifier)) {
+            return refreshPositionPinned(market, chainIdentifier, walletAddress);
+        }
+    }
+
+    private Optional<LendingPosition> refreshPositionPinned(LendingMarket market, String chainIdentifier, String walletAddress) {
         Optional<LendingPosition> existing =
                 positionRepository.findByMarketIdAndWalletAddressIgnoreCase(market.getId(), walletAddress);
 
@@ -212,6 +219,13 @@ public class LendingPositionService {
     }
 
     private Optional<LendingSupplyPosition> refreshSupplyPosition(
+            LendingMarket market, String chainIdentifier, String walletAddress) {
+        try (RepoMarketOnchainReader.Pin pin = onchainReader.pinBlock(chainIdentifier)) {
+            return refreshSupplyPositionPinned(market, chainIdentifier, walletAddress);
+        }
+    }
+
+    private Optional<LendingSupplyPosition> refreshSupplyPositionPinned(
             LendingMarket market, String chainIdentifier, String walletAddress) {
         Optional<LendingSupplyPosition> existing =
                 supplyPositionRepository.findByMarketIdAndWalletAddressIgnoreCase(market.getId(), walletAddress);

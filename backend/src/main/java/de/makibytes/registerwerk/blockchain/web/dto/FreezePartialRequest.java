@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.web.dto;
 
+import de.makibytes.registerwerk.shared.api.StrictAmount;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -18,5 +20,5 @@ public record FreezePartialRequest(
 
         @NotNull
         @Positive
-        BigDecimal amount
+        @JsonDeserialize(using = StrictAmount.BigDecimalAmount.class) BigDecimal amount
 ) {}

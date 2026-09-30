@@ -8,6 +8,7 @@ import de.makibytes.registerwerk.blockchain.internal.tx.EvmSignedSubmission;
 import de.makibytes.registerwerk.blockchain.internal.tx.EvmSignedSubmissionRepository;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
+import de.makibytes.registerwerk.idempotency.api.IdempotencyContext;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.springframework.security.core.Authentication;
@@ -33,18 +34,21 @@ public class DurableEvmSubmissionService implements DurableEvmSubmissionPort {
     private final BlockchainClientRegistry clientRegistry;
     private final EvmContractService evmContractService;
     private final BlockchainTransactionService txService;
+    private final OutboxProperties properties;
 
     public DurableEvmSubmissionService(
             EvmSignedSubmissionRepository repository,
             ChainConfigRepository chainConfigRepository,
             BlockchainClientRegistry clientRegistry,
             EvmContractService evmContractService,
-            BlockchainTransactionService txService) {
+            BlockchainTransactionService txService,
+            OutboxProperties properties) {
         this.repository = repository;
         this.chainConfigRepository = chainConfigRepository;
         this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
         this.txService = txService;
+        this.properties = properties;
     }
 
     /** Persists signed bytes and their deterministic hash before any broadcast is possible. */
@@ -52,6 +56,16 @@ public class DurableEvmSubmissionService implements DurableEvmSubmissionPort {
     @Override
     public PreparedSubmission prepare(UUID chainConfigId, String contractAddress,
             Function function, Map<String, Object> params) {
+        // P4B-7: the same HTTP request replayed with the same Idempotency-Key (after a timeout, a 5xx
+        // whose cached response was released, or once the cached response expired) must map to the
+        // SAME signed transaction: return the existing row instead of signing a second nonce.
+        String idempotencyKey = IdempotencyContext.nextSubmissionKey();
+        if (idempotencyKey != null) {
+            Optional<EvmSignedSubmission> existing = repository.findByIdempotencyKey(idempotencyKey);
+            if (existing.isPresent()) {
+                return new PreparedSubmission(existing.get().getId(), existing.get().getTxHash());
+            }
+        }
         ChainConfig chain = chainConfigRepository.findById(chainConfigId)
                 .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainConfigId));
         Web3j web3j = clientRegistry.getEvmClientByIdentifier(chain.getIdentifier());
@@ -73,9 +87,23 @@ public class DurableEvmSubmissionService implements DurableEvmSubmissionPort {
         row.setParams(params);
         row.setActorName(resolveActorName());
         row.setActorRole(resolveActorRole());
+        row.setIdempotencyKey(idempotencyKey);
         repository.saveAndFlush(row);
+        // P4B-4: a PREPARED row is visible in blockchain_transaction from the moment its bytes are
+        // durable (same DB transaction). Before, only broadcast created that row, so a payload that
+        // could never be broadcast had no timeout, no alert and no console entry at all.
+        txService.recordPrepared(row.getTxHash(), row.getMethodName(), row.getChainConfigId(),
+                row.getChainName(), row.getNetwork(), row.getContractAddress(), row.getParams(),
+                row.getActorName(), row.getActorRole());
+        txService.tagIdempotencyKey(row.getTxHash(), idempotencyKey);
         return new PreparedSubmission(row.getId(), row.getTxHash());
     }
+
+    /** Result of one dispatch attempt; the dispatcher escalates {@link #FAILED}. */
+    public enum DispatchOutcome { BROADCAST, FAILED, SKIPPED }
+
+    /** A dispatch candidate: the row id plus the signer it belongs to. */
+    public record Candidate(UUID id, String signer) {}
 
     /**
      * Dispatches the persisted bytes in a fresh transaction. A rollback after RPC success only
@@ -84,10 +112,15 @@ public class DurableEvmSubmissionService implements DurableEvmSubmissionPort {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     @Override
     public void dispatch(UUID submissionId) {
+        dispatchWithOutcome(submissionId);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public DispatchOutcome dispatchWithOutcome(UUID submissionId) {
         EvmSignedSubmission row = repository.findByIdForUpdate(submissionId)
                 .orElseThrow(() -> new EntityNotFoundException("EvmSignedSubmission", submissionId));
-        if (row.getStatus() == EvmSignedSubmission.Status.BROADCAST) {
-            return;
+        if (row.getStatus() != EvmSignedSubmission.Status.PREPARED) {
+            return DispatchOutcome.SKIPPED; // already BROADCAST, or superseded / abandoned meanwhile
         }
 
         ChainConfig chain = chainConfigRepository.findById(row.getChainConfigId())
@@ -99,31 +132,48 @@ public class DurableEvmSubmissionService implements DurableEvmSubmissionPort {
             known = isKnown(web3j, row.getTxHash());
             if (!known) {
                 try {
-                evmContractService.broadcastPrepared(
-                        row.getChainConfigId(), web3j, row.getSignedPayload(), row.getTxHash());
+                    evmContractService.broadcastPrepared(
+                            row.getChainConfigId(), web3j, row.getSignedPayload(), row.getTxHash());
                 } catch (RuntimeException ambiguousBroadcastFailure) {
                     // A provider can accept the bytes and still lose the response, or answer
                     // "already known"/"nonce too low" on an exact replay. Only visibility of
-                    // this immutable expected hash proves acceptance; otherwise retain PREPARED.
+                    // this immutable expected hash proves acceptance; otherwise retain PREPARED,
+                    // classified so the outbox recovery knows whether a higher fee could help.
                     if (!isKnown(web3j, row.getTxHash())) {
-                        row.setLastError(abbreviate(ambiguousBroadcastFailure.getMessage()));
+                        recordFailure(row, ambiguousBroadcastFailure);
                         repository.save(row);
-                        return;
+                        return DispatchOutcome.FAILED;
                     }
                 }
             }
+            // Idempotent: prepare() already created the row; this covers pre-V22 PREPARED rows.
             txService.recordPrepared(row.getTxHash(), row.getMethodName(), row.getChainConfigId(),
                     row.getChainName(), row.getNetwork(), row.getContractAddress(), row.getParams(),
                     row.getActorName(), row.getActorRole());
             row.setStatus(EvmSignedSubmission.Status.BROADCAST);
             row.setBroadcastAt(Instant.now());
             row.setLastError(null);
+            row.setLastErrorClass(null);
+            row.setFirstFailedAt(null);
+            row.setNextAttemptAt(null);
             repository.save(row);
+            return DispatchOutcome.BROADCAST;
         } catch (Exception e) {
-            row.setLastError(abbreviate(e.getMessage()));
+            recordFailure(row, e);
             repository.save(row);
-            return;
+            return DispatchOutcome.FAILED;
         }
+    }
+
+    /** Stores the failure, its class, and the exponential back-off before the next attempt. */
+    private void recordFailure(EvmSignedSubmission row, Exception failure) {
+        Instant now = Instant.now();
+        row.setLastError(abbreviate(failure.getMessage()));
+        row.setLastErrorClass(BroadcastErrorClassifier.classify(failure.getMessage()));
+        if (row.getFirstFailedAt() == null) {
+            row.setFirstFailedAt(now);
+        }
+        row.setNextAttemptAt(now.plus(properties.backoff(row.getAttemptCount())));
     }
 
     @Transactional(readOnly = true)
@@ -131,10 +181,17 @@ public class DurableEvmSubmissionService implements DurableEvmSubmissionPort {
         return repository.findByTxHash(txHash).map(EvmSignedSubmission::getId);
     }
 
+    /**
+     * Fair dispatch page (P4B-4): per signer the lowest eligible nonces (a row in back-off is
+     * skipped, not waited for), interleaved round-robin across signers and capped per signer, so a
+     * signer whose rows are poisoned can neither monopolise the page nor starve other signers/chains.
+     */
     @Transactional(readOnly = true)
-    public java.util.List<UUID> pendingIds() {
-        return repository.findTop100ByStatusOrderByCreatedAtAsc(EvmSignedSubmission.Status.PREPARED)
-                .stream().map(EvmSignedSubmission::getId).toList();
+    public java.util.List<Candidate> dispatchCandidates() {
+        return repository.findDispatchCandidates(Instant.now(), properties.getPerSignerBatch(),
+                properties.getBatchLimit()).stream()
+                .map(c -> new Candidate(c.getId(), c.getChainId().toPlainString() + ":" + c.getSenderAddress()))
+                .toList();
     }
 
     private boolean isKnown(Web3j web3j, String txHash) throws Exception {

@@ -19,7 +19,7 @@ export class SolanaAdminService {
 
   forcedTransfer(
     assetId: string, depId: string,
-    body: { fromTokenAccount: string; toTokenAccount: string; amount: string; decimals: number; legalBasis: string },
+    body: { fromTokenAccount: string; toTokenAccount: string; toOwnerWallet: string; amount: string; decimals: number; legalBasis: string },
     stepUpToken: string, dualControlToken: string,
   ): Observable<TxSubmissionResponse> {
     const headers = new HttpHeaders({

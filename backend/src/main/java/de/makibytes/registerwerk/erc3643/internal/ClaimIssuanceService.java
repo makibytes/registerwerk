@@ -10,6 +10,14 @@ import de.makibytes.registerwerk.erc3643.api.OnchainClaim;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentity;
 import de.makibytes.registerwerk.erc3643.api.OnchainClaimRepository;
 import de.makibytes.registerwerk.erc3643.api.OnchainIdentityRepository;
+import de.makibytes.registerwerk.customer.api.KycStatus;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -55,12 +63,27 @@ public class ClaimIssuanceService {
     private final OnchainClaimRepository claimRepository;
     private final Erc3643DeploymentService deploymentService;
     private final ApplicationEventPublisher eventPublisher;
+    private final LegalEntityRepository entityRepository;
+    private final ScreeningGate screeningGate;
+    private final HolderBlockGate holderBlockGate;
+    private final Environment environment;
+    private final boolean allowUnapprovedInNonProd;
 
     public ClaimIssuanceService(
             OnchainIdentityRepository identityRepository,
             OnchainClaimRepository claimRepository,
             Erc3643DeploymentService deploymentService,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            LegalEntityRepository entityRepository,
+            ScreeningGate screeningGate,
+            HolderBlockGate holderBlockGate,
+            Environment environment,
+            @Value("${registerwerk.claims.allow-unapproved-in-nonprod:false}") boolean allowUnapprovedInNonProd) {
+        this.entityRepository = entityRepository;
+        this.screeningGate = screeningGate;
+        this.holderBlockGate = holderBlockGate;
+        this.environment = environment;
+        this.allowUnapprovedInNonProd = allowUnapprovedInNonProd;
         this.identityRepository = identityRepository;
         this.claimRepository = claimRepository;
         this.deploymentService = deploymentService;
@@ -88,8 +111,8 @@ public class ClaimIssuanceService {
     /**
      * Issues an AML claim (topic 2) to a legal entity's ONCHAINID on the specified chain.
      *
-     * <p>AML claims do not carry an expiry; re-screening results in revoking the old claim
-     * and issuing a new one.
+     * <p>The expiry is derived from the entity's next periodic KYC review date (P4C-3); re-screening
+     * results in revoking the old claim and issuing a new one.
      *
      * @param legalEntityId ID of the legal entity to receive the claim
      * @param chainConfigId ID of the chain configuration
@@ -125,6 +148,7 @@ public class ClaimIssuanceService {
             UUID actorId, String actorRole) {
         log.info("Issuing claim (topic={}, label={}) for entity={} on chain={}",
             topic, topicLabel, legalEntityId, chainConfigId);
+        expiresAt = requireIssuable(legalEntityId, topic, expiresAt);
 
         OnchainIdentity identity = identityRepository
             .findByLegalEntityIdAndChainConfigId(legalEntityId, chainConfigId)
@@ -283,7 +307,49 @@ public class ClaimIssuanceService {
             .toList();
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Helpers ────
+
+    /**
+     * P4C-3: fail closed unless the entity is KYC APPROVED with no unresolved screening hit (entity
+     * or beneficial owner) and no §16 block. KYC (1) / AML (2) claims expire with the next periodic
+     * review (kycExpiryDate): a missing or past date is rejected; a caller-supplied earlier expiry
+     * wins. Custom topics keep the caller's expiry. Manual break-glass only exists outside prod via
+     * {@code registerwerk.claims.allow-unapproved-in-nonprod=true} (parked T4-05).
+     */
+    private Instant requireIssuable(UUID legalEntityId, long topic, Instant requested) {
+        if (allowUnapprovedInNonProd && !environment.acceptsProfiles(
+                org.springframework.core.env.Profiles.of("prod", "production"))) {
+            log.warn("Claim issuance gate RELAXED for entity={} (registerwerk.claims.allow-unapproved-in-nonprod)", legalEntityId);
+            return requested;
+        }
+        LegalEntity entity = entityRepository.findById(legalEntityId)
+                .orElseThrow(() -> new EntityNotFoundException("LegalEntity", legalEntityId));
+        if (entity.getKycStatus() != KycStatus.APPROVED) {
+            throw new ComplianceGateException("Claim refused: KYC of entity " + legalEntityId + " is "
+                    + entity.getKycStatus() + " (APPROVED required).");
+        }
+        if (screeningGate.hasUnresolvedHit(legalEntityId) || screeningGate.hasUnresolvedBeneficialOwnerHit(legalEntityId)) {
+            throw new ComplianceGateException("Claim refused: entity " + legalEntityId
+                    + " has an unresolved sanctions-screening result.");
+        }
+        if (holderBlockGate.isBlocked(legalEntityId, null)) {
+            throw new ComplianceGateException("Claim refused: entity " + legalEntityId
+                    + " is subject to an active §16 eWpG Sperrvermerk.");
+        }
+        if (topic != CLAIM_TOPIC_KYC && topic != CLAIM_TOPIC_AML) {
+            return requested;
+        }
+        if (entity.getKycExpiryDate() == null) {
+            throw new ComplianceGateException("Claim refused: entity " + legalEntityId
+                    + " has no next periodic review date to derive the claim expiry from.");
+        }
+        Instant derived = entity.getKycExpiryDate().atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        if (!derived.isAfter(Instant.now())) {
+            throw new ComplianceGateException("Claim refused: the periodic review of entity " + legalEntityId
+                    + " is due (" + entity.getKycExpiryDate() + ").");
+        }
+        return requested != null && requested.isBefore(derived) ? requested : derived;
+    }
 
     private OnchainClaim buildClaimRecord(
             OnchainIdentity identity, UUID chainConfigId, long topic, String topicLabel, Instant expiresAt) {

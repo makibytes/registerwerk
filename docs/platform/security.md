@@ -103,6 +103,19 @@ The SPA decodes `claims`, calls `acquireTokenRedirect({ claims })`, and retries 
 
 ---
 
+## Chain operations: destination gate, dual-control evidence, signer lifecycle
+
+**Destination gate.** Whitelist, mint, forced transfer (single, batch, Canton, Solana, confidential) and forced approve only accept a destination that is an **active register holder of the same asset**, whose legal entity is ACTIVE and KYC-approved, has no unresolved sanctions-screening result (entity or beneficial owner) and is not under a §16 eWpG Sperrvermerk. Anything else is refused with `403` and the reason; there is no exception path — onboard the new party as a holder first. Mixed-case EVM addresses must pass the EIP-55 checksum. The whitelist and mint responses echo the resolved holder name (`destinationHolder`). Switch: `registerwerk.chain.destination-gate.enabled` (default `true`; disable only in a demo profile). Forced operations require a `legalBasis` of at least 10 characters; an optional `X-Case-Reference` header is stored with the transaction.
+
+**Dual-control evidence.** `/whitelist`, `/unwhitelist` and the issuer `/mint` need step-up plus a second approver (REGISTRY_ADMIN or COMPLIANCE_OFFICER; the initiator cannot approve). For every 4-eyes request the step-up aspect writes a `DUAL_CONTROL_APPROVED` audit event (initiator, approver, action, path) *before* the action runs; if that write fails, the action does not run. The approver id is also stored on `blockchain_transaction.approver_id` and in the domain audit event.
+
+**Claims.** KYC and AML claims are issued only for an entity that is KYC APPROVED, has no unresolved screening hit and no block. Their expiry is the entity's next periodic review date (a missing date is refused). `registerwerk.claims.allow-unapproved-in-nonprod=true` relaxes this outside production profiles only.
+
+**Signer lifecycle.** Generate, import (raw, keystore) and HSM attach need step-up plus a second approver, and a new wallet is never promoted to chain default automatically (only the very first wallet of a fresh install is); change defaults with the 4-eyes *set default* action. Deleting a wallet is a **soft delete**: the encrypted key stays for `registerwerk.wallet.retention-days` (default 90) and can be restored; a purge job then destroys it. Deletion is refused while the wallet is a chain default or its address ever signed a chain transaction (it may hold deployer, registry or claim-issuer authority).
+
+!!! warning "Signer rotation runbook (manual)"
+    There is no automated handover yet. To replace a registry signer: (1) create or attach the new wallet (4-eyes); (2) with the old key, grant the new address the required roles on chain using Foundry `cast send` (`grantRole` / `transferRegistry` / claim-issuer `addKey`), with a second person present; (3) verify with `cast call` that the new address holds every role; (4) switch the chain default to the new wallet (4-eyes); (5) revoke the old key on chain (`revokeRole` / `removeKey`) and verify; (6) only then delete the old wallet — it stays restorable for the retention period.
+
 ## Role enforcement
 
 Every controller method that requires authorisation is annotated with `@PreAuthorize`:

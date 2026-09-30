@@ -9,6 +9,7 @@ import org.web3j.crypto.Keys;
 import org.web3j.crypto.RawTransaction;
 import org.web3j.crypto.Sign;
 import org.web3j.crypto.TransactionEncoder;
+import org.web3j.crypto.transaction.type.TransactionType;
 
 import java.math.BigInteger;
 import java.util.Arrays;
@@ -32,13 +33,26 @@ public final class Pkcs11EvmSigner implements EvmSigner {
         return address;
     }
 
+    /**
+     * Signs a legacy (EIP-155) or typed (EIP-2718, e.g. EIP-1559) transaction. web3j's
+     * {@code encode(tx, chainId)} only accepts legacy transactions (it throws for type-2), so the
+     * signing preimage differs: legacy appends {@code (chainId, 0, 0)} and signs with
+     * {@code v = 35 + 2*chainId + yParity}; a typed transaction already carries its chain id inside
+     * the payload, is prefixed with its type byte, and is written with yParity (web3j's typed
+     * encoder takes the electrum {@code v = 27 + recId} that {@link #signDigest} returns and emits
+     * {@code recId}).
+     */
     @Override
     public byte[] signTransaction(RawTransaction transaction, long chainId) {
-        byte[] preimage = TransactionEncoder.encode(transaction, chainId);
+        boolean legacy = transaction.getType() == TransactionType.LEGACY;
+        byte[] preimage = legacy
+                ? TransactionEncoder.encode(transaction, chainId)
+                : TransactionEncoder.encode(transaction);
         Sign.SignatureData signature = signDigest(Hash.sha3(preimage));
-        Sign.SignatureData replayProtected =
-                TransactionEncoder.createEip155SignatureData(signature, chainId);
-        return TransactionEncoder.encode(transaction, replayProtected);
+        Sign.SignatureData finalSignature = legacy
+                ? TransactionEncoder.createEip155SignatureData(signature, chainId)
+                : signature;
+        return TransactionEncoder.encode(transaction, finalSignature);
     }
 
     @Override

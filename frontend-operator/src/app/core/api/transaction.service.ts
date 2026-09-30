@@ -7,7 +7,9 @@ import { environment } from '../../../environments/environment';
 export interface TxRecord {
   id: string;
   txHash: string | null;
-  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'TIMEOUT';
+  /** TIMEOUT = not mined within the wait window; the transaction may STILL execute (P4B-5), it is
+   *  not a failure. REPLACED = another transaction consumed the nonce (cancel / re-price). */
+  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'TIMEOUT' | 'REPLACED';
   methodName: string;
   chain: string;
   network: string;
@@ -29,6 +31,14 @@ export interface TxRecord {
    *  ConfidentialForcedOpVerifier). SUCCESS alone does not mean the correction was executed:
    *  the FHE select moves 0 on insufficient balance. Null while pending or not applicable. */
   executionOutcome: ConfidentialForcedOpOutcome | null;
+  /** Set when a TIMEOUT transaction was mined after all (P4B-5). */
+  lateMinedAt?: string | null;
+  /** Hash of the cancel / re-price transaction that replaced this one at the same nonce. */
+  replacedByTxHash?: string | null;
+  /** Hash that was actually mined when it differs from txHash (re-price replacement mined). */
+  minedTxHash?: string | null;
+  /** True for TIMEOUT: the chain has not answered yet — do not treat as failed, do not resubmit. */
+  awaitingChain?: boolean;
 }
 
 export type ConfidentialForcedOpOutcome =
@@ -121,6 +131,14 @@ export class TransactionService {
           if (tx.status === 'SUCCESS') {
             this.snackBar.open(`✅ ${label} confirmed (block ${tx.blockNumber})`, 'OK', {
               duration: 8000, panelClass: 'tx-success'
+            });
+          } else if (tx.status === 'TIMEOUT') {
+            this.snackBar.open(`⏱️ ${label}: not yet mined — it may still execute. Check the transaction console before retrying.`, 'Close', {
+              duration: 0, panelClass: 'tx-pending'
+            });
+          } else if (tx.status === 'REPLACED') {
+            this.snackBar.open(`↪ ${label} was replaced on chain (${tx.errorMessage ?? 'another transaction used the nonce'})`, 'Close', {
+              duration: 0, panelClass: 'tx-error'
             });
           } else {
             const msg = tx.errorMessage ?? tx.status;

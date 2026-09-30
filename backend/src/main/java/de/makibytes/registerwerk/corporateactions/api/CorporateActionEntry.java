@@ -44,10 +44,10 @@ public class CorporateActionEntry {
     @Column(name = "wallet_address", nullable = false)
     private String walletAddress;
 
-    @Column(name = "nominal_at_record", nullable = false, precision = 38, scale = 18)
+    @Column(name = "nominal_at_record", nullable = false, precision = 96, scale = 18)
     private BigDecimal nominalAtRecord;
 
-    @Column(name = "entitlement_amount", precision = 38, scale = 18)
+    @Column(name = "entitlement_amount", precision = 96, scale = 18)
     private BigDecimal entitlementAmount;
 
     @Enumerated(EnumType.STRING)

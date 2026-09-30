@@ -103,10 +103,26 @@ public class WalletDefaultService {
     }
 
     /**
-     * Auto-promotes {@code wallet} as the default for all chains of its type that have no
-     * default set yet. Called after a wallet is created/imported.
+     * P4C-5: fresh-install bootstrap ONLY. The first wallet ever created is promoted to default for
+     * chains without one; once {@code wallet_bootstrap_marker} exists (any wallet was ever created,
+     * even if deleted since) this is a no-op, so an imported or generated key can never silently
+     * become a signer — default switching always goes through {@link #setDefault} (4-eyes + event).
      */
-    public void autoPromoteIfFirstOfType(OperatorWallet wallet) {
+    public void bootstrapDefaultIfFirstWalletEver(OperatorWallet wallet) {
+        if (walletRepository.bootstrapCompleted()) {
+            log.info("Wallet '{}' created; not auto-promoted (bootstrap already completed) — set the "
+                    + "chain default explicitly with 4-eyes.", wallet.getName());
+            return;
+        }
+        walletRepository.markBootstrapCompleted();
+        autoPromoteIfFirstOfType(wallet);
+    }
+
+    /**
+     * Promotes {@code wallet} as the default for all chains of its type that have no default set
+     * yet. Only reachable through {@link #bootstrapDefaultIfFirstWalletEver}.
+     */
+    void autoPromoteIfFirstOfType(OperatorWallet wallet) {
         ChainConfig.ChainType targetType = wallet.getType() == OperatorWallet.WalletType.EVM
                 ? ChainConfig.ChainType.EVM : ChainConfig.ChainType.SOLANA;
 
@@ -117,10 +133,15 @@ public class WalletDefaultService {
                 d.setChainConfigId(chain.getId());
                 d.setWallet(wallet);
                 defaultRepository.save(d);
-                log.info("Auto-promoted wallet '{}' as default for chain '{}'",
+                log.info("Bootstrap: promoted wallet '{}' as default for chain '{}'",
                         wallet.getName(), chain.getIdentifier());
             }
         }
+    }
+
+    @Transactional(readOnly = true)
+    public List<UUID> findDefaultChainIds(UUID walletId) {
+        return defaultRepository.findByWallet_Id(walletId).stream().map(WalletChainDefault::getChainConfigId).toList();
     }
 
     /**

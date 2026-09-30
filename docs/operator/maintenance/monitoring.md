@@ -158,6 +158,22 @@ actually ran on the leader replica — never lock-skipped ticks on the other rep
 |--------|-------------|----------------|
 | `registerwerk_blockchain_tx_confirmation_latency_seconds{chain,outcome}` (histogram) | Time from a `blockchain_transaction` row's submission (`created_at`) to its terminal status (`SUCCESS`/`FAILED`/`TIMEOUT`) | p95 > 5 min for 10m = WARN (`BlockchainTxConfirmationLatencyHigh`) |
 
+### Durable EVM outbox and TIMEOUT semantics (`blockchain` module)
+
+A signed transaction that no node ever accepts, or one dropped from the mempool, blocks every later transaction of its signer. The outbox is therefore monitored per signer, and stuck payloads have an operator workflow.
+
+| Metric | Description | Alert threshold |
+|--------|-------------|----------------|
+| `registerwerk_outbox_oldest_prepared_age_seconds{chain_id,signer}` | Age of the oldest signed payload not yet accepted by a node | > 10 min = CRITICAL (`EvmOutboxPreparedStuck`) |
+| `registerwerk_outbox_prepared_count{chain_id,signer}` | Signed payloads waiting to be broadcast | informational |
+| `registerwerk_outbox_stuck_count{chain_id,signer}` | Payloads without a receipt for 10+ minutes | > 0 for 5m = WARN (`EvmOutboxBroadcastStuck`) |
+| `registerwerk_outbox_lease_repaired_total{chain}` | A stale nonce lease was capped back to the chain value (dropped transaction) | any = WARN (`EvmNonceLeaseRepaired`) |
+| `registerwerk_blockchain_tx_late_mined_total{outcome}` | A transaction marked `TIMEOUT` was mined after all | any = INFO (`BlockchainTxLateMined`) |
+
+- **`TIMEOUT` is not a failure.** It means "not mined within the timeout"; the transaction may still execute. The poller keeps reading `TIMEOUT` rows for `registerwerk.blockchain.tx.late-mined-window-seconds` (7 days) and completes them as `SUCCESS`/`FAILED` when a receipt arrives. Only `FAILED` (reverted) and `REPLACED` (the nonce was consumed by another transaction) count as confirmed failures; business state is never cleared, and nothing is resubmitted, on `TIMEOUT` alone.
+- **Automatic actions** are deliberately narrow: stored bytes of a dropped transaction are re-broadcast after 10 minutes, and an allow-listed, non-regulatory call (`registerwerk.outbox.auto-reprice-methods`, e.g. identity registry, claims, dApp anchoring) that keeps failing for fee reasons is re-signed at the same nonce within the chain's fee ceiling. Regulatory operations (forced transfer, burn, freeze, recovery, pause) are never replaced automatically.
+- **Operator actions** (step-up token and a second approver, recorded in the audit trail): `GET /api/v1/admin/chains/{chainConfigId}/outbox/stuck`, `POST .../outbox/{id}/reprice` (same call, fee at least 15 % higher) and `POST .../outbox/{id}/cancel` (0-value self-send at the same nonce; the operation will not execute). After a cancel is final the original transaction becomes `REPLACED` and its business owner may resubmit.
+
 ### API error rates & latency
 
 `http.server.requests` now publishes a real percentile histogram

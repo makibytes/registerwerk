@@ -26,6 +26,8 @@ class IndexerAdminServiceTest {
 
     @Mock private IndexerStateRepository repository;
     @Mock private ApplicationEventPublisher events;
+    @Mock private SolanaMintSyncCursorRepository solanaMintCursors;
+    @Mock private IndexerDeploymentCursorRepository deploymentCursors;
 
     private IndexerAdminService service;
 
@@ -44,7 +46,7 @@ class IndexerAdminServiceTest {
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
-        service = new IndexerAdminService(repository, events);
+        service = new IndexerAdminService(repository, events, solanaMintCursors, deploymentCursors);
     }
 
     @Test
@@ -82,6 +84,23 @@ class IndexerAdminServiceTest {
         assertThat(result.getLastSyncedBlock()).isNull();
         assertThat(result.getLastFinalBlock()).isNull();
         assertThat(result.getLastSyncedSignature()).isNull();
+    }
+
+    @Test
+    @DisplayName("a full resync of Solana / Stellar also clears the per-mint / per-deployment positions")
+    void reset_fullResync_clearsSideCursors() {
+        IndexerState solana = stuckState();
+        solana.setIndexerType(IndexerState.IndexerType.SOLANA_POLL);
+        when(repository.findById(solana.getId())).thenReturn(Optional.of(solana));
+        when(repository.save(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
+        service.reset(solana.getId(), UUID.randomUUID(), "REGISTRY_ADMIN", true);
+        verify(solanaMintCursors).clearPositions(solana.getChainConfigId());
+
+        IndexerState stellar = stuckState();
+        stellar.setIndexerType(IndexerState.IndexerType.STELLAR_HORIZON);
+        when(repository.findById(stellar.getId())).thenReturn(Optional.of(stellar));
+        service.reset(stellar.getId(), UUID.randomUUID(), "REGISTRY_ADMIN", true);
+        verify(deploymentCursors).clearPositions(stellar.getChainConfigId());
     }
 
     @Test

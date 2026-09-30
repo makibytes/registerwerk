@@ -124,6 +124,23 @@ public class ChainConfig {
     @Column(name = "finality_source", nullable = false, length = 20)
     private FinalitySource finalitySource = FinalitySource.RPC_SELF_PROBE;
 
+    /** Fee ceiling (wei) for maxFeePerGas / legacy gasPrice; null = global default cap. */
+    @Column(name = "max_fee_per_gas_wei", precision = 38, scale = 0)
+    private java.math.BigInteger maxFeePerGasWei;
+
+    /** Fee ceiling (wei) for maxPriorityFeePerGas; null = global default cap. */
+    @Column(name = "max_priority_fee_per_gas_wei", precision = 38, scale = 0)
+    private java.math.BigInteger maxPriorityFeePerGasWei;
+
+    /** Pinned genesis block hash (EVM block 0 / Solana genesis hash), captured once from the first
+     *  node whose chain id matched the pin and never overwritten by a node afterwards (P4C-1). */
+    @Column(name = "genesis_hash", length = 80)
+    private String genesisHash;
+
+    /** Optional comma-separated host allow-list for RPC node URLs; blank = any host (P4C-6). */
+    @Column(name = "rpc_allowed_hosts")
+    private String rpcAllowedHosts;
+
     @Column(nullable = false)
     private boolean enabled = true;
 
@@ -180,6 +197,12 @@ public class ChainConfig {
     public Long getChainId() { return chainId; }
     public void setChainId(Long chainId) { this.chainId = chainId; }
 
+    public java.math.BigInteger getMaxFeePerGasWei() { return maxFeePerGasWei; }
+    public void setMaxFeePerGasWei(java.math.BigInteger maxFeePerGasWei) { this.maxFeePerGasWei = maxFeePerGasWei; }
+
+    public java.math.BigInteger getMaxPriorityFeePerGasWei() { return maxPriorityFeePerGasWei; }
+    public void setMaxPriorityFeePerGasWei(java.math.BigInteger v) { this.maxPriorityFeePerGasWei = v; }
+
     public String getRpcUrl() { return rpcUrl; }
     public void setRpcUrl(String rpcUrl) { this.rpcUrl = rpcUrl; }
 
@@ -215,6 +238,12 @@ public class ChainConfig {
 
     public FinalitySource getFinalitySource() { return finalitySource; }
     public void setFinalitySource(FinalitySource finalitySource) { this.finalitySource = finalitySource; }
+
+    public String getGenesisHash() { return genesisHash; }
+    public void setGenesisHash(String genesisHash) { this.genesisHash = genesisHash; }
+
+    public String getRpcAllowedHosts() { return rpcAllowedHosts; }
+    public void setRpcAllowedHosts(String rpcAllowedHosts) { this.rpcAllowedHosts = rpcAllowedHosts; }
 
     public Instant getCreatedAt() { return createdAt; }
 

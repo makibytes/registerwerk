@@ -39,7 +39,7 @@ class RpcNodeHealthPersisterTest {
         persister.persist(List.of(healthyNode(), healthyNode()));
 
         verify(rpcNodeRepository, times(2)).updateHealthFields(any(), any(), any(), any(), any(),
-                anyBoolean(), anyInt(), any(), anyBoolean());
+                anyBoolean(), anyInt(), any(), anyBoolean(), any(), anyInt());
         verifyNoMoreInteractions(rpcNodeRepository);
     }
 

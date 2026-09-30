@@ -65,6 +65,8 @@ class ChainDriftDetectionJob {
             .map(chain -> "'" + chain + "'")
             .collect(java.util.stream.Collectors.joining(","));
 
+    private static final java.util.regex.Pattern EVM_WALLET = java.util.regex.Pattern.compile("(?i)0x[0-9a-f]+");
+
     private final JdbcTemplate jdbc;
     private final int batchSize;
 
@@ -82,6 +84,14 @@ class ChainDriftDetectionJob {
                                 "SELECT count(*) FROM chain_drift_event WHERE status = 'OPEN' AND confirmed = true",
                                 Long.class))
                 .description("Count of currently OPEN and confirmed chain_drift_event rows (registry vs. on-chain balance divergence)")
+                .register(meterRegistry);
+        // P4-01: holders whose deployment has no indexed history at all. Separate from the drift
+        // gauge so an operator can tell "the chain disagrees" from "nothing is indexing this".
+        Gauge.builder("registerwerk.drift.not_indexed", jdbc,
+                        j -> j.queryForObject(
+                                "SELECT count(*) FROM chain_drift_event WHERE status = 'OPEN' AND confirmed = true "
+                                        + "AND kind = 'NOT_INDEXED'", Long.class))
+                .description("Count of OPEN confirmed register holders whose deployment has no indexed transfer history")
                 .register(meterRegistry);
     }
 
@@ -118,10 +128,36 @@ class ChainDriftDetectionJob {
         }
     }
 
+    /** Case-folds {@code column} for EVM deployments only (see {@link #EVM_CHAIN_SET}). */
+    private static String fold(String column) {
+        return "(CASE WHEN ad.chain IN (" + EVM_CHAINS + ") THEN LOWER(" + column + ") ELSE " + column + " END)";
+    }
+
+    /** One row's signed effect on the holder's wallet; a self-transfer (from = to) nets to zero. */
+    private static final String CONTRIBUTION =
+            "CASE WHEN " + fold("tt.from_address") + " = " + fold("ah.wallet_address")
+                    + " AND " + fold("tt.to_address") + " = " + fold("ah.wallet_address") + " THEN 0 "
+                    + "WHEN " + fold("tt.to_address") + " = " + fold("ah.wallet_address") + " THEN tt.amount "
+                    + "ELSE -tt.amount END";
+
+    private static final String WALLET_TOUCHED =
+            "(" + fold("tt.from_address") + " = " + fold("ah.wallet_address")
+                    + " OR " + fold("tt.to_address") + " = " + fold("ah.wallet_address") + ")";
+
+    private static final String CONFIRMED_DEPLOYMENT =
+            "ad.asset_id = ah.asset_id AND ad.deployment_status = 'CONFIRMED' AND ad.contract_address IS NOT NULL";
+
     private List<Map<String, Object>> loadBatch(UUID afterId) {
         // Keyset pagination: strictly increasing ah.id, bounded batch. Two query
         // variants — Postgres cannot infer the type of a NULL parameter in
         // "(? IS NULL OR ah.id > ?)" and would reject the prepared statement.
+        //
+        // P4-03: one row per HOLDER (asset, wallet), aggregated across all CONFIRMED deployments of
+        // the asset. Transfers are attributed to a deployment by deployment_id when set, otherwise
+        // (not yet linked, P4-06) by (chain_config_id, contract address) — never by address alone,
+        // which let a replicated transfer on chain A mask a missing one on chain B. A self-transfer
+        // nets to zero. Rows with no indexed history are reported as such (indexed_rows = 0), not
+        // defaulted to the register balance.
         String keysetPredicate = afterId == null ? "" : "AND ah.id > ? ";
         String sql = """
             SELECT
@@ -129,35 +165,9 @@ class ChainDriftDetectionJob {
                 ah.asset_id,
                 ah.wallet_address,
                 ah.nominal_amount  AS db_balance,
-                COALESCE(
-                    (SELECT SUM(
-                        CASE WHEN (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
-) THEN LOWER(tt.to_address) ELSE tt.to_address END)
-                                  = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
-) THEN LOWER(ah.wallet_address) ELSE ah.wallet_address END)
-                             THEN tt.amount ELSE -tt.amount END)
-                     FROM token_transfer tt
-                     -- Case-fold only for EVM chains: The Graph indexes lowercase addresses while
-                     -- holder rows may store EIP-55 checksummed ones, so a case-sensitive join
-                     -- there would silently report zero drift for every holder. Solana (base58)
-                     -- and Stellar (StrKey) addresses are compared exactly.
-                     WHERE tt.finality_status <> 'ORPHANED'
-                       AND (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
-) THEN LOWER(tt.contract_address) ELSE tt.contract_address END)
-                         = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
-) THEN LOWER(ad.contract_address) ELSE ad.contract_address END)
-                       AND (
-                            (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
-) THEN LOWER(tt.from_address) ELSE tt.from_address END)
-                                = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
-) THEN LOWER(ah.wallet_address) ELSE ah.wallet_address END)
-                            OR (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
-) THEN LOWER(tt.to_address) ELSE tt.to_address END)
-                                = (CASE WHEN ad.chain IN (""" + EVM_CHAINS + """
-) THEN LOWER(ah.wallet_address) ELSE ah.wallet_address END)
-                           )
-                    ), ah.nominal_amount
-                ) AS indexed_balance,
+                COALESCE(agg.indexed_balance, 0)   AS indexed_balance,
+                COALESCE(agg.finalized_balance, 0) AS finalized_balance,
+                COALESCE(agg.indexed_rows, 0)      AS indexed_rows,
                 -- Net units this holder gained or lost through the SIMULATED venue, which
                 -- settles the register off-chain with no token_transfer. Those legitimately
                 -- move the register ahead of the chain, so they are added to the on-chain
@@ -171,18 +181,51 @@ class ChainDriftDetectionJob {
                           WHERE te.seller_holder_id = ah.id
                             AND te.venue_code = 'SIMULATED'
                             AND te.settlement_status = 'SETTLED'), 0) AS net_simulated,
-                ad.id              AS deployment_id,
-                ad.chain           AS chain
+                COALESCE(agg.lead_deployment_id,
+                         (SELECT ad0.id FROM asset_deployment ad0
+                           WHERE ad0.asset_id = ah.asset_id AND ad0.deployment_status = 'CONFIRMED'
+                             AND ad0.contract_address IS NOT NULL
+                           ORDER BY ad0.id LIMIT 1)) AS deployment_id
             FROM asset_holder ah
             JOIN asset a ON a.id = ah.asset_id AND a.status = 'ISSUED'
-            JOIN asset_deployment ad ON ad.asset_id = a.id
-                AND ad.deployment_status = 'CONFIRMED'
-                AND ad.contract_address IS NOT NULL
+            LEFT JOIN LATERAL (
+                SELECT SUM(d.bal) AS indexed_balance, SUM(d.fin) AS finalized_balance,
+                       SUM(d.cnt) AS indexed_rows,
+                       (ARRAY_AGG(d.dep_id ORDER BY ABS(d.bal) DESC, d.dep_id))[1] AS lead_deployment_id
+                FROM (
+                    SELECT x.dep_id, SUM(x.contrib) AS bal,
+                           SUM(x.contrib) FILTER (WHERE x.finality_status = 'FINALIZED') AS fin,
+                           COUNT(*) AS cnt
+                    FROM (
+                        SELECT ad.id AS dep_id, tt.finality_status, ${CONTRIBUTION} AS contrib
+                        FROM asset_deployment ad
+                        JOIN token_transfer tt ON tt.deployment_id = ad.id
+                        WHERE ${CONFIRMED_DEPLOYMENT}
+                          AND tt.finality_status <> 'ORPHANED' AND ${WALLET_TOUCHED}
+                        UNION ALL
+                        SELECT ad.id AS dep_id, tt.finality_status, ${CONTRIBUTION} AS contrib
+                        FROM asset_deployment ad
+                        JOIN token_transfer tt ON tt.deployment_id IS NULL
+                             AND tt.chain_config_id = ad.chain_config_id
+                             AND ${SAME_CONTRACT}
+                        WHERE ad.chain_config_id IS NOT NULL AND ${CONFIRMED_DEPLOYMENT}
+                          AND tt.finality_status <> 'ORPHANED' AND ${WALLET_TOUCHED}
+                    ) x
+                    GROUP BY x.dep_id
+                ) d
+            ) agg ON true
             WHERE ah.nominal_amount IS NOT NULL
-            """ + keysetPredicate + """
+              AND ah.removed_at IS NULL
+              AND EXISTS (SELECT 1 FROM asset_deployment ad WHERE ${CONFIRMED_DEPLOYMENT})
+              ${KEYSET}
             ORDER BY ah.id
             LIMIT ?
-            """;
+            """
+                .replace("${CONTRIBUTION}", CONTRIBUTION)
+                .replace("${CONFIRMED_DEPLOYMENT}", CONFIRMED_DEPLOYMENT)
+                .replace("${WALLET_TOUCHED}", WALLET_TOUCHED)
+                .replace("${SAME_CONTRACT}", fold("tt.contract_address") + " = " + fold("ad.contract_address"))
+                .replace("${KEYSET}", keysetPredicate);
         return afterId == null
                 ? jdbc.queryForList(sql, batchSize)
                 : jdbc.queryForList(sql, afterId, batchSize);
@@ -199,11 +242,10 @@ class ChainDriftDetectionJob {
         UUID assetId = toUuid(row.get("asset_id"));
         UUID deploymentId = toUuid(row.get("deployment_id"));
         String wallet = (String) row.get("wallet_address");
-        String chain = (String) row.get("chain");
-        // Case-fold the wallet-address match only for EVM chains — Solana (base58) and Stellar
-        // (StrKey) addresses are case-sensitive.
-        boolean isEvm = chain != null && EVM_CHAIN_SET.contains(chain);
-        String walletMatchSql = isEvm ? "LOWER(wallet_address) = LOWER(?)" : "wallet_address = ?";
+        // Case-fold the wallet-address match only for hex (EVM) wallets — Solana (base58) and
+        // Stellar (StrKey) addresses are case-sensitive.
+        String walletMatchSql = EVM_WALLET.matcher(wallet).matches()
+                ? "LOWER(wallet_address) = LOWER(?)" : "wallet_address = ?";
 
         // Off-chain SIMULATED-venue settlements legitimately move the register ahead of the
         // chain; fold them into the expected on-chain balance so they are not flagged as drift.
@@ -211,17 +253,29 @@ class ChainDriftDetectionJob {
         BigDecimal effectiveIndexed = netSimulated != null ? indexedBalance.add(netSimulated) : indexedBalance;
         BigDecimal delta = effectiveIndexed.subtract(dbBalance).abs();
         if (delta.compareTo(BigDecimal.ZERO) == 0) {
-            autoResolveUnconfirmedCandidate(deploymentId, wallet, walletMatchSql);
+            autoResolveUnconfirmedCandidate(assetId, wallet, walletMatchSql);
             return false;
         }
 
-        String severity = dbBalance.compareTo(BigDecimal.ZERO) > 0
-                && delta.divide(dbBalance, 10, RoundingMode.HALF_UP)
-                        .compareTo(CRITICAL_THRESHOLD_PCT) >= 0
+        // P4-01: no indexed row for this holder at all is "not indexed", never "the chain agrees".
+        BigDecimal indexedRows = toBigDecimal(row.get("indexed_rows"));
+        boolean notIndexed = indexedRows == null || indexedRows.signum() == 0;
+        String kind = notIndexed ? "NOT_INDEXED" : "DRIFT";
+
+        // A difference that disappears when only FINALIZED rows are counted (the register itself is
+        // built from FINALIZED rows only) is a confirmation-depth artefact: keep it visible, but as
+        // a warning rather than a critical case.
+        BigDecimal finalizedBalance = toBigDecimal(row.get("finalized_balance"));
+        boolean provisionalOnly = !notIndexed && finalizedBalance != null
+                && (netSimulated != null ? finalizedBalance.add(netSimulated) : finalizedBalance)
+                        .compareTo(dbBalance) == 0;
+        String severity = !provisionalOnly && (notIndexed
+                || dbBalance.compareTo(BigDecimal.ZERO) > 0
+                && delta.divide(dbBalance, 10, RoundingMode.HALF_UP).compareTo(CRITICAL_THRESHOLD_PCT) >= 0)
                 ? "CRITICAL" : "WARNING";
 
         try {
-            // One OPEN event per (deployment, wallet). Three outcomes, tried in order:
+            // One OPEN event per (asset, wallet). Three outcomes, tried in order:
             //   1. An unconfirmed candidate from a prior run is still diverging now — promote it
             //      (this run is the second, independent sighting that confirms it).
             //   2. An already-confirmed case is still diverging — refresh its balances/severity
@@ -239,32 +293,34 @@ class ChainDriftDetectionJob {
             // its first detection — confirmed by reproducing the literal concatenated SQL string.
             int promoted = jdbc.update("""
                 UPDATE chain_drift_event
-                SET db_balance = ?, onchain_balance = ?, severity = ?, detected_at = now(), confirmed = true
-                WHERE deployment_id = ? AND\s""" + walletMatchSql + """
+                SET db_balance = ?, onchain_balance = ?, severity = ?, kind = ?, deployment_id = ?,
+                    detected_at = now(), confirmed = true
+                WHERE asset_id = ? AND\s""" + walletMatchSql + """
                  AND status = 'OPEN' AND confirmed = false
-                """, dbBalance, effectiveIndexed, severity, deploymentId, wallet);
+                """, dbBalance, effectiveIndexed, severity, kind, deploymentId, assetId, wallet);
             if (promoted > 0) {
-                log.warn("Chain drift CONFIRMED [{}] asset={} wallet={} db={} indexed={} delta={} "
+                log.warn("Chain drift CONFIRMED [{} {}] asset={} wallet={} db={} indexed={} delta={} "
                                 + "— persisted across two consecutive scans.",
-                        severity, assetId, wallet, dbBalance, effectiveIndexed, delta);
+                        kind, severity, assetId, wallet, dbBalance, effectiveIndexed, delta);
                 return true;
             }
 
             int refreshed = jdbc.update("""
                 UPDATE chain_drift_event
-                SET db_balance = ?, onchain_balance = ?, severity = ?, detected_at = now()
-                WHERE deployment_id = ? AND\s""" + walletMatchSql + """
+                SET db_balance = ?, onchain_balance = ?, severity = ?, kind = ?, deployment_id = ?,
+                    detected_at = now()
+                WHERE asset_id = ? AND\s""" + walletMatchSql + """
                  AND status = 'OPEN' AND confirmed = true
-                """, dbBalance, effectiveIndexed, severity, deploymentId, wallet);
+                """, dbBalance, effectiveIndexed, severity, kind, deploymentId, assetId, wallet);
             if (refreshed == 0) {
                 jdbc.update("""
                     INSERT INTO chain_drift_event
-                      (asset_id, deployment_id, wallet_address, db_balance, onchain_balance, severity)
-                    VALUES (?,?,?,?,?,?)
-                    """, assetId, deploymentId, wallet, dbBalance, effectiveIndexed, severity);
-                log.debug("Chain drift candidate [{}] asset={} wallet={} db={} indexed={} delta={} "
+                      (asset_id, deployment_id, wallet_address, db_balance, onchain_balance, severity, kind)
+                    VALUES (?,?,?,?,?,?,?)
+                    """, assetId, deploymentId, wallet, dbBalance, effectiveIndexed, severity, kind);
+                log.debug("Chain drift candidate [{} {}] asset={} wallet={} db={} indexed={} delta={} "
                                 + "— awaiting reconfirmation on the next scan before it is surfaced.",
-                        severity, assetId, wallet, dbBalance, effectiveIndexed, delta);
+                        kind, severity, assetId, wallet, dbBalance, effectiveIndexed, delta);
             }
             return true;
         } catch (Exception e) {
@@ -278,18 +334,18 @@ class ChainDriftDetectionJob {
      *  confirm-on-reconfirmation flow exists to filter out, not genuine drift. A confirmed case
      *  is deliberately left untouched here: only {@code ChainDriftService#resolve} may close one,
      *  since a human already had to look at it. */
-    private void autoResolveUnconfirmedCandidate(UUID deploymentId, String wallet, String walletMatchSql) {
+    private void autoResolveUnconfirmedCandidate(UUID assetId, String wallet, String walletMatchSql) {
         try {
             int cleared = jdbc.update("""
                 UPDATE chain_drift_event
                 SET status = 'RESOLVED', resolved_at = now(),
                     resolution_notes = 'Auto-resolved: divergence was no longer present on a later scan, before ever being confirmed.'
-                WHERE deployment_id = ? AND\s""" + walletMatchSql + """
+                WHERE asset_id = ? AND\s""" + walletMatchSql + """
                  AND status = 'OPEN' AND confirmed = false
-                """, deploymentId, wallet);
+                """, assetId, wallet);
             if (cleared > 0) {
-                log.debug("Chain drift: auto-resolved an unconfirmed candidate for deployment={} wallet={} "
-                        + "— balances now agree.", deploymentId, wallet);
+                log.debug("Chain drift: auto-resolved an unconfirmed candidate for asset={} wallet={} "
+                        + "— balances now agree.", assetId, wallet);
             }
         } catch (Exception e) {
             log.error("Chain drift: failed to auto-resolve stale candidate for wallet {}: {}", wallet, e.getMessage());

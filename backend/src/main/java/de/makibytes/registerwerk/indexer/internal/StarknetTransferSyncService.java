@@ -26,13 +26,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigInteger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,6 +101,7 @@ public class StarknetTransferSyncService {
     private final ExplorerUrlBuilder explorerUrlBuilder;
     private final RestClient restClient;
     private final ReorgGuard reorgGuard;
+    private final IndexerSyncSupport syncSupport;
     private final Bulkhead fanOutBulkhead;
 
     public StarknetTransferSyncService(
@@ -111,6 +112,7 @@ public class StarknetTransferSyncService {
             ExplorerUrlBuilder explorerUrlBuilder,
             RestClient.Builder restClientBuilder,
             ReorgGuard reorgGuard,
+            IndexerSyncSupport syncSupport,
             BulkheadRegistry bulkheadRegistry) {
         this.chainConfigRepository = chainConfigRepository;
         this.indexerStateRepository = indexerStateRepository;
@@ -119,6 +121,7 @@ public class StarknetTransferSyncService {
         this.explorerUrlBuilder = explorerUrlBuilder;
         this.restClient = restClientBuilder.build();
         this.reorgGuard = reorgGuard;
+        this.syncSupport = syncSupport;
         this.fanOutBulkhead = bulkheadRegistry.bulkhead("starknet-transfer-fanout", FAN_OUT_BULKHEAD_CONFIG);
     }
 
@@ -151,8 +154,21 @@ public class StarknetTransferSyncService {
 
     // ── Per-chain sync ────────────────────────────────────────────────────────
 
-    @Transactional
+    /**
+     * One sync pass for {@code chain}: a single transaction; a failure rolls it back completely and is
+     * counted afterwards in a separate transaction (P4B-6), so a poisoned batch cannot lose its own
+     * error bookkeeping.
+     */
     public void syncChain(ChainConfig chain) {
+        try {
+            syncSupport.inTransaction(() -> syncChainOnce(chain));
+        } catch (Exception e) {
+            syncSupport.recordFailure(chain.getId(), chain.getIdentifier(),
+                    IndexerState.IndexerType.STARKNET_POLL, e, MAX_CONSECUTIVE_ERRORS);
+        }
+    }
+
+    private void syncChainOnce(ChainConfig chain) {
         Network network = Network.valueOf(chain.getNetworkType().name());
         List<AssetDeployment> deployments = assetDeploymentRepository.findByChainAndNetwork(Chain.STARKNET, network);
 
@@ -179,114 +195,119 @@ public class StarknetTransferSyncService {
 
         long fromBlock = state.getLastSyncedBlock() != null ? state.getLastSyncedBlock() + 1 : 0L;
 
-        try {
-            long headBlock = fetchBlockNumber(chain.getRpcUrl());
-            if (fromBlock > headBlock) {
-                state.setLastSyncedAt(Instant.now());
-                state.setStatus(IndexerState.IndexerStatus.ACTIVE);
-                indexerStateRepository.save(state);
-                return;
-            }
-
-            // Each watched address is an independent RPC round-trip (itself possibly paginated),
-            // so fetch them concurrently; only the DB writes below stay on the calling thread,
-            // since Hibernate's persistence context isn't safe to share across threads.
-            Map<String, CompletableFuture<List<Map<String, Object>>>> eventsByAddress = new HashMap<>();
-            for (String address : byNormalizedAddress.keySet()) {
-                eventsByAddress.put(address, CompletableFuture.supplyAsync(
-                        () -> fetchTransferEventsBounded(chain, address, fromBlock, headBlock)));
-            }
-            CompletableFuture.allOf(eventsByAddress.values().toArray(CompletableFuture[]::new)).join();
-
-            int totalSaved = 0;
-            Map<Long, String> statusCache = new HashMap<>();
-            for (Map.Entry<String, CompletableFuture<List<Map<String, Object>>>> entry : eventsByAddress.entrySet()) {
-                Map<String, Integer> logIndexByTx = new HashMap<>();
-
-                for (Map<String, Object> event : entry.getValue().join()) {
-                    String txHash = (String) event.get("transaction_hash");
-                    if (txHash == null) {
-                        continue;
-                    }
-                    // Starknet's get_events response carries no explicit per-event index, so we
-                    // derive a stable position among events sharing the same tx within this
-                    // fetch — matches "log index" semantics closely enough for dedup purposes.
-                    int logIndex = logIndexByTx.merge(txHash, 0, (oldVal, one) -> oldVal + 1);
-
-                    boolean duplicate = tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(
-                            chain.getId(), txHash, logIndex);
-                    if (duplicate) {
-                        continue;
-                    }
-
-                    TokenTransfer transfer = mapToEntity(chain, event, txHash, logIndex,
-                            byNormalizedAddress.get(entry.getKey()), statusCache);
-                    if (transfer == null) {
-                        continue;
-                    }
-                    tokenTransferRepository.save(transfer);
-                    totalSaved++;
-                }
-            }
-
-            // Re-verify every still-unsettled (PROVISIONAL or SAFE/ACCEPTED_ON_L2) block for this
-            // chain: promote to SAFE once ACCEPTED_ON_L2, to FINALIZED once ACCEPTED_ON_L1, or
-            // ORPHAN (never delete) + rewind on the rare REJECTED.
-            VerifyResult result = reorgGuard.reverifyUnsettledWindow(chain.getId(),
-                    blockNumber -> probeStarknetBlock(chain, blockNumber, statusCache));
-            if (result.promotedSafe() > 0) {
-                log.debug("Starknet chain {}: {} transfer row(s) promoted PROVISIONAL -> ACCEPTED_ON_L2/SAFE.",
-                        chain.getIdentifier(), result.promotedSafe());
-            }
-            if (result.promotedFinalized() > 0) {
-                log.debug("Starknet chain {}: {} transfer row(s) promoted -> ACCEPTED_ON_L1/FINALIZED.",
-                        chain.getIdentifier(), result.promotedFinalized());
-            }
-
-            if (result.reorgDetected()) {
-                long rewoundTo = result.forkBlock() - 1;
-                state.setLastSyncedBlock(rewoundTo < 0 ? null : rewoundTo);
-                log.warn("Starknet chain {}: cursor rewound to block {} after a REJECTED block at {}.",
-                        chain.getIdentifier(), rewoundTo, result.forkBlock());
-            } else {
-                // Every fetch above used to_block=headBlock, so no event can ever be newer than
-                // it — headBlock is always the correct new checkpoint absent a detected rejection.
-                state.setLastSyncedBlock(headBlock);
-            }
+        long headBlock = fetchBlockNumber(chain.getRpcUrl());
+        if (fromBlock > headBlock) {
             state.setLastSyncedAt(Instant.now());
             state.setConsecutiveErrors(0);
             state.setLastError(null);
             state.setStatus(IndexerState.IndexerStatus.ACTIVE);
             indexerStateRepository.save(state);
+            return;
+        }
 
-            if (totalSaved > 0) {
-                log.info("Starknet chain {}: synced {} new transfer(s) up to block {}.",
-                        chain.getIdentifier(), totalSaved, headBlock);
-            } else {
-                log.debug("Starknet chain {}: no new transfers found from block {}.",
-                        chain.getIdentifier(), fromBlock);
+        // Each watched address is an independent RPC round-trip (itself possibly paginated),
+        // so fetch them concurrently; only the DB writes below stay on the calling thread,
+        // since Hibernate's persistence context isn't safe to share across threads.
+        Map<String, CompletableFuture<List<Map<String, Object>>>> eventsByAddress = new HashMap<>();
+        for (String address : byNormalizedAddress.keySet()) {
+            eventsByAddress.put(address, CompletableFuture.supplyAsync(
+                    () -> fetchTransferEventsBounded(chain, address, fromBlock, headBlock)));
+        }
+        CompletableFuture.allOf(eventsByAddress.values().toArray(CompletableFuture[]::new)).join();
+
+        List<PositionedEvent> events = new ArrayList<>();
+        for (Map.Entry<String, CompletableFuture<List<Map<String, Object>>>> entry : eventsByAddress.entrySet()) {
+            // starknet_getEvents carries no per-event index in every RPC version. The position among the
+            // events of ONE contract inside one transaction is stable (events come back in emission
+            // order and a transaction is never split across the range), and the contract is part of the
+            // dedup key - two watched tokens in one transaction therefore no longer collide.
+            Map<String, Integer> ordinalByTx = new HashMap<>();
+            for (Map<String, Object> event : entry.getValue().join()) {
+                String txHash = (String) event.get("transaction_hash");
+                if (txHash == null) {
+                    continue;
+                }
+                int ordinal = ordinalByTx.merge(txHash, 1, Integer::sum) - 1;
+                // ONE scheme only: the RPC's optional event_index (whole-transaction position, all
+                // contracts) is deliberately ignored - rows already stored use this ordinal, and V19's
+                // cursor rewind re-reads them; mixing schemes would insert every such event twice.
+                events.add(new PositionedEvent(entry.getKey(), event, txHash, ordinal));
             }
-        } catch (Exception e) {
-            int errors = state.getConsecutiveErrors() + 1;
-            state.setConsecutiveErrors(errors);
-            state.setLastError(truncate(e.getMessage(), 2000));
-            if (errors >= MAX_CONSECUTIVE_ERRORS) {
-                state.setStatus(IndexerState.IndexerStatus.ERROR);
-                log.error("Starknet chain {}: indexer set to ERROR after {} consecutive failures. Last error: {}",
-                        chain.getIdentifier(), errors, e.getMessage());
-            } else {
-                log.warn("Starknet chain {}: sync error ({}/{}): {}",
-                        chain.getIdentifier(), errors, MAX_CONSECUTIVE_ERRORS, e.getMessage());
+        }
+        events.sort(Comparator
+                .comparing((PositionedEvent e) -> e.event().get("block_number") instanceof Number n ? n.longValue() : -1L)
+                .thenComparing(PositionedEvent::address)
+                .thenComparing(PositionedEvent::txHash)
+                .thenComparingInt(PositionedEvent::logIndex));
+
+        int totalSaved = 0;
+        Map<Long, BlockInfo> blockCache = new HashMap<>();
+        for (PositionedEvent positioned : events) {
+            AssetDeployment deployment = byNormalizedAddress.get(positioned.address());
+            String contract = (String) positioned.event().get("from_address");
+            if (tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(
+                    chain.getId(), positioned.txHash(), positioned.logIndex(), contract)) {
+                continue;
             }
-            indexerStateRepository.save(state);
+            TokenTransfer transfer = mapToEntity(chain, positioned.event(), positioned.txHash(),
+                    positioned.logIndex(), deployment, blockCache);
+            if (transfer == null) {
+                continue;
+            }
+            tokenTransferRepository.save(transfer);
+            totalSaved++;
+        }
+
+        // Re-verify every still-unsettled (PROVISIONAL or SAFE/ACCEPTED_ON_L2) block for this
+        // chain: promote to SAFE once ACCEPTED_ON_L2, to FINALIZED once ACCEPTED_ON_L1, or
+        // ORPHAN (never delete) + rewind on the rare REJECTED.
+        VerifyResult result = reorgGuard.reverifyUnsettledWindow(chain.getId(),
+                blockNumber -> probeStarknetBlock(chain, blockNumber, blockCache));
+        if (result.promotedSafe() > 0) {
+            log.debug("Starknet chain {}: {} transfer row(s) promoted PROVISIONAL -> ACCEPTED_ON_L2/SAFE.",
+                    chain.getIdentifier(), result.promotedSafe());
+        }
+        if (result.promotedFinalized() > 0) {
+            log.debug("Starknet chain {}: {} transfer row(s) promoted -> ACCEPTED_ON_L1/FINALIZED.",
+                    chain.getIdentifier(), result.promotedFinalized());
+        }
+
+        if (result.reorgDetected()) {
+            long rewoundTo = result.forkBlock() - 1;
+            state.setLastSyncedBlock(rewoundTo < 0 ? null : rewoundTo);
+            log.warn("Starknet chain {}: cursor rewound to block {} after a REJECTED block at {}.",
+                    chain.getIdentifier(), rewoundTo, result.forkBlock());
+        } else {
+            // Every fetch above used to_block=headBlock, so no event can ever be newer than
+            // it - headBlock is always the correct new checkpoint absent a detected rejection.
+            state.setLastSyncedBlock(headBlock);
+        }
+        state.setLastSyncedAt(Instant.now());
+        state.setConsecutiveErrors(0);
+        state.setLastError(null);
+        state.setStatus(IndexerState.IndexerStatus.ACTIVE);
+        indexerStateRepository.save(state);
+
+        if (totalSaved > 0) {
+            log.info("Starknet chain {}: synced {} new transfer(s) up to block {}.",
+                    chain.getIdentifier(), totalSaved, headBlock);
+        } else {
+            log.debug("Starknet chain {}: no new transfers found from block {}.",
+                    chain.getIdentifier(), fromBlock);
         }
     }
+
+    /** A fetched event with its resolved position inside (transaction, contract). */
+    private record PositionedEvent(String address, Map<String, Object> event, String txHash, int logIndex) {}
+
+    /** Header facts of one block: finality status and the sequencer timestamp (epoch seconds). */
+    record BlockInfo(String status, Long timestamp) {}
 
     // ── Event decoding ────────────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
     private TokenTransfer mapToEntity(ChainConfig chain, Map<String, Object> event, String txHash,
-            int logIndex, AssetDeployment deployment, Map<Long, String> statusCache) {
+            int logIndex, AssetDeployment deployment, Map<Long, BlockInfo> blockCache) {
         List<Object> keys = (List<Object>) event.get("keys");
         List<Object> data = (List<Object>) event.get("data");
         if (keys == null || keys.size() < 3 || data == null || data.size() < 2) {
@@ -322,32 +343,42 @@ public class StarknetTransferSyncService {
         transfer.setTxHash(txHash);
         transfer.setBlockNumber(blockNumber);
         transfer.setLogIndex(logIndex);
-        transfer.setOccurredAt(Instant.now());
         transfer.setExplorerTxUrl(explorerUrlBuilder.buildTxUrl(chain, txHash));
         if (deployment != null) {
             transfer.setDeploymentId(deployment.getId());
             transfer.setAssetId(deployment.getAssetId());
         }
-        transfer.setRawData(Map.of(
-                "blockNumber", blockNumber != null ? blockNumber : -1,
-                "logIndex", logIndex
-        ));
 
         // Finality classification: FINALIZED only once ACCEPTED_ON_L1; SAFE once ACCEPTED_ON_L2
         // (a real intermediate guarantee — see the STATUS_ACCEPTED_ON_L2 constant's javadoc);
         // RECEIVED/PENDING stay PROVISIONAL. A block whose status can't be determined this tick
         // (RPC error) is conservatively PROVISIONAL too — the reorg pass will keep re-checking it
         // on later ticks.
-        if (blockNumber != null) {
-            String status = fetchAndCacheBlockStatus(chain.getRpcUrl(), blockNumber, statusCache);
-            transfer.setFinalityStatus(switch (String.valueOf(status)) {
-                case STATUS_ACCEPTED_ON_L1 -> FinalityLevel.FINALIZED;
-                case STATUS_ACCEPTED_ON_L2 -> FinalityLevel.SAFE;
-                default -> FinalityLevel.PROVISIONAL;
-            });
-        } else {
-            transfer.setFinalityStatus(FinalityLevel.PROVISIONAL);
+        if (blockNumber == null) {
+            throw new IllegalStateException("Starknet event of tx " + txHash + " carries no block_number; "
+                    + "refusing to book it without a block timestamp");
         }
+        // occurred_at is the block's own timestamp, never processing time: record-date snapshots use
+        // occurred_at < cutoff, so an indexer-latency dependent value would corrupt them (P4D-3). An
+        // unreadable block header aborts the pass (nothing persisted, cursor not advanced).
+        BlockInfo block = fetchAndCacheBlockInfo(chain.getRpcUrl(), blockNumber, blockCache);
+        if (block == null || block.timestamp() == null) {
+            throw new IllegalStateException("Starknet block " + blockNumber + " has no readable timestamp");
+        }
+        transfer.setOccurredAt(Instant.ofEpochSecond(block.timestamp()));
+        transfer.setRawData(Map.of(
+                "blockNumber", blockNumber,
+                "logIndex", logIndex,
+                "blockTimestamp", block.timestamp()
+        ));
+        // Finality classification: FINALIZED only once ACCEPTED_ON_L1; SAFE once ACCEPTED_ON_L2
+        // (a real intermediate guarantee - see the STATUS_ACCEPTED_ON_L2 constant's javadoc);
+        // RECEIVED/PENDING stay PROVISIONAL. The reorg pass keeps re-checking non-final blocks.
+        transfer.setFinalityStatus(switch (String.valueOf(block.status())) {
+            case STATUS_ACCEPTED_ON_L1 -> FinalityLevel.FINALIZED;
+            case STATUS_ACCEPTED_ON_L2 -> FinalityLevel.SAFE;
+            default -> FinalityLevel.PROVISIONAL;
+        });
         return transfer;
     }
 
@@ -355,8 +386,9 @@ public class StarknetTransferSyncService {
 
     /** Starknet {@link ReorgGuard.FinalityProbe}: re-reads the block's own {@code status} field —
      *  a completely different primitive from EVM's hash comparison (no block hash involved). */
-    private ProbeOutcome probeStarknetBlock(ChainConfig chain, long blockNumber, Map<Long, String> statusCache) {
-        String status = fetchAndCacheBlockStatus(chain.getRpcUrl(), blockNumber, statusCache);
+    private ProbeOutcome probeStarknetBlock(ChainConfig chain, long blockNumber, Map<Long, BlockInfo> blockCache) {
+        BlockInfo info = fetchAndCacheBlockInfo(chain.getRpcUrl(), blockNumber, blockCache);
+        String status = info == null ? null : info.status();
         if (status == null) {
             return ProbeOutcome.unknown();
         }
@@ -368,17 +400,17 @@ public class StarknetTransferSyncService {
         };
     }
 
-    private String fetchAndCacheBlockStatus(String rpcUrl, long blockNumber, Map<Long, String> statusCache) {
-        if (statusCache.containsKey(blockNumber)) {
-            return statusCache.get(blockNumber);
+    private BlockInfo fetchAndCacheBlockInfo(String rpcUrl, long blockNumber, Map<Long, BlockInfo> blockCache) {
+        if (blockCache.containsKey(blockNumber)) {
+            return blockCache.get(blockNumber);
         }
-        String status = fetchBlockStatus(rpcUrl, blockNumber);
-        statusCache.put(blockNumber, status);
-        return status;
+        BlockInfo info = fetchBlockInfo(rpcUrl, blockNumber);
+        blockCache.put(blockNumber, info);
+        return info;
     }
 
     @SuppressWarnings("unchecked")
-    private String fetchBlockStatus(String rpcUrl, long blockNumber) {
+    private BlockInfo fetchBlockInfo(String rpcUrl, long blockNumber) {
         Map<String, Object> requestBody = Map.of(
                 "jsonrpc", "2.0", "id", 1, "method", "starknet_getBlockWithTxHashes",
                 "params", List.of(Map.of("block_number", blockNumber)));
@@ -388,14 +420,15 @@ public class StarknetTransferSyncService {
                 log.debug("starknet_getBlockWithTxHashes error for block {}: {}", blockNumber, response.get("error"));
                 return null;
             }
-            Object result = response.get("result");
-            if (result instanceof Map<?, ?> map) {
-                Object status = ((Map<String, Object>) map).get("status");
-                return status instanceof String s ? s : null;
+            if (response.get("result") instanceof Map<?, ?> map) {
+                Map<String, Object> block = (Map<String, Object>) map;
+                String status = block.get("status") instanceof String s ? s : null;
+                Long timestamp = block.get("timestamp") instanceof Number n ? n.longValue() : null;
+                return new BlockInfo(status, timestamp);
             }
             return null;
         } catch (Exception e) {
-            log.debug("Failed to fetch block status for block {}: {}", blockNumber, e.getMessage());
+            log.debug("Failed to fetch block header for block {}: {}", blockNumber, e.getMessage());
             return null;
         }
     }
@@ -509,10 +542,5 @@ public class StarknetTransferSyncService {
     /** Canonical, non-zero-padded lowercase-hex form, matching how contractAddress is stored. */
     static String normalizeFelt(String hex) {
         return "0x" + parseFelt(hex).toString(16);
-    }
-
-    private String truncate(String s, int max) {
-        if (s == null) return null;
-        return s.length() <= max ? s : s.substring(0, max);
     }
 }

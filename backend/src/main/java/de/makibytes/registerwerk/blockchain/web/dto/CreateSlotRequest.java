@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.blockchain.web.dto;
 
+import de.makibytes.registerwerk.shared.api.StrictAmount;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigInteger;
@@ -15,11 +17,11 @@ import java.util.Map;
  */
 public record CreateSlotRequest(
         @NotNull
-        BigInteger slotId,
+        @JsonDeserialize(using = StrictAmount.BigIntegerAmount.class) BigInteger slotId,
 
         String name,
 
         Map<String, Object> metadata,
 
-        BigInteger supplyCap
+        @JsonDeserialize(using = StrictAmount.BigIntegerAmount.class) BigInteger supplyCap
 ) {}

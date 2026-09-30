@@ -31,23 +31,31 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Polls enabled Stellar chains' Horizon {@code /payments} endpoint (cursor-based, per the
- * mechanism the README always prescribed for this chain) for operations touching a tracked
- * asset's issuing account, and persists them in {@code token_transfer}.
+ * Polls enabled Stellar chains' Horizon {@code /accounts/{issuer}/operations} feed (cursor-based) for
+ * operations touching a tracked asset's issuing account, and persists them in {@code token_transfer}.
  *
- * <p>Discovers which issuer accounts to watch from {@code AssetDeployment.contractAddress} —
+ * <p>Discovers which issuer accounts to watch from {@code AssetDeployment.contractAddress} -
  * populated at submission time for Stellar with the issuing account's G-address (see
  * {@code StellarAssetService.createStellarAsset}). The asset code itself is not persisted
  * anywhere; it is re-derived deterministically from the asset UUID via the shared
- * {@link StellarUtils#deriveAssetCode}, so no schema change was needed to carry it.
+ * {@link StellarUtils#deriveAssetCode}.
  *
- * <p><b>Known limitation:</b> only payments touching the issuing account are tracked (issuance,
- * redemption, and any transfer routed through it) — pure holder-to-holder secondary transfers
- * that never touch the issuer are not yet indexed. This mirrors the honesty of Solana's
- * WebSocket-stub/polling-active state: a real, working mechanism with a documented gap, not a
- * silent one.
+ * <p>Stage 1 (P4-08): every deployment owns its cursor ({@code indexer_deployment_cursor}), so a
+ * deployment added later is scanned from its own beginning and one failing issuer neither advances
+ * nor blocks the others. The full operation feed (not only {@code /payments}) is read so that
+ * {@code clawback} operations - the registrar's forced-transfer instrument on Stellar, see
+ * {@code StellarAssetService.clawbackAsset} - are booked as BURN rows.
+ *
+ * <p><b>Known limitation (Stage 2 pending):</b> only operations touching the issuing account are
+ * observable. Holder-to-holder payments, DEX fills, liquidity-pool and claimable-balance movements
+ * never appear in that feed, so the register cannot be reconciled from indexed history alone; the
+ * coverage guard therefore keeps Stellar deployments {@code NOT_INDEXED} until a balance-authoritative
+ * check (Horizon {@code /accounts?asset=CODE:ISSUER}) lands. Horizon has no {@code effects?asset=}
+ * filter, so movements cannot be replayed per asset. {@code clawback_claimable_balance} carries no
+ * amount and is not booked either.
  */
 @Service
 public class StellarTransferSyncService {
@@ -60,10 +68,8 @@ public class StellarTransferSyncService {
     /**
      * bounds the per-issuer-account fan-out below — same reasoning as
      * {@code StarknetTransferSyncService.FAN_OUT_BULKHEAD_CONFIG}: a waiting (not fail-fast)
-     * bulkhead, because Stellar's cursor is shared across every watched account on the chain
-     * (see {@code sharedCursor} below) and advances once regardless of which individual accounts'
-     * fetches completed — silently skipping one would lose its transfers in this tick's range,
-     * not merely delay them.
+     * bulkhead, so that a saturated queue delays an issuer's fetch (its cursor simply
+     * does not advance) instead of silently skipping it.
      */
     private static final BulkheadConfig FAN_OUT_BULKHEAD_CONFIG = BulkheadConfig.custom()
             .maxConcurrentCalls(8)
@@ -74,6 +80,8 @@ public class StellarTransferSyncService {
     private final IndexerStateRepository indexerStateRepository;
     private final TokenTransferRepository tokenTransferRepository;
     private final AssetDeploymentRepository assetDeploymentRepository;
+    private final IndexerDeploymentCursorRepository cursorRepository;
+    private final IndexerSyncSupport syncSupport;
     private final ExplorerUrlBuilder explorerUrlBuilder;
     private final RestClient restClient;
     private final Bulkhead fanOutBulkhead;
@@ -83,6 +91,8 @@ public class StellarTransferSyncService {
             IndexerStateRepository indexerStateRepository,
             TokenTransferRepository tokenTransferRepository,
             AssetDeploymentRepository assetDeploymentRepository,
+            IndexerDeploymentCursorRepository cursorRepository,
+            IndexerSyncSupport syncSupport,
             ExplorerUrlBuilder explorerUrlBuilder,
             RestClient.Builder restClientBuilder,
             BulkheadRegistry bulkheadRegistry) {
@@ -90,6 +100,8 @@ public class StellarTransferSyncService {
         this.indexerStateRepository = indexerStateRepository;
         this.tokenTransferRepository = tokenTransferRepository;
         this.assetDeploymentRepository = assetDeploymentRepository;
+        this.cursorRepository = cursorRepository;
+        this.syncSupport = syncSupport;
         this.explorerUrlBuilder = explorerUrlBuilder;
         this.restClient = restClientBuilder.build();
         this.fanOutBulkhead = bulkheadRegistry.bulkhead("stellar-transfer-fanout", FAN_OUT_BULKHEAD_CONFIG);
@@ -124,16 +136,22 @@ public class StellarTransferSyncService {
 
     // ── Per-chain sync ────────────────────────────────────────────────────────
 
-    /** One deployment's fetch, in flight — {@code future} resolves independently of the others. */
+    /** One deployment's fetch, in flight - {@code future} resolves independently of the others. */
     private record AccountFetch(AssetDeployment deployment, String issuerAccount, String assetCode,
-            CompletableFuture<List<Map<String, Object>>> future) {}
+            String cursor, CompletableFuture<List<Map<String, Object>>> future) {}
 
-    @Transactional
+    /**
+     * One pass for {@code chain}. Issuer feeds are fetched concurrently (from each deployment's own
+     * cursor); every deployment is then persisted in its own transaction together with its cursor, so a
+     * failing issuer leaves its own cursor untouched and does not roll back the others. Any failure is
+     * counted in the chain's {@code STELLAR_HORIZON} state in a separate transaction.
+     */
     public void syncChain(ChainConfig chain) {
         Network network = Network.valueOf(chain.getNetworkType().name());
         List<AssetDeployment> deployments = assetDeploymentRepository.findByChainAndNetwork(Chain.STELLAR, network)
                 .stream()
                 .filter(d -> d.getContractAddress() != null && !d.getContractAddress().isBlank())
+                .filter(d -> d.getDeploymentStatus() != AssetDeployment.DeploymentStatus.FAILED)
                 .toList();
 
         if (deployments.isEmpty()) {
@@ -142,113 +160,121 @@ public class StellarTransferSyncService {
             return;
         }
 
-        IndexerState state = loadOrCreateState(chain);
-        if (state.getStatus() == IndexerState.IndexerStatus.ERROR
+        IndexerState state = indexerStateRepository
+                .findByChainConfigIdAndIndexerType(chain.getId(), IndexerState.IndexerType.STELLAR_HORIZON)
+                .orElse(null);
+        if (state != null && state.getStatus() == IndexerState.IndexerStatus.ERROR
                 && state.getConsecutiveErrors() >= MAX_CONSECUTIVE_ERRORS) {
-            log.warn("Skipping Stellar chain {} — indexer is in ERROR state with {} consecutive errors.",
+            log.warn("Skipping Stellar chain {} - indexer is in ERROR state with {} consecutive errors.",
                     chain.getIdentifier(), state.getConsecutiveErrors());
             return;
         }
 
-        String sharedCursor = state.getLastSyncedSignature() != null ? state.getLastSyncedSignature() : "0";
-
-        try {
-            // Each watched issuer account is an independent, self-paginating Horizon call, so
-            // fetch them concurrently; only the DB writes below stay on the calling thread,
-            // since Hibernate's persistence context isn't safe to share across threads.
-            List<AccountFetch> fetches = deployments.stream()
-                    .map(d -> new AccountFetch(d, d.getContractAddress(), StellarUtils.deriveAssetCode(d.getAssetId()),
+        // Each watched issuer account is an independent, self-paginating Horizon call, so fetch them
+        // concurrently; only the DB writes stay on the calling thread.
+        List<AccountFetch> fetches = deployments.stream()
+                .map(d -> {
+                    String cursor = cursorRepository
+                            .findByDeploymentIdAndIndexerType(d.getId(), IndexerState.IndexerType.STELLAR_HORIZON)
+                            .map(IndexerDeploymentCursor::getCursorValue)
+                            .filter(c -> !c.isBlank())
+                            .orElse("0");
+                    return new AccountFetch(d, d.getContractAddress(), StellarUtils.deriveAssetCode(d.getAssetId()), cursor,
                             CompletableFuture.supplyAsync(() -> fanOutBulkhead.executeSupplier(
-                                    () -> fetchPayments(chain.getRpcUrl(), d.getContractAddress(), sharedCursor)))))
-                    .toList();
-            CompletableFuture.allOf(fetches.stream().map(AccountFetch::future).toArray(CompletableFuture[]::new)).join();
+                                    () -> fetchOperations(chain.getRpcUrl(), d.getContractAddress(), cursor))));
+                })
+                .toList();
+        CompletableFuture.allOf(fetches.stream().map(AccountFetch::future).toArray(CompletableFuture[]::new))
+                .handle((ok, err) -> null).join();
 
-            int totalSaved = 0;
-            // One indexer_state row is shared across every watched account on this chain, so we
-            // advance the shared cursor to the MINIMUM high-water mark reached across all of
-            // them this poll — never skips an account's unprocessed payments, at the cost of
-            // occasionally re-scanning (harmlessly, thanks to dedup) an account that ran ahead.
-            String newSharedCursor = null;
-
-            for (AccountFetch fetch : fetches) {
-                List<Map<String, Object>> payments = fetch.future().join();
-
-                // Horizon returns payments in ascending cursor order, so the last record (if any)
-                // carries this account's high-water mark for this poll.
-                String lastPagingToken = payments.isEmpty() ? null
-                        : (String) payments.get(payments.size() - 1).get("paging_token");
-                String accountHighWaterMark = lastPagingToken != null ? lastPagingToken : sharedCursor;
-
-                for (Map<String, Object> payment : payments) {
-                    if (!matchesTrackedAsset(payment, fetch.assetCode(), fetch.issuerAccount())) {
-                        continue;
-                    }
-
-                    String txHash = (String) payment.get("transaction_hash");
-                    if (txHash == null) {
-                        continue;
-                    }
-                    StellarOperationId opId = StellarOperationId.parse(payment.get("id"));
-                    Integer logIndex = opId != null ? opId.logIndex() : null;
-
-                    boolean duplicate = tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndex(
-                            chain.getId(), txHash, logIndex);
-                    if (duplicate) {
-                        continue;
-                    }
-
-                    TokenTransfer transfer = mapToEntity(chain, payment, fetch.deployment(), fetch.issuerAccount(),
-                            txHash, logIndex, opId != null ? opId.ledger() : null);
-                    tokenTransferRepository.save(transfer);
-                    totalSaved++;
+        Exception firstFailure = null;
+        int totalSaved = 0;
+        for (AccountFetch fetch : fetches) {
+            try {
+                List<Map<String, Object>> operations = fetch.future().join();
+                totalSaved += persistDeployment(chain, fetch, operations);
+            } catch (Exception e) {
+                log.warn("Stellar chain {}: deployment {} not synced this pass: {}", chain.getIdentifier(),
+                        fetch.deployment().getId(), e.getMessage());
+                if (firstFailure == null) {
+                    firstFailure = e;
                 }
-
-                newSharedCursor = newSharedCursor == null
-                        ? accountHighWaterMark
-                        : minCursor(newSharedCursor, accountHighWaterMark);
             }
-
-            state.setLastSyncedSignature(newSharedCursor != null ? newSharedCursor : sharedCursor);
-            state.setLastSyncedAt(Instant.now());
-            state.setConsecutiveErrors(0);
-            state.setLastError(null);
-            state.setStatus(IndexerState.IndexerStatus.ACTIVE);
-            indexerStateRepository.save(state);
-
-            if (totalSaved > 0) {
-                log.info("Stellar chain {}: synced {} new transfer(s).", chain.getIdentifier(), totalSaved);
-            } else {
-                log.debug("Stellar chain {}: no new transfers found.", chain.getIdentifier());
-            }
-        } catch (Exception e) {
-            int errors = state.getConsecutiveErrors() + 1;
-            state.setConsecutiveErrors(errors);
-            state.setLastError(truncate(e.getMessage(), 2000));
-            if (errors >= MAX_CONSECUTIVE_ERRORS) {
-                state.setStatus(IndexerState.IndexerStatus.ERROR);
-                log.error("Stellar chain {}: indexer set to ERROR after {} consecutive failures. Last error: {}",
-                        chain.getIdentifier(), errors, e.getMessage());
-            } else {
-                log.warn("Stellar chain {}: sync error ({}/{}): {}",
-                        chain.getIdentifier(), errors, MAX_CONSECUTIVE_ERRORS, e.getMessage());
-            }
-            indexerStateRepository.save(state);
         }
+
+        if (firstFailure != null) {
+            syncSupport.recordFailure(chain.getId(), chain.getIdentifier(),
+                    IndexerState.IndexerType.STELLAR_HORIZON, firstFailure, MAX_CONSECUTIVE_ERRORS);
+            return;
+        }
+        syncSupport.inTransaction(() -> {
+            IndexerState s = loadOrCreateState(chain);
+            s.setLastSyncedAt(Instant.now());
+            s.setConsecutiveErrors(0);
+            s.setLastError(null);
+            s.setStatus(IndexerState.IndexerStatus.ACTIVE);
+            indexerStateRepository.save(s);
+        });
+        if (totalSaved > 0) {
+            log.info("Stellar chain {}: synced {} new transfer(s).", chain.getIdentifier(), totalSaved);
+        } else {
+            log.debug("Stellar chain {}: no new transfers found.", chain.getIdentifier());
+        }
+    }
+
+    private int persistDeployment(ChainConfig chain, AccountFetch fetch, List<Map<String, Object>> operations) {
+        // Horizon returns operations in ascending cursor order: the last record is this feed's high-water mark.
+        String highWaterMark = operations.isEmpty() ? fetch.cursor()
+                : (String) operations.get(operations.size() - 1).get("paging_token");
+        AtomicInteger saved = new AtomicInteger();
+        syncSupport.inTransaction(() -> {
+            for (Map<String, Object> operation : operations) {
+                if (!matchesTrackedAsset(operation, fetch.assetCode(), fetch.issuerAccount())) {
+                    continue;
+                }
+                String txHash = (String) operation.get("transaction_hash");
+                if (txHash == null) {
+                    continue;
+                }
+                StellarOperationId opId = StellarOperationId.parse(operation.get("id"));
+                Integer logIndex = opId != null ? opId.logIndex() : null;
+                if (tokenTransferRepository.existsByChainConfigIdAndTxHashAndLogIndexAndContractAddress(
+                        chain.getId(), txHash, logIndex, fetch.issuerAccount())) {
+                    continue;
+                }
+                tokenTransferRepository.save(mapToEntity(chain, operation, fetch.deployment(), fetch.issuerAccount(),
+                        txHash, logIndex, opId != null ? opId.ledger() : null));
+                saved.incrementAndGet();
+            }
+            IndexerDeploymentCursor cursor = cursorRepository
+                    .findByDeploymentIdAndIndexerType(fetch.deployment().getId(), IndexerState.IndexerType.STELLAR_HORIZON)
+                    .orElseGet(() -> {
+                        IndexerDeploymentCursor c = new IndexerDeploymentCursor();
+                        c.setDeploymentId(fetch.deployment().getId());
+                        c.setIndexerType(IndexerState.IndexerType.STELLAR_HORIZON);
+                        return c;
+                    });
+            cursor.setCursorValue(highWaterMark);
+            cursor.setLastSyncedAt(Instant.now());
+            cursorRepository.save(cursor);
+        });
+        return saved.get();
     }
 
     // ── Decoding ──────────────────────────────────────────────────────────────
 
-    private boolean matchesTrackedAsset(Map<String, Object> payment, String assetCode, String issuerAccount) {
-        Object type = payment.get("type");
+    /** payment / path payments that deliver the tracked asset, and clawbacks of it. */
+    private boolean matchesTrackedAsset(Map<String, Object> operation, String assetCode, String issuerAccount) {
+        Object type = operation.get("type");
         if (!"payment".equals(type) && !"path_payment_strict_receive".equals(type)
-                && !"path_payment_strict_send".equals(type)) {
+                && !"path_payment_strict_send".equals(type) && !"clawback".equals(type)) {
             return false;
         }
-        String assetType = (String) payment.get("asset_type");
+        String assetType = (String) operation.get("asset_type");
         if (assetType == null || "native".equals(assetType)) {
             return false;
         }
-        return assetCode.equals(payment.get("asset_code")) && issuerAccount.equals(payment.get("asset_issuer"));
+        return assetCode.equals(operation.get("asset_code")) && issuerAccount.equals(operation.get("asset_issuer"));
     }
 
     private TokenTransfer mapToEntity(ChainConfig chain, Map<String, Object> payment, AssetDeployment deployment,
@@ -256,9 +282,14 @@ public class StellarTransferSyncService {
         String from = (String) payment.get("from");
         String to = (String) payment.get("to");
         String amountStr = (String) payment.get("amount");
+        boolean clawback = "clawback".equals(payment.get("type"));
 
         TokenTransfer.EventType eventType;
-        if (issuerAccount.equals(from)) {
+        if (clawback) {
+            // The issuer takes the units back from `from`: the holder's balance falls, supply falls.
+            eventType = TokenTransfer.EventType.BURN;
+            to = null;
+        } else if (issuerAccount.equals(from)) {
             eventType = TokenTransfer.EventType.MINT;
         } else if (issuerAccount.equals(to)) {
             eventType = TokenTransfer.EventType.BURN;
@@ -290,19 +321,14 @@ public class StellarTransferSyncService {
                 "pagingToken", String.valueOf(payment.get("paging_token")),
                 "type", String.valueOf(payment.get("type"))
         ));
-        // Stellar Consensus Protocol has no probabilistic finality — a ledger either
-        // closes with 2/3+ validator quorum agreement or it does not close at all, and Horizon's
-        // /payments endpoint only ever returns operations from ledgers that have already closed.
-        // There is no equivalent of an EVM/Starknet "provisional, might still be reorged" state
-        // to represent here, so every row is FINAL on write (matches the entity default; set
-        // explicitly for clarity/documentation).
+        // Stellar Consensus Protocol has no probabilistic finality: Horizon only returns operations of
+        // ledgers that already closed, so every row is FINALIZED on write.
         transfer.setFinalityStatus(FinalityLevel.FINALIZED);
         return transfer;
     }
 
     /** Uses Horizon's own {@code created_at} (real ledger-close time) when available rather
-     *  than the processing time — every Horizon payment/operation record includes it. Falls
-     *  back to processing time only if it's ever missing or malformed. */
+     *  than the processing time. Falls back to processing time only if it's missing or malformed. */
     private Instant resolveOccurredAt(Map<String, Object> payment) {
         Object createdAt = payment.get("created_at");
         if (createdAt instanceof String s) {
@@ -335,24 +361,16 @@ public class StellarTransferSyncService {
         }
     }
 
-    /** Lexicographic comparison is valid here because both are numeric stellar-core total order IDs. */
-    private String minCursor(String a, String b) {
-        if (a.length() != b.length()) {
-            return a.length() < b.length() ? a : b;
-        }
-        return a.compareTo(b) <= 0 ? a : b;
-    }
-
     // ── Horizon REST helpers ──────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> fetchPayments(String horizonUrl, String account, String cursor) {
+    private List<Map<String, Object>> fetchOperations(String horizonUrl, String account, String cursor) {
         List<Map<String, Object>> all = new ArrayList<>();
         String nextCursor = cursor;
 
         while (true) {
             Map<String, Object> response = restClient.get()
-                    .uri(horizonUrl + "/accounts/{account}/payments?cursor={cursor}&order=asc&limit={limit}&include_failed=false",
+                    .uri(horizonUrl + "/accounts/{account}/operations?cursor={cursor}&order=asc&limit={limit}&include_failed=false",
                             account, nextCursor, PAGE_LIMIT)
                     .retrieve()
                     .body(Map.class);
@@ -394,10 +412,5 @@ public class StellarTransferSyncService {
                     s.setStatus(IndexerState.IndexerStatus.ACTIVE);
                     return indexerStateRepository.save(s);
                 });
-    }
-
-    private String truncate(String s, int max) {
-        if (s == null) return null;
-        return s.length() <= max ? s : s.substring(0, max);
     }
 }

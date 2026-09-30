@@ -135,6 +135,19 @@ dann für Browser-JavaScript sichtbar ist, wenn ihn jeder Proxy-Hop weiterreicht
 
 ---
 
+## Chain-Operationen: Zieladress-Gate, Vier-Augen-Nachweis, Signer-Lebenszyklus { #chain-operations }
+
+**Zieladress-Gate.** Whitelist, Mint, Forced Transfer (einzeln, Batch, Canton, Solana, vertraulich) und Forced Approve akzeptieren nur eine Zieladresse, die **aktiver Registerhalter desselben Assets** ist, dessen Rechtsträger ACTIVE und KYC-genehmigt ist, kein ungeklärtes Sanktionsscreening-Ergebnis (Rechtsträger oder wirtschaftlich Berechtigte) hat und keinem §16-eWpG-Sperrvermerk unterliegt. Andernfalls antwortet die API mit `403` und der Begründung; es gibt keinen Ausnahmepfad – die neue Partei wird zuerst als Halter onboardet. Gemischt geschriebene EVM-Adressen müssen die EIP-55-Prüfsumme bestehen. Die Antworten von Whitelist und Mint geben den aufgelösten Halternamen zurück (`destinationHolder`). Schalter: `registerwerk.chain.destination-gate.enabled` (Standard `true`; nur in einem Demo-Profil deaktivieren). Zwangsmaßnahmen erfordern eine `legalBasis` mit mindestens 10 Zeichen; ein optionaler Header `X-Case-Reference` wird mit der Transaktion gespeichert.
+
+**Vier-Augen-Nachweis.** `/whitelist`, `/unwhitelist` und der Emittenten-`/mint` erfordern Step-up plus einen zweiten Freigeber (REGISTRY_ADMIN oder COMPLIANCE_OFFICER; der Auslöser kann nicht selbst freigeben). Für jede Vier-Augen-Anfrage schreibt der Step-up-Aspekt *vor* der Aktion ein Audit-Ereignis `DUAL_CONTROL_APPROVED` (Auslöser, Freigeber, Aktion, Pfad); schlägt dieses Schreiben fehl, wird die Aktion nicht ausgeführt. Die Freigeber-ID steht zusätzlich in `blockchain_transaction.approver_id` und im fachlichen Audit-Ereignis.
+
+**Claims.** KYC- und AML-Claims werden nur für einen Rechtsträger ausgestellt, dessen KYC APPROVED ist und der weder einen ungeklärten Screening-Treffer noch eine Sperre hat. Ihr Ablauf entspricht dem nächsten periodischen Überprüfungsdatum (fehlt es, wird abgelehnt). `registerwerk.claims.allow-unapproved-in-nonprod=true` lockert dies ausschließlich außerhalb von Produktionsprofilen.
+
+**Signer-Lebenszyklus.** Erzeugen, Import (Raw, Keystore) und HSM-Anbindung erfordern Step-up plus zweiten Freigeber; ein neues Wallet wird nie automatisch zum Chain-Default (nur das allererste Wallet einer Neuinstallation); Defaults werden mit der Vier-Augen-Aktion *Default setzen* geändert. Das Löschen eines Wallets ist ein **Soft-Delete**: Der verschlüsselte Schlüssel bleibt `registerwerk.wallet.retention-days` (Standard 90) erhalten und kann wiederhergestellt werden; danach vernichtet ihn ein Purge-Job. Löschen wird abgelehnt, solange das Wallet Chain-Default ist oder seine Adresse je eine Chain-Transaktion signiert hat (es könnte Deployer-, Registry- oder Claim-Issuer-Rechte halten).
+
+!!! warning "Runbook Signer-Rotation (manuell)"
+    Eine automatische Übergabe gibt es noch nicht. So ersetzen Sie einen Registry-Signer: (1) neues Wallet erzeugen oder anbinden (Vier-Augen); (2) mit dem alten Schlüssel der neuen Adresse die nötigen Rollen on-chain mit Foundry `cast send` erteilen (`grantRole` / `transferRegistry` / Claim-Issuer `addKey`), im Beisein einer zweiten Person; (3) mit `cast call` prüfen, dass die neue Adresse alle Rollen hält; (4) Chain-Default auf das neue Wallet umstellen (Vier-Augen); (5) den alten Schlüssel on-chain entziehen (`revokeRole` / `removeKey`) und prüfen; (6) erst dann das alte Wallet löschen – es bleibt für die Aufbewahrungsfrist wiederherstellbar.
+
 ## Rollendurchsetzung { #role-enforcement }
 
 Jede Controller-Methode, die eine Autorisierung erfordert, ist mit `@PreAuthorize` annotiert:

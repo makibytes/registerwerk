@@ -4,6 +4,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -12,6 +13,9 @@ import java.util.UUID;
 public interface BlockchainTransactionRepository extends JpaRepository<BlockchainTransaction, UUID> {
 
     List<BlockchainTransaction> findByStatus(BlockchainTransaction.Status status);
+
+    /** TIMEOUT rows still inside the late-mined window (P4B-5): they keep being reconciled. */
+    List<BlockchainTransaction> findByStatusAndCompletedAtAfter(BlockchainTransaction.Status status, Instant cutoff);
 
     Optional<BlockchainTransaction> findByTxHash(String txHash);
 

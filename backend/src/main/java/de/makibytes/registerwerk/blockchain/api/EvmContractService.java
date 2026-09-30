@@ -1,7 +1,16 @@
 package de.makibytes.registerwerk.blockchain.api;
 
+import de.makibytes.registerwerk.blockchain.events.TxSubmissionRefusedEvent;
 import de.makibytes.registerwerk.blockchain.internal.NonceCoordinator;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
+import de.makibytes.registerwerk.shared.TransientChainException;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
+import org.web3j.abi.TypeReference;
+import org.web3j.abi.datatypes.Utf8String;
+import org.web3j.protocol.core.Response;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
@@ -17,6 +26,8 @@ import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
 import org.web3j.crypto.RawTransaction;
+import org.web3j.crypto.TransactionDecoder;
+import org.web3j.crypto.transaction.type.Transaction1559;
 import org.web3j.crypto.Hash;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
@@ -31,12 +42,15 @@ import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
 
-import java.util.concurrent.ConcurrentHashMap;
-
 import java.math.BigInteger;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * Shared infrastructure for EVM smart-contract interactions.
@@ -68,19 +82,54 @@ public class EvmContractService {
     private final NonceCoordinator         nonceCoordinator;
     private final ChainQuarantinePort       chainQuarantine;
 
-    /** eth_chainId per Web3j client — chain clients are long-lived singletons. */
-    private final ConcurrentHashMap<Web3j, Long> chainIdCache = new ConcurrentHashMap<>();
+    private final ApplicationEventPublisher eventPublisher;
+    private final IsolatedTransactionExecutor isolatedTransactions;
+    private final MeterRegistry             meters;
+    private final EvmSubmissionSettings     settings;
 
+    /**
+     * Bounds concurrent immediate submit/send/deploy calls (P4B-1): each holds the caller's pooled
+     * connection for the whole call and needs a second one inside {@code NonceCoordinator.withNonce},
+     * so unbounded concurrency can deadlock the pool (hold-and-wait).
+     */
+    private final Semaphore immediateSlots;
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    @Autowired
     public EvmContractService(BlockchainClientRegistry clientRegistry,
                                ChainConfigRepository chainConfigRepository,
                                WalletSigner walletSigner,
                                NonceCoordinator nonceCoordinator,
-                               ChainQuarantinePort chainQuarantine) {
+                               ChainQuarantinePort chainQuarantine,
+                               ApplicationEventPublisher eventPublisher,
+                               IsolatedTransactionExecutor isolatedTransactions,
+                               MeterRegistry meters,
+                               EvmSubmissionSettings settings) {
         this.clientRegistry       = clientRegistry;
         this.chainConfigRepository = chainConfigRepository;
         this.walletSigner          = walletSigner;
         this.nonceCoordinator      = nonceCoordinator;
         this.chainQuarantine       = chainQuarantine;
+        this.eventPublisher        = eventPublisher;
+        this.isolatedTransactions  = isolatedTransactions;
+        this.meters                = meters;
+        this.settings              = settings;
+        this.immediateSlots        = new Semaphore(settings.immediateSubmitPermits(), true);
+    }
+
+    @Autowired(required = false)
+    void setTransactionManager(org.springframework.transaction.PlatformTransactionManager transactionManager) {
+        this.transactionManager = transactionManager;
+    }
+
+    /** Without audit/metrics wiring and with default settings (unit tests, tooling). */
+    public EvmContractService(BlockchainClientRegistry clientRegistry,
+                               ChainConfigRepository chainConfigRepository,
+                               WalletSigner walletSigner,
+                               NonceCoordinator nonceCoordinator,
+                               ChainQuarantinePort chainQuarantine) {
+        this(clientRegistry, chainConfigRepository, walletSigner, nonceCoordinator, chainQuarantine,
+                null, null, null, EvmSubmissionSettings.defaults());
     }
 
     // ── Credential helpers ────────────────────────────────────────────────────
@@ -115,12 +164,17 @@ public class EvmContractService {
     }
 
     /**
-     * Returns the chain ID for the given chain config.
+     * Returns the pinned chain ID ({@code chain_config.chain_id}) for the given chain config.
+     *
+     * @throws ChainIdMismatchException if no chain id is pinned - there is deliberately no default
      */
     public long chainId(UUID chainConfigId) {
         ChainConfig config = chainConfigRepository.findById(chainConfigId)
                 .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainConfigId));
-        return config.getChainId() != null ? config.getChainId() : 1L;
+        if (config.getChainId() == null) {
+            throw ChainIdMismatchException.unpinned(config.getIdentifier());
+        }
+        return config.getChainId();
     }
 
     /** Resolves the stable database identity required by every state-changing EVM call. */
@@ -161,12 +215,13 @@ public class EvmContractService {
      * Chain-aware immediate submission boundary. The chain row lock is retained through the
      * RPC call, making submission and quarantine activation strictly ordered across replicas.
      */
-    @Transactional
     public String submit(UUID chainConfigId, Web3j web3j, EvmSigner signer,
             String contractAddress, Function function) {
-        chainQuarantine.requireSubmissionAllowed(chainConfigId);
-        return submitEncoded(web3j, signer, contractAddress,
-                FunctionEncoder.encode(function), CALL_GAS_LIMIT);
+        return withImmediateSlot("submit", () -> {
+            chainQuarantine.requireSubmissionAllowed(chainConfigId);
+            return submitEncoded(chainConfigId, web3j, signer, contractAddress,
+                    FunctionEncoder.encode(function), CALL_GAS_LIMIT);
+        });
     }
 
     /**
@@ -178,20 +233,22 @@ public class EvmContractService {
         throw new IllegalStateException("chainConfigId is required for quarantine-safe EVM submission");
     }
 
-    @Transactional
     public String submit(UUID chainConfigId, Web3j web3j, EvmSigner signer, String contractAddress,
             String encodedData, BigInteger gasLimit) {
-        chainQuarantine.requireSubmissionAllowed(chainConfigId);
-        return submitEncoded(web3j, signer, contractAddress, encodedData, gasLimit);
+        return withImmediateSlot("submit", () -> {
+            chainQuarantine.requireSubmissionAllowed(chainConfigId);
+            return submitEncoded(chainConfigId, web3j, signer, contractAddress, encodedData, gasLimit);
+        });
     }
 
-    private String submitEncoded(Web3j web3j, EvmSigner signer, String contractAddress,
+    private String submitEncoded(UUID chainConfigId, Web3j web3j, EvmSigner signer, String contractAddress,
                          String encodedData, BigInteger gasLimit) {
         try {
-            long chainId = resolveChainId(web3j);
-            BigInteger effectiveGasLimit = estimateGasLimit(web3j, signer.address(), contractAddress,
-                    encodedData, gasLimit);
-            Fees fees = resolveFees(web3j);
+            SigningContext ctx = signingContext(chainConfigId, web3j);
+            long chainId = ctx.chainId();
+            BigInteger effectiveGasLimit = boundedGasLimit(ctx,
+                    estimateGasLimit(web3j, signer.address(), contractAddress, encodedData, gasLimit));
+            Fees fees = resolveFees(web3j, ctx);
             // Fleet-wide nonce coordination (NonceCoordinator): two concurrent submissions —
             // whether on this instance or another replica — would otherwise read the same
             // pending nonce and one transaction would silently replace the other.
@@ -236,10 +293,11 @@ public class EvmContractService {
         chainQuarantine.requireSubmissionAllowed(chainConfigId);
         try {
             String encodedData = FunctionEncoder.encode(function);
-            long chainId = resolveChainId(web3j);
-            BigInteger effectiveGasLimit = estimateGasLimit(web3j, signer.address(), contractAddress,
-                    encodedData, CALL_GAS_LIMIT);
-            Fees fees = resolveFees(web3j);
+            SigningContext ctx = signingContext(chainConfigId, web3j);
+            long chainId = ctx.chainId();
+            BigInteger effectiveGasLimit = boundedGasLimit(ctx,
+                    estimateGasLimit(web3j, signer.address(), contractAddress, encodedData, CALL_GAS_LIMIT));
+            Fees fees = resolveFees(web3j, ctx);
             return nonceCoordinator.withReservedNonce(chainId, signer.address(),
                     () -> nonce(web3j, signer.address()), nonce -> {
                         RawTransaction tx = buildTransaction(
@@ -255,6 +313,88 @@ public class EvmContractService {
         } catch (Exception e) {
             throw new RuntimeException("EVM durable transaction preparation error: " + e.getMessage(), e);
         }
+    }
+
+    /** Which replacement {@link #resign} builds: same call at a higher fee, or a 0-value self-send. */
+    public enum ReplacementKind { REPRICE, CANCEL }
+
+    /** Fee-relevant fields of a signed payload; {@code maxFeePerGas} carries the gas price of a legacy tx. */
+    public record PayloadInfo(boolean eip1559, long nonce, BigInteger gasLimit,
+            BigInteger maxFeePerGas, BigInteger maxPriorityFeePerGas, String to) {}
+
+    /** Decodes a persisted signed payload without touching the network (operator views, bump maths). */
+    public static PayloadInfo describe(String signedPayload) {
+        RawTransaction raw = TransactionDecoder.decode(signedPayload);
+        if (raw.getTransaction() instanceof Transaction1559 t) {
+            return new PayloadInfo(true, raw.getNonce().longValueExact(), raw.getGasLimit(),
+                    t.getMaxFeePerGas(), t.getMaxPriorityFeePerGas(), raw.getTo());
+        }
+        return new PayloadInfo(false, raw.getNonce().longValueExact(), raw.getGasLimit(),
+                raw.getGasPrice(), null, raw.getTo());
+    }
+
+    /**
+     * Re-signs an outbox payload at its <em>same nonce</em> (P4B-4). {@link ReplacementKind#REPRICE}
+     * keeps recipient, calldata, value and gas limit and raises the fees; {@link ReplacementKind#CANCEL}
+     * replaces it with a 0-value self-send of 21000 gas so the nonce is consumed without effect. Fees are
+     * {@code max(fresh network fees, old fees * (100 + minBumpPercent) / 100)} - nodes only accept a
+     * replacement that is at least 10 % dearer in both fee fields - and are checked against the same fee
+     * ceilings as any signing ({@link FeeAboveCeilingException}). No nonce is reserved: the lease is
+     * untouched because the nonce was already taken by the payload being replaced. The caller persists the
+     * result before any broadcast, exactly like {@link #prepareDurable}.
+     */
+    public PreparedRawTransaction resign(UUID chainConfigId, Web3j web3j, EvmSigner signer,
+            String originalSignedPayload, ReplacementKind kind, int minBumpPercent) {
+        chainQuarantine.requireSubmissionAllowed(chainConfigId);
+        try {
+            RawTransaction original = TransactionDecoder.decode(originalSignedPayload);
+            SigningContext ctx = signingContext(chainConfigId, web3j);
+            PayloadInfo info = describe(originalSignedPayload);
+            Fees fresh = resolveUncappedFees(web3j);
+            BigInteger factor = BigInteger.valueOf(100L + Math.max(minBumpPercent, 10));
+            Fees fees;
+            if (info.eip1559()) {
+                BigInteger freshTip = fresh.eip1559() ? fresh.maxPriorityFeePerGas() : BigInteger.ZERO;
+                BigInteger freshMax = fresh.eip1559() ? fresh.maxFeePerGas() : fresh.gasPrice();
+                BigInteger tip = freshTip.max(bump(info.maxPriorityFeePerGas(), factor));
+                BigInteger max = freshMax.max(bump(info.maxFeePerGas(), factor)).max(tip);
+                fees = Fees.eip1559(tip, max);
+            } else {
+                BigInteger freshPrice = fresh.eip1559() ? fresh.maxFeePerGas() : fresh.gasPrice();
+                fees = Fees.legacy(freshPrice.max(bump(info.maxFeePerGas(), factor)));
+            }
+            fees = enforceFeeCeiling(ctx, fees);
+
+            String to = kind == ReplacementKind.CANCEL ? signer.address() : original.getTo();
+            String data = kind == ReplacementKind.CANCEL ? "" : original.getData();
+            BigInteger gasLimit = kind == ReplacementKind.CANCEL ? BigInteger.valueOf(21_000L) : original.getGasLimit();
+            BigInteger value = kind == ReplacementKind.CANCEL ? BigInteger.ZERO : original.getValue();
+            RawTransaction tx = fees.eip1559()
+                    ? RawTransaction.createTransaction(ctx.chainId(), original.getNonce(), gasLimit, to, value,
+                            data, fees.maxPriorityFeePerGas(), fees.maxFeePerGas())
+                    : RawTransaction.createTransaction(original.getNonce(), fees.gasPrice(), gasLimit, to, value, data);
+            byte[] signed = signer.signTransaction(tx, ctx.chainId());
+            return new PreparedRawTransaction(Numeric.toHexString(Hash.sha3(signed)), Numeric.toHexString(signed),
+                    ctx.chainId(), signer.address(), original.getNonce());
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("EVM replacement transaction error: " + e.getMessage(), e);
+        }
+    }
+
+    private static BigInteger bump(BigInteger value, BigInteger factorPercent) {
+        // round up so that a 10 % floor is never missed by integer truncation
+        return value.multiply(factorPercent).add(BigInteger.valueOf(99)).divide(BigInteger.valueOf(100));
+    }
+
+    /** {@code eth_getTransactionCount} at the given tag (LATEST = mined; FINALIZED = irreversible if supported). */
+    public BigInteger transactionCount(Web3j web3j, String address, DefaultBlockParameterName tag) throws Exception {
+        EthGetTransactionCount cnt = web3j.ethGetTransactionCount(address, tag).send();
+        if (cnt.hasError()) {
+            throw new RuntimeException(cnt.getError().getMessage());
+        }
+        return cnt.getTransactionCount();
     }
 
     /**
@@ -300,12 +440,13 @@ public class EvmContractService {
     }
 
     /** Chain-aware synchronous submission retaining the quarantine lock through its receipt. */
-    @Transactional
     public TransactionReceipt send(UUID chainConfigId, Web3j web3j, EvmSigner signer,
             String contractAddress, Function function) {
-        chainQuarantine.requireSubmissionAllowed(chainConfigId);
-        return sendEncoded(web3j, signer, contractAddress,
-                FunctionEncoder.encode(function), CALL_GAS_LIMIT);
+        return withImmediateSlot("send", () -> {
+            chainQuarantine.requireSubmissionAllowed(chainConfigId);
+            return sendEncoded(chainConfigId, web3j, signer, contractAddress,
+                    FunctionEncoder.encode(function), CALL_GAS_LIMIT);
+        });
     }
 
     /**
@@ -317,20 +458,22 @@ public class EvmContractService {
         throw new IllegalStateException("chainConfigId is required for quarantine-safe EVM submission");
     }
 
-    @Transactional
     public TransactionReceipt send(UUID chainConfigId, Web3j web3j, EvmSigner signer,
             String contractAddress, String encodedData, BigInteger gasLimit) {
-        chainQuarantine.requireSubmissionAllowed(chainConfigId);
-        return sendEncoded(web3j, signer, contractAddress, encodedData, gasLimit);
+        return withImmediateSlot("send", () -> {
+            chainQuarantine.requireSubmissionAllowed(chainConfigId);
+            return sendEncoded(chainConfigId, web3j, signer, contractAddress, encodedData, gasLimit);
+        });
     }
 
-    private TransactionReceipt sendEncoded(Web3j web3j, EvmSigner signer, String contractAddress,
-                                   String encodedData, BigInteger gasLimit) {
+    private TransactionReceipt sendEncoded(UUID chainConfigId, Web3j web3j, EvmSigner signer,
+                                   String contractAddress, String encodedData, BigInteger gasLimit) {
         try {
-            long chainId = resolveChainId(web3j);
-            BigInteger effectiveGasLimit = estimateGasLimit(web3j, signer.address(), contractAddress,
-                    encodedData, gasLimit);
-            Fees fees = resolveFees(web3j);
+            SigningContext ctx = signingContext(chainConfigId, web3j);
+            long chainId = ctx.chainId();
+            BigInteger effectiveGasLimit = boundedGasLimit(ctx,
+                    estimateGasLimit(web3j, signer.address(), contractAddress, encodedData, gasLimit));
+            Fees fees = resolveFees(web3j, ctx);
             EthSendTransaction sent = nonceCoordinator.withNonce(chainId, signer.address(),
                     () -> nonce(web3j, signer.address()),
                     nonce -> {
@@ -374,21 +517,24 @@ public class EvmContractService {
         throw new IllegalStateException("chainConfigId is required for quarantine-safe EVM deployment");
     }
 
-    @Transactional
     public String deploy(UUID chainConfigId, Web3j web3j, EvmSigner signer, String binary,
                          String encodedConstructor) {
-        chainQuarantine.requireSubmissionAllowed(chainConfigId);
-        return deployEncoded(web3j, signer, binary, encodedConstructor);
+        return withImmediateSlot("deploy", () -> {
+            chainQuarantine.requireSubmissionAllowed(chainConfigId);
+            return deployEncoded(chainConfigId, web3j, signer, binary, encodedConstructor);
+        });
     }
 
-    private String deployEncoded(Web3j web3j, EvmSigner signer, String binary,
+    private String deployEncoded(UUID chainConfigId, Web3j web3j, EvmSigner signer, String binary,
                          String encodedConstructor) {
         String data = Numeric.cleanHexPrefix(binary)
                 + (encodedConstructor != null ? Numeric.cleanHexPrefix(encodedConstructor) : "");
         try {
-            long chainId = resolveChainId(web3j);
-            BigInteger effectiveGasLimit = estimateDeployGasLimit(web3j, signer.address(), data, DEPLOY_GAS_LIMIT);
-            Fees fees = resolveFees(web3j);
+            SigningContext ctx = signingContext(chainConfigId, web3j);
+            long chainId = ctx.chainId();
+            BigInteger effectiveGasLimit = boundedGasLimit(ctx,
+                    estimateDeployGasLimit(web3j, signer.address(), data, DEPLOY_GAS_LIMIT));
+            Fees fees = resolveFees(web3j, ctx);
             EthSendTransaction sent = nonceCoordinator.withNonce(chainId, signer.address(),
                     () -> nonce(web3j, signer.address()),
                     nonce -> {
@@ -495,8 +641,78 @@ public class EvmContractService {
      * back to the legacy {@link #gasPrice} heuristic otherwise. Some configured chains (older
      * testnets, certain L2s, confidential-EVM sidecars) do not implement the London fee-market
      * RPC methods, so this must degrade gracefully rather than assume every chain supports it.
+     *
+     * <p>The resulting fees are checked against the chain's fee ceiling ({@link SigningContext}):
+     * a node reporting an absurd base fee must never lead to a signed transaction (P4B-2).
      */
-    private Fees resolveFees(Web3j web3j) {
+    private Fees resolveFees(Web3j web3j, SigningContext ctx) {
+        return enforceFeeCeiling(ctx, crossCheckFees(resolveUncappedFees(web3j), web3j, ctx.identifier()));
+    }
+
+    /**
+     * Second-node fee cross-check (P4B-2 interim, K5): when another healthy node exists its fees are
+     * fetched too and the result is {@code min(A, B * 1.5)}, so one node inflating fee data cannot make
+     * the registry overpay by more than 50 % over an independent view. A second node that cannot answer
+     * (or answers in the other fee model) leaves {@code A} untouched; a low outlier is bounded by the 1.5
+     * factor and never triggers a fallback default.
+     */
+    private Fees crossCheckFees(Fees a, Web3j primary, String identifier) {
+        try {
+            List<BlockchainClientRegistry.EvmNodeClient> healthy = clientRegistry.evmNodeClients(identifier).stream()
+                    .filter(BlockchainClientRegistry.EvmNodeClient::healthy).collect(java.util.stream.Collectors.toList());
+            if (healthy.size() < 2) return a;
+            // A direct client is skipped by identity; the failover client is served by the top-ranked node.
+            if (!healthy.removeIf(n -> n.client() == primary)) healthy.removeFirst();
+            for (BlockchainClientRegistry.EvmNodeClient other : healthy) {
+                Optional<Fees> b = fetchFees(other.client());
+                if (b.isPresent()) return minWithHeadroom(a, b.get());
+            }
+        } catch (RuntimeException e) {
+            log.debug("Fee cross-check skipped: {}", e.getMessage());
+        }
+        return a;
+    }
+
+    private static Fees minWithHeadroom(Fees a, Fees b) {
+        BigInteger num = BigInteger.valueOf(3), den = BigInteger.TWO;
+        if (a.eip1559() && b.eip1559()) {
+            BigInteger tip = a.maxPriorityFeePerGas().min(b.maxPriorityFeePerGas().multiply(num).divide(den));
+            BigInteger max = a.maxFeePerGas().min(b.maxFeePerGas().multiply(num).divide(den)).max(tip);
+            return Fees.eip1559(tip, max);
+        }
+        if (!a.eip1559() && !b.eip1559()) {
+            return Fees.legacy(a.gasPrice().min(b.gasPrice().multiply(num).divide(den)));
+        }
+        return a;
+    }
+
+    /** Fees as {@link #resolveUncappedFees} would compute them, but empty instead of falling back to defaults. */
+    private Optional<Fees> fetchFees(Web3j web3j) {
+        try {
+            EthFeeHistory history = web3j.ethFeeHistory(1, DefaultBlockParameterName.LATEST, List.of()).send();
+            if (!history.hasError() && history.getFeeHistory().getBaseFeePerGas() != null
+                    && !history.getFeeHistory().getBaseFeePerGas().isEmpty()) {
+                List<BigInteger> baseFees = history.getFeeHistory().getBaseFeePerGas();
+                BigInteger tip = BigInteger.valueOf(1_500_000_000L);
+                try {
+                    EthMaxPriorityFeePerGas t = web3j.ethMaxPriorityFeePerGas().send();
+                    if (!t.hasError() && t.getMaxPriorityFeePerGas() != null) tip = t.getMaxPriorityFeePerGas();
+                } catch (Exception ignored) {
+                    // default tip
+                }
+                return Optional.of(Fees.eip1559(tip, baseFees.get(baseFees.size() - 1).multiply(BigInteger.TWO).add(tip)));
+            }
+            EthGasPrice gp = web3j.ethGasPrice().send();
+            if (!gp.hasError() && gp.getGasPrice() != null) {
+                return Optional.of(Fees.legacy(gp.getGasPrice().multiply(BigInteger.valueOf(12)).divide(BigInteger.TEN)));
+            }
+        } catch (Exception e) {
+            log.debug("Second-node fee lookup failed: {}", e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    private Fees resolveUncappedFees(Web3j web3j) {
         try {
             EthFeeHistory feeHistoryResponse =
                     web3j.ethFeeHistory(1, DefaultBlockParameterName.LATEST, List.of()).send();
@@ -536,6 +752,32 @@ public class EvmContractService {
         }
     }
 
+    private Fees enforceFeeCeiling(SigningContext ctx, Fees fees) {
+        if (fees.eip1559()) {
+            if (fees.maxPriorityFeePerGas().compareTo(ctx.maxPriorityFeePerGas()) > 0) {
+                throw refuse(ctx, "TIP_CEILING", new FeeAboveCeilingException(
+                        "maxPriorityFeePerGas", fees.maxPriorityFeePerGas(), ctx.maxPriorityFeePerGas()));
+            }
+            if (fees.maxFeePerGas().compareTo(ctx.maxFeePerGas()) > 0) {
+                throw refuse(ctx, "FEE_CEILING", new FeeAboveCeilingException(
+                        "maxFeePerGas", fees.maxFeePerGas(), ctx.maxFeePerGas()));
+            }
+        } else if (fees.gasPrice().compareTo(ctx.maxFeePerGas()) > 0) {
+            throw refuse(ctx, "FEE_CEILING", new FeeAboveCeilingException(
+                    "gasPrice", fees.gasPrice(), ctx.maxFeePerGas()));
+        }
+        return fees;
+    }
+
+    /** Refuses a gas limit above the block-gas ceiling (estimate or caller/fallback value alike). */
+    private BigInteger boundedGasLimit(SigningContext ctx, BigInteger gasLimit) {
+        if (gasLimit.compareTo(settings.maxGasLimit()) > 0) {
+            throw refuse(ctx, "GAS_CEILING",
+                    new FeeAboveCeilingException("gasLimit", gasLimit, settings.maxGasLimit()));
+        }
+        return gasLimit;
+    }
+
     /** {@code to} = {@code ""} (not null) signals contract creation, matching
      *  {@link RawTransaction}'s own convention for the legacy path. */
     private RawTransaction buildTransaction(long chainId, BigInteger nonce, BigInteger gasLimit,
@@ -548,44 +790,104 @@ public class EvmContractService {
     }
 
     /**
-     * Estimates the gas limit for a contract call via {@code eth_estimateGas}, replacing the
-     * previous fixed {@code CALL_GAS_LIMIT}. {@code fallback} (the caller-supplied or default
-     * limit) is used whenever estimation fails or errors — e.g. the node doesn't support the
-     * call, or execution depends on state that makes a dry-run estimate unreliable — so a
-     * transaction is never blocked on {@code eth_estimateGas} being available.
+     * Estimates the gas limit for a contract call via {@code eth_estimateGas}. {@code fallback}
+     * (the caller-supplied or default limit) is used only when estimation is <em>unavailable</em>:
+     * the node does not implement the method, or the transport failed. A node answer saying the
+     * call would revert fails here, before signing, with the decoded reason (P4B-3) - broadcasting
+     * a doomed transaction with a fallback gas limit only burns fees and a nonce.
      */
     private BigInteger estimateGasLimit(Web3j web3j, String from, String to, String data, BigInteger fallback) {
-        try {
-            EthEstimateGas result = web3j.ethEstimateGas(
-                    Transaction.createFunctionCallTransaction(from, null, null, null, to, data)).send();
-            if (result.hasError()) {
-                log.debug("eth_estimateGas error ({}); using fallback gas limit {}.",
-                        result.getError().getMessage(), fallback);
-                return fallback;
-            }
-            return withSafetyMargin(result.getAmountUsed());
-        } catch (Exception e) {
-            log.debug("eth_estimateGas failed ({}); using fallback gas limit {}.", e.getMessage(), fallback);
-            return fallback;
-        }
+        return estimate("call", fallback, () -> web3j.ethEstimateGas(
+                Transaction.createFunctionCallTransaction(from, null, null, null, to, data)).send());
     }
 
     /** Same as {@link #estimateGasLimit} but for contract creation (no {@code to} address). */
     private BigInteger estimateDeployGasLimit(Web3j web3j, String from, String initCode, BigInteger fallback) {
+        return estimate("deploy", fallback, () -> web3j.ethEstimateGas(
+                Transaction.createContractTransaction(from, null, null, null, BigInteger.ZERO, initCode))
+                .send());
+    }
+
+    @FunctionalInterface
+    private interface EstimateCall {
+        EthEstimateGas send() throws Exception;
+    }
+
+    private BigInteger estimate(String what, BigInteger fallback, EstimateCall call) {
+        EthEstimateGas result;
         try {
-            EthEstimateGas result = web3j.ethEstimateGas(
-                    Transaction.createContractTransaction(from, null, null, null, BigInteger.ZERO, initCode))
-                    .send();
-            if (result.hasError()) {
-                log.debug("eth_estimateGas (deploy) error ({}); using fallback gas limit {}.",
-                        result.getError().getMessage(), fallback);
-                return fallback;
-            }
-            return withSafetyMargin(result.getAmountUsed());
+            result = call.send();
         } catch (Exception e) {
-            log.debug("eth_estimateGas (deploy) failed ({}); using fallback gas limit {}.", e.getMessage(), fallback);
+            log.warn("eth_estimateGas ({}) transport failure ({}); using fallback gas limit {}.",
+                    what, e.getMessage(), fallback);
             return fallback;
         }
+        if (result.hasError()) {
+            Response.Error error = result.getError();
+            if (isMethodNotFound(error)) {
+                log.warn("eth_estimateGas ({}) unsupported by node ({}); using fallback gas limit {}.",
+                        what, error.getMessage(), fallback);
+                return fallback;
+            }
+            if (isRevert(error)) {
+                throw new ChainRevertException(decodeRevertReason(error));
+            }
+            throw new TransientChainException("eth_estimateGas (" + what + ") was rejected by the node: "
+                    + error.getMessage());
+        }
+        return withSafetyMargin(result.getAmountUsed());
+    }
+
+    private static boolean isMethodNotFound(Response.Error error) {
+        if (error.getCode() == -32601) {
+            return true;
+        }
+        String m = lower(error.getMessage());
+        return m.contains("method not found") || m.contains("does not exist")
+                || m.contains("not supported") || m.contains("unsupported method");
+    }
+
+    private static boolean isRevert(Response.Error error) {
+        String m = lower(error.getMessage());
+        String data = error.getData() == null ? "" : error.getData().toLowerCase(Locale.ROOT);
+        return error.getCode() == 3 || m.contains("revert") || m.contains("always failing transaction")
+                || data.startsWith(ERROR_STRING_SELECTOR) || data.startsWith(PANIC_SELECTOR);
+    }
+
+    private static final String ERROR_STRING_SELECTOR = "0x08c379a0";
+    private static final String PANIC_SELECTOR = "0x4e487b71";
+
+    /** Error(string) and Panic(uint256) are decoded; any other selector is a custom error, kept raw. */
+    static String decodeRevertReason(Response.Error error) {
+        String data = error.getData() == null ? "" : error.getData().trim();
+        if (data.length() >= 2 && data.startsWith("\"") && data.endsWith("\"")) {
+            data = data.substring(1, data.length() - 1);
+        }
+        String lowered = data.toLowerCase(Locale.ROOT);
+        try {
+            if (lowered.startsWith(ERROR_STRING_SELECTOR) && lowered.length() > 10) {
+                List<TypeReference<Type>> outputs = List.of(
+                        (TypeReference<Type>) (TypeReference<?>) new TypeReference<Utf8String>() {});
+                List<Type> decoded = FunctionReturnDecoder.decode("0x" + lowered.substring(10), outputs);
+                if (!decoded.isEmpty()) {
+                    return String.valueOf(decoded.get(0).getValue());
+                }
+            }
+            if (lowered.startsWith(PANIC_SELECTOR) && lowered.length() >= 74) {
+                return "panic code 0x" + new BigInteger(lowered.substring(lowered.length() - 64), 16).toString(16);
+            }
+        } catch (RuntimeException ignored) {
+            // fall through to the raw message
+        }
+        String message = error.getMessage() == null ? "execution reverted" : error.getMessage();
+        if (lowered.startsWith("0x") && lowered.length() >= 10 && !lowered.startsWith(ERROR_STRING_SELECTOR)) {
+            return message + " (custom error " + lowered.substring(0, 10) + ")";
+        }
+        return message;
+    }
+
+    private static String lower(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT);
     }
 
     /**
@@ -608,21 +910,106 @@ public class EvmContractService {
         return gp.getGasPrice().multiply(BigInteger.valueOf(12)).divide(BigInteger.TEN);
     }
 
+    /** The pinned chain id and fee ceilings that govern one signing operation. */
+    private record SigningContext(UUID chainConfigId, String identifier, long chainId,
+            BigInteger maxFeePerGas, BigInteger maxPriorityFeePerGas) {}
+
     /**
-     * Resolves and caches the chain ID for EIP-155 replay-protected signing.
-     * Legacy (unprotected) signatures would be (a) rejected by chains that enforce
-     * EIP-155 and (b) replayable across every chain where the registry wallet
-     * exists — a forcedTransfer signed for one network must never be valid on another.
+     * Establishes the EIP-155 signing chain id from the pinned {@code chain_config.chain_id}, never
+     * from the RPC node (P4C-1): a compromised or misconfigured node answering a foreign
+     * {@code eth_chainId} would otherwise make the registry sign for the wrong chain - and a
+     * CREATE2/forced-transfer signed for one network must never be valid on another. The node is
+     * still asked, but only to <em>verify</em> the pin; any disagreement refuses signing. Also loads
+     * the chain's fee ceilings (per-chain override or global default).
      */
-    private long resolveChainId(Web3j web3j) {
-        return chainIdCache.computeIfAbsent(web3j, client -> {
+    private SigningContext signingContext(UUID chainConfigId, Web3j web3j) {
+        ChainConfig config = chainConfigRepository.findById(chainConfigId)
+                .orElseThrow(() -> new EntityNotFoundException("ChainConfig", chainConfigId));
+        SigningContext unpinned = new SigningContext(chainConfigId, config.getIdentifier(), -1,
+                settings.defaultMaxFeePerGasWei(), settings.defaultMaxPriorityFeePerGasWei());
+        Long pinned = config.getChainId();
+        if (pinned == null) {
+            throw refuse(unpinned, "CHAIN_ID_UNPINNED", ChainIdMismatchException.unpinned(config.getIdentifier()));
+        }
+        long reported;
+        try {
+            reported = web3j.ethChainId().send().getChainId().longValue();
+        } catch (Exception e) {
+            throw new TransientChainException("Could not verify the chain id of '" + config.getIdentifier()
+                    + "' against its RPC node: " + e.getMessage());
+        }
+        if (reported != pinned) {
+            // The offending node is not unhealthy-marked here; RpcNodeHealthService owns node state
+            // (K5 verifies eth_chainId on every health round). Signing is refused regardless.
+            throw refuse(unpinned, "CHAIN_ID_MISMATCH",
+                    ChainIdMismatchException.mismatch(config.getIdentifier(), pinned, reported));
+        }
+        return new SigningContext(chainConfigId, config.getIdentifier(), pinned,
+                config.getMaxFeePerGasWei() != null ? config.getMaxFeePerGasWei()
+                        : settings.defaultMaxFeePerGasWei(),
+                config.getMaxPriorityFeePerGasWei() != null ? config.getMaxPriorityFeePerGasWei()
+                        : settings.defaultMaxPriorityFeePerGasWei());
+    }
+
+    /** Logs, counts and audits a hard pre-signing refusal, then returns the exception to throw. */
+    private <E extends RuntimeException> E refuse(SigningContext ctx, String kind, E exception) {
+        log.warn("EVM submission refused on {} ({}): {}", ctx.identifier(), kind, exception.getMessage());
+        if (meters != null) {
+            meters.counter("registerwerk.tx.submission.refused", "kind", kind, "chain", ctx.identifier())
+                    .increment();
+        }
+        if (eventPublisher != null) {
+            Map<String, Object> details = Map.of("chain", String.valueOf(ctx.identifier()),
+                    "reason", String.valueOf(exception.getMessage()));
+            TxSubmissionRefusedEvent event = new TxSubmissionRefusedEvent(ctx.chainConfigId(), kind, details);
             try {
-                return client.ethChainId().send().getChainId().longValue();
-            } catch (Exception e) {
-                throw new RuntimeException("Could not resolve chain ID for EIP-155 signing: "
-                        + e.getMessage(), e);
+                // REQUIRES_NEW: the caller's transaction is about to roll back, which would discard
+                // an AFTER_COMMIT audit event published inside it.
+                if (isolatedTransactions != null) {
+                    isolatedTransactions.run(() -> eventPublisher.publishEvent(event));
+                } else {
+                    eventPublisher.publishEvent(event);
+                }
+            } catch (RuntimeException e) {
+                log.error("Could not record refusal audit event {} for {}: {}", kind, ctx.identifier(),
+                        e.getMessage());
             }
-        });
+        }
+        return exception;
+    }
+
+    /**
+     * Permit FIRST, transaction second: the public submit/send/deploy methods are deliberately not
+     * {@code @Transactional}. Waiters must queue on the semaphore without holding a pooled connection
+     * (a method-level transaction would have begun - and with a non-lazy pool taken - its connection
+     * before the permit was acquired, so a burst of waiters could starve the running holders). The body
+     * then runs in its own transaction (joining a caller's transaction if there is one, in which case the
+     * caller's connection is the caller's responsibility).
+     */
+    private <T> T withImmediateSlot(String operation, Supplier<T> body) {
+        boolean acquired;
+        try {
+            acquired = immediateSlots.tryAcquire(settings.acquireTimeoutMs(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new TransientChainException("Interrupted while waiting for an immediate EVM " + operation
+                    + " slot");
+        }
+        if (!acquired) {
+            if (meters != null) {
+                meters.counter("registerwerk.tx.immediate.rejected", "operation", operation).increment();
+            }
+            throw new TransientChainException("All " + settings.immediateSubmitPermits()
+                    + " immediate EVM submission slots are busy; retry shortly");
+        }
+        try {
+            return transactionManager == null
+                    ? body.get()
+                    : new org.springframework.transaction.support.TransactionTemplate(transactionManager)
+                            .execute(status -> body.get());
+        } finally {
+            immediateSlots.release();
+        }
     }
 
     private BigInteger nonce(Web3j web3j, String address) throws Exception {

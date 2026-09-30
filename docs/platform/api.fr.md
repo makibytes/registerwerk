@@ -73,6 +73,16 @@ Les réponses incluent un en-tête `X-Total-Count` avec le nombre total d'enregi
 
 ---
 
+## Idempotency-Key et montants { #idempotency-key-and-amounts }
+
+Les endpoints d'administration/d'émetteur qui déplacent des fonds ou modifient un état exigent l'en-tête `Idempotency-Key` : mint, burn, transferts/approbations forcés, force-burn, gel et modifications de liste blanche, opérations de slot et de vault, actions d'agent ERC-3643, modifications de moyens de paiement, import de wallet, remise/finalisation de transferts de registre et remboursement d'un actif. Un `POST`, `PUT`, `PATCH` ou `DELETE` sans clé valide est rejeté avec `400` et le code `IDEMPOTENCY_KEY_REQUIRED` (ou `IDEMPOTENCY_KEY_INVALID`) avant toute exécution. Les autres endpoints restent facultatifs.
+
+- Envoyez une valeur unique par action utilisateur (UUID ; 8 à 255 caractères parmi `A-Za-z0-9._:-`) et **réutilisez la même valeur lorsque vous répétez la même requête** après un délai dépassé ou une erreur `5xx`. La répétition renvoie alors le résultat initial (`X-Idempotent-Replay: true`) ou la même transaction au lieu de s'exécuter deux fois.
+- La clé est propre à l'appelant : l'entité juridique pour les jetons clients, l'utilisateur agissant pour les jetons opérateur. La même clé avec une autre méthode, un autre chemin ou un autre corps reçoit `422` ; une requête encore en cours reçoit `409`.
+- La clé est aussi enregistrée sur la ligne d'outbox de la transaction on-chain ; une répétition correspond donc à la même transaction signée, même après expiration de la réponse en cache. Les réponses `401`/`403` (y compris les défis de step-up) et `5xx` ne sont pas mises en cache : répéter la requête après un step-up avec la même clé est sans risque.
+
+**Les montants sont des chaînes décimales.** Envoyez les montants de jetons (`amount`, `value`, `newCap`, `navPerShare`, ...) sous forme de chaînes JSON telles que `"1000000000000000000000"`. Un nombre JavaScript perd en précision au-delà de 2^53. Pendant une version, un nombre JSON reste accepté s'il est exactement représentable (entier inférieur à 2^53 ou décimal d'au plus 15 chiffres significatifs) et un avertissement de dépréciation est journalisé ; tout le reste reçoit `400` avec `Invalid amount: ...`.
+
 ## Principaux groupes d'API { #key-api-groups }
 
 ### Actifs (`/api/v1/assets`) { #assets-apiv1assets }
