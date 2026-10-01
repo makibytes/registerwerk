@@ -102,6 +102,7 @@ public class OperatorUserEntraController {
      * Registerwerk does not store it — so it is marked {@code no-store} and must be delivered
      * out-of-band immediately.
      */
+    @de.makibytes.registerwerk.idempotency.api.NoIdempotencyReplay
     @PostMapping("/temporary-access-pass")
     @RequiresStepUp(requireSecondApprover = true, reason = "ENTRA_TEMPORARY_ACCESS_PASS")
     public ResponseEntity<TemporaryAccessPassResponse> issueTemporaryAccessPass(

@@ -94,10 +94,16 @@ public class EndpointService {
         if (isOperator) {
             holders = assetHolderRepository.findByWalletAddressIn(normalizedRemaining);
         } else {
+            // 7A-10 (T7-02 interim): a holder must not learn the identity of co-holders. Names are
+            // resolved only for wallets the caller's own entity holds and for holders of assets the caller issued.
             List<UUID> relatedAssets = findRelatedAssetIds(entityId);
+            Set<UUID> issued = new HashSet<>(assetRepository.findIdsByIssuerId(entityId));
             holders = relatedAssets.isEmpty()
                     ? List.of()
-                    : assetHolderRepository.findByAssetIdInAndWalletAddressIn(relatedAssets, normalizedRemaining);
+                    : assetHolderRepository.findByAssetIdInAndWalletAddressIn(relatedAssets, normalizedRemaining)
+                            .stream()
+                            .filter(h -> issued.contains(h.getAssetId()) || Objects.equals(h.getInvestorId(), entityId))
+                            .toList();
         }
 
         if (!holders.isEmpty()) {

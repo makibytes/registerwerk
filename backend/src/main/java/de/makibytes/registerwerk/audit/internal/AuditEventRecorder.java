@@ -29,7 +29,15 @@ class AuditEventRecorder {
     @Value("${registerwerk.audit.legacy-listener:true}")
     private boolean legacyListener;
 
-    AuditEventRecorder(AuditEventRepository repository, AuditChainAppender chainAppender, AuditEventCapture capture) {
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final io.micrometer.core.instrument.Counter duplicates;
+
+    AuditEventRecorder(AuditEventRepository repository, AuditChainAppender chainAppender, AuditEventCapture capture,
+                       org.springframework.jdbc.core.JdbcTemplate jdbc,
+                       io.micrometer.core.instrument.MeterRegistry registry) {
+        this.jdbc = jdbc;
+        this.duplicates = io.micrometer.core.instrument.Counter.builder("registerwerk_audit_duplicate_suppressed_total")
+                .description("Audit records skipped because their recordId was already appended").register(registry);
         this.repository = repository;
         this.chainAppender = chainAppender;
         this.capture = capture;
@@ -37,9 +45,26 @@ class AuditEventRecorder {
 
     @ApplicationModuleListener
     void on(AuditRecord record) {
+        // 7A-05: claim the record id BEFORE the append, in this transaction. The chain-tip row lock
+        // serialises appends, and a rollback undoes both. Null id = legacy publication (no dedup).
+        if (record.recordId() != null) {
+            int claimed = jdbc.update(
+                    "INSERT INTO audit_event_record_id (record_id) VALUES (?) ON CONFLICT (record_id) DO NOTHING",
+                    record.recordId());
+            if (claimed == 0) {
+                duplicates.increment();
+                log.info("Audit record {} already appended; duplicate delivery suppressed (type={})",
+                        record.recordId(), record.eventType());
+                return;
+            }
+        }
         AuditEvent ae = AuditEvent.fromRecord(record);
         chainAppender.append(ae);
         repository.save(ae);
+        if (record.recordId() != null && ae.getSequenceNo() != null) {
+            jdbc.update("UPDATE audit_event_record_id SET sequence_no = ? WHERE record_id = ?",
+                    ae.getSequenceNo(), record.recordId());
+        }
         log.debug("Recorded audit event: type={}, subject={}/{}, seq={}",
                 ae.getEventType(), ae.getSubjectType(), ae.getSubjectId(), ae.getSequenceNo());
     }

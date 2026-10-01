@@ -72,6 +72,17 @@ Consulte su sección `.env.example` ("Tokens confidenciales (Zama fhEVM)") para 
 `ZAMA_CONFIG_PRESET=sepolia`, `ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY` y
 `REGISTERWERK_ZAMA_RELAYER_URL` en el lado backend.
 
+### Modo de producción del relayer y revocación de claves de visor
+
+!!! warning "Gestión de la clave de descifrado del operador"
+    Con `RELAYER_PRODUCTION_MODE=true` (activado por defecto en el chart de Helm; desactivado en Compose), el relayer se niega a arrancar con el proveedor KEK en variable de entorno (`ENV_VAR`) o con un `OPERATOR_DECRYPT_PRIVATE_KEY` en texto claro. Use un proveedor KMS (`RELAYER_KEK_PROVIDER=AWS_KMS|GCP_KMS|AZURE_KEY_VAULT`; hoy son marcadores que informan «not configured», decisión aparcada T7-05) o reconozca la excepción explícitamente con `RELAYER_ALLOW_ENV_KEK=true` (se registra como advertencia). El modo producción también exige `OPERATOR_DECRYPT_DURATION_DAYS` explícito (valor de demo: 365 días; decisión abierta T7-07). La derivación de la clave permanece intencionadamente sin cambios.
+
+Si la clave pudiera estar comprometida, revóquela por token:
+
+1. Llame a `POST .../admin/confidential-remove-viewer` (`removeViewer`) con la dirección del visor en **cada** token.
+2. Genere un nuevo par de claves, regístrelo con `confidential-add-viewer` y vuelva a desplegar `OPERATOR_DECRYPT_PRIVATE_KEY(_WRAPPED)`.
+3. La eliminación solo detiene concesiones futuras; los handles ya descifrables siguen siéndolo.
+
 ## Saldo de inversor/emisor/auditor descifrado { #investorissuerauditor-balance-decryption }
 
 Revelar un saldo confidencial (o cifrar un monto de transferencia confidencial) es una operación **del lado del cliente**

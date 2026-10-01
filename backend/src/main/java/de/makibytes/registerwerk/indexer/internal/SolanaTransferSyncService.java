@@ -388,7 +388,7 @@ public class SolanaTransferSyncService {
             t.setSlot(slot);
             t.setBlockNumber(slot);
             t.setLogIndex(i);
-            t.setOccurredAt(Instant.ofEpochSecond(blockTime));
+            t.setOccurredAt(IndexerTimestamps.clampFuture(Instant.ofEpochSecond(blockTime), String.valueOf(chain)));
             t.setExplorerTxUrl(explorerUrlBuilder.buildTxUrl(chain, signature));
             // getSignaturesForAddress and getTransaction both use commitment=finalized: rooted, no reorg window.
             t.setFinalityStatus(FinalityLevel.FINALIZED);

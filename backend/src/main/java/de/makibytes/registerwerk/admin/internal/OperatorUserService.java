@@ -75,6 +75,7 @@ public class OperatorUserService {
     private final DualControlGate dualControlGate;
     private final List<String> operatorEmailDomains;
     private final String customerFrontendUrl;
+    private final de.makibytes.registerwerk.shared.SecureLinkPort secureLinks;
     private final long userActionTokenTtlHours;
 
     public OperatorUserService(
@@ -86,6 +87,7 @@ public class OperatorUserService {
             RegisterwerkAuthProperties authProperties,
             AccessReviewItemRepository accessReviewItems,
             DualControlGate dualControlGate,
+            de.makibytes.registerwerk.shared.SecureLinkPort secureLinks,
             @Value("${registerwerk.admin.operator-email-domains:}") List<String> operatorEmailDomains,
             @Value("${registerwerk.onboarding.frontend-url:http://localhost:44201}") String customerFrontendUrl,
             @Value("${registerwerk.onboarding.user-action-ttl-hours:48}") long userActionTokenTtlHours) {
@@ -97,6 +99,7 @@ public class OperatorUserService {
         this.authProperties = authProperties;
         this.accessReviewItems = accessReviewItems;
         this.dualControlGate = dualControlGate;
+        this.secureLinks = secureLinks;
         this.operatorEmailDomains = operatorEmailDomains.stream()
             .map(d -> d.trim().toLowerCase()).filter(d -> !d.isEmpty()).toList();
         this.customerFrontendUrl = customerFrontendUrl;
@@ -150,8 +153,8 @@ public class OperatorUserService {
 
         String registrationToken = createActionToken(saved, AppUserActionTokenType.REGISTRATION, actorId);
         eventPublisher.publishEvent(new OperatorUserInvitedNotificationEvent(
-            saved.getId(), saved.getEmail(), saved.getFullName(),
-            customerFrontendUrl + "/register/" + registrationToken));
+            saved.getId(), saved.getEmail(), saved.getFullName(), entityName,
+            secureLinks.seal(customerFrontendUrl + "/register/" + registrationToken, saved.getId())));
 
         Map<String, Object> details = details(saved, Set.of(), bootstrap);
         eventPublisher.publishEvent(new OperatorUserInvitedEvent(saved.getId(), actorId, actorRole(authentication), details));
@@ -246,7 +249,8 @@ public class OperatorUserService {
         String entityName = resolveEntityName(user.getLegalEntityId());
         String resetToken = createActionToken(user, AppUserActionTokenType.PASSWORD_RESET, actorId);
         eventPublisher.publishEvent(new OperatorUserPasswordResetNotificationEvent(
-            user.getId(), user.getEmail(), customerFrontendUrl + "/reset-password/" + resetToken));
+            user.getId(), user.getEmail(), user.getFullName(), entityName,
+            secureLinks.seal(customerFrontendUrl + "/reset-password/" + resetToken, user.getId())));
 
         eventPublisher.publishEvent(new OperatorUserPasswordResetSentEvent(user.getId(), actorId, null, java.util.Map.of("email", user.getEmail())));
     }

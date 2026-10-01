@@ -74,6 +74,29 @@ See its `.env.example` section ("Confidential tokens (Zama fhEVM)") for the envi
 variables — `ZAMA_CONFIG_PRESET=sepolia`, `ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY`, and
 `REGISTERWERK_ZAMA_RELAYER_URL` on the backend side.
 
+### Relayer production mode and viewer-key revocation
+
+!!! warning "Operator decrypt key handling"
+    With `RELAYER_PRODUCTION_MODE=true` (set by default in the Helm chart; off in Compose) the relayer
+    refuses to start with the environment-held KEK provider (`ENV_VAR`) or a plaintext
+    `OPERATOR_DECRYPT_PRIVATE_KEY`, because that secret would sit in the same environment as the key
+    it protects. Use a KMS provider (`RELAYER_KEK_PROVIDER=AWS_KMS|GCP_KMS|AZURE_KEY_VAULT`; these
+    are placeholders that report "not configured" until a vendor client is wired, parked decision
+    T7-05) or acknowledge the exception explicitly with `RELAYER_ALLOW_ENV_KEK=true` (logged as a
+    warning). Production mode also requires `OPERATOR_DECRYPT_DURATION_DAYS` to be set explicitly
+    (the demo default is 365 days); a shorter lifetime means more frequent re-authorisation
+    (open decision T7-07). The key derivation of the env provider is unchanged on purpose: it stays
+    byte-compatible with the backend and with already wrapped values.
+
+If the operator decrypt key may be compromised, revoke it per token:
+
+1. Call `POST .../admin/confidential-remove-viewer` (`removeViewer`) for the viewer address on
+   **every** confidential token it was registered on.
+2. Generate a new operator-decrypt keypair, register its address with `confidential-add-viewer` on
+   each token, and re-wrap/redeploy `OPERATOR_DECRYPT_PRIVATE_KEY(_WRAPPED)`.
+3. Remember that removal stops future grants only; balance handles the old key could already decrypt
+   stay decryptable (Zama's ACL has no revoke primitive).
+
 ## Investor/issuer/auditor balance decryption
 
 Revealing a confidential balance (or encrypting a confidential-transfer amount) is a **client-side**

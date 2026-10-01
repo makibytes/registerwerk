@@ -31,9 +31,9 @@ Seuls les plugins Kong OSS fournis sont actifs par défaut (voir `gateway/kong.y
 |---|---|
 | `proxy-cache` | Met en cache 200 réponses GET de voie publique pendant 30 à 60 secondes |
 | `request-transformer` | Supprime tous les `X-Entity-Id`/`X-Entity-Roles` fournis par le client sur les routes publiques, de sorte que rien ne puisse être introduit clandestinement avant même que le backend ne voie la demande |
-| `rate-limiting` | 300 requêtes/minute, 10 000/heure par consommateur |
+| `rate-limiting` | 300 requêtes/minute, 10 000/heure par IP client (via Redis, partagé entre les réplicas Kong) |
 | `bot-detection` | Bloque les agents utilisateurs courants des robots d'exploration/scanner |
-| `ip-restriction` | Restreint `/api/v1/admin/**` aux CIDR du réseau de l'opérateur |
+| `ip-restriction` | Restreint `/api/v1/admin/**` aux CIDR du réseau de l'opérateur, comparés à l'IP client réelle |
 | `cors` | En-têtes d'origine croisée pour le frontend client Angular |
 | `request-size-limiting` | Corps de requête maximum de 20 Mo |
 | `response-transformer` | Ajoute des en-têtes de sécurité standard (HSTS, CSP, X-Frame-Options, …) |
@@ -41,6 +41,17 @@ Seuls les plugins Kong OSS fournis sont actifs par défaut (voir `gateway/kong.y
 `openid-connect` (terminaison JWT au niveau de la passerelle) est **Kong Enterprise/Konnect uniquement** et n'est pas
 actif dans cette configuration OSS — un extrait prêt à fusionner se trouve dans `gateway/plugins/oidc-entra.yml` pour les déploiements
 qui exécutent Kong Enterprise. Sans cela, la validation JWT et l'extraction d'entité/rôle se produisent entièrement dans le backend Spring, en lisant les revendications sur le jeton lui-même — Kong n'injecte jamais les en-têtes `X-Entity-Id`/`X-Entity-Roles` ici.
+
+## Gestion de l'IP client
+
+Le rate limiting, l'`ip-restriction` admin et la limitation de connexion du backend dépendent de l'adresse réelle du client ; un `X-Forwarded-For` fourni par le client n'est jamais cru :
+
+- Les nginx **écrasent** `X-Forwarded-For` avec le pair TCP observé (jamais d'ajout). Derrière l'ingress Helm, nginx restaure d'abord l'adresse réelle via `ingress.trustedCidrs`.
+- Kong ne fait confiance à `X-Forwarded-For` que depuis le réseau nginx/ingress (`KONG_TRUSTED_IPS`, `KONG_REAL_IP_HEADER=X-Forwarded-For`, `KONG_REAL_IP_RECURSIVE=off` ; dans le chart `kong.env.trusted_ips`).
+- Le backend ne fait confiance à l'en-tête que depuis `REGISTERWERK_AUTH_TRUSTED_PROXIES` (défini explicitement dans Compose et le chart).
+- La liste d'autorisation admin de Compose inclut `192.168.0.0/16` et `::1` pour la démo locale. Dans Helm elle est générée à partir de `kong.adminAllowCidrs` (obligatoire, sans défaut).
+
+`scripts/check-client-ip.sh` vérifie sur une pile en marche que des valeurs `X-Forwarded-For` falsifiées ne réinitialisent pas le compteur de limitation. L'ingress API Helm pointe vers Kong, jamais vers le backend, et répond 404 pour `/actuator/*` hors santé.
 
 ## API d'administration de Kong
 

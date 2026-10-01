@@ -64,7 +64,7 @@ class KycNotificationListenerTest {
         listener.on(new KycApprovedEvent(entityId, UUID.randomUUID(), null, Map.of("expiryDate", "2027-01-01")));
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(emailPort).sendHtml(org.mockito.ArgumentMatchers.eq("admin@acme.example"),
+        verify(emailPort).sendHtmlOrThrow(org.mockito.ArgumentMatchers.eq("admin@acme.example"),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("kyc-approved"), varsCaptor.capture());
         assertThat(varsCaptor.getValue()).containsEntry("entityName", "Acme GmbH").containsEntry("expiryDate", "2027-01-01");
     }
@@ -78,7 +78,7 @@ class KycNotificationListenerTest {
                 "internalReason", "sanctions match", "reasonCode", "DOCUMENTS_UNREADABLE")));
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(emailPort).sendHtml(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+        verify(emailPort).sendHtmlOrThrow(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.eq("kyc-rejected"), varsCaptor.capture());
         assertThat(varsCaptor.getValue()).containsEntry("reasonCode", "DOCUMENTS_UNREADABLE")
                 .doesNotContainKey("reason").doesNotContainValue("sanctions match");
@@ -92,7 +92,7 @@ class KycNotificationListenerTest {
         listener.on(new KycExpiringEvent(entityId, null, Map.of("reason", "EXPIRING_SOON")));
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(emailPort).sendHtml(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+        verify(emailPort).sendHtmlOrThrow(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.eq("kyc-expiring"), varsCaptor.capture());
         assertThat(varsCaptor.getValue()).containsEntry("expired", false);
     }

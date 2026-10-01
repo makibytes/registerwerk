@@ -25,7 +25,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.UUID;
 
 /**
  * Verifies the SHA-256 hash chain of the audit_event table (see AuditEventRecorder,
@@ -53,8 +53,17 @@ public class AuditChainVerificationService implements HealthIndicator {
     private final AuditCanonicalJson canonicalJson;
     private final Optional<SigningKeyProvider> signingKeyProvider;
     private final Optional<AuditAnchorSink> anchorSink;
-    private final AtomicReference<VerificationResult> lastResult =
-            new AtomicReference<>(new VerificationResult(true, 0, null, Instant.now()));
+    private final org.springframework.context.ApplicationEventPublisher events;
+
+    /** Persisted verdict as seen by this pod, cached 15 s (7B-04); invalidated by every local run/ack. */
+    record Snapshot(UUID id, VerificationResult latest, boolean broken) {
+        static final Snapshot UNKNOWN = new Snapshot(null, null, false);
+        boolean unknown() { return latest == null; }
+    }
+    /** The verdict is persisted in its own transaction: callers (AuditApi) may be read-only. */
+    private final org.springframework.transaction.support.TransactionTemplate persistTx;
+    private volatile Snapshot cached;
+    private volatile long cachedAt;
 
     /**
      * Highest {@code sequence_no} at or below which a NULL {@code entry_hash} is tolerated as
@@ -72,7 +81,13 @@ public class AuditChainVerificationService implements HealthIndicator {
 
     AuditChainVerificationService(AuditEventRepository repository, JdbcTemplate jdbc, AuditCanonicalJson canonicalJson,
                                   Optional<SigningKeyProvider> signingKeyProvider, Optional<AuditAnchorSink> anchorSink,
-                                  MeterRegistry meterRegistry) {
+                                  MeterRegistry meterRegistry,
+                                  org.springframework.context.ApplicationEventPublisher events,
+                                  org.springframework.transaction.PlatformTransactionManager txManager) {
+        this.events = events;
+        this.persistTx = new org.springframework.transaction.support.TransactionTemplate(txManager);
+        this.persistTx.setPropagationBehavior(
+                org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.anchorSink = anchorSink;
         this.repository = repository;
         this.jdbc = jdbc;
@@ -81,8 +96,17 @@ public class AuditChainVerificationService implements HealthIndicator {
 
         // Gauge functions are called by Micrometer at scrape time, so these always reflect the
         // current lastResult/key age — no separate push step needed.
-        Gauge.builder("registerwerk_audit_chain_valid", lastResult, r -> r.get().valid() ? 1.0 : 0.0)
-                .description("1 if the audit hash chain's last verification was valid, 0 if broken")
+        Gauge.builder("registerwerk_audit_chain_valid", this, svc -> {
+                    Snapshot sn = svc.snapshot();
+                    return sn.unknown() ? -1.0 : (sn.broken() ? 0.0 : 1.0);
+                })
+                .description("1 valid, 0 broken (until a later valid run AND an ack), -1 unknown (no run recorded)")
+                .register(meterRegistry);
+        Gauge.builder("registerwerk_audit_chain_last_verified_timestamp_seconds", this, svc -> {
+                    Snapshot sn = svc.snapshot();
+                    return sn.unknown() || sn.latest().checkedAt() == null ? 0.0 : sn.latest().checkedAt().getEpochSecond();
+                })
+                .description("Unix time of the latest persisted audit-chain verification run (any pod)")
                 .register(meterRegistry);
 
         Gauge.builder("registerwerk_audit_chain_tip_age_seconds", this, AuditChainVerificationService::tipAgeSeconds)
@@ -98,19 +122,89 @@ public class AuditChainVerificationService implements HealthIndicator {
 
     @Override
     public Health health() {
-        VerificationResult r = lastResult.get();
-        if (r.valid()) {
-            return Health.up()
+        Snapshot sn = snapshot();
+        if (sn.unknown()) {
+            return Health.unknown().withDetail("reason", "no audit chain verification has been recorded yet").build();
+        }
+        VerificationResult r = sn.latest();
+        if (sn.broken()) {
+            return Health.down()
+                    .withDetail("firstBrokenSequenceNo", String.valueOf(r.firstBrokenSeq()))
+                    .withDetail("reason", String.valueOf(r.reason()))
                     .withDetail("rowsChecked", r.rowsChecked())
                     .withDetail("checkedAt", r.checkedAt())
+                    .withDetail("note", "stays DOWN until a later valid run AND a dual-control acknowledgement")
                     .build();
         }
-        return Health.down()
-                .withDetail("firstBrokenSequenceNo", r.firstBrokenSeq())
-                .withDetail("reason", String.valueOf(r.reason()))
+        return Health.up()
                 .withDetail("rowsChecked", r.rowsChecked())
                 .withDetail("checkedAt", r.checkedAt())
                 .build();
+    }
+
+    Snapshot snapshot() {
+        long now = System.currentTimeMillis();
+        Snapshot sn = cached;
+        if (sn == null || now - cachedAt > 15_000) {
+            try {
+                sn = loadSnapshot();
+            } catch (RuntimeException e) {
+                log.warn("Could not read audit chain verification state: {}", e.toString());
+                if (sn == null) {
+                    sn = Snapshot.UNKNOWN;
+                }
+            }
+            cached = sn;
+            cachedAt = now;
+        }
+        return sn;
+    }
+
+    private Snapshot loadSnapshot() {
+        var rows = jdbc.queryForList(
+                "SELECT id, ran_at, valid, rows_checked, first_broken_seq, reason FROM audit_chain_verification "
+                        + "ORDER BY ran_at DESC, id LIMIT 1");
+        if (rows.isEmpty()) {
+            return Snapshot.UNKNOWN;
+        }
+        var row = rows.get(0);
+        boolean latestValid = Boolean.TRUE.equals(row.get("valid"));
+        Boolean unacked = jdbc.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM audit_chain_verification v WHERE NOT v.valid "
+                        + "AND NOT EXISTS (SELECT 1 FROM audit_chain_verification_ack a WHERE a.verification_id = v.id))",
+                Boolean.class);
+        Number first = (Number) row.get("first_broken_seq");
+        Object ranAt = row.get("ran_at");
+        Instant ran = ranAt instanceof java.sql.Timestamp t ? t.toInstant()
+                : ((java.time.OffsetDateTime) ranAt).toInstant();
+        VerificationResult r = new VerificationResult(latestValid, ((Number) row.get("rows_checked")).longValue(),
+                first == null ? null : first.longValue(), ran, (String) row.get("reason"));
+        return new Snapshot((UUID) row.get("id"), r, !latestValid || Boolean.TRUE.equals(unacked));
+    }
+
+    void invalidate() {
+        cached = null;
+    }
+
+    /** Acknowledges a broken verdict (dual control enforced at the controller) (7B-04). */
+    @org.springframework.transaction.annotation.Transactional
+    public void acknowledge(UUID verificationId, UUID actorId, String role, String note) {
+        var rows = jdbc.queryForList("SELECT valid FROM audit_chain_verification WHERE id = ?", verificationId);
+        if (rows.isEmpty()) {
+            throw new de.makibytes.registerwerk.shared.EntityNotFoundException("AuditChainVerification", verificationId);
+        }
+        if (Boolean.TRUE.equals(rows.get(0).get("valid"))) {
+            throw new de.makibytes.registerwerk.shared.InvalidStateTransitionException(
+                    "Only a broken verification can be acknowledged");
+        }
+        int n = jdbc.update("INSERT INTO audit_chain_verification_ack (verification_id, acked_by, note) VALUES (?, ?, ?) "
+                + "ON CONFLICT (verification_id) DO NOTHING", verificationId, actorId, note);
+        if (n == 0) {
+            throw new de.makibytes.registerwerk.shared.InvalidStateTransitionException("Already acknowledged");
+        }
+        events.publishEvent(new de.makibytes.registerwerk.audit.events.AuditChainVerificationAckedEvent(
+                verificationId, actorId, role, note));
+        invalidate();
     }
 
     /** Result of verifying one page: how far continuity got, and where/why it broke (if it did). */
@@ -123,7 +217,7 @@ public class AuditChainVerificationService implements HealthIndicator {
     @SchedulerLock(name = "auditChainVerification", lockAtMostFor = "PT2H")
     @Scheduled(cron = "0 30 3 * * *")
     public void verify() {
-        runFullVerification();
+        runFullVerification("NIGHTLY");
     }
 
     /**
@@ -132,12 +226,22 @@ public class AuditChainVerificationService implements HealthIndicator {
      * running unattended at 03:30 with results visible solely via {@code /actuator/health}.
      */
     public VerificationResult verifyNow() {
-        return runFullVerification();
+        return runFullVerification("ON_DEMAND");
     }
 
-    /** The most recently computed result, without triggering a new scan. */
+    /** The latest persisted result (any pod), without triggering a new scan; null when none exists. */
     public VerificationResult lastResult() {
-        return lastResult.get();
+        return snapshot().latest();
+    }
+
+    /** Effective state: broken until a later valid run AND an acknowledgement exist. */
+    public String status() {
+        Snapshot sn = snapshot();
+        return sn.unknown() ? "UNKNOWN" : (sn.broken() ? "BROKEN" : "VALID");
+    }
+
+    public UUID latestVerificationId() {
+        return snapshot().id();
     }
 
     private volatile long tipAgeCachedAt;
@@ -171,7 +275,7 @@ public class AuditChainVerificationService implements HealthIndicator {
 
     private record Break(Long seq, String reason) {}
 
-    private VerificationResult runFullVerification() {
+    private VerificationResult runFullVerification(String source) {
         log.info("Starting audit chain verification...");
         Scan scan = new Scan();
         Long signingFrom = jdbc.queryForObject("SELECT signing_from_seq FROM audit_chain_meta WHERE id = TRUE", Long.class);
@@ -192,12 +296,16 @@ public class AuditChainVerificationService implements HealthIndicator {
         VerificationResult result;
         if (broken != null) {
             log.error("Audit chain BROKEN at sequence_no={}: {}", broken.seq(), broken.reason());
-            result = new VerificationResult(false, scan.count, broken.seq(), Instant.now(), broken.reason());
+            result = new VerificationResult(false, scan.count, broken.seq(), Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS), broken.reason());
         } else {
             log.info("Audit chain verification complete: {} rows verified, chain intact.", scan.count);
-            result = new VerificationResult(true, scan.count, null, Instant.now());
+            result = new VerificationResult(true, scan.count, null, Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
         }
-        lastResult.set(result);
+        persistTx.executeWithoutResult(st -> jdbc.update(
+                "INSERT INTO audit_chain_verification (ran_at, valid, rows_checked, first_broken_seq, reason, source) "
+                        + "VALUES (?, ?, ?, ?, ?, ?)", java.sql.Timestamp.from(result.checkedAt()), result.valid(),
+                result.rowsChecked(), result.firstBrokenSeq(), result.reason(), source));
+        invalidate();
         return result;
     }
 

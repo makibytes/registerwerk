@@ -2,10 +2,10 @@ name: Cairo Contracts CI
 
 on:
   push:
-    branches: [main, feat/**, fix/**]
+    branches: [main, feat/**, fix/**, develop, review/**]
     paths: [contracts/cairo/**, .github/workflows/cairo.yml]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths: [contracts/cairo/**, .github/workflows/cairo.yml]
 
 concurrency:

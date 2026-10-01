@@ -208,13 +208,23 @@ plugins:
   # 172.16.0.0/12 is included as defense-in-depth for Docker's default bridge-network range —
   # it does NOT make it safe to point the operator frontend at Kong; the invariant above still
   # applies. Restrict this list to your real operator-network CIDRs before production use.
+  #
+  # The client address this list is matched against is the real caller, not the nginx hop: the
+  # customer nginx overwrites X-Forwarded-For with $remote_addr and Kong trusts only that
+  # nginx's network (KONG_TRUSTED_IPS / KONG_REAL_IP_HEADER in docker-compose.yml), so a spoofed
+  # header from the internet cannot satisfy it. 192.168.0.0/16 and ::1 are here for the LOCAL DEMO
+  # only: on Docker Desktop the browser's source address is the VM gateway (e.g. 192.168.65.1) and
+  # the customer app's REGISTRY_ADMIN impersonation bar calls admin routes through Kong. The
+  # Helm copy renders this list from `kong.adminAllowCidrs` (required, no default).
   - name: ip-restriction
     route: api-admin
     config:
       allow:
         - 127.0.0.1
+        - ::1
         - 10.0.0.0/8
         - 172.16.0.0/12
+        - 192.168.0.0/16
       message: "Access denied by IP restriction policy."
 
   # CORS — set the deployed frontend origins here per environment.

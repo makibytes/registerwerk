@@ -56,6 +56,9 @@ public class BlockchainTransactionService {
     private final ChainConfigRepository chainConfigRepository;
     private final OutboxNonceResolver nonceResolver;
     private final SecondSourceConfirmer secondSource;
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    private final java.util.concurrent.atomic.AtomicInteger pendingPage = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger lateMinedPage = new java.util.concurrent.atomic.AtomicInteger();
 
     public BlockchainTransactionService(
             BlockchainTransactionRepository repository,
@@ -68,6 +71,25 @@ public class BlockchainTransactionService {
             ChainConfigRepository chainConfigRepository,
             OutboxNonceResolver nonceResolver,
             SecondSourceConfirmer secondSource) {
+        this(repository, clientRegistry, evmContractService, eventPublisher, txProperties, completionWriter,
+                finalityResolver, chainConfigRepository, nonceResolver, secondSource,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public BlockchainTransactionService(
+            BlockchainTransactionRepository repository,
+            BlockchainClientRegistry clientRegistry,
+            EvmContractService evmContractService,
+            ApplicationEventPublisher eventPublisher,
+            BlockchainTxProperties txProperties,
+            BlockchainTransactionCompletionWriter completionWriter,
+            EvmFinalityResolver finalityResolver,
+            ChainConfigRepository chainConfigRepository,
+            OutboxNonceResolver nonceResolver,
+            SecondSourceConfirmer secondSource,
+            io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
         this.repository = repository;
         this.clientRegistry = clientRegistry;
         this.evmContractService = evmContractService;
@@ -295,15 +317,35 @@ public class BlockchainTransactionService {
 
     // ── Scheduled polling ─────────────────────────────────────────────────────
 
-    @SchedulerLock(name = "blockchainTxPoller", lockAtMostFor = "PT1M", lockAtLeastFor = "PT4S")
+    @SchedulerLock(name = "blockchainTxPoller", lockAtMostFor = "PT5M", lockAtLeastFor = "PT4S")
     @Scheduled(fixedDelay = 5_000, initialDelay = 15_000)
     public void pollPendingTransactions() {
-        List<BlockchainTransaction> pending = repository.findByStatus(BlockchainTransaction.Status.PENDING);
+        int size = Math.max(1, txProperties.getPollBatchSize());
+        List<BlockchainTransaction> pending = repository.findByStatusOrderByCreatedAtAsc(
+                BlockchainTransaction.Status.PENDING,
+                org.springframework.data.domain.PageRequest.of(pendingPage.get(), size));
+        // Rotate through pages so rows beyond the first batch (still un-mined) are not starved.
+        pendingPage.set(pending.size() == size ? pendingPage.get() + 1 : 0);
         if (pending.isEmpty()) return;
 
         log.debug("Polling {} pending blockchain transactions", pending.size());
-        for (BlockchainTransaction tx : pending) {
+        pollBounded(pending, "pending");
+    }
+
+    /** Polls rows until the run deadline (7A-06); rows not reached stay as they are and are picked up next tick. */
+    private void pollBounded(List<BlockchainTransaction> rows, String kind) {
+        long deadlineNanos = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(txProperties.getPollDeadlineSeconds());
+        long budgetNanos = deadlineNanos - System.nanoTime();
+        for (BlockchainTransaction tx : rows) {
+            if (System.nanoTime() >= deadlineNanos) {
+                log.warn("Blockchain tx poller ({}) reached its run deadline; remaining rows wait for the next run", kind);
+                meterRegistry.counter("registerwerk_blockchain_tx_poll_deadline_reached_total", "poller", kind).increment();
+                return;
+            }
             pollOne(tx);
+        }
+        if (System.nanoTime() - (deadlineNanos - budgetNanos) > budgetNanos * 8 / 10) {
+            meterRegistry.counter("registerwerk_blockchain_tx_poll_over_80pct_budget_total", "poller", kind).increment();
         }
     }
 
@@ -313,18 +355,19 @@ public class BlockchainTransactionService {
      * leaves a late-mined audit event, and a nonce proven consumed by another transaction turns them
      * REPLACED.
      */
-    @SchedulerLock(name = "blockchainTxLateMinedPoller", lockAtMostFor = "PT2M", lockAtLeastFor = "PT20S")
+    @SchedulerLock(name = "blockchainTxLateMinedPoller", lockAtMostFor = "PT10M", lockAtLeastFor = "PT20S")
     @Scheduled(fixedDelay = 30_000, initialDelay = 45_000)
     public void pollTimedOutTransactions() {
         Instant cutoff = Instant.now().minusSeconds(txProperties.getLateMinedWindowSeconds());
-        List<BlockchainTransaction> timedOut =
-                repository.findByStatusAndCompletedAtAfter(BlockchainTransaction.Status.TIMEOUT, cutoff);
+        int size = Math.max(1, txProperties.getPollBatchSize());
+        List<BlockchainTransaction> timedOut = repository.findByStatusAndCompletedAtAfterOrderByCompletedAtAsc(
+                BlockchainTransaction.Status.TIMEOUT, cutoff,
+                org.springframework.data.domain.PageRequest.of(lateMinedPage.get(), size));
+        lateMinedPage.set(timedOut.size() == size ? lateMinedPage.get() + 1 : 0);
         if (timedOut.isEmpty()) return;
 
         log.debug("Reconciling {} timed-out blockchain transactions", timedOut.size());
-        for (BlockchainTransaction tx : timedOut) {
-            pollOne(tx);
-        }
+        pollBounded(timedOut, "late_mined");
     }
 
     private void pollOne(BlockchainTransaction tx) {

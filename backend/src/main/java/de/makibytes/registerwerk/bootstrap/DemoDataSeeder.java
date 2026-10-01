@@ -65,7 +65,7 @@ import java.util.stream.Collectors;
 
 @Component
 @ConditionalOnProperty(name = "registerwerk.seed-demo-data", havingValue = "true")
-public class DemoDataSeeder implements ApplicationRunner, Ordered {
+public class DemoDataSeeder implements ApplicationRunner, Ordered, de.makibytes.registerwerk.shared.DemoOnly {
 
     private static final Logger log = LoggerFactory.getLogger(DemoDataSeeder.class);
 

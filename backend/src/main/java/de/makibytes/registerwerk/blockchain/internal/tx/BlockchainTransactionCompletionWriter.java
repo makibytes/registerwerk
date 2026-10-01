@@ -60,6 +60,8 @@ public class BlockchainTransactionCompletionWriter {
      */
     @Transactional
     public void complete(BlockchainTransaction tx, TransactionReceipt receipt, String minedTxHash) {
+        tx = lockIfUnchanged(tx);
+        if (tx == null) return;
         boolean late = tx.getStatus() == BlockchainTransaction.Status.TIMEOUT;
         boolean success = "0x1".equals(receipt.getStatus());
         tx.setStatus(success ? BlockchainTransaction.Status.SUCCESS : BlockchainTransaction.Status.FAILED);
@@ -121,6 +123,8 @@ public class BlockchainTransactionCompletionWriter {
 
     @Transactional
     public void markTimeout(BlockchainTransaction tx, long timeoutSeconds) {
+        tx = lockIfUnchanged(tx);
+        if (tx == null) return;
         tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
         Instant completedAt = Instant.now();
         tx.setCompletedAt(completedAt);
@@ -140,6 +144,8 @@ public class BlockchainTransactionCompletionWriter {
      */
     @Transactional
     public void markReplaced(BlockchainTransaction tx, String replacingTxHash, String reason) {
+        tx = lockIfUnchanged(tx);
+        if (tx == null) return;
         tx.setStatus(BlockchainTransaction.Status.REPLACED);
         Instant completedAt = Instant.now();
         tx.setCompletedAt(completedAt);
@@ -175,6 +181,8 @@ public class BlockchainTransactionCompletionWriter {
      */
     @Transactional
     public void recordProvisionalReceipt(BlockchainTransaction tx, TransactionReceipt receipt) {
+        tx = lockIfUnchanged(tx);
+        if (tx == null) return;
         if (receipt.getBlockNumber() != null) tx.setBlockNumber(receipt.getBlockNumber().longValue());
         if (receipt.getBlockHash() != null) tx.setBlockHash(receipt.getBlockHash());
         repository.save(tx);
@@ -194,6 +202,8 @@ public class BlockchainTransactionCompletionWriter {
      */
     @Transactional
     public void resetToPendingAfterReorg(BlockchainTransaction tx, String newBlockHashObserved) {
+        tx = lockIfUnchanged(tx);
+        if (tx == null) return;
         log.warn("Blockchain tx={} block hash mismatch (was {}, chain now reports {} at that height) — "
                         + "resetting to PENDING; awaiting re-mining or operator action.",
                 tx.getTxHash(), tx.getBlockHash(), newBlockHashObserved);
@@ -201,6 +211,23 @@ public class BlockchainTransactionCompletionWriter {
         tx.setBlockHash(null);
         tx.setBlockNumber(null);
         repository.save(tx);
+    }
+
+    /**
+     * 7A-06: the pollers hand in an entity loaded at the start of a run. Re-read the row under a write lock and
+     * apply the transition only if its status is still the one the caller observed; otherwise another run (or
+     * the late-mined poller) already moved it, and a stale write must not overwrite a terminal state or emit a
+     * second completion audit event. Returns the managed, locked row, or null when the write is stale.
+     */
+    private BlockchainTransaction lockIfUnchanged(BlockchainTransaction observed) {
+        BlockchainTransaction current = repository.findByIdForUpdate(observed.getId()).orElse(null);
+        if (current == null || current.getStatus() != observed.getStatus()) {
+            meterRegistry.counter("registerwerk_blockchain_tx_stale_write_skipped_total").increment();
+            log.warn("Skipping stale write for blockchain tx={}: observed {} but row is {}", observed.getTxHash(),
+                    observed.getStatus(), current == null ? "gone" : current.getStatus());
+            return null;
+        }
+        return current;
     }
 
     private void publishCompletionAuditEvent(BlockchainTransaction tx) {

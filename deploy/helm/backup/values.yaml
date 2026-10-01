@@ -14,6 +14,12 @@ postgresql:
   # Previously this was derived as "{{ .Release.Namespace }}-postgresql", which is wrong on
   # both counts: it used this chart's own namespace, not the main chart's release name.
   host: ""
+  # REQUIRED — name of the Secret holding the database password (the main chart's
+  # postgresql.auth.existingSecret, default "registerwerk-postgres-secret") and its key.
+  existingSecret: ""
+  existingSecretKey: password
+  # Database user (the main chart's postgresql.auth.username).
+  username: registerwerk
   port: 5432
   database: registerwerk
   # Same PVC the main chart's postgresql subchart provisions for its primary pod — must be

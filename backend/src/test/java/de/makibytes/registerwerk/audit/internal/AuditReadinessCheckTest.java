@@ -23,7 +23,7 @@ class AuditReadinessCheckTest {
         Mockito.when(jdbc.queryForObject(any(String.class), eq(Boolean.class))).thenReturn(owns);
         AuditReadinessCheck c = new AuditReadinessCheck(jdbc,
                 signing ? Optional.of(Mockito.mock(SigningKeyProvider.class)) : Optional.empty(),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(), new org.springframework.mock.env.MockEnvironment());
         ReflectionTestUtils.setField(c, "allowOwnerRuntimeRole", ack);
         return c;
     }

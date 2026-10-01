@@ -77,7 +77,17 @@ class AuditApiImpl implements AuditApi {
 
     @Override
     public ChainVerificationView chainVerificationStatus() {
-        return toView(chainVerificationService.lastResult());
+        var r = chainVerificationService.lastResult();
+        if (r == null) {
+            return new ChainVerificationView(false, 0, null, null, "No audit chain verification has been recorded yet",
+                    "UNKNOWN", null);
+        }
+        return toView(r);
+    }
+
+    @Override
+    public void acknowledgeChainVerification(UUID verificationId, UUID actorId, String role, String note) {
+        chainVerificationService.acknowledge(verificationId, actorId, role, note);
     }
 
     @Override
@@ -95,7 +105,10 @@ class AuditApiImpl implements AuditApi {
     }
 
     private ChainVerificationView toView(AuditChainVerificationService.VerificationResult r) {
-        return new ChainVerificationView(r.valid(), r.rowsChecked(), r.firstBrokenSeq(), r.checkedAt(), r.reason());
+        String status = chainVerificationService.status();
+        boolean effectiveValid = r.valid() && !"BROKEN".equals(status);
+        return new ChainVerificationView(effectiveValid, r.rowsChecked(), r.firstBrokenSeq(), r.checkedAt(), r.reason(),
+                status, chainVerificationService.latestVerificationId());
     }
 
     private AuditEventView toView(AuditEvent e) {

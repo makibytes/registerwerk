@@ -43,8 +43,8 @@ public class OutboundUrlPolicy {
 
     @Autowired
     OutboundUrlPolicy(WebhookProperties properties,
-                      @Value("${REGISTERWERK_PRODUCTION_MODE:false}") boolean productionMode) {
-        this(properties, productionMode, host -> {
+                      org.springframework.core.env.Environment environment) {
+        this(properties, de.makibytes.registerwerk.shared.ProductionMode.resolve(environment), host -> {
             try {
                 return InetAddress.getAllByName(host);
             } catch (UnknownHostException e) {

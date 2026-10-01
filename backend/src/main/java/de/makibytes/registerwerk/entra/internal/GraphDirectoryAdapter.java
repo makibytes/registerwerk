@@ -44,19 +44,43 @@ class GraphDirectoryAdapter implements EntraDirectoryPort {
     private final RestClient client;
     private final RegisterwerkEntraProperties props;
 
+    GraphDirectoryAdapter(RestClient.Builder builder, GraphAccessTokenProvider tokens,
+                          RegisterwerkEntraProperties props) {
+        this(builder, tokens, props, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     GraphDirectoryAdapter(
             RestClient.Builder builder,
             GraphAccessTokenProvider tokens,
-            RegisterwerkEntraProperties props) {
+            RegisterwerkEntraProperties props,
+            io.micrometer.core.instrument.MeterRegistry meters) {
         this.props = props;
         this.client = builder
                 .baseUrl(props.getGraphBaseUrl())
                 .requestInterceptor((request, body, execution) -> {
                     request.getHeaders().setBearerAuth(tokens.bearerToken());
-                    return execution.execute(request, body);
+                    // 7A-08: make Graph 429 pressure visible, split by caller (status page vs support console)
+                    String caller = request.getMethod() == org.springframework.http.HttpMethod.GET
+                            && request.getURI().getPath().endsWith("/authentication/methods") ? "mfa_status" : "support";
+                    try {
+                        var response = execution.execute(request, body);
+                        count(meters, response.getStatusCode().is2xxSuccessful() ? "ok"
+                                : response.getStatusCode().value() == 429 ? "throttled" : "error", caller);
+                        return response;
+                    } catch (java.io.IOException | RuntimeException e) {
+                        count(meters, "error", caller);
+                        throw e;
+                    }
                 })
                 .defaultStatusHandler(HttpStatusCode::isError, GraphErrorTranslator::translate)
                 .build();
+    }
+
+    private static void count(io.micrometer.core.instrument.MeterRegistry meters, String outcome, String caller) {
+        if (meters != null) {
+            meters.counter("registerwerk_graph_requests_total", "outcome", outcome, "caller", caller).increment();
+        }
     }
 
     @Override

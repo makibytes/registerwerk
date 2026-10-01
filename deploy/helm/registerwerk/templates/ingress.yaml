@@ -1,4 +1,15 @@
 {{- if .Values.ingress.enabled -}}
+{{- /* The API host must never point straight at the backend by accident (7B-02): default target is
+       Kong's proxy Service; with kong.enabled=false an explicit ingress.backendService is required. */ -}}
+{{- $backendName := .Values.ingress.backendService -}}
+{{- $backendPort := .Values.ingress.backendPort -}}
+{{- if not $backendName -}}
+{{- if .Values.kong.enabled -}}
+{{- $backendName = printf "%s-kong-proxy" .Release.Name -}}
+{{- else -}}
+{{- fail "ingress.enabled requires kong.enabled=true or an explicit ingress.backendService (the API ingress never defaults to the backend Service)" -}}
+{{- end -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -43,9 +54,9 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "registerwerk.fullname" $ }}
+                name: {{ $backendName }}
                 port:
-                  number: {{ $.Values.service.port }}
+                  number: {{ $backendPort }}
           {{- end }}
     {{- end }}
 {{- end }}

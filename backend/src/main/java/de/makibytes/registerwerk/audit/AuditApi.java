@@ -46,4 +46,7 @@ public interface AuditApi {
 
     /** Runs a full hash-chain verification scan now and returns the result. */
     ChainVerificationView verifyChainNow();
+
+    /** Acknowledges a broken chain verification (caller enforces dual control). */
+    void acknowledgeChainVerification(UUID verificationId, UUID actorId, String role, String note);
 }

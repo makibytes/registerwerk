@@ -1,6 +1,9 @@
 {{- if not .Values.postgresql.host }}
 {{- fail "postgresql.host is required — set it to the main registerwerk chart's postgresql Service name (typically \"<release-name>-postgresql\"). See values.yaml for why this can't be derived automatically." }}
 {{- end }}
+{{- if not .Values.postgresql.existingSecret }}
+{{- fail "postgresql.existingSecret is required — set it to the Secret holding the database password (the main chart's postgresql.auth.existingSecret)." }}
+{{- end }}
 {{- if not .Values.postgresql.pvcName }}
 {{- fail "postgresql.pvcName is required — set it to the main chart's postgresql data PVC name." }}
 {{- end }}
@@ -37,6 +40,10 @@ spec:
                   # (PGDATA=/bitnami/postgresql/data) — previously this pointed at
                   # /var/lib/postgresql/data, one directory level above the actual PGDATA,
                   # which would have failed at runtime even once PGHOST/DB_USER were fixed.
+                  # RPO note: only the daily base backup is guaranteed. WAL is NOT archived
+                  # (no archive_command), so RPO = time since the last successful base backup.
+                  # A failure here is fatal on purpose (set -e + backoffLimit): the job must
+                  # fail so BackupStale fires.
                   wal-g backup-push /bitnami/postgresql/data
                   echo "Backup complete. Purging old backups (retain {{ .Values.backup.retainFullBackups }} days)..."
                   wal-g delete retain FULL {{ .Values.backup.retainFullBackups }} --confirm
@@ -47,10 +54,11 @@ spec:
                   # through --data-binary @- is required, not cosmetic (confirmed by hand
                   # against a running Pushgateway — this previously pushed nothing, ever,
                   # silently swallowed by the `|| echo WARNING` fallback below).
+                  # A failed push exits non-zero (curl -f, set -e): without the metric BackupStale
+                  # fires, which is the correct outcome for an unreportable backup.
                   printf 'backup_last_success_timestamp %s\n' "$(date +%s)" \
-                    | curl -s -X POST --data-binary @- \
-                      "{{ .Values.monitoring.pushgatewayUrl }}/metrics/job/registerwerk_pg_backup" \
-                    || echo "WARNING: backup succeeded but pushing the success metric failed"
+                    | curl -fsS -X POST --data-binary @- \
+                      "{{ .Values.monitoring.pushgatewayUrl }}/metrics/job/registerwerk_pg_backup"
                   {{- end }}
               env:
                 - name: PGHOST
@@ -58,15 +66,12 @@ spec:
                 - name: PGPORT
                   value: {{ .Values.postgresql.port | quote }}
                 - name: PGUSER
-                  valueFrom:
-                    secretKeyRef:
-                      name: registerwerk-secrets
-                      key: DB_USER
+                  value: {{ .Values.postgresql.username | quote }}
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: registerwerk-secrets
-                      key: DB_PASSWORD
+                      name: {{ .Values.postgresql.existingSecret }}
+                      key: {{ .Values.postgresql.existingSecretKey }}
                 - name: PGDATABASE
                   value: {{ .Values.postgresql.database | quote }}
                 - name: WALG_S3_PREFIX

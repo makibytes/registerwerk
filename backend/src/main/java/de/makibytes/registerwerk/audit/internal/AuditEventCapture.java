@@ -79,7 +79,11 @@ class AuditEventCapture {
 
     private void publish(Object source, AuditRecord raw) {
         captured.put(source, Boolean.TRUE);
-        publisher.publishEvent(stamp(raw));
+        AuditRecord stamped = stamp(raw);
+        publisher.publishEvent(stamped.recordId() != null ? stamped
+                : new AuditRecord(stamped.eventType(), stamped.subjectType(), stamped.subjectId(), stamped.actorId(),
+                        stamped.actorRole(), stamped.payload(), stamped.occurredAt(), stamped.reversesEventId(),
+                        stamped.correlationId(), UUID.randomUUID()));
     }
 
     AuditRecord stamp(AuditRecord r) {
@@ -105,7 +109,7 @@ class AuditEventCapture {
         String subjectType = clamp(r.subjectType(), 50, "subjectType");
         role = clamp(role, 64, "actorRole");
         return new AuditRecord(eventType, subjectType, r.subjectId(), r.actorId(), role, payload,
-                r.occurredAt(), r.reversesEventId(), r.correlationId());
+                r.occurredAt(), r.reversesEventId(), r.correlationId(), r.recordId());
     }
 
     private String clamp(String value, int max, String field) {

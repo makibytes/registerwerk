@@ -72,8 +72,12 @@ spec:
       {{- with .Values.terminationGracePeriodSeconds }}
       terminationGracePeriodSeconds: {{ . }}
       {{- end }}
-      {{- if .Values.cloudSqlProxy.enabled }}
+      {{- if or .Values.cloudSqlProxy.enabled .Values.initContainers }}
       initContainers:
+        {{- with .Values.initContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.cloudSqlProxy.enabled }}
         # Kubernetes native sidecar (Kubernetes 1.29+): starts before the application and remains
         # for the lifetime of the pod, avoiding startup and shutdown races around database access.
         - name: cloud-sql-proxy
@@ -115,6 +119,7 @@ spec:
             timeoutSeconds: 5
           resources:
             {{- toYaml .Values.cloudSqlProxy.resources | nindent 12 }}
+        {{- end }}
       {{- end }}
       containers:
         - name: backend
@@ -187,11 +192,20 @@ spec:
                   name: {{ .Values.zamaRelayer.existingSecret }}
                   key: RELAYER_API_KEY
             {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           envFrom:
             - secretRef:
                 name: registerwerk-secrets
                 optional: false
+            {{- with .Values.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           volumeMounts:
+          {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
             - name: tmp
               mountPath: /tmp
             - name: cds
@@ -214,6 +228,9 @@ spec:
             {{- toYaml .Values.readinessProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+        {{- with .Values.sidecars }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
@@ -223,4 +240,7 @@ spec:
         - name: wallets
           persistentVolumeClaim:
             claimName: {{ include "registerwerk.fullname" . }}-wallets
+      {{- end }}
+      {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}

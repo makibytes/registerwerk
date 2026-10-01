@@ -2,10 +2,10 @@ name: Backend CI
 
 on:
   push:
-    branches: [main, feat/**, fix/**, release/**]
+    branches: [main, feat/**, fix/**, release/**, develop, review/**]
     paths: [backend/**, .github/workflows/backend.yml]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths: [backend/**, .github/workflows/backend.yml]
 
 permissions:

@@ -52,6 +52,18 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID>, JpaSpec
             @Param("role") AppUserRole role,
             @Param("excludeUserId") UUID excludeUserId);
 
+    /** Enabled holders of {@code role} other than {@code excludeUserId} that have set their own password (7A-12). */
+    @Query("""
+        select count(u) from AppUser u
+        where u.enabled = true
+          and u.mustChangePassword = false
+          and :role member of u.roles
+          and u.id <> :excludeUserId
+        """)
+    long countEnabledWithOwnPasswordExcluding(
+            @Param("role") AppUserRole role,
+            @Param("excludeUserId") UUID excludeUserId);
+
     /**
      * Counts enabled, TOTP-enrolled users with {@code role} — i.e. how many people could
      * actually act as the SECOND approver on a {@code requireSecondApprover} 4-eyes action

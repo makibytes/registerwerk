@@ -365,7 +365,7 @@ public class StarknetTransferSyncService {
         if (block == null || block.timestamp() == null) {
             throw new IllegalStateException("Starknet block " + blockNumber + " has no readable timestamp");
         }
-        transfer.setOccurredAt(Instant.ofEpochSecond(block.timestamp()));
+        transfer.setOccurredAt(IndexerTimestamps.clampFuture(Instant.ofEpochSecond(block.timestamp()), String.valueOf(chain)));
         transfer.setRawData(Map.of(
                 "blockNumber", blockNumber,
                 "logIndex", logIndex,

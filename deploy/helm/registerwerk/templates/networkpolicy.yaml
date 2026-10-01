@@ -18,9 +18,10 @@ spec:
     - Egress
   ingress:
     {{- toYaml .Values.networkPolicy.ingress | nindent 4 }}
-    {{- if .Values.ingress.enabled }}
-    # Admits the cluster's ingress controller — see the comment on networkPolicy above for
-    # why this is required whenever ingress.enabled is true.
+    {{- if and .Values.ingress.enabled (not .Values.kong.enabled) }}
+    # Only when the API ingress targets the backend directly (kong.enabled=false with an explicit
+    # ingress.backendService). Normally the ingress controller reaches Kong only
+    # (templates/kong-networkpolicy.yaml) and never the backend (7B-02).
     - from:
         - namespaceSelector:
             matchLabels:

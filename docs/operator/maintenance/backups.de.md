@@ -35,7 +35,10 @@ Bewahren Sie tägliche Backups 30 Tage lang und wöchentliche Backups 12 Monate 
 find /backups/postgres -name "*.sql.gz" -mtime +30 -delete
 ```
 
-### Helm-/Kubernetes-Bereitstellung – kontinuierliche WAL-G-Archivierung
+### Helm-/Kubernetes-Bereitstellung – WAL-G-Basis-Backup
+
+!!! warning "RPO ist das letzte tägliche Basis-Backup"
+    WAL wird **nicht** archiviert (kein `archive_command`/`archive_mode` im Repository). Der Wiederherstellungspunkt ist das letzte erfolgreiche Basis-Backup, bis zu 24 Stunden; Point-in-Time-Recovery ist nicht verfügbar. Ein kürzerer RPO erfordert ein WAL-Archiv (Sidecar, `archive_command` oder verwaltetes PostgreSQL mit PITR) — geparkte Entscheidung (T7-04). Ein fehlschlagendes `wal-g backup-push` oder ein fehlgeschlagener Pushgateway-Push lässt den Job fehlschlagen, sodass `BackupStale` auslöst. Zusätzlich muss `postgresql.existingSecret` (Secret mit dem DB-Passwort) gesetzt werden: `--set postgresql.existingSecret=<Secret des Haupt-Charts>`.
 
 Der obige Docker-Compose-pg_dump-Ansatz gilt hier **nicht**. `deploy/helm/backup/` ist ein
 separates Helm-Chart (installiert als eigenes Release, neben dem Haupt-Chart
@@ -120,6 +123,9 @@ docker compose start backend
 
 ### Wiederherstellung aus einem WAL-G-Backup (Helm-/Kubernetes-Bereitstellung)
 
+!!! warning "Ungetestet"
+    Dieser Pfad stellt nur das Basis-Backup wieder her und wurde in keiner echten wal-g-Übung erprobt. Siehe das [DR-Runbook](../dr/runbook.md).
+
 ```bash
 # Scale the backend down to prevent writes during restore
 kubectl scale deployment/registerwerk --replicas=0
@@ -143,6 +149,8 @@ kubectl scale deployment/registerwerk --replicas=<original-replica-count>
 | Smart-Contract-Zustand | Die Wiederherstellung wird nicht durch das Anwendungs-Backup gesteuert. Anwendungsprojektionen separat wiederherstellen und mit der konfigurierten Chain sowie dem instrumentenspezifischen Rechtsregister abgleichen; die Blockchain ist nicht universell maßgeblich. |
 
 ## Backup-Überwachung
+
+`BackupStale` löst jetzt aus, wenn das letzte Backup älter als 24 h ist **oder** die Serie fehlt; `BackupMetricAbsent` (Serie 2 Tage weg) und `BackupPushStale` ergänzen das. Ohne Backup-Dienst (Docker Compose) feuert `BackupStale` daher, weil die Serie fehlt.
 
 `monitoring/alerts/registerwerk.yml` enthält bereits eine `BackupStale`-Regel, die
 `backup_last_success_timestamp` abfragt. Diese Metrik existiert nur, wenn etwas sie tatsächlich pusht – ein

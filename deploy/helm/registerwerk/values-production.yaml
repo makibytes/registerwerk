@@ -105,3 +105,51 @@ postgresql:
 # values.yaml) is self-signed and not meant to be internet-facing in this topology — the ingress
 # above is. If your compliance posture requires in-cluster mTLS too (not just edge TLS), that is
 # a service-mesh decision (Linkerd/Istio) outside what this chart provisions.
+
+# ── Network inputs required in every deployment (the chart refuses to render without them) ──
+# Uncomment and fill in for YOUR cluster; none of these have a safe default.
+#
+# ingress:
+#   trustedCidrs: ["<ingress-controller pod CIDR>"]
+# kong:
+#   adminAllowCidrs: ["<operator network CIDR>"]       # /api/v1/admin/** only
+#   env:
+#     trusted_ips: "<ingress controller + customer-frontend pod CIDR>"
+# env:
+#   REGISTERWERK_AUTH_TRUSTED_PROXIES: '<regex matching the pod CIDR>'
+
+# ── Values the backend's production gate requires (ProductionReadinessCheck) ──────────────
+# CORS: at least one non-localhost origin (the two portal hosts).
+# env:
+#   REGISTERWERK_CORS_ALLOWED_ORIGINS: "https://portal.registerwerk.example.com,https://app.registerwerk.example.com"
+#   # Document signing: mount a keystore via extraVolumes/extraVolumeMounts below and set the
+#   # registerwerk.docsig.* properties, or acknowledge unsigned statements explicitly (parked T7-01):
+#   # REGISTERWERK_DOCSIG_ALLOW_UNSIGNED: "true"
+# (merge with the `env:` block above if you also set the network inputs; YAML keys must not repeat)
+
+# ── HSM / KMS (parked T7-05: the target is not chosen, so production mode cannot boot yet) ──
+# SoftHSM is demo-only. Pattern for a network HSM through the generic hooks (no vendor client
+# bundled; adapt names, paths and the library to your vendor):
+#
+# extraVolumes:
+#   - name: hsm-config
+#     secret: { secretName: registerwerk-hsm-config }       # pkcs11.cfg + client certificates
+#   - name: hsm-lib
+#     emptyDir: {}                                          # filled by the initContainer below
+# extraVolumeMounts:
+#   - { name: hsm-config, mountPath: /etc/hsm, readOnly: true }
+#   - { name: hsm-lib,    mountPath: /opt/hsm, readOnly: true }
+# initContainers:
+#   - name: hsm-client
+#     image: registry.example.com/vendor/hsm-client:1.2.3  # copies the PKCS#11 library into hsm-lib
+#     command: ["sh", "-c", "cp /vendor/lib/*.so /opt/hsm/"]
+#     volumeMounts: [{ name: hsm-lib, mountPath: /opt/hsm }]
+# extraEnv:
+#   - { name: REGISTERWERK_WALLET_HSM_PROFILE, value: "THALES" }
+# extraEnvFrom:
+#   - secretRef: { name: registerwerk-hsm-pin }
+#
+# zama-relayer (only when zamaRelayer.enabled): RELAYER_PRODUCTION_MODE is already "true" in
+# values.yaml. Set zamaRelayer.env.OPERATOR_DECRYPT_DURATION_DAYS explicitly, and either wire a KMS
+# KEK provider or acknowledge the environment-held key with zamaRelayer.env.RELAYER_ALLOW_ENV_KEK
+# "true" (WARN-logged; T7-05/T7-07).

@@ -43,10 +43,16 @@ class EntraAuthContextValidator {
     private final EntraStepUpContextProperties stepUpProperties;
     private final boolean productionMode;
 
+    @org.springframework.beans.factory.annotation.Autowired
     EntraAuthContextValidator(
             EntraDirectoryPort directory,
             EntraStepUpContextProperties stepUpProperties,
-            @Value("${REGISTERWERK_PRODUCTION_MODE:false}") boolean productionMode) {
+            org.springframework.core.env.Environment environment) {
+        this(directory, stepUpProperties, de.makibytes.registerwerk.shared.ProductionMode.resolve(environment));
+    }
+
+    EntraAuthContextValidator(EntraDirectoryPort directory, EntraStepUpContextProperties stepUpProperties,
+                              boolean productionMode) {
         this.directory = directory;
         this.stepUpProperties = stepUpProperties;
         this.productionMode = productionMode;

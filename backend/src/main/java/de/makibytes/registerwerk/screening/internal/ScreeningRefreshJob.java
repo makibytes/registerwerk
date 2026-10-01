@@ -26,10 +26,30 @@ public class ScreeningRefreshJob {
     private final AtomicInteger lastFailures = new AtomicInteger();
     private final boolean demoSeeded;
 
+    private final de.makibytes.registerwerk.shared.ProductionMode productionMode;
+    private final MeterRegistry meterRegistry;
+
+    public ScreeningRefreshJob(ScreeningRunRepository runRepository, ScreeningService screeningService,
+                               MeterRegistry meterRegistry, boolean demoSeeded) {
+        this(runRepository, screeningService, meterRegistry, demoSeeded,
+                de.makibytes.registerwerk.shared.ProductionMode.of(false));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ScreeningRefreshJob(ScreeningRunRepository runRepository, ScreeningService screeningService,
+                               MeterRegistry meterRegistry,
+                               @Value("${registerwerk.seed-demo-data:false}") boolean demoSeeded,
+                               org.springframework.core.env.Environment environment) {
+        this(runRepository, screeningService, meterRegistry, demoSeeded, de.makibytes.registerwerk.shared.ProductionMode.of(environment));
+    }
+
     public ScreeningRefreshJob(ScreeningRunRepository runRepository,
                                ScreeningService screeningService,
                                MeterRegistry meterRegistry,
-                               @Value("${registerwerk.seed-demo-data:false}") boolean demoSeeded) {
+                               boolean demoSeeded,
+                               de.makibytes.registerwerk.shared.ProductionMode productionMode) {
+        this.productionMode = productionMode;
+        this.meterRegistry = meterRegistry;
         this.demoSeeded = demoSeeded;
         this.runRepository = runRepository;
         this.screeningService = screeningService;
@@ -42,10 +62,15 @@ public class ScreeningRefreshJob {
     @SchedulerLock(name = "screeningPeriodicRefresh", lockAtMostFor = "PT2H")
     @Scheduled(cron = "0 0 1 * * *")
     public void periodicRefresh() {
-        if (demoSeeded) {
+        if (demoSeeded && productionMode.enabled()) {
+            // 7A-01 belt and braces: unreachable (the readiness check refuses it), but never skip silently.
+            log.error("registerwerk.seed-demo-data=true in production mode: running the sanctions re-screening anyway");
+            meterRegistry.counter("registerwerk_screening_job_skipped_total", "reason", "demo_seeded_in_production").increment();
+        } else if (demoSeeded) {
             // The demo stack has no reachable screening provider: a re-screen would append an ERROR run per
             // demo party, which becomes the "latest" run and makes the fail-closed gates refuse them again.
             log.info("Periodic sanctions re-screening skipped: demo data is seeded (registerwerk.seed-demo-data=true).");
+            meterRegistry.counter("registerwerk_screening_job_skipped_total", "reason", "demo_seeded").increment();
             return;
         }
         log.info("Starting periodic sanctions re-screening...");

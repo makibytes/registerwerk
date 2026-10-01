@@ -102,6 +102,24 @@ public class DoraService {
         registerBreachGauge(meterRegistry, "intermediate_report", () -> incidentRepository.findOverdueIntermediateReports(Instant.now()).size());
         registerBreachGauge(meterRegistry, "final_report", () -> incidentRepository.findOverdueFinalReports(Instant.now()).size());
         registerBreachGauge(meterRegistry, "resilience_test", () -> resilienceTestRepository.findByNextDueDateBeforeOrderByNextDueDateAsc(LocalDate.now()).size());
+
+        // 7B-06: lead time before a deadline is missed (NaN = nothing open), for a pre-breach warning alert.
+        registerDueGauge(meterRegistry, "classification", incidentRepository::nextClassificationDeadline);
+        registerDueGauge(meterRegistry, "initial_report", incidentRepository::nextInitialReportDeadline);
+        registerDueGauge(meterRegistry, "intermediate_report", incidentRepository::nextIntermediateReportDeadline);
+        registerDueGauge(meterRegistry, "final_report", incidentRepository::nextFinalReportDeadline);
+    }
+
+    private static void registerDueGauge(MeterRegistry meterRegistry, String breachType,
+                                         java.util.function.Function<Instant, Instant> next) {
+        Gauge.builder("registerwerk_dora_deadline_due_seconds", next, f -> {
+                    Instant now = Instant.now();
+                    Instant due = f.apply(now);
+                    return due == null ? Double.NaN : (double) Duration.between(now, due).getSeconds();
+                })
+                .tag("breach_type", breachType)
+                .description("Seconds until the next open (not yet breached) DORA deadline of this type; NaN if none")
+                .register(meterRegistry);
     }
 
     private static void registerBreachGauge(MeterRegistry meterRegistry, String breachType,

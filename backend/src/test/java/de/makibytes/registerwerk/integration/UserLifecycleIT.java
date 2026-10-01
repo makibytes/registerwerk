@@ -89,6 +89,7 @@ class UserLifecycleIT {
     @Autowired PasswordEncoder encoder;
     @Autowired JdbcTemplate jdbc;
     @Autowired Sink recorded;
+    @Autowired de.makibytes.registerwerk.shared.SecureLinkPort links;
 
     /** Collects domain events from every thread (HTTP requests run on server threads). */
     @Component
@@ -175,8 +176,10 @@ class UserLifecycleIT {
         ResponseEntity<String> invited = post(stepUp(adminToken), "/api/v1/admin/users",
                 Map.of("email", email, "name", "Invitee", "roles", List.of("AUDIT")));
         assertThat(invited.getStatusCode()).isEqualTo(HttpStatus.OK);
-        String link = recorded.stream(OperatorUserInvitedNotificationEvent.class)
-                .filter(e -> e.email().equals(email)).findFirst().orElseThrow().inviteLink();
+        var invitedEvent = recorded.stream(OperatorUserInvitedNotificationEvent.class)
+                .filter(e -> e.email().equals(email)).findFirst().orElseThrow();
+        assertThat(invitedEvent.inviteLink()).startsWith("enc:v1:");
+        String link = links.open(invitedEvent.inviteLink(), invitedEvent.userId());
         String registrationToken = link.substring(link.lastIndexOf('/') + 1);
         AppUser invitee = users.findByEmailIgnoreCase(email).orElseThrow();
 

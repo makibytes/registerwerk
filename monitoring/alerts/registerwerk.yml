@@ -16,6 +16,45 @@ groups:
           summary: "Audit chain integrity BROKEN"
           description: "The SHA-256 hash chain of audit_event has been violated. Immediate investigation required. DORA Art. 17 major incident."
 
+      # The verdict gauge is -1 while no verification has run yet (7B-04). That is fine during the
+      # first deploy window, not after it: a verifier that never produces a verdict is as bad as a
+      # broken chain.
+      - alert: AuditChainUnverified
+        expr: |
+          registerwerk_audit_chain_valid{job="registerwerk-backend"} == -1
+        for: 10m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Audit chain has no verification verdict"
+          description: "registerwerk_audit_chain_valid has been -1 (never verified) for 10 minutes. The verifier is not running or cannot reach the database."
+
+      - alert: AuditChainVerificationStale
+        expr: |
+          time() - registerwerk_audit_chain_last_verified_timestamp_seconds{job="registerwerk-backend"} > 93600
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Audit chain not verified for over 26 hours"
+          description: "The daily audit-chain verification has not completed in 26h; the in-memory verdict may be out of date."
+
+      # Tip not advancing although events are waiting to be chained (uses the existing
+      # incomplete-capture gauge; there is no per-event counter to take a rate of).
+      - alert: AuditChainTipStalled
+        expr: |
+          registerwerk_audit_chain_tip_age_seconds{job="registerwerk-backend"} > 1800
+          and registerwerk_audit_oldest_incomplete_seconds{job="registerwerk-backend"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Audit chain tip has not advanced for 30+ minutes"
+          description: "The chain tip is older than 30 minutes while audit events are still waiting to be appended. The appender is stalled."
+
       # ── Indexer liveness ──────────────────────────────────────────────────
       # registerwerk_indexer_last_sync_timestamp_seconds is a Unix-epoch timestamp gauge
       # (IndexerMonitorService), not a precomputed age — time() - metric is the idiomatic
@@ -267,14 +306,27 @@ groups:
       # Pushgateway is actually deployed and configured; this rule has no effect otherwise.
       - alert: BackupStale
         expr: |
-          time() - backup_last_success_timestamp > 86400
+          (time() - backup_last_success_timestamp > 86400) or absent(backup_last_success_timestamp)
         for: 0m
         labels:
           severity: critical
           dora_category: DATA_INTEGRITY
         annotations:
-          summary: "PostgreSQL backup has not run in over 24 hours"
-          description: "No successful backup reported in the last 24h. Verify the backup CronJob/cron script and its Pushgateway connectivity."
+          summary: "PostgreSQL backup has not run in over 24 hours (or never reported)"
+          description: "No successful backup reported in the last 24h, or the metric is absent altogether. Verify the backup CronJob/cron script and its Pushgateway connectivity."
+
+      # Same condition seen from the other side: the series vanished (Pushgateway restarted
+      # without persistence, wrong job name) and has been gone for 2 days.
+      - alert: BackupMetricAbsent
+        expr: |
+          absent_over_time(backup_last_success_timestamp[2d])
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "No backup success metric for 2 days"
+          description: "backup_last_success_timestamp has not existed for 2 days. Backups may be running but unreported, or not running at all."
 
   - name: registerwerk.availability
     interval: 1m
@@ -392,14 +444,26 @@ groups:
       # ── DORA deadline breaches (Art. 19) ─────────────────────────────────────
       - alert: DoraDeadlineBreach
         expr: |
-          sum(registerwerk_dora_deadline_breaches{job="registerwerk-backend"}) > 0
+          sum by (breach_type) (registerwerk_dora_deadline_breaches{job="registerwerk-backend"}) > 0
         for: 0m
         labels:
           severity: critical
           dora_category: DATA_INTEGRITY
         annotations:
           summary: "DORA reporting deadline breach"
-          description: "{{ $value }} overdue DORA deadline(s)/resilience test(s) across classification/initial/final report and resilience-test breach types — see the breach_type label to identify which."
+          description: "{{ $value }} overdue DORA deadline(s)/resilience test(s) of type {{ $labels.breach_type }}."
+
+      # Early warning (interim for parked T7-06: lead time and recipients are not decided; this
+      # goes to the existing warning receiver). Gauge = seconds to the next open, not yet breached deadline.
+      - alert: DoraDeadlineDueSoon
+        expr: |
+          registerwerk_dora_deadline_due_seconds{job="registerwerk-backend"} < 3600
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DORA deadline due within one hour"
+          description: "A {{ $labels.breach_type }} deadline is due in {{ $value | humanizeDuration }}."
 
       # ── Regulatory-report staleness ──────────────────────────────────────────
       - alert: RegReportSubmissionsStale
@@ -567,3 +631,117 @@ groups:
         annotations:
           summary: "API p95 latency exceeds 1s"
           description: "p95 request latency is {{ $value | humanizeDuration }}, sustained for 10+ minutes across all endpoints."
+
+  # ── Meta-monitoring, absence and platform coverage (Phase 7 7B-06 / 7B-04 / 7A-11) ──────────
+  - name: registerwerk.meta
+    interval: 1m
+    rules:
+      # Dead-man's switch: always firing. Route it to a receiver that ALERTS WHEN IT STOPS
+      # arriving (e.g. deadmansnitch / healthchecks.io); a silent alerting plane is the failure
+      # this exists to detect.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "Alerting pipeline heartbeat"
+          description: "Always firing. If the dead-man receiver stops getting this, the alerting plane is broken."
+
+      - alert: AuditChainMetricAbsent
+        expr: absent_over_time(registerwerk_audit_chain_valid{job="registerwerk-backend"}[15m])
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Audit chain gauge missing for 15 minutes"
+          description: "registerwerk_audit_chain_valid is absent: backend not scraped or the verifier is not registered."
+
+      - alert: IndexerMonitorMetricAbsent
+        expr: absent_over_time(registerwerk_indexer_last_sync_timestamp_seconds[15m])
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Indexer liveness gauge missing for 15 minutes"
+          description: "No indexer reports a last-sync timestamp; IndexerStale* alerts cannot fire without the series."
+
+      - alert: OutboxMetricAbsent
+        expr: absent_over_time(registerwerk_outbox_stuck_count{job="registerwerk-backend"}[15m])
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EVM outbox gauge missing for 15 minutes"
+          description: "registerwerk_outbox_stuck_count is absent; outbox stuck alerts are blind."
+
+      - alert: DoraMetricAbsent
+        expr: absent_over_time(registerwerk_dora_deadline_breaches{job="registerwerk-backend"}[15m])
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DORA deadline gauge missing for 15 minutes"
+          description: "registerwerk_dora_deadline_breaches is absent; DoraDeadlineBreach cannot fire."
+
+      - alert: ScrapeTargetDown
+        expr: up{job=~"kong|postgres|pushgateway"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape target {{ $labels.job }} is down"
+          description: "Prometheus cannot scrape {{ $labels.job }} ({{ $labels.instance }}) for 5 minutes."
+
+      - alert: BackupPushStale
+        expr: time() - push_time_seconds{job="registerwerk_pg_backup"} > 90000
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Backup job has not pushed in over 25 hours"
+          description: "The Pushgateway group registerwerk_pg_backup was last updated more than 25h ago."
+
+      # Kong's rate-limiting runs fault_tolerant (fail open): if Redis is unreachable every
+      # request is allowed through unthrottled and nothing else says so. redis_up needs a
+      # redis_exporter scrape job (job="redis"); without one this rule has no data.
+      - alert: KongRateLimitRedisDown
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis behind Kong rate limiting is down"
+          description: "Kong's rate-limiting plugin fails open without Redis: the API is currently unthrottled."
+
+      # ── Platform: default partitions, event publication (L1 gauges) ───────────────────────
+      - alert: PartitionDefaultRowsPresent
+        expr: |
+          registerwerk_partition_default_rows{job="registerwerk-backend"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rows in the DEFAULT partition of {{ $labels.table }}"
+          description: "{{ $value }} row(s) sit in {{ $labels.table }}_default. A row there blocks creating its month's partition. See docs/operator/maintenance runbook: detach default, create month, insert-select, reattach."
+
+      - alert: EventPublicationIncomplete
+        expr: |
+          registerwerk_event_publication_incomplete{job="registerwerk-backend"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Incomplete event publications older than 10 minutes"
+          description: "{{ $value }} publication(s) for listener family {{ $labels.listener }} are incomplete (a listener keeps failing)."
+
+      - alert: ConfigDefaultTrustedProxies
+        expr: |
+          registerwerk_config_default_trusted_proxies{job="registerwerk-backend"} == 1
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "trusted-proxies is the built-in default"
+          description: "registerwerk.auth.trusted-proxies still covers all private ranges; set REGISTERWERK_AUTH_TRUSTED_PROXIES to your proxy network."

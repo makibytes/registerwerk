@@ -12,7 +12,7 @@ description: Draft operational runbook for Postgres and backend restore, audit c
 
 **Service:** Registerwerk eWpG Registry  
 **RTO target:** ≤4 hours (eWpRV §6)  
-**RPO target:** ≤15 minutes (WAL archiving via wal-g)  
+**RPO:** last successful daily base backup (up to 24 hours) — WAL is **not** archived today; a ≤15-minute target is not implemented (open decision T7-04)  
 **Owner:** Registry Operations Team  
 **DORA classification:** MAJOR incident if >4h downtime
 
@@ -35,34 +35,47 @@ authority, deadline, form, and channel below is a review input that must be veri
 
 ---
 
-## 2. Postgres Full Restore (RPO ≤15 min)
+## 2. Postgres Full Restore (RPO = last daily base backup)
 
-### 2a. Restore from wal-g backup (primary path)
+!!! warning "Untested for WAL"
+    The Helm backup chart takes a daily WAL-G **base backup** only. No `archive_command` /
+    `archive_mode` is configured anywhere in this repository, so there is no continuous WAL archive
+    and no point-in-time recovery beyond the base backup. The steps below are PG18 mechanics and
+    have **not** been exercised in a real wal-g restore drill; treat them as untested until one is
+    run. The archive mechanism (sidecar, `archive_command`, or managed PostgreSQL PITR) is a parked
+    decision (T7-04).
+
+### 2a. Restore from a wal-g base backup (primary path)
 ```bash
-# 1. Provision a new Postgres 18.6 instance
+# 1. Provision a new Postgres 18.6 instance (empty data directory)
 docker run -d --name postgres-restore postgres:18.6-alpine
 
-# 2. Restore base backup — PGDATA lives under /var/lib/postgresql/18/docker on this image,
+# 2. Restore the base backup — PGDATA lives under /var/lib/postgresql/18/docker on this image,
 #    which declares VOLUME /var/lib/postgresql (not .../data as on pg17 and earlier); restoring
 #    into the old .../data path would silently write outside the volume the image actually reads.
-docker exec postgres-restore wal-g backup-fetch /var/lib/postgresql LATEST \
+docker exec postgres-restore wal-g backup-fetch /var/lib/postgresql/18/docker LATEST \
   --walg-s3-prefix s3://registerwerk-backups/wal-g
 
-# 3. Replay WAL to target time
-cat > /tmp/recovery.conf << EOF
-restore_command = 'wal-g wal-fetch "%f" "%p"'
-recovery_target_time = '$(date -u -d "-15 minutes" +"%Y-%m-%d %H:%M:%S")'
-recovery_target_action = 'promote'
-EOF
+# 3. Recovery signalling (PG12+: recovery.conf is gone). Create recovery.signal in PGDATA.
+#    Add restore_command ONLY if WAL is actually archived; otherwise omit it and Postgres
+#    recovers to the end of the consistent base backup and promotes.
+docker exec postgres-restore touch /var/lib/postgresql/18/docker/recovery.signal
+# With a real WAL archive only (not the case today):
+#   restore_command = 'wal-g wal-fetch "%f" "%p"'
+#   recovery_target_time = '<UTC timestamp>'     # optional PITR; default target = end of available data
+#   recovery_target_action = 'promote'
 
 # 4. Start Postgres and wait for recovery
 docker start postgres-restore
-docker logs -f postgres-restore | grep "recovery is complete"
+docker logs -f postgres-restore | grep "recovery is complete\|database system is ready"
 
 # 5. Validate row counts
 psql -h localhost -U registerwerk -c "SELECT count(*) FROM audit_event;"
 psql -h localhost -U registerwerk -c "SELECT max(occurred_at) FROM audit_event;"
 ```
+
+Data written after the last successful base backup is lost. Compare `max(occurred_at)` with the
+incident time to quantify the actual loss, then reconcile with the chain indexers.
 
 ### 2b. Restore from pg_dump (fallback — RPO = last dump)
 ```bash
@@ -71,7 +84,7 @@ pg_restore -h new-host -U registerwerk -d registerwerk \
   /backups/registerwerk_$(date +%Y%m%d).dump
 ```
 
-**`scripts/dr-restore-drill.sh` automates this fallback path** (pg_dump the running `postgres`
+**`scripts/dr-restore-drill.sh` automates this pg_dump fallback path only (it does not test wal-g)** (pg_dump the running `postgres`
 compose service → restore into a disposable container → compare every table's row count →
 report an RTO figure) and, with `--record-dora <backend-base-url> <bearer-token>`, files the
 result as a real `SCENARIO_BASED` entry in `POST /api/v1/dora/resilience-tests` — a continuity
@@ -118,8 +131,32 @@ kubectl set env deployment/<release-name> \
 ```
 
 Any transaction not yet streamed to the replica at promotion time is lost — this is a real RPO,
-not zero, exactly like the WAL-G path's ≤15 min target above. Practice this promotion in a
+not zero; like the WAL-G path above, the RPO is bounded by what was last captured, not by a 15-minute target. Practice this promotion in a
 non-production namespace before relying on it during an actual incident.
+
+### 2d. Rows in a DEFAULT partition
+
+`token_transfer`, `blockchain_transaction` and `audit_event` are partitioned by month. A row whose
+`occurred_at` falls outside the existing partitions (for example a mis-clocked indexer source or a
+historic backfill) lands in `<table>_default`, and Postgres then refuses to create the partition for
+that month. The `PartitionDefaultRowsPresent` alert (`registerwerk_partition_default_rows`) fires.
+Split the default partition in a maintenance window:
+
+```sql
+BEGIN;
+ALTER TABLE token_transfer DETACH PARTITION token_transfer_default;
+CREATE TABLE token_transfer_2031_03 PARTITION OF token_transfer
+  FOR VALUES FROM ('2031-03-01') TO ('2031-04-01');
+INSERT INTO token_transfer_2031_03 SELECT * FROM token_transfer_default
+  WHERE occurred_at >= '2031-03-01' AND occurred_at < '2031-04-01';
+DELETE FROM token_transfer_default
+  WHERE occurred_at >= '2031-03-01' AND occurred_at < '2031-04-01';
+ALTER TABLE token_transfer ATTACH PARTITION token_transfer_default DEFAULT;
+COMMIT;
+```
+
+Repeat per affected month and table. No automatic split job exists (it needs a maintenance-window
+decision); the table, month and dates above are examples.
 
 ---
 

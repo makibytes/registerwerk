@@ -16,6 +16,14 @@ route:
   repeat_interval: 4h
   receiver: default
   routes:
+    # Dead-man's switch: the Watchdog alert always fires; the receiver below must page when it
+    # STOPS arriving. Short repeat so a dead pipeline is noticed quickly.
+    - match:
+        alertname: Watchdog
+      receiver: deadman
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
     - match:
         severity: critical
       receiver: critical-pagerduty
@@ -30,6 +38,11 @@ receivers:
     webhook_configs:
       - url: "http://localhost:9094"  # EDIT ME — default receiver's webhook target
         send_resolved: true
+
+  - name: deadman
+    webhook_configs:
+      - url: "http://localhost:9095"  # EDIT ME — dead-man's-switch endpoint (healthchecks.io / deadmansnitch URL)
+        send_resolved: false
 
   - name: critical-pagerduty
     pagerduty_configs:

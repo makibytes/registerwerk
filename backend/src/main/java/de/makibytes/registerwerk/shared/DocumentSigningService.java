@@ -68,12 +68,23 @@ public class DocumentSigningService {
     private X509Certificate signingCertificate;
     private List<X509Certificate> certificateChain;
     private boolean configured;
+    private final boolean allowUnsigned;
+    private final ProductionMode productionMode;
+    private final java.util.concurrent.atomic.AtomicBoolean unsignedRenderLogged = new java.util.concurrent.atomic.AtomicBoolean();
 
     public DocumentSigningService(
             @Value("${registerwerk.docsig.keystore-path:}") String keystorePath,
             @Value("${registerwerk.docsig.keystore-password:}") String keystorePassword,
             @Value("${registerwerk.docsig.key-alias:}") String keyAlias,
-            @Value("${registerwerk.docsig.key-password:}") String keyPassword) {
+            @Value("${registerwerk.docsig.key-password:}") String keyPassword,
+            @Value("${registerwerk.docsig.allow-unsigned:false}") boolean allowUnsigned,
+            org.springframework.core.env.Environment environment,
+            io.micrometer.core.instrument.MeterRegistry registry) {
+        this.allowUnsigned = allowUnsigned;
+        this.productionMode = ProductionMode.of(environment);
+        io.micrometer.core.instrument.Gauge.builder("registerwerk_docsig_configured", this, s -> s.configured ? 1 : 0)
+                .description("1 if a document-signing keystore is loaded, 0 if registry PDFs are rendered unsigned")
+                .register(registry);
         this.keystorePath = keystorePath;
         this.keystorePassword = keystorePassword;
         this.keyAlias = keyAlias;
@@ -82,6 +93,17 @@ public class DocumentSigningService {
 
     @PostConstruct
     void init() {
+        loadKeystore();
+        // 7A-02 (T7-01 interim): production must not silently emit unsigned register statements.
+        if (!configured && productionMode.enabled() && !allowUnsigned) {
+            throw new IllegalStateException("Document signing keystore is not configured or not loadable "
+                    + "(registerwerk.docsig.keystore-path) in production mode — register statements would be "
+                    + "rendered UNSIGNED. Configure the keystore, or set registerwerk.docsig.allow-unsigned=true "
+                    + "to acknowledge unsigned statements explicitly.");
+        }
+    }
+
+    private void loadKeystore() {
         if (keystorePath == null || keystorePath.isBlank()) {
             log.info("registerwerk.docsig.keystore-path not set — registry-generated PDFs "
                     + "(Registerauszug/Depotauszug/Steuerbescheinigung/Registereinsicht) will be "
@@ -116,6 +138,10 @@ public class DocumentSigningService {
     }
 
     public boolean isConfigured() {
+        if (!configured && unsignedRenderLogged.compareAndSet(false, true)) {
+            log.error("Registry document rendered UNSIGNED: no document-signing keystore is loaded "
+                    + "(further occurrences are not logged)");
+        }
         return configured;
     }
 

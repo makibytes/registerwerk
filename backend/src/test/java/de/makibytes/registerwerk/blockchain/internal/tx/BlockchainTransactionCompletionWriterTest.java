@@ -44,7 +44,27 @@ class BlockchainTransactionCompletionWriterTest {
         tx.setNetwork("MAINNET");
         tx.setChainConfigId(chainConfigId);
         tx.setStatus(BlockchainTransaction.Status.PENDING);
+        org.springframework.test.util.ReflectionTestUtils.setField(tx, "id", UUID.randomUUID());
+        org.mockito.Mockito.lenient().when(repository.findByIdForUpdate(tx.getId())).thenReturn(java.util.Optional.of(tx));
         return tx;
+    }
+
+    @Test
+    @DisplayName("7A-06: a stale TIMEOUT write after SUCCESS is skipped - no overwrite, no second audit event")
+    void staleTimeoutAfterSuccessIsSkipped() {
+        BlockchainTransaction observedByPollerB = pendingTx(UUID.randomUUID());
+        observedByPollerB.setChainConfigId(UUID.randomUUID());
+        // poller A completed the row meanwhile: the locked DB row is SUCCESS, B still holds the PENDING copy
+        BlockchainTransaction dbRow = new BlockchainTransaction();
+        dbRow.setStatus(BlockchainTransaction.Status.SUCCESS);
+        org.mockito.Mockito.when(repository.findByIdForUpdate(observedByPollerB.getId()))
+                .thenReturn(java.util.Optional.of(dbRow));
+
+        writer.markTimeout(observedByPollerB, 900);
+
+        assertThat(dbRow.getStatus()).isEqualTo(BlockchainTransaction.Status.SUCCESS);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verifyNoInteractions(eventPublisher);
     }
 
     @Test

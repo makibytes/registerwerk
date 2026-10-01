@@ -37,9 +37,9 @@ Solo los complementos Kong OSS incluidos están activos de forma predeterminada 
 |---|---|
 | `proxy-cache` | Almacena en caché las respuestas GET de ruta pública 200 durante 30-60 segundos |
 | `request-transformer` | Elimina cualquier `X-Entity-Id`/`X-Entity-Roles` proporcionado por el cliente en rutas públicas, para que no se pueda introducir nada de contrabando antes de que el servidor vea la solicitud |
-| `rate-limiting` | 300 solicitudes/minuto, 10.000/hora por consumidor |
+| `rate-limiting` | 300 solicitudes/minuto, 10.000/hora por IP de cliente (con Redis, compartido entre réplicas de Kong) |
 | `bot-detection` | Bloquea agentes de usuario de rastreadores/escáneres comunes |
-| `ip-restriction` | Restringe `/api/v1/admin/**` a los CIDR de red del operador |
+| `ip-restriction` | Restringe `/api/v1/admin/**` a los CIDR de red del operador, comparados con la IP real del cliente |
 | `cors` | Cabeceras de origen cruzado para la interfaz Angular del cliente |
 | `request-size-limiting` | Cuerpo de solicitud máximo de 20 MB |
 | `response-transformer` | Agrega encabezados de seguridad estándar (HSTS, CSP, X-Frame-Options,…) |
@@ -49,6 +49,17 @@ está activo en esta configuración OSS: hay un fragmento listo para fusionar en
 que ejecutan Kong Enterprise. Sin él, la validación del JWT y la extracción de entidad/rol suceden
 por completo en el backend de Spring, leyendo los claims del propio token: Kong nunca
 inyecta aquí las cabeceras `X-Entity-Id`/`X-Entity-Roles`.
+
+## Gestión de la IP del cliente
+
+El rate limiting, la `ip-restriction` de administración y la limitación de inicios de sesión del backend dependen de la dirección real del cliente; un `X-Forwarded-For` aportado por el cliente nunca se cree:
+
+- Los nginx **sobrescriben** `X-Forwarded-For` con el par TCP observado (nunca añaden). Detrás del ingress de Helm, nginx restaura antes la dirección real mediante `ingress.trustedCidrs`.
+- Kong solo confía en `X-Forwarded-For` desde la red de nginx/ingress (`KONG_TRUSTED_IPS`, `KONG_REAL_IP_HEADER=X-Forwarded-For`, `KONG_REAL_IP_RECURSIVE=off`; en el chart `kong.env.trusted_ips`).
+- El backend solo confía en la cabecera desde `REGISTERWERK_AUTH_TRUSTED_PROXIES` (definido explícitamente en Compose y el chart).
+- La lista de permitidos de administración de Compose incluye `192.168.0.0/16` y `::1` para la demo local. En Helm se genera a partir de `kong.adminAllowCidrs` (obligatorio, sin valor por defecto).
+
+`scripts/check-client-ip.sh` comprueba en una pila en ejecución que valores `X-Forwarded-For` falsificados no reinician el contador de límite. El ingress de API de Helm apunta a Kong, nunca al backend, y responde 404 a `/actuator/*` salvo health.
 
 ## Kong admin API { #kong-admin-api }
 

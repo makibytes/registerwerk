@@ -115,6 +115,7 @@ public class WalletController {
      * GwG §25k / MaRisk AT 4.3.1): a single compromised admin session must not be able to
      * exfiltrate the keys that control every deployed security.
      */
+    @de.makibytes.registerwerk.idempotency.api.NoIdempotencyReplay
     @PostMapping("/{id}/export-keystore")
     @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_KEYSTORE_EXPORT")
     public ResponseEntity<byte[]> exportKeystore(

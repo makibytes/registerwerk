@@ -19,9 +19,9 @@ public class CompanyUserInvitationEmailService {
             "Your Registerwerk account invitation",
             "email/company-user-invite",
             Map.of(
-                "inviteeName", inviteeName,
-                "entityName", entityName,
-                "registrationUrl", registrationUrl
+                "inviteeName", java.util.Objects.requireNonNullElse(inviteeName, ""),
+                "entityName", java.util.Objects.requireNonNullElse(entityName, "Registerwerk"),
+                "registrationUrl", java.util.Objects.requireNonNullElse(registrationUrl, "")
             )
         );
     }

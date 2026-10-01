@@ -1,0 +1,65 @@
+# promtool test rules monitoring/alerts/tests/registerwerk.test.yml  (run from the repo root)
+rule_files:
+  - ../registerwerk.yml
+evaluation_interval: 1m
+
+tests:
+  # No series at all -> every absence alert fires (the dead-on-arrival case, 7B-06).
+  - interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels: {severity: none}
+            exp_annotations:
+              summary: "Alerting pipeline heartbeat"
+              description: "Always firing. If the dead-man receiver stops getting this, the alerting plane is broken."
+      - eval_time: 20m
+        alertname: AuditChainMetricAbsent
+        exp_alerts:
+          - exp_labels: {severity: critical, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Audit chain gauge missing for 15 minutes"
+              description: "registerwerk_audit_chain_valid is absent: backend not scraped or the verifier is not registered."
+      - eval_time: 5m
+        alertname: BackupStale
+        exp_alerts:
+          - exp_labels: {severity: critical, dora_category: DATA_INTEGRITY}
+            exp_annotations:
+              summary: "PostgreSQL backup has not run in over 24 hours (or never reported)"
+              description: "No successful backup reported in the last 24h, or the metric is absent altogether. Verify the backup CronJob/cron script and its Pushgateway connectivity."
+
+  # Two breach types stay separate series: the label survives (sum by breach_type).
+  - interval: 1m
+    input_series:
+      - series: 'registerwerk_dora_deadline_breaches{job="registerwerk-backend", breach_type="INITIAL_REPORT", instance="a"}'
+        values: "1x10"
+      - series: 'registerwerk_dora_deadline_breaches{job="registerwerk-backend", breach_type="FINAL_REPORT", instance="a"}'
+        values: "2x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DoraDeadlineBreach
+        exp_alerts:
+          - exp_labels: {severity: critical, dora_category: DATA_INTEGRITY, breach_type: INITIAL_REPORT}
+            exp_annotations:
+              summary: "DORA reporting deadline breach"
+              description: "1 overdue DORA deadline(s)/resilience test(s) of type INITIAL_REPORT."
+          - exp_labels: {severity: critical, dora_category: DATA_INTEGRITY, breach_type: FINAL_REPORT}
+            exp_annotations:
+              summary: "DORA reporting deadline breach"
+              description: "2 overdue DORA deadline(s)/resilience test(s) of type FINAL_REPORT."
+
+  # Verdict stuck at -1 (never verified) fires after 10 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'registerwerk_audit_chain_valid{job="registerwerk-backend"}'
+        values: "-1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AuditChainUnverified
+        exp_alerts:
+          - exp_labels: {severity: critical, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Audit chain has no verification verdict"
+              description: "registerwerk_audit_chain_valid has been -1 (never verified) for 10 minutes. The verifier is not running or cannot reach the database."

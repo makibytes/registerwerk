@@ -50,6 +50,8 @@ public class RegisterwerkEntraProperties {
 
     /** Minimum seconds between forced Graph re-reads per user, so status polling cannot flood Graph. */
     private int statusRefreshThrottleSeconds = 10;
+    /** A recorded MFA status younger than this is served without calling Graph (7A-08). */
+    private int statusCacheTtlSeconds = 60;
 
     private Tap tap = new Tap();
 
@@ -107,6 +109,9 @@ public class RegisterwerkEntraProperties {
 
     public boolean isRequireTwoFactorEnrolment() { return requireTwoFactorEnrolment; }
     public void setRequireTwoFactorEnrolment(boolean v) { this.requireTwoFactorEnrolment = v; }
+
+    public int getStatusCacheTtlSeconds() { return statusCacheTtlSeconds; }
+    public void setStatusCacheTtlSeconds(int v) { this.statusCacheTtlSeconds = v; }
 
     public int getStatusRefreshThrottleSeconds() { return statusRefreshThrottleSeconds; }
     public void setStatusRefreshThrottleSeconds(int v) { this.statusRefreshThrottleSeconds = v; }

@@ -32,7 +32,10 @@ Conserve copias de seguridad diarias durante 30 días, y copias de seguridad sem
 find /backups/postgres -name "*.sql.gz" -mtime +30 -delete
 ```
 
-### Implementación de Helm/Kubernetes: archivado continuo con WAL-G { #helmkubernetes-deployment-wal-g-continuous-archiving }
+### Implementación de Helm/Kubernetes: copia base con WAL-G { #helmkubernetes-deployment-wal-g-continuous-archiving }
+
+!!! warning "El RPO es la última copia base diaria"
+    El WAL **no** se archiva (no hay `archive_command`/`archive_mode` en el repositorio). El punto de recuperación es la última copia base correcta, hasta 24 horas; no hay recuperación a un punto en el tiempo. Un RPO menor requiere un archivo WAL (sidecar, `archive_command` o PostgreSQL gestionado con PITR) — decisión aparcada (T7-04). Un `wal-g backup-push` fallido, o un push fallido a Pushgateway, hace fallar el job, de modo que salta `BackupStale`. También debe definirse `postgresql.existingSecret` (Secret con la contraseña de la base de datos): `--set postgresql.existingSecret=<Secret del chart principal>`.
 
 El enfoque de pg_dump de Docker Compose anterior **no** se aplica aquí. `deploy/helm/backup/` es un chart de Helm independiente (instalado como versión propia, junto al chart principal `deploy/helm/registerwerk` — no fusionado en él) que ejecuta un `CronJob` diario de WAL-G que archiva copias de seguridad continuas en S3. Antes de instalarlo, debe configurar dos valores del chart que este no puede derivar por sí solo:
 
@@ -113,6 +116,9 @@ docker compose start backend
 
 ### Restaurar desde una copia de seguridad de WAL-G (implementación de Helm/Kubernetes) { #restore-from-wal-g-backup-helmkubernetes-deployment }
 
+!!! warning "Sin probar"
+    Esta ruta solo restaura la copia base y no se ha probado en un simulacro real con wal-g. Consulte el [runbook de DR](../dr/runbook.md).
+
 ```bash
 # Scale the backend down to prevent writes during restore
 kubectl scale deployment/registerwerk --replicas=0
@@ -136,6 +142,8 @@ kubectl scale deployment/registerwerk --replicas=<original-replica-count>
 | Estado del contrato inteligente | La restauración no está controlada por la copia de seguridad de la aplicación. Recupere las proyecciones de la aplicación por separado y concílielas con la cadena configurada y con el registro legal específico del instrumento; la blockchain no es universalmente autoritativa. |
 
 ## Monitorización de las copias de seguridad { #backup-monitoring }
+
+`BackupStale` salta ahora si la última copia tiene más de 24 h **o** la serie no existe; `BackupMetricAbsent` (serie ausente 2 días) y `BackupPushStale` lo complementan. Sin servicio de copias (Docker Compose), `BackupStale` salta porque la serie no existe.
 
 `monitoring/alerts/registerwerk.yml` ya incluye una regla `BackupStale` que consulta
 `backup_last_success_timestamp`. Esa métrica solo existe si algo realmente la envía — un

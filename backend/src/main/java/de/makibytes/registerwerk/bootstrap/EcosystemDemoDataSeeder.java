@@ -78,7 +78,7 @@ import java.util.UUID;
  */
 @Component
 @ConditionalOnProperty(name = "registerwerk.seed-demo-data", havingValue = "true")
-public class EcosystemDemoDataSeeder implements ApplicationRunner, Ordered {
+public class EcosystemDemoDataSeeder implements ApplicationRunner, Ordered, de.makibytes.registerwerk.shared.DemoOnly {
 
     private static final Logger log = LoggerFactory.getLogger(EcosystemDemoDataSeeder.class);
 

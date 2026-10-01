@@ -405,6 +405,10 @@ services:
       JWT_AUDIENCE: ${JWT_AUDIENCE:-}
       ENTRA_ENABLED: ${ENTRA_ENABLED:-false}
       REGISTERWERK_PRODUCTION_MODE: ${REGISTERWERK_PRODUCTION_MODE:-false}
+      # Explicit (narrower than application.yml's built-in "all RFC1918" default): the peers that
+      # may assert X-Forwarded-For are Kong and the operator nginx, both on the compose bridge
+      # network. Narrow further to your network's CIDR in production.
+      REGISTERWERK_AUTH_TRUSTED_PROXIES: ${REGISTERWERK_AUTH_TRUSTED_PROXIES:-172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+|127\.\d+\.\d+\.\d+|0:0:0:0:0:0:0:1|::1}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
       JWT_DEV_SECRET: ${JWT_DEV_SECRET:-registerwerk-dev-jwt-secret-change-in-production!!}
@@ -740,6 +744,14 @@ services:
       # kong.yml effectively multiplies the configured limit by the worker count). Two is ample
       # for a single-host demo and makes the rate limit mean roughly what it says.
       KONG_NGINX_WORKER_PROCESSES: "2"
+      # Real client IP for rate-limiting / ip-restriction (7B-01). The customer nginx OVERWRITES
+      # X-Forwarded-For with the TCP peer it saw, so Kong trusts that header only from the compose
+      # network (Docker bridge pools) and takes the last hop (recursive off). A caller that
+      # reaches the published Kong port directly is not in these CIDRs, so its own header is
+      # ignored and it is limited by its real address.
+      KONG_TRUSTED_IPS: "172.16.0.0/12,192.168.0.0/16"
+      KONG_REAL_IP_HEADER: "X-Forwarded-For"
+      KONG_REAL_IP_RECURSIVE: "off"
     volumes:
       - ./gateway/kong.yml:/etc/kong/kong.yml:ro
     depends_on:

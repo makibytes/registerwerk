@@ -45,12 +45,28 @@ public class EmailService implements de.makibytes.registerwerk.notification.api.
         if (vars != null) {
             vars.forEach(context::setVariable);
         }
-        String htmlBody = templateEngine.process(templateName, context);
         try {
+            String htmlBody = templateEngine.process(templateName, context);
             smtpEmailAdapter.sendHtml(to, subject, htmlBody);
         } catch (Exception e) {
-            log.error("Failed to send email to={}, template={} — SMTP error is non-fatal", to, templateName, e);
+            log.error("Failed to send email to={}, template={} — error is non-fatal", to, templateName, e);
             incrementFailureCounter("generic");
+        }
+    }
+
+    @Override
+    public void sendHtmlOrThrow(String to, String subject, String templateName, Map<String, Object> vars) {
+        try {
+            Context context = new Context(Locale.ENGLISH);
+            if (vars != null) {
+                vars.forEach(context::setVariable);
+            }
+            String htmlBody = templateEngine.process(templateName, context);
+            smtpEmailAdapter.sendHtml(to, subject, htmlBody);
+        } catch (Exception e) {
+            incrementFailureCounter("alert");
+            throw new de.makibytes.registerwerk.notification.api.EmailDeliveryException(
+                    "Failed to send email template=" + templateName, e);
         }
     }
 

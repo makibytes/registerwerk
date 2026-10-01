@@ -69,12 +69,20 @@ class KycNotificationListener {
     }
 
     private void notifyCompanyAdmins(UUID entityId, String subject, String template, Map<String, Object> baseVars) {
+        RuntimeException[] failure = new RuntimeException[1];
         appUserRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(entityId).stream()
                 .filter(user -> user.getRoles().contains(AppUserRole.COMPANY_ADMIN))
                 .forEach(admin -> {
                     Map<String, Object> vars = new java.util.HashMap<>(baseVars);
                     vars.put("adminName", admin.getFullName() != null ? admin.getFullName() : admin.getEmail());
-                    emailPort.sendHtml(admin.getEmail(), subject, template, vars);
+                    try {
+                        emailPort.sendHtmlOrThrow(admin.getEmail(), subject, template, vars);
+                    } catch (RuntimeException ex) {
+                        failure[0] = failure[0] == null ? ex : failure[0];
+                    }
                 });
+        if (failure[0] != null) {
+            throw failure[0]; // 7A-04: leave the publication incomplete so it is retried
+        }
     }
 }

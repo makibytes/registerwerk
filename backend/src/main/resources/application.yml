@@ -629,6 +629,8 @@ registerwerk:
       # (REPLACED) needs the chain to have reported the nonce used for this long.
       late-mined-window-seconds: ${REGISTERWERK_TX_LATE_MINED_WINDOW_SECONDS:604800}
       replaced-confirmation-seconds: ${REGISTERWERK_TX_REPLACED_CONFIRMATION_SECONDS:600}
+      # Pollers examine at most this many rows per run, oldest first, and stop at the deadline (7A-06).
+      poll-batch-size: ${REGISTERWERK_TX_POLL_BATCH_SIZE:25}
       # Per-chain overrides (keyed by Chain enum name). Deeper for chains with weaker
       # finality / a history of reorgs.
       confirmations-by-chain:

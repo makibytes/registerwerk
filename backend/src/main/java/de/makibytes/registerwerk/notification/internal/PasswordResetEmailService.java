@@ -19,9 +19,9 @@ public class PasswordResetEmailService {
             "Reset your Registerwerk password",
             "email/password-reset",
             Map.of(
-                "recipientName", recipientName,
-                "entityName", entityName,
-                "resetUrl", resetUrl
+                "recipientName", java.util.Objects.requireNonNullElse(recipientName, ""),
+                "entityName", java.util.Objects.requireNonNullElse(entityName, "Registerwerk"),
+                "resetUrl", java.util.Objects.requireNonNullElse(resetUrl, "")
             )
         );
     }

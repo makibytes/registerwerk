@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/impersonation")
 @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+@de.makibytes.registerwerk.idempotency.api.NoIdempotencyReplay
 public class AdminImpersonationController {
 
     private final AdminImpersonationService impersonationService;

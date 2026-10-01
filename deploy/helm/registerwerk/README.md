@@ -37,17 +37,55 @@ drains remove already-unhealthy pods while preserving healthy availability.
 Generic clusters can scrape the `prometheus.io/*` pod annotations. Set
 `monitoring.googleManagedPrometheus=true` on GKE to render a `monitoring.googleapis.com/v1`
 `PodMonitoring`; the Managed Service for Prometheus CRD must already exist. `/actuator/prometheus`
-is deliberately unauthenticated inside this chart's network boundary, so do not expose the
-actuator path through a public ingress.
+is deliberately unauthenticated inside this chart's network boundary; the default ingress blocks
+the actuator path (see below).
+
+## Ingress, Kong and the client IP
+
+The API ingress (`ingress.*`) targets Kong's proxy Service (`<release>-kong-proxy`), never the
+backend Service. With `kong.enabled=false` the chart refuses to render unless you name a Service in
+`ingress.backendService`. Three inputs have no default and make the chart fail to render until you
+set them:
+
+- `ingress.trustedCidrs` — the ingress controller's pod CIDRs (the frontend nginx pods restore the
+  real client address from `X-Forwarded-For` only from these).
+- `kong.env.trusted_ips` — the CIDRs whose `X-Forwarded-For` Kong believes (ingress controller and
+  customer-frontend pods). `real_ip_recursive` stays off because those hops overwrite the header.
+- `kong.adminAllowCidrs` — the operator networks allowed on `/api/v1/admin/**`; `files/kong.yml` is
+  rendered from it.
+
+Set `env.REGISTERWERK_AUTH_TRUSTED_PROXIES` to a regex of your pod CIDR so the backend's login
+throttle sees the real client behind Kong.
+
+### Blocking /actuator at the ingress
+
+Only `/actuator/health*` may be reachable on the public API host. The default
+`ingress.annotations` carry an ingress-nginx `server-snippet` that answers 404 for
+`^/actuator/(?!health)` (ingress-nginx needs `allow-snippet-annotations: "true"`). For another
+controller, add the equivalent rule: Traefik/Envoy Gateway/GKE Gateway users should add a
+path-match on `/actuator` (excluding `/actuator/health`) that returns 404, or a request filter, in
+the controller's own configuration. Prometheus scrapes `:8080/actuator/prometheus` inside the
+cluster (annotations or `PodMonitoring`), never through the ingress; the backend NetworkPolicy
+admits only Kong and Prometheus.
+
+## HSM / KMS hooks
+
+`extraVolumes`, `extraVolumeMounts`, `extraEnv`, `extraEnvFrom`, `initContainers` and `sidecars`
+are generic, empty-by-default hooks on the backend Deployment, for mounting a PKCS#11 config and a
+vendor HSM client library or supplying KEK settings. No vendor client is bundled and SoftHSM is
+demo-only: in production mode the backend refuses to start until an HSM/KMS target is chosen
+(parked decision T7-05). Multi-replica deployments need a shared signer (network HSM or KMS).
+`values-production.yaml` shows a commented network-HSM pattern.
 
 ## Validation
 
 ```bash
-helm lint deploy/helm/registerwerk
-helm template registerwerk deploy/helm/registerwerk >/dev/null
+cd deploy/helm/registerwerk
+helm lint . -f ci/test-values.yaml
+helm template registerwerk . -f ci/test-values.yaml >/dev/null
 
 # GKE/Cloud SQL path: site values must disable the subchart and provide the instance name.
-helm template registerwerk deploy/helm/registerwerk \
+helm template registerwerk . -f ci/test-values.yaml \
   --set postgresql.enabled=false \
   --set cloudSqlProxy.enabled=true \
   --set cloudSqlProxy.instanceConnectionName=project:region:instance >/dev/null

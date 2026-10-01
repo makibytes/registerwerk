@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 /** Enrolls the Anvil operator fixture through PKCS#11 so the demo really signs via SoftHSM. */
 @Component
 @ConditionalOnProperty(name = "registerwerk.seed-demo-data", havingValue = "true")
-public class DemoHsmWalletSeeder implements ApplicationRunner, Ordered {
+public class DemoHsmWalletSeeder implements ApplicationRunner, Ordered, de.makibytes.registerwerk.shared.DemoOnly {
     private static final Logger log = LoggerFactory.getLogger(DemoHsmWalletSeeder.class);
     private static final String NAME = "Demo Operator (SoftHSM)";
     private static final String ALIAS = "registerwerk-operator";

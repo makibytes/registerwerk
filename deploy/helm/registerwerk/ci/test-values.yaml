@@ -1,0 +1,10 @@
+# Placeholder values for the inputs this chart deliberately REQUIRES (no defaults), so that
+# `helm lint` / `helm template` in CI and local checks can render it:
+#   helm template test . -f values.yaml -f ci/test-values.yaml
+# They are RFC 5737 / example ranges, not recommendations.
+ingress:
+  trustedCidrs: ["10.8.0.0/14"]
+kong:
+  adminAllowCidrs: ["203.0.113.0/24"]
+  env:
+    trusted_ips: "10.8.0.0/14"

@@ -49,7 +49,7 @@ import java.util.UUID;
  */
 @Component
 @ConditionalOnProperty(name = "registerwerk.seed-demo-data", havingValue = "true")
-public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
+public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered, de.makibytes.registerwerk.shared.DemoOnly {
 
     private static final Logger log = LoggerFactory.getLogger(LocalLendingDemoSeeder.class);
     private static final String DEMO_CHAIN = "ETHEREUM_SEPOLIA";

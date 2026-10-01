@@ -18,7 +18,7 @@ import java.util.*;
 /** Creates a small but genuinely multi-counterparty repo book for the local demo. */
 @Component
 @ConditionalOnProperty(name="registerwerk.seed-demo-data", havingValue="true")
-public class RepoDeskDemoSeeder implements ApplicationRunner, Ordered {
+public class RepoDeskDemoSeeder implements ApplicationRunner, Ordered, de.makibytes.registerwerk.shared.DemoOnly {
     private static final String MARKER="[DEMO-REPO]";
     private final RepoDeskCapability capability; private final RepoRfqRepository rfqs;
     private final RepoQuoteRepository quotes; private final LegalEntityRepository entities; private final AssetRepository assets;

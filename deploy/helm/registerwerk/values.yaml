@@ -59,9 +59,27 @@ service:
 ingress:
   enabled: true
   className: nginx
+  # Where the API host's ingress sends traffic. EMPTY (default) = Kong's proxy Service
+  # "<release>-kong-proxy" when kong.enabled — the API must never be exposed straight to the
+  # backend (7B-02). With kong.enabled=false you must name a Service explicitly (a deliberate
+  # choice); the chart fails to render otherwise.
+  backendService: ""
+  backendPort: 80
+  # CIDRs of the ingress controller's pods. The frontend nginx pods believe X-Forwarded-For only
+  # from these (set_real_ip_from) to recover the true client address. REQUIRED (no default): it is
+  # your cluster's pod/ingress network, e.g. ["10.8.0.0/14"].
+  trustedCidrs: []
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/proxy-body-size: 20m
+    nginx.ingress.kubernetes.io/proxy-body-size: 21m
+    # Only /actuator/health* is meant to be reachable through the public API host; metrics,
+    # info, env ... answer 404 here. Prometheus scrapes :8080 in-cluster, not through the ingress.
+    # Needs ingress-nginx with allow-snippet-annotations=true; for other controllers apply the
+    # equivalent rule (see README.md, "Blocking /actuator at the ingress").
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ~ ^/actuator/(?!health) {
+        return 404;
+      }
   # Set to a real ClusterIssuer name (e.g. "letsencrypt-prod") to have cert-manager's
   # ingress-shim automatically provision/renew the "registerwerk-tls" secret referenced below.
   # Requires cert-manager and that ClusterIssuer to already be installed cluster-wide — this
@@ -112,6 +130,20 @@ env:
   # Wallet keystores live in Postgres (wallet_keystore_blob, V3 migration) rather than on a
   # shared filesystem volume — see wallets.persistence below for why that matters here.
   REGISTERWERK_WALLET_STORAGE_BACKEND: "POSTGRES"
+  # Peers allowed to assert X-Forwarded-For (Kong + operator nginx pods). Explicit on purpose;
+  # replace with a regex matching YOUR pod CIDR (registerwerk.auth.trusted-proxies).
+  REGISTERWERK_AUTH_TRUSTED_PROXIES: '10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+|127\.\d+\.\d+\.\d+|0:0:0:0:0:0:0:1|::1'
+
+# Generic, additive hooks for the backend Deployment (all empty by default). They let an operator
+# mount what this chart cannot know about: a PKCS#11 config + vendor HSM client library (volume +
+# mount), KEK/KMS settings (env/envFrom), a network-HSM sidecar or init step. No vendor client is
+# bundled; values-production.yaml shows a commented pattern.
+extraVolumes: []
+extraVolumeMounts: []
+extraEnv: []
+extraEnvFrom: []
+initContainers: []
+sidecars: []
 
 # Previously this chart shipped replicaCount: 3 + autoscaling (min 3) + REQUIRED pod
 # anti-affinity (one replica per node, see affinity: below) while ALSO mounting a single
@@ -242,6 +274,19 @@ kong:
   # if you ever need more than one registerwerk release in the same namespace.
   dblessConfig:
     configMap: "registerwerk-kong-config"
+  # Operator-network CIDRs allowed on /api/v1/admin/** (ip-restriction in files/kong.yml, which
+  # is rendered from this list). REQUIRED, no default: a 10.0.0.0/8 default would admit every pod
+  # in most clusters. Example: ["203.0.113.0/24"].
+  adminAllowCidrs: []
+  # Kong's real-client-IP handling (7B-01). trusted_ips = the networks whose X-Forwarded-For Kong
+  # believes: the customer-frontend nginx pods and the ingress controller (the API ingress lands
+  # on Kong directly). REQUIRED, no default (cluster pod CIDR). real_ip_recursive stays off: those
+  # hops overwrite the header, so the last entry is the client. (Subchart values are not
+  # templated, so this is the single source; the chart fails to render if it is empty.)
+  env:
+    trusted_ips: ""
+    real_ip_header: X-Forwarded-For
+    real_ip_recursive: "off"
   # Same prometheus.io/* pod-annotation convention as the backend's podAnnotations above
   # (this Kong subchart version's status listener "cannot be exposed through a service or
   # ingress" per its own values.yaml comment, so a ServiceMonitor has no Service to bind to —
@@ -279,15 +324,11 @@ chaincache:
 
 networkPolicy:
   enabled: true
-  # templates/ingress.yaml routes external traffic directly to this chart's backend Service,
-  # not through Kong — but this policy previously only admitted pods labeled
-  # app.kubernetes.io/name: kong or prometheus. The ingress controller's pods match neither,
-  # so every request arriving via the Ingress resource was silently dropped at the network
-  # layer with ingress.enabled=true (ledger finding: "network policy does not admit the
-  # ingress-controller path"). templates/networkpolicy.yaml appends a rule admitting
-  # ingressControllerNamespace + ingressControllerPodSelector automatically whenever
-  # ingress.enabled is true — defaults below match the standard ingress-nginx Helm chart's own
-  # namespace/labels; override both if your cluster's ingress controller differs.
+  # The API ingress terminates on Kong (templates/ingress.yaml), so the ingress controller is
+  # admitted to Kong's proxy ports only (templates/kong-networkpolicy.yaml) and NOT to the backend
+  # — except when kong.enabled=false and ingress.backendService names the backend explicitly
+  # (templates/networkpolicy.yaml then adds the controller rule). Defaults below match the standard
+  # ingress-nginx Helm chart's own namespace/labels; override both if your controller differs.
   ingressControllerNamespace: ingress-nginx
   ingressControllerPodSelector:
     app.kubernetes.io/name: ingress-nginx
@@ -362,6 +403,8 @@ frontendOperator:
     className: nginx
     annotations:
       nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      # /api/ uploads (KYC documents) go up to 20 MB; ingress-nginx's 1m default would 413 them (7B-05).
+      nginx.ingress.kubernetes.io/proxy-body-size: 21m
     certManagerClusterIssuer: ""
     hosts:
       - host: app.registerwerk.example.com
@@ -436,6 +479,8 @@ frontendCustomer:
     className: nginx
     annotations:
       nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      # /api/ uploads (KYC documents) go up to 20 MB; ingress-nginx's 1m default would 413 them (7B-05).
+      nginx.ingress.kubernetes.io/proxy-body-size: 21m
     certManagerClusterIssuer: ""
     hosts:
       - host: portal.registerwerk.example.com
@@ -552,6 +597,17 @@ zamaRelayer:
   # Compose's own `${VAR:-}` fallbacks — a cluster operator turning zamaRelayer.enabled on must
   # also fill these in, same values ETH_SEPOLIA_RPC/ZAMA_* would get in a real .env.
   env:
+    # true in the chart (off in Compose): refuses the ENV_VAR KEK provider and the plaintext
+    # OPERATOR_DECRYPT_PRIVATE_KEY at startup, and requires an explicit decrypt-authorisation
+    # duration (see zama-relayer/src/config.ts). Acknowledge a deliberate exception with
+    # RELAYER_ALLOW_ENV_KEK: "true" (logged as a WARN) until a KMS provider is wired (T7-05/T7-07).
+    RELAYER_PRODUCTION_MODE: "true"
+    # REQUIRED while RELAYER_PRODUCTION_MODE is true: how long the signed viewer-decrypt
+    # authorisation stays valid, in days. Leave blank and the relayer refuses to start, so the
+    # choice is deliberate (the Compose default of 365 is too long to adopt silently). Shorter
+    # values mean more frequent re-authorisation; revoke early with removeViewer (see
+    # docs/operator/confidential-tokens viewer-key revocation runbook).
+    OPERATOR_DECRYPT_DURATION_DAYS: ""
     ZAMA_CONFIG_PRESET: "sepolia"
     CHAIN_ID: "11155111"
     SEPOLIA_NETWORK_RPC_URL: ""

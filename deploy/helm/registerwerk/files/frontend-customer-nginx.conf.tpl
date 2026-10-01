@@ -14,10 +14,22 @@ values.yaml's `redis.fullnameOverride` comment already make explicit for this ex
 every other line byte-for-byte identical to frontend-customer/nginx.conf — including the security
 headers, duplicated per the comment below — so this doesn't silently drift from what's actually
 shipped and verified in the Compose/local path.
+
+Chart-only delta besides that upstream: the real-IP restoration block at the top of the server (the
+ingress controller sits in front here; Compose's nginx is the edge).
 */ -}}
 server {
     listen 80;
     server_tokens off;
+
+    # Behind the cluster ingress: restore the real client address from the ingress controller's
+    # X-Forwarded-For (7B-01). Only the listed ingress CIDRs are believed; anything else keeps its
+    # own TCP address.
+    {{- range (required "ingress.trustedCidrs is required (ingress controller pod CIDRs, used for real-IP restoration)" .Values.ingress.trustedCidrs) }}
+    set_real_ip_from {{ . }};
+    {{- end }}
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
     root /usr/share/nginx/html;
     index index.html;
 
@@ -60,6 +72,12 @@ server {
         proxy_pass http://{{ .Release.Name }}-kong-proxy:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        # Overwrite, never append (7B-01): $remote_addr is the true client thanks to the
+        # set_real_ip_from / real_ip_header block at the top of this server.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        # Uploads (KYC documents) are up to 20 MB (7B-05).
+        client_max_body_size 21m;
+        proxy_read_timeout 120s;
     }
 
     # Angular builds with outputHashing: "all", so bundle filenames change whenever their content

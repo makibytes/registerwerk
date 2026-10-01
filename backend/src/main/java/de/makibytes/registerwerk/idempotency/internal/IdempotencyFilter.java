@@ -53,14 +53,21 @@ class IdempotencyFilter extends OncePerRequestFilter {
 
     private final IdempotencyService service;
     private final Predicate<HttpServletRequest> keyRequired;
+    private final Predicate<HttpServletRequest> noReplay;
 
     IdempotencyFilter(IdempotencyService service) {
         this(service, request -> false);
     }
 
     IdempotencyFilter(IdempotencyService service, Predicate<HttpServletRequest> keyRequired) {
+        this(service, keyRequired, request -> false);
+    }
+
+    IdempotencyFilter(IdempotencyService service, Predicate<HttpServletRequest> keyRequired,
+                      Predicate<HttpServletRequest> noReplay) {
         this.service = service;
         this.keyRequired = keyRequired;
+        this.noReplay = noReplay;
     }
 
     @Override
@@ -112,11 +119,12 @@ class IdempotencyFilter extends OncePerRequestFilter {
                 body = cached.getCachedBody();
             }
             // A multipart upload is not buffered (the parts are parsed downstream): its request hash
-            // covers method + path + content type + length, the key does the rest.
+            // covers method + path + query + length, the key does the rest. The content type is left out
+            // because it carries the random multipart boundary, which changes on every browser retry.
+            String target = request.getRequestURI() + "?" + canonicalQuery(request.getQueryString());
             String requestHash = multipart
-                    ? hash(request.getMethod(), request.getRequestURI(),
-                            (request.getContentType() + "|" + request.getContentLengthLong()).getBytes(StandardCharsets.UTF_8))
-                    : hash(request.getMethod(), request.getRequestURI(), body);
+                    ? hash(request.getMethod(), target, ("multipart|" + request.getContentLengthLong()).getBytes(StandardCharsets.UTF_8))
+                    : hash(request.getMethod(), target, body);
             outcome = service.checkOrStart(scope.kind(), scope.id(), key, requestHash);
         } catch (Exception e) {
             if (required) {
@@ -149,6 +157,7 @@ class IdempotencyFilter extends OncePerRequestFilter {
         }
 
         UUID recordId = ((IdempotencyService.Outcome.Proceed) outcome).recordId();
+        boolean secretResponse = noReplay.test(request);
         IdempotencyContext.bind(request, new IdempotencyContext.Key(scope.kind(), scope.id().toString(), key));
         ContentCachingResponseWrapper cachedResponse = new ContentCachingResponseWrapper(response);
         boolean threw = true;
@@ -161,7 +170,11 @@ class IdempotencyFilter extends OncePerRequestFilter {
             // prevents a second chain submission).
             int status = threw ? 500 : cachedResponse.getStatus();
             try {
-                service.complete(recordId, status, new String(cachedResponse.getContentAsByteArray(), StandardCharsets.UTF_8));
+                if (secretResponse) {
+                    service.release(recordId); // 7A-07: one-time secrets are never stored or replayed
+                } else {
+                    service.complete(recordId, status, new String(cachedResponse.getContentAsByteArray(), StandardCharsets.UTF_8));
+                }
             } catch (RuntimeException e) {
                 log.error("Could not complete idempotency record {} - it stays IN_PROGRESS until cleanup.", recordId, e);
             }
@@ -169,6 +182,16 @@ class IdempotencyFilter extends OncePerRequestFilter {
                 cachedResponse.copyBodyToResponse();
             }
         }
+    }
+
+    /** Query string with its parameters sorted, so parameter order does not change the hash but values do. */
+    static String canonicalQuery(String query) {
+        if (query == null || query.isBlank()) {
+            return "";
+        }
+        String[] pairs = query.split("&");
+        java.util.Arrays.sort(pairs);
+        return String.join("&", pairs);
     }
 
     private record Scope(String kind, UUID id) {}

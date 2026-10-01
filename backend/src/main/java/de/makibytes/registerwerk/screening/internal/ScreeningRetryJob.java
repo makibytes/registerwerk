@@ -30,9 +30,30 @@ public class ScreeningRetryJob {
     private final ScreeningPolicy policy;
     private final boolean demoSeeded;
 
+    private final de.makibytes.registerwerk.shared.ProductionMode productionMode;
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
+    public ScreeningRetryJob(ScreeningRunRepository runRepository, ScreeningService screeningService,
+                             ScreeningPolicy policy, boolean demoSeeded) {
+        this(runRepository, screeningService, policy, demoSeeded,
+                de.makibytes.registerwerk.shared.ProductionMode.of(false),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public ScreeningRetryJob(ScreeningRunRepository runRepository, ScreeningService screeningService,
                              ScreeningPolicy policy,
-                             @Value("${registerwerk.seed-demo-data:false}") boolean demoSeeded) {
+                             @Value("${registerwerk.seed-demo-data:false}") boolean demoSeeded,
+                             org.springframework.core.env.Environment environment,
+                             io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+        this(runRepository, screeningService, policy, demoSeeded, de.makibytes.registerwerk.shared.ProductionMode.of(environment), meterRegistry);
+    }
+
+    public ScreeningRetryJob(ScreeningRunRepository runRepository, ScreeningService screeningService,
+                             ScreeningPolicy policy, boolean demoSeeded, de.makibytes.registerwerk.shared.ProductionMode productionMode,
+                             io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+        this.productionMode = productionMode;
+        this.meterRegistry = meterRegistry;
         this.runRepository = runRepository;
         this.screeningService = screeningService;
         this.policy = policy;
@@ -43,7 +64,11 @@ public class ScreeningRetryJob {
     @Scheduled(fixedDelayString = "${registerwerk.screening.retry-delay:PT30M}",
             initialDelayString = "${registerwerk.screening.retry-delay:PT30M}")
     public void retryFailed() {
-        if (demoSeeded) {
+        if (demoSeeded && productionMode.enabled()) {
+            log.error("registerwerk.seed-demo-data=true in production mode: running the screening retry anyway");
+            meterRegistry.counter("registerwerk_screening_job_skipped_total", "reason", "demo_seeded_in_production").increment();
+        } else if (demoSeeded) {
+            meterRegistry.counter("registerwerk_screening_job_skipped_total", "reason", "demo_seeded").increment();
             return;
         }
         retryRound();

@@ -32,7 +32,10 @@ Conservez les sauvegardes quotidiennes pendant 30 jours, les sauvegardes hebdoma
 find /backups/postgres -name "*.sql.gz" -mtime +30 -delete
 ```
 
-### Déploiement Helm/Kubernetes — Archivage continu WAL-G
+### Déploiement Helm/Kubernetes — sauvegarde de base WAL-G
+
+!!! warning "Le RPO est la dernière sauvegarde de base quotidienne"
+    Le WAL n'est **pas** archivé (aucun `archive_command`/`archive_mode` dans le dépôt). Le point de récupération est la dernière sauvegarde de base réussie, jusqu'à 24 heures ; la restauration à un instant donné n'est pas disponible. Un RPO plus court exige une archive WAL (sidecar, `archive_command` ou PostgreSQL géré avec PITR) — décision en suspens (T7-04). Un `wal-g backup-push` en échec, ou un push Pushgateway en échec, fait échouer le job, de sorte que `BackupStale` se déclenche. Il faut aussi définir `postgresql.existingSecret` (Secret contenant le mot de passe de la base) : `--set postgresql.existingSecret=<Secret du chart principal>`.
 
 L'approche Docker Compose pg_dump ci-dessus ne s'applique **pas** ici. `deploy/helm/backup/` est un chart Helm distinct
 (installé comme sa propre release, aux côtés — non fusionné dans — le chart principal
@@ -115,6 +118,9 @@ docker compose start backend
 
 ### Restauration à partir d'une sauvegarde WAL-G (déploiement Helm/Kubernetes)
 
+!!! warning "Non testé"
+    Ce chemin ne restaure que la sauvegarde de base et n'a pas été éprouvé lors d'un véritable exercice wal-g. Voir le [runbook DR](../dr/runbook.md).
+
 ```bash
 # Scale the backend down to prevent writes during restore
 kubectl scale deployment/registerwerk --replicas=0
@@ -138,6 +144,8 @@ kubectl scale deployment/registerwerk --replicas=<original-replica-count>
 | État du contrat intelligent | La restauration n'est pas contrôlée par la sauvegarde de l'application. Récupérer séparément les projections applicatives et les réconcilier avec la chaîne configurée et le registre juridique spécifique à l'instrument ; la blockchain ne fait pas universellement autorité. |
 
 ## Surveillance des sauvegardes
+
+`BackupStale` se déclenche désormais si la dernière sauvegarde a plus de 24 h **ou** si la série est absente ; `BackupMetricAbsent` (série absente depuis 2 jours) et `BackupPushStale` complètent la règle. Sans service de sauvegarde (Docker Compose), `BackupStale` se déclenche donc car la série est absente.
 
 `monitoring/alerts/registerwerk.yml` inclut déjà une règle `BackupStale` interrogeant
 `backup_last_success_timestamp`. Cette métrique n'existe que si quelque chose la transmet réellement — un

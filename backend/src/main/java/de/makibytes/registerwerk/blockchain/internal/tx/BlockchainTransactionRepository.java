@@ -3,6 +3,10 @@ package de.makibytes.registerwerk.blockchain.internal.tx;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -18,6 +22,17 @@ public interface BlockchainTransactionRepository extends JpaRepository<Blockchai
     List<BlockchainTransaction> findByStatusAndCompletedAtAfter(BlockchainTransaction.Status status, Instant cutoff);
 
     Optional<BlockchainTransaction> findByTxHash(String txHash);
+
+    /** Oldest-first slice of one status for the bounded pollers (7A-06). */
+    List<BlockchainTransaction> findByStatusOrderByCreatedAtAsc(BlockchainTransaction.Status status, Pageable pageable);
+
+    List<BlockchainTransaction> findByStatusAndCompletedAtAfterOrderByCompletedAtAsc(
+            BlockchainTransaction.Status status, Instant cutoff, Pageable pageable);
+
+    /** Re-read under a write lock inside the writer transaction, so a stale poller cannot overwrite a terminal state. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from BlockchainTransaction t where t.id = :id")
+    Optional<BlockchainTransaction> findByIdForUpdate(@Param("id") UUID id);
 
     Page<BlockchainTransaction> findByDeploymentIdOrderByCreatedAtDesc(UUID deploymentId, Pageable pageable);
 

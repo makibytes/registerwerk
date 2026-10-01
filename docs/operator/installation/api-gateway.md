@@ -37,9 +37,9 @@ Only bundled Kong OSS plugins are active by default (see `gateway/kong.yml`):
 |---|---|
 | `proxy-cache` | Caches public-route GET 200 responses for 30-60 seconds |
 | `request-transformer` | Strips any client-supplied `X-Entity-Id`/`X-Entity-Roles` on public routes, so nothing can be smuggled in before the backend even sees the request |
-| `rate-limiting` | 300 requests/minute, 10,000/hour per consumer |
+| `rate-limiting` | 300 requests/minute, 10,000/hour per client IP (Redis-backed, shared across Kong replicas) |
 | `bot-detection` | Blocks common crawler/scanner user agents |
-| `ip-restriction` | Restricts `/api/v1/admin/**` to operator-network CIDRs |
+| `ip-restriction` | Restricts `/api/v1/admin/**` to operator-network CIDRs, matched against the real client IP (see below) |
 | `cors` | Cross-origin headers for the customer Angular frontend |
 | `request-size-limiting` | 20 MB max request body |
 | `response-transformer` | Adds standard security headers (HSTS, CSP, X-Frame-Options, …) |
@@ -49,6 +49,28 @@ active in this OSS setup — a ready-to-merge snippet lives at `gateway/plugins/
 deployments that run Kong Enterprise. Without it, JWT validation and entity/role extraction happen
 entirely in the Spring backend, reading the claims off the token itself — Kong never
 injects `X-Entity-Id`/`X-Entity-Roles` headers here.
+
+## Client IP handling
+
+Rate limiting, the admin `ip-restriction` and the backend's login throttle all depend on the real
+client address, so a client-supplied `X-Forwarded-For` must never be believed:
+
+- The customer nginx **overwrites** `X-Forwarded-For` with the TCP peer it saw (never appends), and
+  the operator nginx does the same. Behind the Helm ingress, nginx first restores the real address
+  from the ingress controller via `ingress.trustedCidrs`.
+- Kong trusts `X-Forwarded-For` only from the nginx/ingress network (`KONG_TRUSTED_IPS`,
+  `KONG_REAL_IP_HEADER=X-Forwarded-For`, `KONG_REAL_IP_RECURSIVE=off` in `docker-compose.yml`;
+  `kong.env.trusted_ips` in the chart). A caller that reaches the published Kong port directly is
+  limited by its own address.
+- The backend trusts the header only from `REGISTERWERK_AUTH_TRUSTED_PROXIES` (set explicitly in
+  Compose and the chart; narrow it to your network).
+- The Compose admin allow list includes `192.168.0.0/16` and `::1` so the local demo works (on
+  Docker Desktop the browser arrives from the VM gateway). In Helm the list is rendered from
+  `kong.adminAllowCidrs` (required, no default): set your operator networks.
+
+`scripts/check-client-ip.sh` checks against a running stack that spoofed `X-Forwarded-For` values
+do not reset the rate-limit counter. The Helm API ingress points at Kong, never at the backend, and
+answers 404 for `/actuator/*` other than health.
 
 ## Kong admin API
 

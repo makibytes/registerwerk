@@ -8,7 +8,7 @@
  * (Sepolia today, Ethereum/Base mainnet, T-REX Chain once it publishes its own addresses) purely
  * by changing env vars, not by editing code.
  */
-import { EnvVarKekProvider } from './kekProvider.js';
+import { createKekProvider } from './kekProvider.js';
 import { fromHex } from './hex.js';
 
 export interface RelayerConfig {
@@ -76,6 +76,15 @@ export interface RelayerConfig {
   apiKey: string;
 }
 
+/**
+ * `RELAYER_PRODUCTION_MODE=true` is the dedicated switch for the hardening below. It is NOT keyed
+ * off NODE_ENV: the Dockerfile bakes NODE_ENV=production into every image, so the Compose demo
+ * relayer would otherwise already run "in production".
+ */
+function isTrue(env: NodeJS.ProcessEnv, name: string): boolean {
+  return (env[name] ?? '').trim().toLowerCase() === 'true';
+}
+
 function requireEnv(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (!value || value.trim() === '') {
@@ -88,6 +97,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayerConfig 
   const preset = (env.ZAMA_CONFIG_PRESET ?? 'sepolia').toLowerCase();
   if (preset !== 'sepolia' && preset !== 'custom') {
     throw new Error(`ZAMA_CONFIG_PRESET must be "sepolia" or "custom", got: ${preset}`);
+  }
+
+  const productionMode = isTrue(env, 'RELAYER_PRODUCTION_MODE');
+  if (productionMode && (env.OPERATOR_DECRYPT_DURATION_DAYS ?? '').trim() === '') {
+    // The viewer decryption authorisation is signed once and valid this long; the default (365)
+    // is too long to adopt silently, so production mode makes the choice explicit (T7-07).
+    throw new Error(
+      'RELAYER_PRODUCTION_MODE=true requires OPERATOR_DECRYPT_DURATION_DAYS to be set explicitly'
+    );
   }
 
   const config: RelayerConfig = {
@@ -115,20 +133,45 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayerConfig 
     };
   }
 
-  config.operatorDecryptPrivateKey = resolveOperatorDecryptPrivateKey(env);
+  config.operatorDecryptPrivateKey = resolveOperatorDecryptPrivateKey(env, productionMode);
 
   return config;
 }
 
-function resolveOperatorDecryptPrivateKey(env: NodeJS.ProcessEnv): `0x${string}` | undefined {
+function resolveOperatorDecryptPrivateKey(
+  env: NodeJS.ProcessEnv, productionMode: boolean
+): `0x${string}` | undefined {
   const wrapped = env.OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED;
   const plaintext = env.OPERATOR_DECRYPT_PRIVATE_KEY;
+  const providerName = (env.RELAYER_KEK_PROVIDER ?? 'ENV_VAR').trim() || 'ENV_VAR';
+  const allowEnvKek = isTrue(env, 'RELAYER_ALLOW_ENV_KEK');
+
+  // Production mode: the KEK master key (ENV_VAR provider) or the plaintext key would sit in the
+  // same environment as the wrapped key / the key itself, so wrapping buys nothing. Refuse both
+  // unless the operator explicitly acknowledges it; a KMS provider is the real fix (T7-05).
+  const usesEnvSecret = (wrapped && wrapped.trim() !== '' && providerName === 'ENV_VAR')
+    || (!(wrapped && wrapped.trim() !== '') && plaintext && plaintext.trim() !== '');
+  if (productionMode && usesEnvSecret) {
+    if (!allowEnvKek) {
+      throw new Error(
+        'RELAYER_PRODUCTION_MODE=true refuses the ENV_VAR KEK provider and the plaintext ' +
+        'OPERATOR_DECRYPT_PRIVATE_KEY (the secret sits beside the key it protects). Use a KMS ' +
+        'provider (RELAYER_KEK_PROVIDER=AWS_KMS|GCP_KMS|AZURE_KEY_VAULT) or acknowledge the ' +
+        'exception with RELAYER_ALLOW_ENV_KEK=true.'
+      );
+    }
+    // eslint-disable-next-line no-console
+    console.warn(
+      'RELAYER_ALLOW_ENV_KEK=true: running production mode with an environment-held KEK / plaintext ' +
+      'operator decrypt key. This is an acknowledged exception, not a recommended setup.'
+    );
+  }
 
   if (wrapped && wrapped.trim() !== '') {
-    const masterKey = requireEnv(env, 'RELAYER_KEK_MASTER_KEY');
+    const provider = createKekProvider(providerName, env);
     let unwrapped: Buffer;
     try {
-      unwrapped = new EnvVarKekProvider(masterKey).unwrap(Buffer.from(fromHex(wrapped)));
+      unwrapped = provider.unwrap(Buffer.from(fromHex(wrapped)));
     } catch (e) {
       throw new Error(
         'Failed to unwrap OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED — check RELAYER_KEK_MASTER_KEY ' +

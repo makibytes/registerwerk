@@ -114,18 +114,22 @@ class BlockchainTransactionServiceTest {
         SecurityContextHolder.clearContext();
     }
 
-    private static BlockchainTransaction pendingTx(String txHash, String chain, String network, Instant createdAt) {
+    private BlockchainTransaction pendingTx(String txHash, String chain, String network, Instant createdAt) {
         BlockchainTransaction tx = new BlockchainTransaction();
         tx.setTxHash(txHash);
         tx.setChain(chain);
         tx.setNetwork(network);
         tx.setStatus(BlockchainTransaction.Status.PENDING);
         ReflectionTestUtils.setField(tx, "createdAt", createdAt);
+        // 7A-06: the writer re-reads the row under a lock; hand it back the very same instance
+        ReflectionTestUtils.setField(tx, "id", UUID.randomUUID());
+        lenient().when(repository.findByIdForUpdate(tx.getId())).thenReturn(Optional.of(tx));
         return tx;
     }
 
     private void stubPending(BlockchainTransaction... txs) {
-        when(repository.findByStatus(BlockchainTransaction.Status.PENDING)).thenReturn(List.of(txs));
+        when(repository.findByStatusOrderByCreatedAtAsc(eq(BlockchainTransaction.Status.PENDING), any()))
+                .thenReturn(List.of(txs));
     }
 
     // ── pollPendingTransactions — no hash/chain yet ──────────────────────────────
@@ -512,7 +516,7 @@ class BlockchainTransactionServiceTest {
         tx.setCompletedAt(Instant.now().minusSeconds(2_000));
         tx.setChainConfigId(chainConfigId);
         tx.setErrorMessage("Transaction not mined within 900s");
-        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+        when(repository.findByStatusAndCompletedAtAfterOrderByCompletedAtAsc(eq(BlockchainTransaction.Status.TIMEOUT), any(), any()))
                 .thenReturn(List.of(tx));
         when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
         TransactionReceipt receipt = new TransactionReceipt();
@@ -539,7 +543,7 @@ class BlockchainTransactionServiceTest {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(3_600));
         tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
         tx.setCompletedAt(Instant.now().minusSeconds(2_000));
-        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+        when(repository.findByStatusAndCompletedAtAfterOrderByCompletedAtAsc(eq(BlockchainTransaction.Status.TIMEOUT), any(), any()))
                 .thenReturn(List.of(tx));
         when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
         TransactionReceipt receipt = new TransactionReceipt();
@@ -560,7 +564,7 @@ class BlockchainTransactionServiceTest {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(3_600));
         tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
         tx.setCompletedAt(Instant.now().minusSeconds(2_000));
-        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+        when(repository.findByStatusAndCompletedAtAfterOrderByCompletedAtAsc(eq(BlockchainTransaction.Status.TIMEOUT), any(), any()))
                 .thenReturn(List.of(tx));
         when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
         when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt())
@@ -578,7 +582,7 @@ class BlockchainTransactionServiceTest {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(3_600));
         tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
         tx.setCompletedAt(Instant.now().minusSeconds(2_000));
-        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+        when(repository.findByStatusAndCompletedAtAfterOrderByCompletedAtAsc(eq(BlockchainTransaction.Status.TIMEOUT), any(), any()))
                 .thenReturn(List.of(tx));
         EvmSignedSubmission original = outboxRow("0xabc", EvmSignedSubmission.Kind.OPERATION,
                 EvmSignedSubmission.Status.SUPERSEDED);
@@ -612,7 +616,7 @@ class BlockchainTransactionServiceTest {
         tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
         tx.setCompletedAt(Instant.now().minusSeconds(2_000));
         tx.setChainConfigId(UUID.randomUUID());
-        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+        when(repository.findByStatusAndCompletedAtAfterOrderByCompletedAtAsc(eq(BlockchainTransaction.Status.TIMEOUT), any(), any()))
                 .thenReturn(List.of(tx));
         EvmSignedSubmission original = outboxRow("0xabc", EvmSignedSubmission.Kind.OPERATION,
                 EvmSignedSubmission.Status.SUPERSEDED);
@@ -645,7 +649,7 @@ class BlockchainTransactionServiceTest {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(7_200));
         tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
         tx.setCompletedAt(Instant.now().minusSeconds(3_600)); // beyond the 10 min confirmation period
-        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+        when(repository.findByStatusAndCompletedAtAfterOrderByCompletedAtAsc(eq(BlockchainTransaction.Status.TIMEOUT), any(), any()))
                 .thenReturn(List.of(tx));
         EvmSignedSubmission original = outboxRow("0xabc", EvmSignedSubmission.Kind.OPERATION,
                 EvmSignedSubmission.Status.BROADCAST);
@@ -672,7 +676,7 @@ class BlockchainTransactionServiceTest {
         BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now().minusSeconds(7_200));
         tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
         tx.setCompletedAt(Instant.now().minusSeconds(3_600));
-        when(repository.findByStatusAndCompletedAtAfter(eq(BlockchainTransaction.Status.TIMEOUT), any()))
+        when(repository.findByStatusAndCompletedAtAfterOrderByCompletedAtAsc(eq(BlockchainTransaction.Status.TIMEOUT), any(), any()))
                 .thenReturn(List.of(tx));
         EvmSignedSubmission original = outboxRow("0xabc", EvmSignedSubmission.Kind.OPERATION,
                 EvmSignedSubmission.Status.BROADCAST);

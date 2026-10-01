@@ -4,7 +4,9 @@
 #  — the Kong subchart ran its own stock defaults instead, silently
 # losing the admin-API scoping/header-stripping/rate-limiting verified in the Compose path.
 # Keep this file identical to the original whenever that one changes — the only deployment-
-# specific delta is called out inline below (rate-limiting's redis.host). The upstream target's
+# specific deltas are rate-limiting's redis.host and the ip-restriction allow list, which is
+# RENDERED from `kong.adminAllowCidrs` (this file is a template, tpl'd by kong-configmap.yaml;
+# infra.yml diffs the rendered result against gateway/kong.yml with that block normalised). The upstream target's
 # hostname is intentionally identical in both files — see that block's own comment for why.
 _format_version: "3.0"
 
@@ -229,9 +231,9 @@ plugins:
     route: api-admin
     config:
       allow:
-        - 127.0.0.1
-        - 10.0.0.0/8
-        - 172.16.0.0/12
+{{- range (required "kong.adminAllowCidrs is required (operator network CIDRs; no default)" .Values.kong.adminAllowCidrs) }}
+        - {{ . | quote }}
+{{- end }}
       message: "Access denied by IP restriction policy."
 
   # CORS — set the deployed frontend origins here per environment.

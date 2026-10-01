@@ -54,6 +54,7 @@ public class StepUpController {
      * returns it plus an otpauth:// URI for a QR code. Call {@link #confirmEnrollment} with a
      * code from the resulting authenticator entry to activate it.
      */
+    @de.makibytes.registerwerk.idempotency.api.NoIdempotencyReplay
     @PostMapping("/enroll")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<TotpEnrollmentResponse> enroll(
@@ -66,6 +67,7 @@ public class StepUpController {
     }
 
     /** Confirms TOTP enrolment with a code produced by the authenticator app added in {@link #enroll}. */
+    @de.makibytes.registerwerk.idempotency.api.NoIdempotencyReplay
     @PostMapping("/enroll/confirm")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Void> confirmEnrollment(

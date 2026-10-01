@@ -536,7 +536,7 @@ public class GraphNodeSyncService {
         t.setTxHash(gt.transactionHash());
         t.setBlockNumber(gt.blockNumber());
         t.setLogIndex((int) gt.logIndex());
-        t.setOccurredAt(Instant.ofEpochSecond(gt.blockTimestamp()));
+        t.setOccurredAt(IndexerTimestamps.clampFuture(Instant.ofEpochSecond(gt.blockTimestamp()), String.valueOf(chain)));
         t.setEventType(resolveEventType(gt.eventType(), gt.from(), gt.to()));
         t.setExplorerTxUrl(explorerUrlBuilder.buildTxUrl(chain, gt.transactionHash()));
 

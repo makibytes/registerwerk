@@ -38,9 +38,14 @@ public class SessionCookieService {
     private final RegisterwerkAuthProperties authProps;
     private final boolean secure;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public SessionCookieService(
             RegisterwerkAuthProperties authProps,
-            @Value("${REGISTERWERK_PRODUCTION_MODE:false}") boolean productionMode) {
+            org.springframework.core.env.Environment environment) {
+        this(authProps, de.makibytes.registerwerk.shared.ProductionMode.resolve(environment));
+    }
+
+    public SessionCookieService(RegisterwerkAuthProperties authProps, boolean productionMode) {
         this.authProps = authProps;
         this.secure = productionMode;
     }

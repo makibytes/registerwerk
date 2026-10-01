@@ -27,12 +27,20 @@ class DoraDeadlineAlertListener {
     @ApplicationModuleListener
     void on(IctIncidentDeadlineBreachedEvent e) {
         log.error("DORA DEADLINE ALERT: incident {} missed {} (deadline {})", e.incidentId(), e.breachType(), e.deadline());
+        RuntimeException failure = null;
         for (var admin : users.findEnabledWithRole(AppUserRole.REGISTRY_ADMIN)) {
-            emailService.sendHtml(admin.getEmail(), "Registerwerk: DORA reporting deadline missed",
-                    "email/dora-deadline-breach",
-                    Map.of("incidentId", e.incidentId().toString(), "title", String.valueOf(e.title()),
-                            "breachType", e.breachType(),
-                            "deadline", e.deadline() != null ? e.deadline().toString() : ""));
+            try {
+                emailService.sendHtmlOrThrow(admin.getEmail(), "Registerwerk: DORA reporting deadline missed",
+                        "email/dora-deadline-breach",
+                        Map.of("incidentId", e.incidentId().toString(), "title", String.valueOf(e.title()),
+                                "breachType", e.breachType(),
+                                "deadline", e.deadline() != null ? e.deadline().toString() : ""));
+            } catch (RuntimeException ex) {
+                failure = failure == null ? ex : failure;
+            }
+        }
+        if (failure != null) {
+            throw failure; // 7A-04: leave the publication incomplete so it is retried
         }
     }
 }

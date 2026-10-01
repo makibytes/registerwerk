@@ -60,3 +60,47 @@ export class EnvVarKekProvider implements KekProvider {
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   }
 }
+
+/**
+ * Placeholder for a cloud-KMS-backed provider. Mirrors the backend's AWS_KMS / GCP_KMS /
+ * AZURE_KEY_VAULT provider names so the selection mechanism ({@link createKekProvider}) is in place,
+ * but no vendor client is bundled: every method throws until a real implementation is wired for a
+ * chosen target (parked decision T7-05). Failing loudly beats silently falling back to the
+ * environment-variable provider.
+ */
+class UnconfiguredKekProvider implements KekProvider {
+  constructor(readonly name: string) {}
+
+  wrap(): Buffer {
+    throw new Error(`KEK provider ${this.name} is not configured in this build`);
+  }
+
+  unwrap(): Buffer {
+    throw new Error(`KEK provider ${this.name} is not configured in this build`);
+  }
+}
+
+export const KEK_PROVIDER_NAMES = ['ENV_VAR', 'AWS_KMS', 'GCP_KMS', 'AZURE_KEY_VAULT'] as const;
+export type KekProviderName = (typeof KEK_PROVIDER_NAMES)[number];
+
+/**
+ * Registry of KEK providers keyed by `RELAYER_KEK_PROVIDER`. Only `ENV_VAR` is functional; the KMS
+ * entries are stubs that throw "not configured" when used.
+ */
+export function createKekProvider(name: string, env: NodeJS.ProcessEnv = process.env): KekProvider {
+  switch (name) {
+    case 'ENV_VAR': {
+      const masterKey = env.RELAYER_KEK_MASTER_KEY;
+      if (!masterKey || masterKey.trim() === '') {
+        throw new Error('Missing required environment variable: RELAYER_KEK_MASTER_KEY');
+      }
+      return new EnvVarKekProvider(masterKey);
+    }
+    case 'AWS_KMS':
+    case 'GCP_KMS':
+    case 'AZURE_KEY_VAULT':
+      return new UnconfiguredKekProvider(name);
+    default:
+      throw new Error(`RELAYER_KEK_PROVIDER must be one of ${KEK_PROVIDER_NAMES.join(', ')}, got: ${name}`);
+  }
+}

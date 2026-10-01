@@ -11,8 +11,6 @@ failing the install itself.
    create the Secret yourself:
 
      kubectl create secret generic registerwerk-secrets -n {{ .Release.Namespace }} \
-       --from-literal=DB_USER=... \
-       --from-literal=DB_PASSWORD=... \
        --from-literal=JWT_DEV_SECRET=... \
        --from-literal=REGISTERWERK_WALLET_MASTER_KEY=... \
        --from-literal=S3_ACCESS_KEY=... \
@@ -49,16 +47,24 @@ failing the install itself.
    registerwerk.wallet.kek-provider is set to AWS_KMS, GCP_KMS, or AZURE_KEY_VAULT. Add the
    corresponding env vars (registerwerk.wallet.kms.key-id, etc.) to values.yaml's `env:` block.
 
+   SoftHSM is DEMO-ONLY: the backend image ships it for the local stack, and in production mode the
+   backend refuses to start with the SOFTHSM profile. Mount your PKCS#11 configuration and vendor
+   client library through the generic hooks (extraVolumes, extraVolumeMounts, extraEnv,
+   extraEnvFrom, initContainers, sidecars; see values-production.yaml for a commented pattern).
+   Running more than one replica needs a shared signer (network HSM or KMS). This chart bundles no
+   vendor client, so production mode cannot boot until you choose an HSM/KMS target (T7-05).
+
 3. Install the companion backup chart — SEPARATELY, as its own release.
    deploy/helm/backup is not a dependency of this chart (a different release, potentially a
    different namespace, is a deliberate choice — see its own values.yaml comments). It backs
-   up both PostgreSQL (WAL-G) and the wallet-keystore volume (restic) — the latter has NO other
+   up both PostgreSQL (WAL-G base backup) and the wallet-keystore volume (restic) — the latter has NO other
    backup mechanism, and losing it means permanently losing the ability to administer
    already-deployed on-chain assets. Install it with the two required cross-release values:
 
      helm install registerwerk-backup deploy/helm/backup \
        --set postgresql.host={{ .Release.Name }}-postgresql \
        --set postgresql.pvcName=data-{{ .Release.Name }}-postgresql-0 \
+       --set postgresql.existingSecret={{ .Values.postgresql.auth.existingSecret }} \
        --set wallets.pvcName={{ include "registerwerk.fullname" . }}-wallets
 
 4. (Optional but recommended) Configure a KMS-backed audit-chain signing key.
@@ -66,6 +72,17 @@ failing the install itself.
    WORM-protected and verified, just without a signature anchored outside the database. Set
    it to GCP_KMS (only cloud with Ed25519 KMS support — see GcpKmsEd25519SigningKeyProvider's
    Javadoc) for a real external chain-of-custody anchor.
+
+5. Required network inputs (the chart refuses to render without them): ingress.trustedCidrs,
+   kong.env.trusted_ips and kong.adminAllowCidrs, plus env.REGISTERWERK_AUTH_TRUSTED_PROXIES set
+   to a regex of your pod CIDR. The API ingress targets Kong, not the backend, and answers 404 for
+   /actuator/* except health (README.md, "Blocking /actuator at the ingress").
+{{- if .Values.zamaRelayer.enabled }}
+
+6. zama-relayer runs with RELAYER_PRODUCTION_MODE={{ .Values.zamaRelayer.env.RELAYER_PRODUCTION_MODE }}: it refuses the environment-held KEK and plaintext
+   OPERATOR_DECRYPT_PRIVATE_KEY unless RELAYER_ALLOW_ENV_KEK=true is set (logged WARN), and needs
+   OPERATOR_DECRYPT_DURATION_DAYS set explicitly.
+{{- end }}
 
 Check chart status:
 

@@ -15,6 +15,12 @@ public interface EmailPort {
     void sendHtml(String to, String subject, String templateName, Map<String, Object> vars);
 
     /**
+     * Like {@link #sendHtml} but a delivery failure is rethrown as {@link EmailDeliveryException}, so an
+     * {@code @ApplicationModuleListener} is left incomplete and retried (security/compliance alerts).
+     */
+    void sendHtmlOrThrow(String to, String subject, String templateName, Map<String, Object> vars);
+
+    /**
      * Renders a template and sends it with a PDF attachment.
      *
      * @return true if the message was handed to the SMTP server, false on failure —

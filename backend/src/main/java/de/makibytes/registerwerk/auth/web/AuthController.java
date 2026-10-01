@@ -135,6 +135,7 @@ public class AuthController {
      * impersonation} can restore it; {@code /select-company} depends on the admin still being
      * authenticated as themselves after leaving an impersonated session.
      */
+    @de.makibytes.registerwerk.idempotency.api.NoIdempotencyReplay
     @PostMapping("/impersonate")
     public ResponseEntity<LoginResponse> impersonate(
             @Valid @RequestBody ImpersonateExchangeRequest req, HttpServletRequest request) {

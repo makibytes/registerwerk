@@ -17,6 +17,7 @@ import java.util.List;
  * @param setupUrl       Microsoft's combined security-info page — registration happens there,
  *                       because Graph exposes no way to create an authenticator or TOTP method
  * @param message        explanation shown when status is unavailable or does not apply
+ * @param stale          true when Graph could not be read and the last recorded state is shown instead
  */
 public record TwoFactorStatusResponse(
         boolean applicable,
@@ -26,5 +27,11 @@ public record TwoFactorStatusResponse(
         List<String> methods,
         Instant checkedAt,
         String setupUrl,
-        String message) {
+        String message,
+        boolean stale) {
+
+    public TwoFactorStatusResponse(boolean applicable, String identityModel, boolean managedHere, boolean registered,
+                                   List<String> methods, Instant checkedAt, String setupUrl, String message) {
+        this(applicable, identityModel, managedHere, registered, methods, checkedAt, setupUrl, message, false);
+    }
 }

@@ -18,5 +18,13 @@ public record AuditRecord(
         Map<String, Object> payload,
         Instant occurredAt,
         UUID reversesEventId,
-        UUID correlationId) {
+        UUID correlationId,
+        UUID recordId) {
+
+    /** Stable identity for idempotent append (7A-05); null on publications written before it existed. */
+    public AuditRecord(String eventType, String subjectType, UUID subjectId, UUID actorId, String actorRole,
+                       Map<String, Object> payload, Instant occurredAt, UUID reversesEventId, UUID correlationId) {
+        this(eventType, subjectType, subjectId, actorId, actorRole, payload, occurredAt, reversesEventId,
+                correlationId, null);
+    }
 }

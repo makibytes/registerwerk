@@ -50,6 +50,17 @@ docker compose --profile confidential up
 
 Die Umgebungsvariablen finden Sie im Abschnitt „Confidential tokens (Zama fhEVM)" der `.env.example` — `ZAMA_CONFIG_PRESET=sepolia`, `ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY` und `REGISTERWERK_ZAMA_RELAYER_URL` auf der Backend-Seite.
 
+### Relayer-Produktionsmodus und Widerruf von Viewer-Schlüsseln
+
+!!! warning "Umgang mit dem Operator-Decrypt-Schlüssel"
+    Mit `RELAYER_PRODUCTION_MODE=true` (im Helm-Chart standardmäßig gesetzt; in Compose aus) verweigert der Relayer den Start mit dem umgebungsgebundenen KEK-Provider (`ENV_VAR`) oder einem Klartext-`OPERATOR_DECRYPT_PRIVATE_KEY`. Verwenden Sie einen KMS-Provider (`RELAYER_KEK_PROVIDER=AWS_KMS|GCP_KMS|AZURE_KEY_VAULT`; derzeit Platzhalter, die „not configured“ melden, geparkte Entscheidung T7-05) oder bestätigen Sie die Ausnahme ausdrücklich mit `RELAYER_ALLOW_ENV_KEK=true` (wird als Warnung geloggt). Der Produktionsmodus verlangt außerdem ein ausdrücklich gesetztes `OPERATOR_DECRYPT_DURATION_DAYS` (Demo-Default: 365 Tage; offene Entscheidung T7-07). Die Schlüsselableitung bleibt bewusst unverändert.
+
+Bei möglicher Kompromittierung des Schlüssels pro Token widerrufen:
+
+1. `POST .../admin/confidential-remove-viewer` (`removeViewer`) für die Viewer-Adresse auf **jedem** Token aufrufen.
+2. Neues Schlüsselpaar erzeugen, per `confidential-add-viewer` registrieren und `OPERATOR_DECRYPT_PRIVATE_KEY(_WRAPPED)` neu ausrollen.
+3. Das Entfernen stoppt nur künftige Freigaben; bereits entschlüsselbare Handles bleiben entschlüsselbar.
+
 ## Saldo-Entschlüsselung für Anleger/Emittent/Prüfer
 
 Das Aufdecken eines vertraulichen Saldos (oder das Verschlüsseln eines vertraulichen Übertragungsbetrags) ist in beiden Frontends ein **clientseitiger** Vorgang: Die verbundene Wallet signiert eine EIP-712-Anfrage, und die eigene `@zama-fhe/relayer-sdk`-Instanz des Browsers spricht direkt mit Zamas Relayer — siehe `FheClientService` in `frontend-customer` (Selbstaufdeckung des Anlegers + vertrauliche Übertragung; Aufdeckung aller Inhaber durch den Emittenten) und `frontend-operator` (`ConfidentialViewerPanelComponent` für Betreiber/Prüfer). Nichts davon läuft über dieses Backend.

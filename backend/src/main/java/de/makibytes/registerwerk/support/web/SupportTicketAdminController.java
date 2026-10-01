@@ -51,12 +51,14 @@ public class SupportTicketAdminController {
     }
 
     @PostMapping("/{ticketId}/messages")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN') or hasRole('COMPLIANCE_OFFICER')")
     public ResponseEntity<SupportTicketMessageResponse> addMessage(@PathVariable UUID ticketId,
                                                                      @Valid @RequestBody AddMessageRequest request,
                                                                      Authentication auth) {
         UUID userId = SecurityUtils.extractUserId(auth);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(SupportTicketMessageResponse.of(service.addMessage(ticketId, userId, true, request.body())));
+                .body(SupportTicketMessageResponse.of(service.addMessage(ticketId, userId, true,
+                        SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"), request.body())));
     }
 
     @PostMapping("/{ticketId}/assign")

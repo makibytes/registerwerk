@@ -39,17 +39,25 @@ docker compose exec postgres pg_dump -U ${DB_USER:-registerwerk} --no-owner --no
 There is no scheduled retention or offsite replication for this local file — it is a one-off,
 manual convenience, not a backup strategy.
 
-### Helm/Kubernetes deployment — WAL-G continuous archiving
+### Helm/Kubernetes deployment — WAL-G daily base backup
 
 The Docker Compose pg_dump approach above does **not** apply here. `deploy/helm/backup/` is a
 separate Helm chart (installed as its own release, alongside — not merged into — the main
-`deploy/helm/registerwerk` chart) that runs a daily WAL-G `CronJob` archiving continuous backups
-to S3. Before installing it, you must set two chart values it cannot derive on its own:
+`deploy/helm/registerwerk` chart) that runs a daily WAL-G `CronJob` that pushes a **base backup**
+to S3. !!! warning "RPO is the last daily base backup"
+    WAL is **not** archived (no `archive_command`/`archive_mode` anywhere in this repository), so
+    the recovery point is the last successful base backup, up to 24 hours, and point-in-time
+    recovery is not available. A shorter RPO needs a WAL archive (sidecar, `archive_command` or a
+    managed PostgreSQL with PITR) — a parked decision (T7-04). A failing `wal-g backup-push` fails
+    the job, and a failed Pushgateway push also fails it, so `BackupStale` fires.
+
+Before installing it, you must set three chart values it cannot derive on its own:
 
 ```bash
 helm install registerwerk-backup deploy/helm/backup \
   --set postgresql.host=<main-release-name>-postgresql \
-  --set postgresql.pvcName=data-<main-release-name>-postgresql-0
+  --set postgresql.pvcName=data-<main-release-name>-postgresql-0 \
+  --set postgresql.existingSecret=<main chart's postgresql.auth.existingSecret>
 ```
 
 See `deploy/helm/backup/values.yaml` for the full set of options (S3 bucket/region, retention,
@@ -142,11 +150,15 @@ docker compose start backend
 
 ### Restore from WAL-G backup (Helm/Kubernetes deployment)
 
+!!! warning "Untested"
+    This path restores the base backup only and has not been exercised in a real wal-g drill. See
+    [the DR runbook](../dr/runbook.md) for the PG18 recovery mechanics (`recovery.signal`).
+
 ```bash
 # Scale the backend down to prevent writes during restore
 kubectl scale deployment/registerwerk --replicas=0
 
-# Restore the latest base backup + replay WAL to the target point in time
+# Restore the latest base backup (no WAL replay: WAL is not archived)
 kubectl run wal-g-restore --rm -it --image=ghcr.io/wal-g/wal-g:v3.0.0 \
   --overrides='{"spec":{"volumes":[{"name":"pgdata","persistentVolumeClaim":{"claimName":"<postgresql-pvc-name>"}}]}}' \
   -- wal-g backup-fetch /bitnami/postgresql/data LATEST
@@ -166,14 +178,15 @@ kubectl scale deployment/registerwerk --replicas=<original-replica-count>
 
 ## Backup monitoring
 
-`monitoring/alerts/registerwerk.yml` already includes a `BackupStale` rule querying
-`backup_last_success_timestamp`. That metric only exists if something actually pushes it — a
+`monitoring/alerts/registerwerk.yml` includes a `BackupStale` rule (stale over 24 h **or** the
+series absent) and a `BackupMetricAbsent` rule (series gone for 2 days) on
+`backup_last_success_timestamp`, plus `BackupPushStale` on the Pushgateway push time. That metric only exists if something actually pushes it — a
 CronJob is ephemeral and can't be scraped directly, so the Helm/Kubernetes WAL-G CronJob pushes it
 to a Prometheus Pushgateway on success (set `monitoring.pushgatewayUrl` in
 `deploy/helm/backup/values.yaml`; see `templates/backup-cronjob.yaml`), and Pushgateway rejects a
 POST body without a trailing newline (HTTP 400), silently, unless you check for it.
 
 The Docker Compose deployment has no automated backup service at all (see above), so this alert
-has no effect there — `time() - backup_last_success_timestamp` never matches an absent series,
-which Prometheus correctly treats as "no alert," not "always firing." This is expected: the
-Compose path's backup story is intentionally not production-grade.
+is expected to fire there once Prometheus runs: the series is absent, which `BackupStale` now treats
+as a failure. The Compose path's backup story is intentionally not production-grade; mute the
+alert in the local observability demo.

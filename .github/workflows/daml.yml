@@ -2,10 +2,10 @@ name: Daml (Canton) CI
 
 on:
   push:
-    branches: [main, feat/**, fix/**]
+    branches: [main, feat/**, fix/**, develop, review/**]
     paths: [daml/**, .github/workflows/daml.yml]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths: [daml/**, .github/workflows/daml.yml]
 
 concurrency:

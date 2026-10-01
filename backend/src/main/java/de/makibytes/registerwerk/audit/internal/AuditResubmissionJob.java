@@ -37,6 +37,7 @@ class AuditResubmissionJob {
     private final JdbcTemplate jdbc;
     private final ApplicationEventPublisher publisher;
     private final Counter deadLettered;
+    private final Counter resubmissions;
     private volatile long gaugeCachedAt;
     private volatile double oldestCached;
 
@@ -53,6 +54,8 @@ class AuditResubmissionJob {
         this.publisher = publisher;
         this.deadLettered = Counter.builder("registerwerk_audit_dead_lettered_total")
                 .description("Audit publications moved to the dead-letter table").register(registry);
+        this.resubmissions = Counter.builder("registerwerk_audit_resubmissions_total")
+                .description("Audit publications resubmitted by the periodic job").register(registry);
         Gauge.builder("registerwerk_audit_oldest_incomplete_seconds", this, AuditResubmissionJob::oldestIncompleteSeconds)
                 .description("Age of the oldest incomplete audit event publication").register(registry);
         Gauge.builder("registerwerk_audit_dead_letter_count", this, j -> j.deadLetterCount())
@@ -94,8 +97,15 @@ class AuditResubmissionJob {
     void runOnce() {
         moveToDeadLetter();
         java.time.Instant cutoff = java.time.Instant.now().minus(Duration.ofSeconds(olderThanSeconds));
-        incomplete.resubmitIncompletePublications(p -> isAuditEvent(p.getEvent())
-                && p.getPublicationDate().isBefore(cutoff));
+        java.util.concurrent.atomic.AtomicInteger resubmitted = new java.util.concurrent.atomic.AtomicInteger();
+        incomplete.resubmitIncompletePublications(p -> {
+            boolean pick = isAuditEvent(p.getEvent()) && p.getPublicationDate().isBefore(cutoff);
+            if (pick) {
+                resubmitted.incrementAndGet();
+            }
+            return pick;
+        });
+        resubmissions.increment(resubmitted.get());
     }
 
     private static boolean isAuditEvent(Object event) {

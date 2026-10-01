@@ -1,0 +1,51 @@
+{{- if and .Values.networkPolicy.enabled .Values.kong.enabled }}
+# Ingress-only policy for the Kong subchart's pods. The API ingress now terminates on Kong
+# (templates/ingress.yaml), so the ingress controller is admitted to Kong's proxy ports and to
+# nothing else in this chart (7B-02). The customer-frontend nginx proxies /api/ to Kong, and
+# Prometheus scrapes Kong's status port (:8100/metrics). Egress is left unrestricted: Kong must
+# reach the backend, Redis and DNS, and the backend's own policy already limits who may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "registerwerk.fullname" . }}-kong
+  labels:
+    {{- include "registerwerk.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kong
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if .Values.ingress.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerPodSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 8443
+    {{- end }}
+    {{- if .Values.frontendCustomer.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "registerwerk.componentSelectorLabels" (dict "context" . "component" "frontend-customer") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8000
+    {{- end }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8100
+{{- end }}

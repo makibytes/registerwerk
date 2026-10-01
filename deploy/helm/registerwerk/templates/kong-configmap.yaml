@@ -12,5 +12,9 @@ metadata:
     {{- include "registerwerk.labels" . | nindent 4 }}
 data:
   kong.yml: |-
-{{ .Files.Get "files/kong.yml" | indent 4 }}
+{{- /* tpl: the ip-restriction allow list is rendered from kong.adminAllowCidrs (required) */}}
+{{ tpl (.Files.Get "files/kong.yml") . | indent 4 }}
+{{- if not .Values.kong.env.trusted_ips }}
+{{- fail "kong.env.trusted_ips is required (CIDRs of the ingress controller and customer-frontend pods whose X-Forwarded-For Kong may trust)" }}
+{{- end }}
 {{- end }}

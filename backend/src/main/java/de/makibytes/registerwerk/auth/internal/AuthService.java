@@ -20,6 +20,8 @@ import java.util.function.LongConsumer;
 @Service
 public class AuthService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AuthService.class);
+
     /**
      * Constant BCrypt hash of a random value, used to equalize response timing
      * when the email does not exist — otherwise the missing hash comparison
@@ -33,13 +35,27 @@ public class AuthService {
     private final JwtMintingService minter;
     private final RegisterwerkAuthProperties props;
     private final LoginAttemptLimiter attemptLimiter;
+    private final SeededAdminPolicy seededAdminPolicy;
 
+    /** Test/legacy constructor: no seeded-admin login restriction. */
     public AuthService(
             AppUserRepository users,
             PasswordEncoder encoder,
             JwtMintingService minter,
             RegisterwerkAuthProperties props,
             LoginAttemptLimiter attemptLimiter) {
+        this(users, encoder, minter, props, attemptLimiter, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    AuthService(
+            AppUserRepository users,
+            PasswordEncoder encoder,
+            JwtMintingService minter,
+            RegisterwerkAuthProperties props,
+            LoginAttemptLimiter attemptLimiter,
+            SeededAdminPolicy seededAdminPolicy) {
+        this.seededAdminPolicy = seededAdminPolicy;
         this.users = users;
         this.encoder = encoder;
         this.minter = minter;
@@ -83,6 +99,12 @@ public class AuthService {
         }
         AppUser user = candidate.get();
         if (user.getPasswordHash() == null || !encoder.matches(rawPassword, user.getPasswordHash())) {
+            attemptLimiter.recordFailure(email, clientIp);
+            throw new InvalidCredentialsException();
+        }
+        if (seededAdminPolicy != null && seededAdminPolicy.refusesLogin(user)) {
+            // 7A-12: the unrotated bootstrap account may not log in while another admin can recover it.
+            log.warn("Password login refused for the seeded administrator: default credentials past the grace period");
             attemptLimiter.recordFailure(email, clientIp);
             throw new InvalidCredentialsException();
         }

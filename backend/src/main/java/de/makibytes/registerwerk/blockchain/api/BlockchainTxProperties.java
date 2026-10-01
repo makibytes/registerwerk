@@ -52,6 +52,12 @@ public class BlockchainTxProperties {
      */
     private long lateMinedWindowSeconds = 7 * 24 * 3600L;
 
+    /** Rows examined per poller run, oldest first (7A-06): bounds a run so it cannot outlive its ShedLock. */
+    private int pollBatchSize = 25;
+
+    /** Run deadline checked between rows: min(lockAtMostFor * 0.8, 45 s). */
+    private long pollDeadlineSeconds = 45;
+
     /**
      * A TIMEOUT transaction whose outbox nonce is proven consumed by a different transaction is
      * only declared REPLACED after the chain has reported the nonce as used for this long, so a
@@ -100,6 +106,12 @@ public class BlockchainTxProperties {
                 : safeConfirmationsByChain.getOrDefault(chain.toUpperCase(Locale.ROOT), defaultSafeConfirmations);
         return Math.min(safe, confirmationsFor(chain));
     }
+
+    public int getPollBatchSize() { return pollBatchSize; }
+    public void setPollBatchSize(int v) { this.pollBatchSize = v; }
+
+    public long getPollDeadlineSeconds() { return pollDeadlineSeconds; }
+    public void setPollDeadlineSeconds(long v) { this.pollDeadlineSeconds = v; }
 
     public long getLateMinedWindowSeconds() { return lateMinedWindowSeconds; }
     public void setLateMinedWindowSeconds(long lateMinedWindowSeconds) { this.lateMinedWindowSeconds = lateMinedWindowSeconds; }

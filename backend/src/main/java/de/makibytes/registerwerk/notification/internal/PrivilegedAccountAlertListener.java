@@ -37,11 +37,19 @@ class PrivilegedAccountAlertListener {
                 .filter(u -> !u.getId().equals(e.userId()))
                 .map(u -> u.getEmail())
                 .toList();
+        RuntimeException failure = null;
         for (String to : recipients) {
-            emailService.sendHtml(to, "Registerwerk: privileged account " + e.change().toLowerCase().replace('_', ' '),
-                    "email/privileged-account",
-                    Map.of("email", e.email(), "change", e.change(), "roles", String.join(", ", e.roles()),
-                            "bootstrap", e.bootstrap()));
+            try {
+                emailService.sendHtmlOrThrow(to, "Registerwerk: privileged account " + e.change().toLowerCase().replace('_', ' '),
+                        "email/privileged-account",
+                        Map.of("email", e.email(), "change", e.change(), "roles", String.join(", ", e.roles()),
+                                "bootstrap", e.bootstrap()));
+            } catch (RuntimeException ex) {
+                failure = failure == null ? ex : failure;
+            }
+        }
+        if (failure != null) {
+            throw failure; // 7A-04: leave the publication incomplete so it is retried
         }
     }
 }

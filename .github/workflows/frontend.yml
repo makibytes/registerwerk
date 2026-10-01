@@ -2,14 +2,14 @@ name: Frontend CI
 
 on:
   push:
-    branches: [main, feat/**, fix/**]
+    branches: [main, feat/**, fix/**, develop, review/**]
     paths:
       - frontend-operator/**
       - frontend-customer/**
       - frontend-shared/**
       - .github/workflows/frontend.yml
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - frontend-operator/**
       - frontend-customer/**

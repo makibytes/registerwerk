@@ -5,6 +5,9 @@ set -euo pipefail
 # freshness half of §4/§7's post-recovery checklist, against a disposable target container.
 # With --verify-audit-chain, also automates the audit-hash-chain half of §4 for real (see below).
 #
+# NOTE (7B-03): this tests the pg_dump fallback ONLY. WAL is not archived (RPO = last daily base
+# backup) and the wal-g restore path has never been drilled; do not read a PASS here as evidence for it.
+#
 # Deliberately scoped: this exercises the pg_dump/pg_restore fallback path (§2b), not the
 # primary wal-g/S3 path (§2a) — that needs real backup-bucket credentials this environment
 # doesn't have, and simulating it would produce a result nobody could trust.

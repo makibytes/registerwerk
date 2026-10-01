@@ -9,20 +9,24 @@ name: Infra Config CI
 
 on:
   push:
-    branches: [main, feat/**, fix/**]
+    branches: [main, feat/**, fix/**, develop, review/**]
     paths:
       - docker-compose.yml
       - monitoring/docker-compose.yml
       - gateway/kong.yml
       - deploy/helm/**
+      - monitoring/**
+      - scripts/lint-placeholders.sh
       - .github/workflows/infra.yml
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - docker-compose.yml
       - monitoring/docker-compose.yml
       - gateway/kong.yml
       - deploy/helm/**
+      - monitoring/**
+      - scripts/lint-placeholders.sh
 
 concurrency:
   group: infra-ci-${{ github.ref }}
@@ -98,13 +102,13 @@ jobs:
       - name: Lint & template & validate the main chart
         working-directory: deploy/helm/registerwerk
         run: |
-          helm lint . -f values.yaml
-          helm lint . -f values.yaml -f values-production.yaml
-          helm template test . -f values.yaml \
+          helm lint . -f values.yaml -f ci/test-values.yaml
+          helm lint . -f values.yaml -f values-production.yaml -f ci/test-values.yaml
+          helm template test . -f values.yaml -f ci/test-values.yaml \
             | kubeconform -strict -summary -kubernetes-version 1.31.0
-          helm template test . -f values.yaml --set zamaRelayer.enabled=true \
+          helm template test . -f values.yaml -f ci/test-values.yaml --set zamaRelayer.enabled=true \
             | kubeconform -strict -summary -kubernetes-version 1.31.0
-          helm template test . -f values.yaml -f values-production.yaml --set zamaRelayer.enabled=true \
+          helm template test . -f values.yaml -f values-production.yaml -f ci/test-values.yaml --set zamaRelayer.enabled=true \
             | kubeconform -strict -summary -kubernetes-version 1.31.0
       # postgresql.host/pvcName are marked REQUIRED in values.yaml with a `fail` guard when
       # unset (they're derived from the main chart's release name at install time, which this
@@ -113,6 +117,84 @@ jobs:
       - name: Lint & template & validate the backup chart
         working-directory: deploy/helm/backup
         run: |
-          helm lint . --set postgresql.host=placeholder --set postgresql.pvcName=placeholder
-          helm template test . --set postgresql.host=placeholder --set postgresql.pvcName=placeholder \
+          helm lint . --set postgresql.host=placeholder --set postgresql.pvcName=placeholder --set postgresql.existingSecret=placeholder
+          helm template test . --set postgresql.host=placeholder --set postgresql.pvcName=placeholder --set postgresql.existingSecret=placeholder \
             | kubeconform -strict -summary -kubernetes-version 1.31.0
+
+      # Regression assertions for 7B-01 / 7B-02 / 8B-08 hooks on the rendered default chart.
+      - name: Assert ingress, Kong and required-value rules
+        working-directory: deploy/helm/registerwerk
+        run: |
+          helm template test . -f values.yaml -f ci/test-values.yaml > /tmp/default.yaml
+          # The API ingress must target Kong, never the backend Service.
+          python3 - <<'PY'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/default.yaml')) if d]
+          ing = next(d for d in docs if d['kind'] == 'Ingress' and d['metadata']['name'] == 'test-registerwerk')
+          svc = ing['spec']['rules'][0]['http']['paths'][0]['backend']['service']['name']
+          assert svc == 'test-kong-proxy', svc
+          snippet = ing['metadata']['annotations']['nginx.ingress.kubernetes.io/server-snippet']
+          assert '/actuator/' in snippet and 'return 404' in snippet, snippet
+          PY
+          # Required values must fail when missing.
+          if helm template test . -f values.yaml 2>/dev/null; then echo 'defaults must not render'; exit 1; fi
+          if helm template test . -f values.yaml -f ci/test-values.yaml --set kong.adminAllowCidrs=null 2>/dev/null; then echo 'adminAllowCidrs must be required'; exit 1; fi
+          if helm template test . -f values.yaml -f ci/test-values.yaml --set kong.enabled=false 2>/dev/null; then echo 'ingress without Kong must need backendService'; exit 1; fi
+          # Generic hooks render.
+          helm template test . -f values.yaml -f ci/test-values.yaml \
+            --set 'extraVolumes[0].name=hsm,extraVolumes[0].emptyDir={}' | grep -q 'name: hsm'
+      - name: Placeholder lint (production values only)
+        run: scripts/lint-placeholders.sh deploy/helm/registerwerk/values-production.yaml
+
+  kong-sync:
+    name: Kong Copies In Sync
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.3"
+      # The Helm copy is a template: render it with test values, then compare with gateway/kong.yml
+      # with comments stripped, the redis host line and the ip-restriction allow list (deliberately
+      # different: rendered from kong.adminAllowCidrs / compose-demo ranges) normalised.
+      - name: Diff gateway/kong.yml against the rendered Helm copy
+        working-directory: deploy/helm/registerwerk
+        run: |
+          helm template test . -f values.yaml -f ci/test-values.yaml --show-only templates/kong-configmap.yaml \
+            | sed -n '/kong.yml: |-/,$p' | tail -n +2 | sed 's/^    //' > /tmp/helm-kong.yml
+          norm() {
+            grep -v '^[[:space:]]*#' "$1" | sed -E '/^[[:space:]]*$/d; s/host: (redis|registerwerk-redis-master)$/host: REDIS/' \
+              | awk '/^[[:space:]]+allow:$/ {print; skip=1; next} skip && /^[[:space:]]+message:/ {skip=0} !skip {print}'
+          }
+          diff <(norm "$GITHUB_WORKSPACE/gateway/kong.yml") <(norm /tmp/helm-kong.yml)
+
+  alerting:
+    name: Prometheus & Alertmanager Config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: promtool check rules + config
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/monitoring:/m:ro" prom/prometheus:v3.5.0 \
+            check rules /m/alerts/registerwerk.yml /m/alerts/chaincache.yml
+          docker run --rm --entrypoint promtool -v "$PWD/monitoring:/m:ro" prom/prometheus:v3.5.0 \
+            check config /m/prometheus.yml
+      - name: promtool unit tests
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/monitoring:/m:ro" prom/prometheus:v3.5.0 \
+            test rules /m/alerts/tests/registerwerk.test.yml
+      - name: amtool check-config
+        run: |
+          docker run --rm --entrypoint amtool -v "$PWD/monitoring:/m:ro" prom/alertmanager:v0.28.1 \
+            check-config /m/alertmanager.yml
+
+  workflows:
+    name: Workflow Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color

@@ -33,7 +33,8 @@ class IdempotencyFilterConfig {
             IdempotencyService service,
             @Qualifier("requestMappingHandlerMapping") ObjectProvider<RequestMappingHandlerMapping> handlerMapping) {
         FilterRegistrationBean<IdempotencyFilter> registration = new FilterRegistrationBean<>(
-                new IdempotencyFilter(service, keyRequired(handlerMapping)));
+                new IdempotencyFilter(service, keyRequired(handlerMapping), annotated(handlerMapping,
+                        de.makibytes.registerwerk.idempotency.api.NoIdempotencyReplay.class)));
         registration.addUrlPatterns("/api/v1/*");
         registration.setOrder(Ordered.LOWEST_PRECEDENCE);
         return registration;
@@ -45,6 +46,12 @@ class IdempotencyFilterConfig {
      * required" (404s etc.); a lookup failure is logged and treated the same.
      */
     static Predicate<HttpServletRequest> keyRequired(ObjectProvider<RequestMappingHandlerMapping> handlerMapping) {
+        return annotated(handlerMapping, RequiresIdempotencyKey.class);
+    }
+
+    /** Same handler resolution for any marker annotation on the handler method or its controller class. */
+    static Predicate<HttpServletRequest> annotated(ObjectProvider<RequestMappingHandlerMapping> handlerMapping,
+                                                   Class<? extends java.lang.annotation.Annotation> marker) {
         return request -> {
             RequestMappingHandlerMapping mapping = handlerMapping.getIfAvailable();
             if (mapping == null) {
@@ -57,8 +64,8 @@ class IdempotencyFilterConfig {
                 }
                 HandlerExecutionChain chain = mapping.getHandler(request);
                 if (chain != null && chain.getHandler() instanceof HandlerMethod handler) {
-                    return AnnotatedElementUtils.hasAnnotation(handler.getMethod(), RequiresIdempotencyKey.class)
-                            || AnnotatedElementUtils.hasAnnotation(handler.getBeanType(), RequiresIdempotencyKey.class);
+                    return AnnotatedElementUtils.hasAnnotation(handler.getMethod(), marker)
+                            || AnnotatedElementUtils.hasAnnotation(handler.getBeanType(), marker);
                 }
                 return false;
             } catch (Exception e) {

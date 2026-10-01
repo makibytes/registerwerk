@@ -38,13 +38,16 @@ public class DefaultAdminSeeder implements ApplicationRunner {
     private final RegisterwerkAuthProperties props;
     private final ApplicationEventPublisher events;
     private final TransactionTemplate tx;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     public DefaultAdminSeeder(
             AppUserRepository users,
             PasswordEncoder encoder,
             RegisterwerkAuthProperties props,
             ApplicationEventPublisher events,
-            PlatformTransactionManager txManager) {
+            PlatformTransactionManager txManager,
+            org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
         this.users = users;
         this.encoder = encoder;
         this.props = props;
@@ -60,10 +63,19 @@ public class DefaultAdminSeeder implements ApplicationRunner {
             log.info("DEFAULT_ADMIN_EMAIL/DEFAULT_ADMIN_PASSWORD not set — skipping admin seed");
             return;
         }
-        tx.executeWithoutResult(status -> seed(admin.getEmail(), admin.getPassword()));
+        try {
+            tx.executeWithoutResult(status -> seed(admin.getEmail(), admin.getPassword()));
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // Another replica won the race on first boot (7A-12); its admin is the one that exists.
+            log.info("Default admin was created concurrently by another replica — continuing");
+        }
     }
 
+    /** Arbitrary constant key: serialises the first-boot seed across replicas for the transaction's lifetime. */
+    static final long SEED_LOCK_KEY = 0x5265676973746572L;
+
     private void seed(String email, String password) {
+        jdbc.queryForObject("select 1 from (select pg_advisory_xact_lock(?)) l", Integer.class, SEED_LOCK_KEY);
         if (users.countWithRole(AppUserRole.REGISTRY_ADMIN) > 0) {
             log.info("A REGISTRY_ADMIN already exists — default admin seed skipped, no existing account is modified");
             return;

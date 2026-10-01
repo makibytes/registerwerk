@@ -13,7 +13,7 @@ description: Entwurf eines operativen Runbooks für Postgres- und Backend-Wieder
 
 **Dienst:** Registerwerk eWpG-Register  
 **RTO-Ziel:** ≤4 Stunden (eWpRV §6)  
-**RPO-Ziel:** ≤15 Minuten (WAL-Archivierung via wal-g)  
+**RPO:** letztes erfolgreiches tägliches Basis-Backup (bis zu 24 Stunden) — WAL wird derzeit **nicht** archiviert; ein Ziel von ≤15 Minuten ist nicht umgesetzt (offene Entscheidung T7-04)  
 **Verantwortlich:** Registry Operations Team  
 **DORA-Klassifizierung:** MAJOR-Vorfall bei >4 Stunden Ausfallzeit
 
@@ -36,7 +36,10 @@ Behörde, Frist, jedes Formular und jeder Kanal unten ist eine Prüfungsvorgabe,
 
 ---
 
-## 2. Vollständige Postgres-Wiederherstellung (RPO ≤15 Min.)
+## 2. Vollständige Postgres-Wiederherstellung (RPO = letztes Basis-Backup)
+
+!!! warning "Für WAL ungetestet"
+    Das Helm-Backup-Chart erstellt täglich nur ein WAL-G-**Basis-Backup**. Im Repository ist weder `archive_command` noch `archive_mode` konfiguriert; es gibt also kein kontinuierliches WAL-Archiv und keine Point-in-Time-Recovery über das Basis-Backup hinaus. Die Schritte unten beschreiben die PG18-Mechanik und wurden in keiner echten wal-g-Restore-Übung erprobt. Der Archivierungsmechanismus ist eine geparkte Entscheidung (T7-04).
 
 ### 2a. Wiederherstellung aus wal-g-Backup (primärer Pfad)
 ```bash
@@ -47,12 +50,10 @@ docker run -d --name postgres-restore postgres:18.6-alpine
 docker exec postgres-restore wal-g backup-fetch /var/lib/postgresql LATEST \
   --walg-s3-prefix s3://registerwerk-backups/wal-g
 
-# 3. Replay WAL to target time
-cat > /tmp/recovery.conf << EOF
-restore_command = 'wal-g wal-fetch "%f" "%p"'
-recovery_target_time = '$(date -u -d "-15 minutes" +"%Y-%m-%d %H:%M:%S")'
-recovery_target_action = 'promote'
-EOF
+# 3. Recovery-Signal (PG12+: recovery.conf entfällt): recovery.signal im PGDATA anlegen.
+#    restore_command nur ergänzen, wenn WAL tatsächlich archiviert wird (heute nicht der Fall);
+#    sonst wird bis zum Ende des Basis-Backups wiederhergestellt und promotet.
+docker exec postgres-restore touch /var/lib/postgresql/18/docker/recovery.signal
 
 # 4. Start Postgres and wait for recovery
 docker start postgres-restore
@@ -69,6 +70,25 @@ pg_restore -h new-host -U registerwerk -d registerwerk \
   --clean --if-exists \
   /backups/registerwerk_$(date +%Y%m%d).dump
 ```
+
+### 2d. Zeilen in einer DEFAULT-Partition
+
+`token_transfer`, `blockchain_transaction` und `audit_event` sind monatlich partitioniert. Eine Zeile mit `occurred_at` außerhalb der vorhandenen Partitionen (z. B. falsch getaktete Indexer-Quelle oder historischer Backfill) landet in `<tabelle>_default`; Postgres kann dann die Partition dieses Monats nicht mehr anlegen. Der Alert `PartitionDefaultRowsPresent` (`registerwerk_partition_default_rows`) löst aus. Default-Partition im Wartungsfenster aufteilen (Tabelle, Monat und Daten sind Beispiele):
+
+```sql
+BEGIN;
+ALTER TABLE token_transfer DETACH PARTITION token_transfer_default;
+CREATE TABLE token_transfer_2031_03 PARTITION OF token_transfer
+  FOR VALUES FROM ('2031-03-01') TO ('2031-04-01');
+INSERT INTO token_transfer_2031_03 SELECT * FROM token_transfer_default
+  WHERE occurred_at >= '2031-03-01' AND occurred_at < '2031-04-01';
+DELETE FROM token_transfer_default
+  WHERE occurred_at >= '2031-03-01' AND occurred_at < '2031-04-01';
+ALTER TABLE token_transfer ATTACH PARTITION token_transfer_default DEFAULT;
+COMMIT;
+```
+
+Je betroffenem Monat und Tabelle wiederholen. Einen automatischen Split-Job gibt es nicht (er braucht eine Entscheidung zum Wartungsfenster).
 
 ---
 

@@ -83,12 +83,27 @@ public class SupportTicketService {
     }
 
     public SupportTicketMessage addMessage(UUID ticketId, UUID authorId, boolean authorIsOperator, String body) {
+        return addMessage(ticketId, authorId, authorIsOperator, null, body);
+    }
+
+    public SupportTicketMessage addMessage(UUID ticketId, UUID authorId, boolean authorIsOperator, String authorRole,
+                                           String body) {
+        SupportTicket current = requireTicket(ticketId);
+        if (!authorIsOperator && current.getStatus() == SupportTicket.Status.CLOSED) {
+            // 7A-09: a closed ticket is final; the customer opens a new one. Nothing is stored.
+            throw new de.makibytes.registerwerk.shared.InvalidStateTransitionException(
+                    "SupportTicket", "CLOSED", "customer message");
+        }
         SupportTicketMessage message = new SupportTicketMessage();
         message.setTicketId(ticketId);
         message.setAuthorId(authorId);
         message.setAuthorIsOperator(authorIsOperator);
         message.setBody(body);
         SupportTicketMessage saved = messages.save(message);
+        if (authorIsOperator) {
+            events.publishEvent(new de.makibytes.registerwerk.support.events.SupportTicketMessageAddedEvent(
+                    ticketId, authorId, authorRole, body == null ? 0 : body.length()));
+        }
 
         // A customer reply on an operator-answered ticket should reopen it if it had been
         // marked RESOLVED — otherwise it silently sits RESOLVED while the customer is still
@@ -111,6 +126,10 @@ public class SupportTicketService {
 
     public SupportTicket resolve(UUID ticketId, UUID actorId, String resolutionNotes) {
         SupportTicket ticket = requireTicket(ticketId);
+        if (ticket.getStatus() != SupportTicket.Status.OPEN && ticket.getStatus() != SupportTicket.Status.IN_PROGRESS) {
+            throw new de.makibytes.registerwerk.shared.InvalidStateTransitionException(
+                    "SupportTicket", ticket.getStatus().name(), "RESOLVED");
+        }
         ticket.setResolutionNotes(resolutionNotes);
         ticket.setResolvedAt(Instant.now());
         return transitionStatus(ticket, SupportTicket.Status.RESOLVED, actorId);
@@ -118,6 +137,10 @@ public class SupportTicketService {
 
     public SupportTicket close(UUID ticketId, UUID actorId) {
         SupportTicket ticket = requireTicket(ticketId);
+        if (ticket.getStatus() == SupportTicket.Status.CLOSED) {
+            throw new de.makibytes.registerwerk.shared.InvalidStateTransitionException(
+                    "SupportTicket", "CLOSED", "CLOSED");
+        }
         ticket.setClosedAt(Instant.now());
         return transitionStatus(ticket, SupportTicket.Status.CLOSED, actorId);
     }

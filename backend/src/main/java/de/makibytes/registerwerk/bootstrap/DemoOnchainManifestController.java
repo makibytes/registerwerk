@@ -12,7 +12,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/demo/onchain")
 @ConditionalOnProperty(name = "registerwerk.seed-demo-data", havingValue = "true")
-public class DemoOnchainManifestController {
+public class DemoOnchainManifestController implements de.makibytes.registerwerk.shared.DemoOnly {
     private final DemoOnchainManifest manifest;
 
     public DemoOnchainManifestController(DemoOnchainManifest manifest) {

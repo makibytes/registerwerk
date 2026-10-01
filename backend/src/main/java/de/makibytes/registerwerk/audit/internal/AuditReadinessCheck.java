@@ -37,7 +37,11 @@ class AuditReadinessCheck implements ApplicationRunner {
     @Value("${registerwerk.audit.allow-owner-runtime-role:false}")
     private boolean allowOwnerRuntimeRole;
 
-    AuditReadinessCheck(JdbcTemplate jdbc, Optional<SigningKeyProvider> signing, MeterRegistry registry) {
+    private final de.makibytes.registerwerk.shared.ProductionMode productionMode;
+
+    AuditReadinessCheck(JdbcTemplate jdbc, Optional<SigningKeyProvider> signing, MeterRegistry registry,
+                        org.springframework.core.env.Environment environment) {
+        this.productionMode = de.makibytes.registerwerk.shared.ProductionMode.of(environment);
         this.jdbc = jdbc;
         this.signing = signing;
         Gauge.builder("registerwerk_audit_runtime_role_owns_table", ownsGauge, AtomicInteger::get)
@@ -47,7 +51,7 @@ class AuditReadinessCheck implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        check("true".equalsIgnoreCase(System.getenv("REGISTERWERK_PRODUCTION_MODE")));
+        check(productionMode.enabled());
     }
 
     void check(boolean productionMode) {

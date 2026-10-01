@@ -135,4 +135,53 @@ describe('loadConfig', () => {
     const config = loadConfig({ RELAYER_API_KEY: API_KEY });
     expect(config.apiKey).toBe(API_KEY);
   });
+
+  describe('RELAYER_PRODUCTION_MODE', () => {
+    const wrappedEnv = () => {
+      const wrapped = toHex(new EnvVarKekProvider('master').wrap(Buffer.from(OPERATOR_KEY.slice(2), 'hex')));
+      return { OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED: wrapped, RELAYER_KEK_MASTER_KEY: 'master' };
+    };
+    const prod = (extra: Record<string, string | undefined> = {}) =>
+      withApiKey({ RELAYER_PRODUCTION_MODE: 'true', OPERATOR_DECRYPT_DURATION_DAYS: '30', ...extra });
+
+    it('refuses the ENV_VAR KEK provider unless explicitly allowed', () => {
+      expect(() => loadConfig(prod(wrappedEnv()))).toThrow(/refuses the ENV_VAR KEK provider/);
+    });
+
+    it('refuses the plaintext operator key unless explicitly allowed', () => {
+      expect(() => loadConfig(prod({ OPERATOR_DECRYPT_PRIVATE_KEY: OPERATOR_KEY })))
+        .toThrow(/plaintext/);
+    });
+
+    it('accepts the env KEK with RELAYER_ALLOW_ENV_KEK=true and logs a warning', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = loadConfig(prod({ ...wrappedEnv(), RELAYER_ALLOW_ENV_KEK: 'true' }));
+      expect(config.operatorDecryptPrivateKey).toBe(OPERATOR_KEY);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('RELAYER_ALLOW_ENV_KEK'));
+      warn.mockRestore();
+    });
+
+    it('requires an explicit OPERATOR_DECRYPT_DURATION_DAYS', () => {
+      expect(() => loadConfig(withApiKey({ RELAYER_PRODUCTION_MODE: 'true' })))
+        .toThrow(/OPERATOR_DECRYPT_DURATION_DAYS/);
+    });
+
+    it('a KMS provider is a stub that throws "not configured"', () => {
+      let error: Error | undefined;
+      try {
+        loadConfig(prod({ ...wrappedEnv(), RELAYER_KEK_PROVIDER: 'AWS_KMS' }));
+      } catch (e) {
+        error = e as Error;
+      }
+      expect((error?.cause as Error).message).toMatch(/AWS_KMS is not configured/);
+    });
+
+    it('does not touch non-production behaviour (NODE_ENV=production alone is not the switch)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = loadConfig(withApiKey({ NODE_ENV: 'production', ...wrappedEnv() }));
+      expect(config.operatorDecryptPrivateKey).toBe(OPERATOR_KEY);
+      expect(config.operatorDecryptDurationDays).toBe(365);
+      warn.mockRestore();
+    });
+  });
 });

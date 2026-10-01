@@ -44,8 +44,13 @@ class OperationalMetricsJob {
     private final AtomicLong eventPublicationBacklog = new AtomicLong();
     private final AtomicLong oldestHeldShedlockAgeSeconds = new AtomicLong();
 
+    private final io.micrometer.core.instrument.MultiGauge incompleteByFamily;
+
     OperationalMetricsJob(JdbcTemplate jdbc, MeterRegistry meterRegistry, Clock clock) {
         this.jdbc = jdbc;
+        this.incompleteByFamily = io.micrometer.core.instrument.MultiGauge.builder("registerwerk_event_publication_incomplete")
+                .description("event_publication rows incomplete for more than 10 minutes, by listener module family")
+                .register(meterRegistry);
         this.clock = clock;
         Gauge.builder("registerwerk.event_publication.backlog", eventPublicationBacklog, AtomicLong::get)
                 .description("Spring Modulith event_publication rows not yet completed")
@@ -62,6 +67,15 @@ class OperationalMetricsJob {
         Long backlog = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM event_publication WHERE completion_date IS NULL", Long.class);
         eventPublicationBacklog.set(backlog != null ? backlog : 0L);
+
+        // 7A-03: stuck publications per listener family (module segment of the listener id)
+        var rows = jdbc.queryForList(
+                "SELECT split_part(listener_id, '.', 4) AS family, COUNT(*) AS n FROM event_publication "
+                        + "WHERE completion_date IS NULL AND publication_date < now() - interval '10 minutes' "
+                        + "GROUP BY 1");
+        incompleteByFamily.register(rows.stream().map(r -> io.micrometer.core.instrument.MultiGauge.Row.of(
+                io.micrometer.core.instrument.Tags.of("family", String.valueOf(r.get("family"))),
+                ((Number) r.get("n")).longValue())).toList(), true);
 
         Timestamp oldestLockedAt = jdbc.query(
                 "SELECT locked_at FROM shedlock WHERE lock_until > now() ORDER BY locked_at ASC LIMIT 1",

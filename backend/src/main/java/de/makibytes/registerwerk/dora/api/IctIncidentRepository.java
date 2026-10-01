@@ -45,6 +45,23 @@ public interface IctIncidentRepository extends JpaRepository<IctIncident, UUID> 
            "AND i.finalReportDeadline < :now")
     List<IctIncident> findOverdueFinalReports(Instant now);
 
+    // Next open (not yet breached) deadline per breach type, for registerwerk_dora_deadline_due_seconds (7B-06).
+    @Query("SELECT MIN(i.classificationDeadline) FROM IctIncident i WHERE i.severity = 'MAJOR' AND i.downgradedAt IS NULL " +
+           "AND i.initialReportedAt IS NULL AND i.classificationDeadline >= :now")
+    Instant nextClassificationDeadline(Instant now);
+
+    @Query("SELECT MIN(i.initialReportDeadline) FROM IctIncident i WHERE i.severity = 'MAJOR' AND i.downgradedAt IS NULL " +
+           "AND i.initialReportedAt IS NULL AND i.initialReportDeadline >= :now")
+    Instant nextInitialReportDeadline(Instant now);
+
+    @Query("SELECT MIN(i.intermediateReportDeadline) FROM IctIncident i WHERE i.severity = 'MAJOR' AND i.downgradedAt IS NULL " +
+           "AND i.intermediateReportedAt IS NULL AND i.intermediateReportDeadline >= :now")
+    Instant nextIntermediateReportDeadline(Instant now);
+
+    @Query("SELECT MIN(i.finalReportDeadline) FROM IctIncident i WHERE i.severity = 'MAJOR' AND i.downgradedAt IS NULL " +
+           "AND i.finalReportedAt IS NULL AND i.finalReportDeadline >= :now")
+    Instant nextFinalReportDeadline(Instant now);
+
     /** Transaction-scoped advisory lock serialising concurrent automatic drafts of one source type. */
     @Query(value = "SELECT CAST(pg_advisory_xact_lock(hashtext(:key)) AS text)", nativeQuery = true)
     String lockDraftCreation(String key);

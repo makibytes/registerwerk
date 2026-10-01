@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.entra.internal;
 
 import java.time.Duration;
 import java.util.List;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -88,11 +89,29 @@ public class TwoFactorStatusService {
                     + "sign-in methods at Microsoft directly.");
         }
 
-        if (forceRefresh && !allowForcedRefresh(user.getId())) {
-            log.debug("Throttled forced 2FA refresh for user {}", user.getId());
+        // 7A-08: serve the recorded row without a Graph call while it is fresh (plain GETs and
+        // throttled forced refreshes alike), so open tabs and polling cannot exhaust the tenant's Graph budget.
+        Instant recorded = user.getEntraMfaCheckedAt();
+        boolean fresh = recorded != null
+                && recorded.isAfter(Instant.now().minusSeconds(entraProperties.getStatusCacheTtlSeconds()));
+        if (fresh && (!forceRefresh || !allowForcedRefresh(user.getId()))) {
+            return new TwoFactorStatusResponse(true, EntraIdentityModel.WORKFORCE_MEMBER.name(), true,
+                    user.getEntraMfaRegisteredAt() != null, List.of(), recorded,
+                    entraProperties.getMfaSetupUrl(), null);
         }
 
+        if (forceRefresh) {
+            allowForcedRefresh(user.getId()); // records this call so a repeat inside the throttle window is served from cache
+        }
         EntraUserMfaStatus status = directory.getMfaStatus(user.getEntraObjectId().toString());
+        if (status.checkedAt() == null) {
+            // Read failure: never treat it as "not registered". Show the recorded state, flagged stale.
+            boolean wasRegistered = user.getEntraMfaRegisteredAt() != null;
+            return new TwoFactorStatusResponse(
+                    status.applicable(), status.identityModel().name(), status.managedHere(),
+                    wasRegistered, List.of(), user.getEntraMfaCheckedAt(),
+                    entraProperties.getMfaSetupUrl(), status.message(), wasRegistered);
+        }
         cacheStatus(user, status);
 
         return new TwoFactorStatusResponse(

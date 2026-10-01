@@ -2,10 +2,10 @@ name: Indexers CI
 
 on:
   push:
-    branches: [main, feat/**, fix/**]
+    branches: [main, feat/**, fix/**, develop, review/**]
     paths: [indexer/**, .github/workflows/indexers.yml]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths: [indexer/**, .github/workflows/indexers.yml]
 
 concurrency:

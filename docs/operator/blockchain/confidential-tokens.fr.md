@@ -71,6 +71,17 @@ Voir sa section `.env.example` (« Jetons confidentiels (Zama fhEVM) ») pour le
 d'environnement — `ZAMA_CONFIG_PRESET=sepolia`, `ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY` et
 `REGISTERWERK_ZAMA_RELAYER_URL` côté backend.
 
+### Mode production du relayer et révocation des clés de visualisation
+
+!!! warning "Gestion de la clé de déchiffrement de l'opérateur"
+    Avec `RELAYER_PRODUCTION_MODE=true` (défini par défaut dans le chart Helm ; désactivé dans Compose), le relayer refuse de démarrer avec le fournisseur KEK en variable d'environnement (`ENV_VAR`) ou avec un `OPERATOR_DECRYPT_PRIVATE_KEY` en clair. Utilisez un fournisseur KMS (`RELAYER_KEK_PROVIDER=AWS_KMS|GCP_KMS|AZURE_KEY_VAULT` ; actuellement des espaces réservés signalant « not configured », décision en suspens T7-05) ou reconnaissez explicitement l'exception avec `RELAYER_ALLOW_ENV_KEK=true` (journalisée en avertissement). Le mode production exige aussi `OPERATOR_DECRYPT_DURATION_DAYS` explicite (défaut de démo : 365 jours ; décision ouverte T7-07). La dérivation de clé reste volontairement inchangée.
+
+En cas de compromission possible de la clé, la révoquer token par token :
+
+1. Appeler `POST .../admin/confidential-remove-viewer` (`removeViewer`) pour l'adresse du viewer sur **chaque** token.
+2. Générer une nouvelle paire de clés, l'enregistrer avec `confidential-add-viewer` et redéployer `OPERATOR_DECRYPT_PRIVATE_KEY(_WRAPPED)`.
+3. Le retrait n'arrête que les octrois futurs ; les handles déjà déchiffrables le restent.
+
 ## Décryptage du solde investisseur/émetteur/auditeur
 
 La révélation d'un solde confidentiel (ou le cryptage d'un montant de transfert confidentiel) est une opération **côté client**
