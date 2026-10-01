@@ -97,6 +97,15 @@ export class AuthService {
     return payload ? payload['impersonating'] === true : false;
   }
 
+  /** READ_ONLY sessions cannot write; the UI shows a banner and the backend answers 403 IMPERSONATION_READ_ONLY. */
+  getImpersonationMode(): 'READ_ONLY' | 'ACT_ON_BEHALF' | null {
+    return this.tokens.getImpersonationMode();
+  }
+
+  isImpersonationReadOnly(): boolean {
+    return this.isImpersonating() && this.getImpersonationMode() === 'READ_ONLY';
+  }
+
   supportsImpersonation(): boolean {
     return this.tokens.supportsImpersonation();
   }
@@ -105,8 +114,8 @@ export class AuthService {
     return this.tokens.getImpersonationMeta();
   }
 
-  enterImpersonation(impersonationToken: string, entityId: string, entityName: string): Observable<void> {
-    return this.tokens.enterImpersonation(impersonationToken, entityId, entityName);
+  enterImpersonation(handoffCode: string, entityId: string, entityName: string): Observable<void> {
+    return this.tokens.enterImpersonation(handoffCode, entityId, entityName);
   }
 
   exitImpersonation(): Observable<void> {

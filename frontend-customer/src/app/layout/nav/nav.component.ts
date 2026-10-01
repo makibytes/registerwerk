@@ -33,7 +33,10 @@ const { operatorUrl } = environment;
       <div class="impersonation-bar">
         <mat-icon>admin_panel_settings</mat-icon>
         @if (isImpersonating) {
-          <span>Acting as <strong>{{ impersonationEntityName }}</strong></span>
+          <span>Acting as <strong>{{ impersonationEntityName }}</strong>
+            @if (impersonationReadOnly) { (read-only support session — changes are blocked) }
+            @else { (acting on behalf — every action is audited) }
+          </span>
           <div class="imp-actions">
             <button class="imp-btn" type="button" (click)="switchCompany()">Switch company</button>
             <button class="imp-btn imp-btn-exit" type="button" (click)="exitImpersonation()">Exit impersonation</button>
@@ -605,6 +608,7 @@ export class NavComponent implements OnInit {
   isImpersonating = false;
   canImpersonate = false;
   impersonationEntityName = '';
+  impersonationReadOnly = false;
   mobileMenuOpen = false;
 
   /**
@@ -629,6 +633,7 @@ export class NavComponent implements OnInit {
     this.userEmail = this.auth.getUserEmail();
     this.isImpersonating = this.auth.isImpersonating();
     this.canImpersonate = this.auth.hasRole('REGISTRY_ADMIN');
+    this.impersonationReadOnly = this.auth.isImpersonationReadOnly();
     const meta = this.auth.getImpersonationMeta();
     this.impersonationEntityName = meta?.entityName ?? '';
     this.eligibleWorkspaces = this.workspaceService.eligibleWorkspaces();

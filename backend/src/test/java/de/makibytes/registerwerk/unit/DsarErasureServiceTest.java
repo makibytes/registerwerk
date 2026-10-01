@@ -93,7 +93,8 @@ class DsarErasureServiceTest {
 
         ErasureRequest resolved = service.complete(id, OPERATOR, "erased marketing prefs; kept KYC (GwG §8)", APPROVER);
 
-        assertThat(resolved.getStatus()).isEqualTo(ErasureRequestStatus.COMPLETED);
+        assertThat(resolved.getStatus()).isEqualTo(ErasureRequestStatus.COMPLETED_PARTIAL);
+        assertThat(resolved.getResolutionDetail()).contains("notCovered").contains("screening runs").contains("retained");
         assertThat(resolved.getReviewedBy()).isEqualTo(OPERATOR);
         assertThat(resolved.getReviewedAt()).isNotNull();
         assertThat(resolved.getResolutionNote()).contains("KYC");
@@ -166,7 +167,7 @@ class DsarErasureServiceTest {
         verify(eventPublisher, never()).publishEvent(any());
 
         ErasureRequest done = service.complete(id, OPERATOR, "note", APPROVER, "Postal notice via issuer");
-        assertThat(done.getStatus()).isEqualTo(ErasureRequestStatus.COMPLETED);
+        assertThat(done.getStatus()).isEqualTo(ErasureRequestStatus.COMPLETED_PARTIAL);
         assertThat(done.getRetainedNoticeChannel()).isEqualTo("Postal notice via issuer");
     }
 

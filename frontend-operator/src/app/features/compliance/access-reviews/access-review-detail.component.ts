@@ -22,6 +22,7 @@ import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerw
 import { AccessReviewCampaign, AccessReviewItem, AccessReviewService } from '../../../core/api/access-review.service';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 import { AuthService } from '../../../core/auth/auth.service';
+import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/components/step-up/step-up-dialog.component';
 
 @Component({
   selector: 'app-access-review-detail',
@@ -61,6 +62,8 @@ import { AuthService } from '../../../core/auth/auth.service';
         <span>{{ pendingCount() }} pending</span>
         <span>{{ confirmedCount() }} confirmed</span>
         <span>{{ revokedCount() }} revoked</span>
+        @if (proposedCount() > 0) { <span>{{ proposedCount() }} awaiting second reviewer</span> }
+        @if (staleCount() > 0) { <span>{{ staleCount() }} stale (roles changed, reopen)</span> }
         @if (campaign.dueDate) { <span>Due {{ campaign.dueDate }}</span> }
       </div>
     }
@@ -84,6 +87,19 @@ import { AuthService } from '../../../core/auth/auth.service';
         <button type="button" mat-stroked-button color="warn" (click)="openRevokeDialog(item)">
           <mat-icon>block</mat-icon>
           Revoke
+        </button>
+      } @else if (item.decision === 'REVOKE_PROPOSED' && campaign?.status === 'OPEN') {
+        <span class="notes" matTooltip="A privileged account: a different reviewer must confirm the revocation">Needs second reviewer</span>
+        <button type="button" mat-stroked-button color="warn" (click)="decide(item, 'REVOKED')">
+          <mat-icon>block</mat-icon>
+          Confirm revoke
+        </button>
+        <button type="button" mat-stroked-button color="primary" (click)="decide(item, 'CONFIRMED')">Keep access</button>
+      } @else if ((item.decision === 'STALE' || item.decision === 'CONFIRMED' || item.decision === 'REVOKED') && campaign?.status === 'OPEN' && canCloseCampaign) {
+        <button type="button" mat-stroked-button (click)="reopen(item)"
+                matTooltip="Reopen the decision (re-snapshots the roles; never re-enables an account)">
+          <mat-icon>restart_alt</mat-icon>
+          Reopen
         </button>
       } @else if (item.notes) {
         <span class="notes" [matTooltip]="item.notes">{{ item.decision }}</span>
@@ -157,12 +173,15 @@ export class AccessReviewDetailComponent implements OnInit {
     { key: 'fullName', header: 'Name', cell: (i: AccessReviewItem) => i.fullName ?? '—' },
     { key: 'roles', header: 'Roles (at review start)', cell: (i: AccessReviewItem) => i.roles, type: 'mono' },
     { key: 'decision', header: 'Decision', cell: (i: AccessReviewItem) => i.decision, type: 'badge' },
+    { key: 'sod', header: 'SoD warning', cell: (i: AccessReviewItem) => i.sodConflicts ?? '—' },
     { key: 'reviewedAt', header: 'Reviewed', cell: (i: AccessReviewItem) => i.reviewedAt ?? '—' },
   ];
 
   pendingCount(): number { return this.items.filter(i => i.decision === 'PENDING').length; }
   confirmedCount(): number { return this.items.filter(i => i.decision === 'CONFIRMED').length; }
   revokedCount(): number { return this.items.filter(i => i.decision === 'REVOKED').length; }
+  proposedCount(): number { return this.items.filter(i => i.decision === 'REVOKE_PROPOSED').length; }
+  staleCount(): number { return this.items.filter(i => i.decision === 'STALE').length; }
 
   ngOnInit(): void {
     this.load();
@@ -193,13 +212,40 @@ export class AccessReviewDetailComponent implements OnInit {
     });
   }
 
+  /** Decisions and reopening are step-up actions: collect a fresh TOTP code first. */
+  private withStepUp(reason: string, then: (stepUpToken: string) => void): void {
+    this.dialog.open(StepUpDialogComponent, {
+      data: { requireDualControl: false, reason, action: 'ACCESS_REVIEW_DECISION' },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (result?.stepUpToken) then(result.stepUpToken);
+    });
+  }
+
   decide(item: AccessReviewItem, decision: 'CONFIRMED' | 'REVOKED'): void {
-    this.accessReviewService.recordDecision(this.campaignId(), item.id, decision).subscribe({
-      next: () => {
-        this.snackBar.open(`${item.email}: ${decision.toLowerCase()}.`, 'Dismiss', { duration: 4000 });
-        this.load();
-      },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to record decision.', 'Dismiss', { duration: 6000 }),
+    this.withStepUp(`Access review: ${decision.toLowerCase()} ${item.email}`, token => {
+      this.accessReviewService.recordDecision(this.campaignId(), item.id, decision, token).subscribe({
+        next: (updated) => {
+          const msg = updated.decision === 'REVOKE_PROPOSED'
+            ? `${item.email}: revocation proposed, a second reviewer must confirm.`
+            : `${item.email}: ${updated.decision.toLowerCase()}.`;
+          this.snackBar.open(msg, 'Dismiss', { duration: 5000 });
+          this.load();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to record decision.', 'Dismiss', { duration: 6000 }),
+      });
+    });
+  }
+
+  reopen(item: AccessReviewItem): void {
+    const reason = prompt(`Reason for reopening the decision on ${item.email} (required, audited):`);
+    if (!reason || !reason.trim()) return;
+    this.withStepUp(`Access review: reopen ${item.email}`, token => {
+      this.accessReviewService.reopenItem(this.campaignId(), item.id, reason.trim(), token).subscribe({
+        next: () => { this.snackBar.open(`${item.email}: reopened.`, 'Dismiss', { duration: 4000 }); this.load(); },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to reopen.', 'Dismiss', { duration: 6000 }),
+      });
     });
   }
 
@@ -212,13 +258,18 @@ export class AccessReviewDetailComponent implements OnInit {
   submitRevoke(): void {
     if (!this.selectedItem || !this.decisionNotes.trim()) return;
     const item = this.selectedItem;
+    const notes = this.decisionNotes.trim();
     this.dialog.closeAll();
-    this.accessReviewService.recordDecision(this.campaignId(), item.id, 'REVOKED', this.decisionNotes.trim()).subscribe({
-      next: () => {
-        this.snackBar.open(`${item.email}: access revoked.`, 'Dismiss', { duration: 5000 });
-        this.load();
-      },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to revoke access.', 'Dismiss', { duration: 6000 }),
+    this.withStepUp(`Access review: revoke ${item.email}`, token => {
+      this.accessReviewService.recordDecision(this.campaignId(), item.id, 'REVOKED', token, notes).subscribe({
+        next: (updated) => {
+          this.snackBar.open(updated.decision === 'REVOKE_PROPOSED'
+            ? `${item.email}: revocation proposed, a second reviewer must confirm.`
+            : `${item.email}: access revoked.`, 'Dismiss', { duration: 5000 });
+          this.load();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to revoke access.', 'Dismiss', { duration: 6000 }),
+      });
     });
   }
 

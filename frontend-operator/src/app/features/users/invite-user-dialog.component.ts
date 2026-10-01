@@ -1,13 +1,14 @@
 import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { AdminUserService, AppUserRole, OperatorUser } from '../../core/api/admin-user.service';
+import { AdminUserService, AppUserRole, OperatorUser, isGatedOperatorAccount } from '../../core/api/admin-user.service';
+import { openStepUp } from '../../shared/components/step-up/open-step-up';
 import { EntityService } from '../../core/api/entity.service';
 import { LegalEntity } from '../../core/models';
 
@@ -107,6 +108,7 @@ export class InviteUserDialogComponent implements OnInit {
   private readonly entityService = inject(EntityService);
   private readonly dialogRef = inject<MatDialogRef<InviteUserDialogComponent, OperatorUser>>(MatDialogRef);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly dialog = inject(MatDialog);
 
   email = '';
   fullName = '';
@@ -130,20 +132,31 @@ export class InviteUserDialogComponent implements OnInit {
   }
 
   invite(): void {
-    this.saving = true;
     this.error = '';
-    this.adminUserService.inviteUser({
-      email: this.email,
-      name: this.fullName,
-      legalEntityId: this.selectedEntityId || null,
-      roles: this.selectedRoles,
-    }).subscribe({
-      next: (user) => this.dialogRef.close(user),
-      error: (err) => {
-        this.saving = false;
-        this.error = err?.error?.message ?? 'Failed to send invitation.';
-        this.cdr.markForCheck();
-      },
+    // Operator accounts and administrative roles are gated: step-up plus a second approver (outside bootstrap).
+    const gated = isGatedOperatorAccount(this.selectedRoles, this.selectedEntityId || null);
+    openStepUp(this.dialog, {
+      requireDualControl: gated, dualControlOptional: true,
+      reason: `Invite ${this.email}`,
+      action: 'OPERATOR_USER_INVITE',
+      target: 'POST /api/v1/admin/users',
+    }).subscribe(tokens => {
+      if (!tokens) return;
+      this.saving = true;
+      this.cdr.markForCheck();
+      this.adminUserService.inviteUser({
+        email: this.email,
+        name: this.fullName,
+        legalEntityId: this.selectedEntityId || null,
+        roles: this.selectedRoles,
+      }, tokens).subscribe({
+        next: (user) => this.dialogRef.close(user),
+        error: (err) => {
+          this.saving = false;
+          this.error = err?.error?.message ?? 'Failed to send invitation.';
+          this.cdr.markForCheck();
+        },
+      });
     });
   }
 }

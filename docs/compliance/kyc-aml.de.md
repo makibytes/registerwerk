@@ -147,6 +147,31 @@ if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
 
 ---
 
+## CDD-Kontrollen für die Entity-Freigabe { #cdd-controls }
+
+`POST /api/v1/entities/{id}/kyc/approve` (Step-up und zweiter Freigeber) führt jetzt dieselben Nachweisprüfungen aus wie die Jurisdiktionsfreigabe, zusätzlich die Abdeckung der wirtschaftlich Berechtigten. Alle Schwellen sind Übergangswerte bis zu den Entscheidungen des Betreibers zur Risikomethodik; sie sind keine Rechtsaussage.
+
+| Prüfung | Regel |
+|---|---|
+| Entity-Status | nur `ACTIVE` oder `PENDING_ONBOARDING` |
+| Screening | kein ungelöster Treffer der Entity; jeder aktuelle wirtschaftlich Berechtigte gescreent und unauffällig (ein beendeter Berechtigter mit offenem Treffer blockiert weiter) |
+| Dokumenten-Checkliste | Heimat-Jurisdiktion (aus dem Registrierungsland oder `jurisdiction` im Body); eine unvollständige Checkliste braucht `overrideNote` und einen `REGISTRY_ADMIN` (Risikoakzeptanz, im Nachweisdatensatz gespeichert) |
+| Wirtschaftlich Berechtigte | mindestens einer; identifizierter Anteil von mindestens 75 % oder ein dokumentierter Fallback auf die oberste Führungsebene (`controlType=SENIOR_MANAGING_OFFICIAL` mit Begründung), der ebenfalls `overrideNote` und einen `REGISTRY_ADMIN` braucht |
+| Gültigkeit | `expiryDate` darf `registerwerk.kyc.max-validity-months` (Standard 12) nicht überschreiten und wird auf das EDD-Überprüfungsdatum einer verknüpften bestätigten PEP begrenzt |
+
+Jede Freigabe schreibt einen `kyc_approval_record` (Checklisten-Snapshot, Override-Notiz, Abdeckung, zweiter Freigeber); das Audit-Ereignis `KYC_APPROVED` trägt dieselben Daten. `KycJurisdictionApproval` bleibt beratend: kein Gate liest es.
+
+!!! note "Bestehende Freigaben werden nicht herabgestuft"
+    `GET /api/v1/kyc/evidence-gaps` listet `APPROVED`-Entities, die die heutigen Prüfungen nicht bestehen würden (unvollständige Checkliste, kein wirtschaftlich Berechtigter, ungeklärter Anteil, Ablauf über der Grenze, PEP ohne EDD, ungelöstes Screening), zur Bearbeitung bei der nächsten Überprüfung.
+
+**Dokumente.** Der Upload akzeptiert `issueDate` und `expiresAt`. `expiresAt` ist für Reisepass, Identitätsdokument und Registerauszüge Pflicht und darf nicht in der Vergangenheit liegen; ein abgelaufenes Dokument zählt in der Checkliste nicht, und die „zu alt“-Frist beginnt mit `issueDate`, falls angegeben. Auflisten und Herunterladen von Dokumenten (und die Liste der wirtschaftlich Berechtigten) ist auf `REGISTRY_ADMIN`, `COMPLIANCE_OFFICER`, `AUDIT` und den eigenen `COMPANY_ADMIN` der Entity beschränkt; Downloads kommen mit `X-Content-Type-Options: nosniff`.
+
+**Wirtschaftlich Berechtigte.** `ownershipPct` muss größer 0 und höchstens 100 sein, die aktive Summe darf 100 nicht überschreiten; `GET .../beneficial-owners/summary` zeigt den identifizierten Anteil und den ungeklärten Rest. `POST .../{id}/verify` hält Prüfer und Nachweisdokument fest. Das Beenden (`DELETE` mit JSON-Body) braucht Step-up, einen zweiten Freigeber und eine Begründung und wird abgelehnt, solange das Screening der Person ungelöst ist: den Treffer zuerst über den Akzeptanzpfad auflösen. Hinzufügen oder Beenden bei einer `APPROVED`-Entity eröffnet eine Aufgabe `KYC_REVIEW_REQUIRED`; der Status ändert sich nicht automatisch.
+
+**PEP und EDD.** Die Bestätigung eines PEP-Treffers setzt `NaturalPerson.pepStatus=CONFIRMED_PEP`. Eine bestätigte PEP passiert das Screening-Gate nur, solange eine EDD-Freigabe gilt: `POST .../{id}/edd-approvals` (`REGISTRY_ADMIN`, Step-up, zweiter Freigeber, Notiz, Überprüfungsdatum höchstens sechs Monate). Nach dem Überprüfungsdatum blockiert die Person wieder. Es gibt kein Risikorating, keine Länderrisikoliste und keine EDD-Checkliste; das gehört in die Risikoanalyse des Betreibers (GwG § 5).
+
+---
+
 ## Laufende Überwachung { #ongoing-monitoring }
 
 **GwG §10 Abs. 1 Nr. 5** und die Äquivalente in allen vier Gerichtsbarkeiten verlangen eine laufende Überwachung der Geschäftsbeziehungen.

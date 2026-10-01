@@ -64,7 +64,7 @@ class ScreeningServiceAcceptHitTest {
         meterRegistry = new SimpleMeterRegistry();
         service = new ScreeningService(
                 List.<SanctionsScreeningPort>of(), runRepository, hitRepository, events, legalEntityRepository,
-                meterRegistry, naturalPersonResolver);
+                meterRegistry, naturalPersonResolver, ScreeningPolicy.defaults());
     }
 
     private double gauge(String name) {
@@ -155,7 +155,7 @@ class ScreeningServiceAcceptHitTest {
         when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
         SanctionsScreeningPort provider = org.mockito.Mockito.mock(SanctionsScreeningPort.class);
         when(provider.providerName()).thenReturn("test-provider");
-        when(provider.screenEntity(any())).thenReturn(List.of());
+        when(provider.screen(any())).thenReturn(new de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningResult(List.of(), null, null));
         java.util.concurrent.atomic.AtomicReference<ScreeningRun> savedRun =
                 new java.util.concurrent.atomic.AtomicReference<>();
         when(runRepository.save(any(ScreeningRun.class))).thenAnswer(inv -> {
@@ -167,13 +167,13 @@ class ScreeningServiceAcceptHitTest {
                 .thenAnswer(inv -> savedRun.get());
         ScreeningService canonicalService = new ScreeningService(
                 List.of(provider), runRepository, hitRepository, events, legalEntityRepository,
-                new SimpleMeterRegistry(), naturalPersonResolver);
+                new SimpleMeterRegistry(), naturalPersonResolver, ScreeningPolicy.defaults());
 
         canonicalService.screenRegisteredEntity(entityId, ScreeningTrigger.MANUAL);
 
         org.mockito.ArgumentCaptor<ScreeningSubjectDto> subject =
                 org.mockito.ArgumentCaptor.forClass(ScreeningSubjectDto.class);
-        verify(provider).screenEntity(subject.capture());
+        verify(provider).screen(subject.capture());
         assertThat(subject.getValue().name()).isEqualTo("Canonical GmbH");
         assertThat(subject.getValue().countryCode()).isEqualTo("DE");
     }
@@ -204,7 +204,8 @@ class ScreeningServiceAcceptHitTest {
 
         SanctionsScreeningPort provider = org.mockito.Mockito.mock(SanctionsScreeningPort.class);
         when(provider.providerName()).thenReturn("test-provider");
-        when(provider.screenEntity(any(ScreeningSubjectDto.class))).thenReturn(List.of());
+        when(provider.screen(any(ScreeningSubjectDto.class)))
+                .thenReturn(new de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningResult(List.of(), null, null));
         // Own registry, not the shared field from setUp(): registering a second same-named gauge
         // against one registry doesn't rebind it to this instance's AtomicInteger — the first
         // registration (from setUp()'s unused `service`) wins and this instance's updates
@@ -212,7 +213,7 @@ class ScreeningServiceAcceptHitTest {
         SimpleMeterRegistry ownRegistry = new SimpleMeterRegistry();
         ScreeningService serviceWithProvider = new ScreeningService(
                 List.of(provider), runRepository, hitRepository, events, legalEntityRepository, ownRegistry,
-                naturalPersonResolver);
+                naturalPersonResolver, ScreeningPolicy.defaults());
         ScreeningRefreshJob refreshJob = new ScreeningRefreshJob(runRepository, serviceWithProvider, ownRegistry, false);
 
         // The very first save() call inside screenEntity() (before its own try/catch) throws for

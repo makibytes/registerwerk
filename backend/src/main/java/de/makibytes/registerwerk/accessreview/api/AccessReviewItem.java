@@ -51,6 +51,24 @@ public class AccessReviewItem {
     @Column(columnDefinition = "TEXT")
     private String notes;
 
+    /** Enabled flag at snapshot time (always true at campaign start; refreshed on re-open). */
+    @Column(name = "enabled_snapshot", nullable = false)
+    private boolean enabledSnapshot = true;
+
+    /** First reviewer of a privileged revocation (decision REVOKE_PROPOSED). */
+    @Column(name = "proposed_by")
+    private UUID proposedBy;
+
+    @Column(name = "proposed_at")
+    private Instant proposedAt;
+
+    /** Comma-separated segregation-of-duties pairs present in the snapshot (warning only, T6-15). */
+    @Column(name = "sod_conflicts", length = 300)
+    private String sodConflicts;
+
+    @Column(name = "reopened_count", nullable = false)
+    private int reopenedCount;
+
     public UUID getId() { return id; }
     public UUID getCampaignId() { return campaignId; }
     public void setCampaignId(UUID campaignId) { this.campaignId = campaignId; }
@@ -70,4 +88,14 @@ public class AccessReviewItem {
     public void setReviewedAt(Instant reviewedAt) { this.reviewedAt = reviewedAt; }
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+    public boolean isEnabledSnapshot() { return enabledSnapshot; }
+    public void setEnabledSnapshot(boolean enabledSnapshot) { this.enabledSnapshot = enabledSnapshot; }
+    public UUID getProposedBy() { return proposedBy; }
+    public void setProposedBy(UUID proposedBy) { this.proposedBy = proposedBy; }
+    public Instant getProposedAt() { return proposedAt; }
+    public void setProposedAt(Instant proposedAt) { this.proposedAt = proposedAt; }
+    public String getSodConflicts() { return sodConflicts; }
+    public void setSodConflicts(String sodConflicts) { this.sodConflicts = sodConflicts; }
+    public int getReopenedCount() { return reopenedCount; }
+    public void setReopenedCount(int reopenedCount) { this.reopenedCount = reopenedCount; }
 }

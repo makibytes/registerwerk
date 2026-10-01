@@ -84,3 +84,12 @@ Le dépôt n'implémente pas de routage vers les autorités DORA spécifique à 
 schémas officiels, de transmission authentifiée, d'accusés de réception, de corrections, de traitement des
 rejets, ni d'acceptation par une autorité. Enregistrer qu'un incident a été signalé ne constitue pas une preuve
 de dépôt.
+
+## Contrôles des incidents (phase 6)
+
+- **Moment de prise de connaissance** : `awarenessAt` est saisi à la création (par défaut maintenant, jamais dans le futur) et est immuable ; les délais de 24 h et d'un mois courent à partir de celui-ci.
+- **Classification** : `POST /api/v1/dora/incidents/{id}/classify` (step-up, motif obligatoire, critères facultatifs) classe ou reclasse ; le passage à `MAJOR` démarre le délai de 4 h et recalcule tous les délais. Retirer `MAJOR` exige un second approbateur et laisse un marqueur de déclassement. Qui classe reste une décision ouverte de l'opérateur.
+- **Délais** : notification initiale 4 h après la classification / 24 h après la prise de connaissance (le plus court), rapport intermédiaire 72 h après la notification initiale, rapport final 30 jours après la prise de connaissance (prudent). La surveillance s'exécute toutes les 15 minutes jusqu'au rapport final, indépendamment du statut ; les dépassements sont notifiés par e-mail aux administrateurs du registre.
+- **Rapports** : lignes en ajout seul (`INITIAL`, `INTERMEDIATE`, `FINAL`) avec référence de l'autorité ; les premiers horodatages et la référence ne peuvent pas être écrasés. `REPORTED_TO_AUTHORITY` n'est défini que par l'enregistrement du rapport final. La clôture d'un incident `MAJOR` exige les preuves des rapports initial et final et un second approbateur.
+- **Brouillons automatiques** : une écriture d'audit définitivement échouée ouvre un brouillon non classé qu'une personne doit classer.
+- Les exports CSV étiquettent correctement les délais et neutralisent les formules de tableur dans les cellules de texte.

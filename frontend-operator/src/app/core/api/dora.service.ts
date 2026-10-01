@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { HttpHeaders } from '@angular/common/http';
 import { IctIncident, ResilienceTest, ThirdPartyProvider } from '../models';
 
 export interface ProviderRequest {
@@ -36,23 +37,51 @@ export class DoraService {
     description?: string;
     category: string;
     severity: string;
+    awarenessAt?: string;
+    /** Mandatory for severity MAJOR. */
+    classificationReason?: string;
+    classificationCriteria?: Record<string, unknown>;
     sourceEventType?: string;
     sourceEventRef?: string;
   }): Observable<IctIncident> {
     return this.http.post<IctIncident>(`${this.base}/incidents`, body);
   }
 
+  getIncident(id: string): Observable<IctIncident> {
+    return this.http.get<IctIncident>(`${this.base}/incidents/${id}`);
+  }
+
+  /**
+   * (Re)classifies: severity + mandatory reason. Step-up (`DORA_INCIDENT_CLASSIFY`); withdrawing MAJOR also needs
+   * a second approver (`DORA_INCIDENT_DOWNGRADE`).
+   */
+  classifyIncident(id: string, body: { severity: string; reason: string; criteria?: Record<string, unknown> },
+                   stepUpToken: string, dualControlToken?: string): Observable<IctIncident> {
+    return this.http.post<IctIncident>(`${this.base}/incidents/${id}/classify`, body,
+      { headers: DoraService.headers(stepUpToken, dualControlToken) });
+  }
+
+  /** Closing a MAJOR incident needs step-up and a second approver (`DORA_INCIDENT_CLOSE`). */
   updateStatus(id: string, body: {
     status: string;
     rootCause?: string;
     remediationSteps?: string;
-  }): Observable<IctIncident> {
-    return this.http.patch<IctIncident>(`${this.base}/incidents/${id}/status`, body);
+  }, stepUpToken?: string, dualControlToken?: string): Observable<IctIncident> {
+    return this.http.patch<IctIncident>(`${this.base}/incidents/${id}/status`, body,
+      stepUpToken ? { headers: DoraService.headers(stepUpToken, dualControlToken) } : {});
+  }
+
+  private static headers(stepUpToken: string, dualControlToken?: string): HttpHeaders {
+    let headers = new HttpHeaders({ Authorization: `Bearer ${stepUpToken}` });
+    if (dualControlToken) headers = headers.set('X-Dual-Control-Token', dualControlToken);
+    return headers;
   }
 
   reportToAuthority(id: string, body: {
     authorityRef: string;
-    isFinalReport: boolean;
+    reportType: 'INITIAL' | 'INTERMEDIATE' | 'FINAL';
+    note?: string;
+    submittedAt?: string;
   }): Observable<IctIncident> {
     return this.http.post<IctIncident>(`${this.base}/incidents/${id}/report-to-authority`, body);
   }

@@ -93,7 +93,7 @@ export class HandoffComponent implements OnInit {
   ngOnInit(): void {
     const fragment = window.location.hash.slice(1);
     const params = new URLSearchParams(fragment);
-    const token = params.get('token');
+    const code = params.get('code');
     const entityId = params.get('entityId');
     const entityName = params.get('entityName') ?? '';
 
@@ -106,8 +106,8 @@ export class HandoffComponent implements OnInit {
       return;
     }
 
-    if (token && entityId) {
-      this.auth.enterImpersonation(token, entityId, entityName).subscribe({
+    if (code && entityId) {
+      this.auth.enterImpersonation(code, entityId, entityName).subscribe({
         next: () => this.router.navigate(['/dashboard']),
         error: () => { this.failed = true; },
       });

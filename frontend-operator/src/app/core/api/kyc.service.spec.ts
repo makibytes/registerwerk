@@ -66,10 +66,25 @@ describe('KycService', () => {
     });
 
     it('approveKyc() POSTs the expiry date to the approve sub-path', () => {
-        service.approveKyc('entity-1', '2027-01-01').subscribe();
+        service.approveKyc('entity-1', { expiryDate: '2027-01-01' }).subscribe();
         const req = httpMock.expectOne(`${base}/entity-1/kyc/approve`);
         expect(req.request.method).toBe('POST');
         expect(req.request.body).toEqual({ expiryDate: '2027-01-01' });
+        req.flush({});
+    });
+
+    it('approveKyc() carries the administrator override note', () => {
+        service.approveKyc('entity-1', { overrideNote: 'documented exception' }).subscribe();
+        const req = httpMock.expectOne(`${base}/entity-1/kyc/approve`);
+        expect(req.request.body).toEqual({ overrideNote: 'documented exception' });
+        req.flush({});
+    });
+
+    it('uploadDocument() sends issueDate and expiresAt when given', () => {
+        const file = new File(['x'], 'p.pdf');
+        service.uploadDocument('entity-1', file, 'PASSPORT', undefined, { expiresAt: '2030-01-01' }).subscribe();
+        const req = httpMock.expectOne(`${base}/entity-1/kyc/documents`);
+        expect((req.request.body as FormData).get('expiresAt')).toBe('2030-01-01');
         req.flush({});
     });
 
@@ -141,7 +156,7 @@ describe('KycService', () => {
             expect(req.request.headers.get('X-Dual-Control-Token')).toBe('dc');
             req.flush({});
         };
-        service.approveKyc('entity-1', '2027-01-01', tokens).subscribe();
+        service.approveKyc('entity-1', { expiryDate: '2027-01-01' }, tokens).subscribe();
         expectTokens(`${base}/entity-1/kyc/approve`);
         service.approveJurisdiction('entity-1', 'DE_EWPG', undefined, tokens).subscribe();
         expectTokens(`${base}/entity-1/kyc/jurisdictions/DE_EWPG/approve`);

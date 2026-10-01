@@ -9,21 +9,23 @@ export interface TotpSubmitState {
 /**
  * Shared loading/error/subscribe shape for the two dialogs that exchange a TOTP code for a
  * step-up token ({@link StepUpDialogComponent} and {@link ApprovalTokenGeneratorDialogComponent})
- * — only what happens on success differs between them.
+ * — only what happens on success differs between them. `approval` is set only when minting a
+ * dual-control approver token (action + the exact request being approved); the initiator's own
+ * token carries neither.
  */
 export function submitTotpForStepUpToken(
   stepUpService: StepUpService,
   cdr: ChangeDetectorRef,
   state: TotpSubmitState,
   totpCode: string,
-  action: string,
+  approval: { action: string; target?: string; targetBody?: unknown } | null,
   onSuccess: (res: StepUpTokenResponse) => void,
 ): void {
   state.loading = true;
   state.errorMessage = null;
   cdr.markForCheck();
 
-  stepUpService.issueToken(totpCode.trim(), action).subscribe({
+  stepUpService.issueToken(totpCode.trim(), approval?.action, approval?.target, approval?.targetBody).subscribe({
     next: (res) => {
       state.loading = false;
       onSuccess(res);

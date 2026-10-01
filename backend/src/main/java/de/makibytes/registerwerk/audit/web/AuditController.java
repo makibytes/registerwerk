@@ -12,7 +12,6 @@ import java.util.UUID;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -98,23 +97,50 @@ public class AuditController {
             @RequestParam(required = false) UUID actorId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) Long afterSeq,
             @RequestParam(defaultValue = "" + MAX_EXPORT_ROWS) @Min(1) @Max(MAX_EXPORT_ROWS) int limit) {
-        Pageable pageable = PageRequest.of(0, limit, Sort.by("occurredAt").ascending());
-        List<AuditEventView> events = auditApi.findForExport(
-                subjectType, subjectId, eventType, actorId, from, to, pageable);
-        String csv = toCsv(events);
+        List<AuditEventView> fetched = auditApi.findForExport(
+                subjectType, subjectId, eventType, actorId, from, to, afterSeq, PageRequest.of(0, limit + 1));
+        boolean truncated = fetched.size() > limit;
+        List<AuditEventView> events = truncated ? fetched.subList(0, limit) : fetched;
+        String csv = exportHeader(events, truncated) + toCsv(events);
         return ResponseEntity.ok()
                 .header("Content-Disposition", "attachment; filename=\"audit-export.csv\"")
                 .body(csv);
     }
 
+    /**
+     * Completeness block ({@code # key=value} lines) printed before the CSV header and covered by the
+     * file signature: sequence range, row count, truncation + continuation cursor, and the chain tip
+     * at export time. Rows carry {@code prevHash}/{@code entryHash}, so a verifier can check the links
+     * between consecutive rows and compare the last row with {@code tipEntryHash}.
+     */
+    private String exportHeader(List<AuditEventView> events, boolean truncated) {
+        Long first = events.isEmpty() ? null : events.get(0).sequenceNo();
+        Long last = events.isEmpty() ? null : events.get(events.size() - 1).sequenceNo();
+        var tip = auditApi.chainTip();
+        StringBuilder sb = new StringBuilder();
+        sb.append("# exportFormat=registerwerk-audit-export/2\r\n");
+        sb.append("# firstSeq=").append(first == null ? "" : first).append("\r\n");
+        sb.append("# lastSeq=").append(last == null ? "" : last).append("\r\n");
+        sb.append("# rowCount=").append(events.size()).append("\r\n");
+        sb.append("# truncated=").append(truncated).append("\r\n");
+        sb.append("# nextAfterSeq=").append(truncated && last != null ? last : "").append("\r\n");
+        sb.append("# tipSeq=").append(tip == null || tip.sequenceNo() == null ? "" : tip.sequenceNo()).append("\r\n");
+        sb.append("# tipEntryHash=").append(tip == null || tip.entryHashHex() == null ? "" : tip.entryHashHex()).append("\r\n");
+        sb.append("# exportedAt=").append(Instant.now()).append("\r\n");
+        return sb.toString();
+    }
+
     private String toCsv(List<AuditEventView> events) {
         List<String> header = List.of(
-                "id", "eventType", "subjectType", "subjectId", "actorId", "actorRole", "occurredAt", "payload");
+                "id", "eventType", "subjectType", "subjectId", "actorId", "actorRole", "occurredAt", "payload",
+                "sequenceNo", "correlationId", "reversesEventId");
         List<List<Object>> rows = events.stream().map(e -> List.<Object>of(
                 e.id(), e.eventType(), nullToEmpty(e.subjectType()), nullToEmpty(e.subjectId()),
                 nullToEmpty(e.actorId()), nullToEmpty(e.actorRole()), e.occurredAt(),
-                serializePayload(e.payload())
+                serializePayload(e.payload()), nullToEmpty(e.sequenceNo()),
+                nullToEmpty(e.correlationId()), nullToEmpty(e.reversesEventId())
         )).toList();
         return CsvWriter.write(header, rows);
     }
@@ -140,11 +166,13 @@ public class AuditController {
             @RequestParam(required = false) UUID actorId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) Long afterSeq,
             @RequestParam(defaultValue = "" + MAX_EXPORT_ROWS) @Min(1) @Max(MAX_EXPORT_ROWS) int limit) {
-        Pageable pageable = PageRequest.of(0, limit, Sort.by("occurredAt").ascending());
-        List<AuditEventView> events = auditApi.findForExport(
-                subjectType, subjectId, eventType, actorId, from, to, pageable);
-        String csv = toSignedCsv(events);
+        List<AuditEventView> fetched = auditApi.findForExport(
+                subjectType, subjectId, eventType, actorId, from, to, afterSeq, PageRequest.of(0, limit + 1));
+        boolean truncated = fetched.size() > limit;
+        List<AuditEventView> events = truncated ? fetched.subList(0, limit) : fetched;
+        String csv = exportHeader(events, truncated) + toSignedCsv(events);
         byte[] digest = sha256(csv.getBytes(StandardCharsets.UTF_8));
         String digestHex = HexFormat.of().formatHex(digest);
 
@@ -181,12 +209,15 @@ public class AuditController {
     private String toSignedCsv(List<AuditEventView> events) {
         List<String> header = List.of(
                 "id", "eventType", "subjectType", "subjectId", "actorId", "actorRole", "occurredAt", "payload",
-                "sequenceNo", "entryHash", "entrySig");
+                "sequenceNo", "entryHash", "entrySig", "canonVersion", "prevHash", "correlationId", "reversesEventId",
+                "recordedAt");
         List<List<Object>> rows = events.stream().map(e -> List.<Object>of(
                 e.id(), e.eventType(), nullToEmpty(e.subjectType()), nullToEmpty(e.subjectId()),
                 nullToEmpty(e.actorId()), nullToEmpty(e.actorRole()), e.occurredAt(),
                 serializePayload(e.payload()), nullToEmpty(e.sequenceNo()),
-                nullToEmpty(e.entryHashHex()), nullToEmpty(e.entrySigHex())
+                nullToEmpty(e.entryHashHex()), nullToEmpty(e.entrySigHex()), e.canonVersion(),
+                nullToEmpty(e.prevHashHex()), nullToEmpty(e.correlationId()), nullToEmpty(e.reversesEventId()),
+                nullToEmpty(e.recordedAt())
         )).toList();
         return CsvWriter.write(header, rows);
     }

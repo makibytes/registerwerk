@@ -67,26 +67,12 @@ class TrpAdapter implements TravelRuleProtocolPort {
     public String protocolName() { return "TRP"; }
 
     @Override
-    public CompletableFuture<String> send(UUID transferId, Ivms101.TravelRuleMessage payload) {
+    public CompletableFuture<String> send(UUID transferId, Ivms101.TravelRuleMessage payload, VaspInfo beneficiary) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                Optional<VaspInfo> beneficiary = payload.beneficiaryVasp() != null
-                        && payload.beneficiaryVasp().beneficiaryVasp() != null
-                        ? Optional.of(new VaspInfo(
-                                payload.beneficiaryVasp().beneficiaryVasp().vaspId(),
-                                payload.beneficiaryVasp().beneficiaryVasp().legalName(),
-                                "", ""))
-                        : Optional.empty();
-
-                String endpoint = beneficiary
-                        .map(VaspInfo::endpoint)
-                        .filter(e -> !e.isBlank())
-                        .orElse(config.getEndpoint());
-
-                if (endpoint == null || endpoint.isBlank()) {
-                    throw new IllegalStateException("No TRP delivery endpoint is configured");
-                }
-
+                // The directory endpoint of the resolved beneficiary VASP wins; the static endpoint is
+                // only a fallback for directories that publish none.
+                String endpoint = deliveryEndpoint(beneficiary, config);
                 RestClient mTlsClient = client(endpoint, sslContext);
                 String body = mapper.writeValueAsString(Map.of(
                         "transferId", transferId.toString(),
@@ -111,6 +97,49 @@ class TrpAdapter implements TravelRuleProtocolPort {
         });
     }
 
+    /** Picks and validates the delivery endpoint (https only, no private/loopback/link-local host, allow-list). */
+    static String deliveryEndpoint(VaspInfo beneficiary, TravelRuleProperties.Trp config) {
+        String endpoint = beneficiary != null && beneficiary.endpoint() != null && !beneficiary.endpoint().isBlank()
+                ? beneficiary.endpoint().trim()
+                : config.getEndpoint();
+        if (endpoint == null || endpoint.isBlank()) {
+            throw new IllegalStateException("No TRP delivery endpoint is configured or published by the directory");
+        }
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(endpoint);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("TRP delivery endpoint is not a valid URI");
+        }
+        boolean insecure = config.isAllowInsecureEndpoints();
+        if (uri.getHost() == null || (!"https".equalsIgnoreCase(uri.getScheme())
+                && !(insecure && "http".equalsIgnoreCase(uri.getScheme())))) {
+            throw new IllegalStateException("TRP delivery endpoint must be an https URL: " + endpoint);
+        }
+        if (uri.getUserInfo() != null) {
+            throw new IllegalStateException("TRP delivery endpoint must not embed credentials");
+        }
+        List<String> allowed = config.getAllowedHosts();
+        if (allowed != null && !allowed.isEmpty()
+                && allowed.stream().noneMatch(h -> h.equalsIgnoreCase(uri.getHost()))) {
+            throw new IllegalStateException("TRP delivery host " + uri.getHost() + " is not on the allow-list");
+        }
+        if (!insecure) {
+            try {
+                for (java.net.InetAddress a : java.net.InetAddress.getAllByName(uri.getHost())) {
+                    if (a.isAnyLocalAddress() || a.isLoopbackAddress() || a.isLinkLocalAddress()
+                            || a.isSiteLocalAddress() || a.isMulticastAddress()) {
+                        throw new IllegalStateException("TRP delivery host " + uri.getHost()
+                                + " resolves to a non-public address");
+                    }
+                }
+            } catch (java.net.UnknownHostException e) {
+                throw new IllegalStateException("TRP delivery host " + uri.getHost() + " cannot be resolved");
+            }
+        }
+        return endpoint;
+    }
+
     @Override
     public Optional<VaspInfo> lookupVasp(String walletAddress) {
         try {
@@ -126,7 +155,8 @@ class TrpAdapter implements TravelRuleProtocolPort {
                     String.valueOf(response.get("did")),
                     String.valueOf(response.getOrDefault("name", "")),
                     String.valueOf(response.getOrDefault("country", "")),
-                    String.valueOf(response.getOrDefault("endpoint", ""))
+                    String.valueOf(response.getOrDefault("endpoint", "")),
+                    response.get("lei") == null ? null : String.valueOf(response.get("lei"))
             ));
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) {

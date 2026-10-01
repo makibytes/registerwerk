@@ -11,7 +11,7 @@ import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
-import de.makibytes.registerwerk.asset.web.dto.AssetDocumentResponse;
+import de.makibytes.registerwerk.asset.web.dto.PublicTermSheetResponse;
 import de.makibytes.registerwerk.kyc.web.dto.JurisdictionRequirementResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ContentDisposition;
@@ -76,15 +76,16 @@ public class PublicController {
     }
 
     /**
-     * Returns term sheet metadata for an asset identified by ISIN (no auth required).
-     * Enables BaFin and other regulators to discover the term sheet by ISIN.
+     * Returns term sheet metadata for an issued asset identified by ISIN (no auth required): the current,
+     * deterministic version with its content hash. Not an assertion that the document is the legally
+     * operative prospectus.
      */
     @GetMapping("/assets/{isin}/termsheet")
-    public ResponseEntity<AssetDocumentResponse> getTermSheetByIsin(@PathVariable String isin) {
+    public ResponseEntity<PublicTermSheetResponse> getTermSheetByIsin(@PathVariable String isin) {
         Asset asset = assetRepository.findByIsin(isin)
             .orElseThrow(() -> new EntityNotFoundException("Asset", "isin", isin));
-        AssetDocument doc = firstTermSheet(asset);
-        return ResponseEntity.ok(toDocResponse(doc));
+        TermSheetService.PublicTermSheet sheet = publicTermSheet(asset);
+        return ResponseEntity.ok(toDocResponse(sheet.document(), sheet.version()));
     }
 
     /**
@@ -95,7 +96,7 @@ public class PublicController {
     public ResponseEntity<byte[]> downloadTermSheetByIsin(@PathVariable String isin) {
         Asset asset = assetRepository.findByIsin(isin)
             .orElseThrow(() -> new EntityNotFoundException("Asset", "isin", isin));
-        AssetDocument doc = firstTermSheet(asset);
+        AssetDocument doc = publicTermSheet(asset).document();
         byte[] content = termSheetService.getDocumentContent(doc.getId());
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION,
@@ -151,26 +152,25 @@ public class PublicController {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private AssetDocument firstTermSheet(Asset asset) {
-        List<AssetDocument> docs = assetDocumentRepository
-            .findByAssetIdAndDocumentTypeAndDeletedAtIsNull(asset.getId(), AssetDocumentType.TERM_SHEET);
-        if (docs.isEmpty()) {
-            throw new EntityNotFoundException("TermSheet for Asset", asset.getId());
-        }
-        return docs.get(0);
+    /**
+     * Only assets that are ISSUED, SUSPENDED or REDEEMED expose a term sheet, and the version is chosen
+     * deterministically by {@link TermSheetService#publicTermSheet}. Anything else is a plain 404 so the
+     * endpoint does not reveal unreleased assets.
+     */
+    private TermSheetService.PublicTermSheet publicTermSheet(Asset asset) {
+        return termSheetService.publicTermSheet(asset)
+            .orElseThrow(() -> new EntityNotFoundException("TermSheet for Asset", asset.getId()));
     }
 
-    private AssetDocumentResponse toDocResponse(AssetDocument doc) {
-        return new AssetDocumentResponse(
+    private PublicTermSheetResponse toDocResponse(AssetDocument doc, int version) {
+        return new PublicTermSheetResponse(
             doc.getId(), doc.getAssetId(), doc.getDocumentType().name(),
             doc.getSource().name(), doc.getMimeType(), doc.getFileName(),
             doc.getSizeBytes(), doc.getContentHash(),
             doc.getChain() != null ? doc.getChain().name() : null,
             doc.getNetwork() != null ? doc.getNetwork().name() : null,
-            doc.getOnchainUri(), doc.getUploadedAt(), doc.getFetchedAt(), doc.hasContent());
+            doc.getOnchainUri(), doc.getUploadedAt(), doc.getFetchedAt(), doc.hasContent(), version);
     }
-
-
 
     private Map<String, Object> buildPublicAssetResponse(Asset asset) {
         Map<String, Object> response = new java.util.LinkedHashMap<>();

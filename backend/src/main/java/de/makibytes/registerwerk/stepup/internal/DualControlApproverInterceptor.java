@@ -33,10 +33,10 @@ class DualControlApproverInterceptor implements HandlerInterceptor {
     private static final Logger log = LoggerFactory.getLogger(DualControlApproverInterceptor.class);
     static final String DUAL_CONTROL_HEADER = "X-Dual-Control-Token";
 
-    private final StepUpTokenValidator validator;
+    private final DualControlService dualControl;
 
-    DualControlApproverInterceptor(StepUpTokenValidator validator) {
-        this.validator = validator;
+    DualControlApproverInterceptor(DualControlService dualControl) {
+        this.dualControl = dualControl;
     }
 
     @Override
@@ -57,7 +57,8 @@ class DualControlApproverInterceptor implements HandlerInterceptor {
             return true; // the aspect rejects
         }
         try {
-            UUID approverId = validator.validateDualControlToken(token, jwt.getSubject(), stepUp.reason());
+            // Validate only: consumption (single use) happens once, in the aspect.
+            UUID approverId = dualControl.peekApprover(request, jwt, stepUp.reason());
             request.setAttribute(StepUpAttributes.DUAL_CONTROL_APPROVER_ID, approverId);
         } catch (RuntimeException e) {
             log.debug("Dual-control token not accepted in preHandle (aspect will reject): {}", e.getMessage());

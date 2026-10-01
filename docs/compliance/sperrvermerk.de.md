@@ -61,7 +61,9 @@ Die `HolderBlock`-Entität im `kyc`-Modul speichert alle aktiven und historische
 stateDiagram-v2
     [*] --> ACTIVE : create (REGISTRY_ADMIN + step-up + 4-eyes)
     ACTIVE --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
-    ACTIVE --> EXPIRED : expiresAt reached (scheduler)
+    ACTIVE --> EXPIRY_REVIEW : expiresAt reached (scheduler, still blocking)
+    EXPIRY_REVIEW --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
+    ACTIVE --> EXPIRED : expiresAt reached, type in auto-expire-types
     LIFTED --> [*]
     EXPIRED --> [*]
 ```
@@ -78,7 +80,10 @@ stateDiagram-v2
 Es gilt derselbe Step-up-+-Vier-Augen-Ablauf. Das Aufheben ruft das entsprechende On-Chain-`unfreezeAddress()` auf und leert das Feld `HolderBlock.liftedAt`.
 
 **Automatischer Ablauf:**
-Ein `@Scheduled`-Job läuft nächtlich, findet alle `HolderBlock`-Datensätze, bei denen `expiresAt < NOW()` und `liftedAt IS NULL` gilt, versetzt sie in den Status `EXPIRED` und ruft das On-Chain-Unfreeze auf.
+Ein `@Scheduled`-Job läuft nächtlich und findet alle ACTIVE-Blöcke mit `expiresAt < NOW()`. Standardmäßig **läuft kein Block-Typ automatisch ab**: Der Block wechselt in `EXPIRY_REVIEW`, sperrt weiterhin (Register-Gates und On-Chain-Freeze), und es werden eine Operator-Aufgabe und eine Compliance-E-Mail ausgelöst. Aufgehoben wird er nur über die normale Aufhebung (Step-up + zweiter Genehmiger). Typen in `registerwerk.sperrvermerk.auto-expire-types` (Standard leer) werden weiterhin automatisch auf `EXPIRED` gesetzt.
+
+!!! note "Ablaufdaten (6-25)"
+    `expiresAt` muss in der Zukunft liegen. Bei Gerichts- und Behördentypen (`GERICHTSBESCHLUSS`, `PFAENDUNG`, `INSOLVENZ`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `REGULATORISCH`) braucht ein Ablaufdatum zusätzlich `courtRef` oder `documentId`, und der zweite Genehmiger bestätigt es gegen die Anordnung. Wird der letzte Block aufgehoben, werden alle Freezes gelöst, die kein verbleibender Block mehr abdeckt – über alle Assets der Wallet; entitätsbezogene Blöcke gelten für alle Halter-Wallets der Entität. Reine Wallet-Blöcke sind auch für die Repo-Desk- und Lending-Gates sichtbar. Ob ein Typ automatisch ablaufen darf, ist eine geparkte Rechtsentscheidung (T6-11).
 
 ---
 

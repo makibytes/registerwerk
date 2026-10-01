@@ -19,8 +19,21 @@ public class HolderBlock {
     }
 
     public enum Status {
-        ACTIVE, LIFTED, EXPIRED, SUPERSEDED
+        ACTIVE, LIFTED, EXPIRED, SUPERSEDED,
+        /**
+         * {@code expires_at} has passed but a human has not confirmed the expiry (6-25, T6-11): the
+         * block keeps blocking until it is lifted through the normal step-up + second-approver lift.
+         */
+        EXPIRY_REVIEW
     }
+
+    /** Statuses in which a block is still enforced by every gate and by the on-chain freeze. */
+    public static final java.util.List<Status> BLOCKING = java.util.List.of(Status.ACTIVE, Status.EXPIRY_REVIEW);
+
+    /** Types whose expiry is a court/authority decision: an expiry date needs a reference and an approver. */
+    public static final java.util.Set<BlockType> LEGAL_ORDER_TYPES = java.util.EnumSet.of(
+            BlockType.GERICHTSBESCHLUSS, BlockType.PFAENDUNG, BlockType.INSOLVENZ, BlockType.NACHLASSSPERRE,
+            BlockType.VERFUGUNGSVERBOT, BlockType.TOD, BlockType.REGULATORISCH);
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -57,6 +70,13 @@ public class HolderBlock {
 
     @Column(name = "expires_at")
     private Instant expiresAt;
+
+    /** The second approver confirmed the expiry date against the order (legal-order types only). */
+    @Column(name = "expiry_confirmed_by_approver", nullable = false)
+    private boolean expiryConfirmedByApprover = false;
+
+    @Column(name = "expiry_review_at")
+    private Instant expiryReviewAt;
 
     @Column(name = "lifted_at")
     private Instant liftedAt;
@@ -108,6 +128,10 @@ public class HolderBlock {
     public void setStartsAt(Instant v) { this.startsAt = v; }
     public Instant getExpiresAt() { return expiresAt; }
     public void setExpiresAt(Instant v) { this.expiresAt = v; }
+    public boolean isExpiryConfirmedByApprover() { return expiryConfirmedByApprover; }
+    public void setExpiryConfirmedByApprover(boolean v) { this.expiryConfirmedByApprover = v; }
+    public Instant getExpiryReviewAt() { return expiryReviewAt; }
+    public void setExpiryReviewAt(Instant v) { this.expiryReviewAt = v; }
     public Instant getLiftedAt() { return liftedAt; }
     public void setLiftedAt(Instant v) { this.liftedAt = v; }
     public UUID getLiftedBy() { return liftedBy; }

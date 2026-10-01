@@ -265,6 +265,7 @@ export class SidebarComponent {
         // matching this section's roles exactly, and indexer sync health is the mechanical
         // counterpart to Chain Drift right above it.
         { label: 'Indexers', icon: 'sync', route: '/indexers', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+        { label: 'Entity Tasks', icon: 'task_alt', route: '/compliance/entity-tasks', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
         { label: 'Holder Blocks', icon: 'gavel', route: '/compliance/holder-blocks', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'Token Admin Grants', icon: 'admin_panel_settings', route: '/compliance/token-admin-grants', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'CASP Register', icon: 'verified_user', route: '/compliance/casp-register', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },

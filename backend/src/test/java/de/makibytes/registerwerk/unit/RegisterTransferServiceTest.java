@@ -475,7 +475,7 @@ class RegisterTransferServiceTest {
         de.makibytes.registerwerk.kyc.api.HolderBlock unrelated = new de.makibytes.registerwerk.kyc.api.HolderBlock();
         unrelated.setAssetId(UUID.randomUUID());
         unrelated.setBlockType(de.makibytes.registerwerk.kyc.api.HolderBlock.BlockType.INSOLVENZ);
-        when(blockRepository.findByStatusOrderByCreatedAtDesc(de.makibytes.registerwerk.kyc.api.HolderBlock.Status.ACTIVE))
+        when(blockRepository.findByStatusInOrderByCreatedAtDesc(de.makibytes.registerwerk.kyc.api.HolderBlock.BLOCKING))
                 .thenReturn(List.of(assetBlock, walletBlock, unrelated));
 
         service.export(transferId, UUID.randomUUID());

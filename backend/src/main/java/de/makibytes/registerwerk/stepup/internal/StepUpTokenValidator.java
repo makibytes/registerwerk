@@ -47,6 +47,7 @@ class StepUpTokenValidator {
 
     private final JwtDecoder jwtDecoder;
     private final AppUserRepository appUserRepository;
+    private final DualControlProperties properties;
 
     /**
      * @param jwtDecoder deliberately the HS256 decoder <em>by qualifier</em>, not the primary
@@ -57,13 +58,21 @@ class StepUpTokenValidator {
      */
     StepUpTokenValidator(
             @Qualifier("localHs256JwtDecoder") JwtDecoder jwtDecoder,
-            AppUserRepository appUserRepository) {
+            AppUserRepository appUserRepository,
+            DualControlProperties properties) {
         this.jwtDecoder = jwtDecoder;
         this.appUserRepository = appUserRepository;
+        this.properties = properties;
     }
 
     /**
-     * @return the validated approver's user id — previously this was validate-only (void), so
+     * A validated approval. {@code jti}/{@code expiresAt} identify the one-time use; {@code targetDigest}
+     * is what the approver bound the token to (null only while target binding is rolled back).
+     */
+    record Approval(UUID approverId, String jti, Instant expiresAt, String targetDigest) {}
+
+    /**
+     * @return the validated approval (approver id plus the single-use handle) — previously this was validate-only (void), so
      *         every controller wanting to persist "who approved this" had to independently
      *         re-decode the same dual-control JWT itself. Most never did (e.g. {@code
      *         HolderBlockController.lift} left the field {@code null} with a comment claiming
@@ -71,7 +80,7 @@ class StepUpTokenValidator {
      *         that did ({@code AssetTokenAdminGrantController}) duplicated the decode. Returning
      *         it here lets {@code StepUpEnforcementAspect} expose it once, centrally.
      */
-    UUID validateDualControlToken(String rawToken, String primarySub, String action) {
+    Approval validateDualControlToken(String rawToken, String primarySub, String action, String expectedTargetDigest) {
         Jwt approverJwt;
         try {
             approverJwt = jwtDecoder.decode(rawToken);
@@ -102,8 +111,9 @@ class StepUpTokenValidator {
             throw new AccessDeniedException("Dual-control approver token must have acr=stepup.");
         }
         Instant iat = approverJwt.getIssuedAt();
-        if (iat == null || iat.isBefore(Instant.now().minusSeconds(600))) {
-            throw new AccessDeniedException("Dual-control approver step-up token expired (max 10 min).");
+        long window = properties.getWindowSeconds();
+        if (iat == null || iat.isBefore(Instant.now().minusSeconds(window))) {
+            throw new AccessDeniedException("Dual-control approver step-up token expired (max " + window + " s).");
         }
 
         // Must be scoped to this exact action — otherwise one dual-
@@ -119,12 +129,38 @@ class StepUpTokenValidator {
                     + "action='" + action + "'.");
         }
 
+        // Bound to this exact request (method, path, query and, for body-bound reasons, the canonical
+        // body): the scope alone is shared by every endpoint with the same reason, so a token minted to
+        // approve "burn 5 of X" would otherwise approve "burn all of Y". Unbound tokens are refused
+        // (fail closed) unless binding was rolled back for this reason.
+        String digest = null;
+        String jti = approverJwt.getId();
+        if (expectedTargetDigest != null) {
+            String bound = approverJwt.getClaimAsString("stepup_target");
+            boolean equal = bound != null && java.security.MessageDigest.isEqual(
+                    bound.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    expectedTargetDigest.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            if (!equal) {
+                log.warn("Dual-control approver token target mismatch: sub={} action={} bound={}",
+                        approverJwt.getSubject(), action, bound != null);
+                throw new AccessDeniedException(bound == null
+                        ? "Dual-control approver token is not bound to a request. Mint a fresh token with action and target."
+                        : "Dual-control approver token was issued for a different request.");
+            }
+            if (jti == null || jti.isBlank()) {
+                throw new AccessDeniedException("Dual-control approver token has no id and cannot be single-use.");
+            }
+            digest = expectedTargetDigest;
+        }
+
         // Re-check current DB state — the JWT claim reflects role/enabled status only as of
         // token mint time, not now.
         requireCurrentlyEligibleApprover(approverJwt.getSubject(), action);
 
         log.info("Dual-control approved: initiator={} approver={} action={}", primarySub, approverJwt.getSubject(), action);
-        return UUID.fromString(approverJwt.getSubject());
+        Instant exp = approverJwt.getExpiresAt();
+        return new Approval(UUID.fromString(approverJwt.getSubject()), digest != null ? jti : null,
+                exp != null ? exp : Instant.now().plusSeconds(window), digest);
     }
 
     private void requireCurrentlyEligibleApprover(String approverSub, String action) {

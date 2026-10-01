@@ -24,7 +24,9 @@ public record DualControlApprovedEvent(
         String reason,
         String httpMethod,
         String requestPath,
-        String stepUpMode)
+        String stepUpMode,
+        String approvalTokenId,
+        String targetDigest)
         implements AuditableEvent {
 
     @Override public String eventType()   { return "DUAL_CONTROL_APPROVED"; }
@@ -42,6 +44,9 @@ public record DualControlApprovedEvent(
         p.put("httpMethod", httpMethod);
         p.put("requestPath", requestPath);
         p.put("stepUpMode", stepUpMode);
+        // K3 (6-08): which single-use approval and which request digest it was bound to.
+        p.put("approvalTokenId", approvalTokenId);
+        p.put("targetDigest", targetDigest);
         return p;
     }
 }

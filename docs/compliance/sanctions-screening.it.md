@@ -40,7 +40,6 @@ flowchart LR
 
     subgraph Adapters
         A1[OpenSanctionsAdapter — default]
-        A2[RefinitivWorldCheckAdapter — commercial]
     end
 
     subgraph Results
@@ -52,8 +51,7 @@ flowchart LR
     T2 & T3 & T5 --> SBO
     SS & SBO --> P
     P --> A1
-    P --> A2
-    A1 & A2 --> SR
+    A1 --> SR
     SR --> SH
     SH -->|Unresolved| KG[KycService — blocks approval]
 ```
@@ -74,9 +72,11 @@ flowchart LR
 | BaFin / Elenco congelamento UE | BaFin tramite OpenSanctions | Aggiunte di congelamento domestico tedesco |
 | Elenco UE PEP | Aggregazione OpenSanctions | Persone politicamente esposte |
 
-OpenSanctions fornisce un REST API unificato che copre tutti questi elenchi. L'adattatore memorizza nella cache locale il set di dati completo (aggiornato ogni 24 ore) ed esegue corrispondenze fuzzy con nomi di entità, alias, date di nascita e numeri di passaporto.
+OpenSanctions fornisce un'API REST unificata che copre tutti questi elenchi. Ogni screening è una chiamata API (nessun dataset locale). L'adattatore invia nome, paese, LEI e numero di registro per le società, e nome, paese, data di nascita e nazionalità per le persone fisiche; i numeri di passaporto non vengono confrontati. La soglia è `registerwerk.screening.match-threshold` (predefinita 0,85) e viene salvata a ogni esecuzione, insieme alla versione del dataset se l'API la comunica. L'API pubblica gratuita ha limiti di frequenza e nessun SLA; un fornitore con licenza richiede un secondo adattatore per `SanctionsScreeningPort` (nessuno è incluso). Vengono controllati solo l'entità e i suoi titolari effettivi registrati, non amministratori, firmatari, catene societarie né indirizzi wallet.
 
-Per distribuzioni che richiedono maggiore affidabilità, `RefinitivWorldCheckAdapter` (commerciale) può essere configurato impostando `REFINITIV_WORLDCHECK_API_KEY` nell'ambiente.
+**Nuovi controlli e interruzioni.** Una corrispondenza ritrovata, già accettata come falso positivo da un operatore e da un secondo approvatore, viene riportata per 90 giorni (stesso record del fornitore, stessa categoria, punteggio al massimo 0,05 superiore), con una voce di audit per ogni riporto; tutto il resto viene riaperto. Se il fornitore non risponde, l'ultimo buon risultato vale al massimo 24 ore dopo la prima esecuzione fallita (mai se ha più di 72 ore). Lo stato degradato è visibile (metriche `registerwerk_screening_degraded_subjects` e `registerwerk_screening_stale_results`, allarme sottoposto ad audit), i soggetti falliti vengono ritentati ogni 30 minuti, quelli mai controllati restano bloccati e, scaduto il periodo di tolleranza, l'errore blocca di nuovo.
+
+**Categorie.** Una corrispondenza etichettata sia sanzione sia PEP è una corrispondenza di sanzione. Una corrispondenza PEP su una persona fisica non è un falso positivo: viene confermata (`CONFIRM_PEP`, step-up più secondo approvatore) e mantiene il gate chiuso finché non viene registrata un'approvazione di adeguata verifica rafforzata (EDD).
 
 ---
 
@@ -154,7 +154,7 @@ Dopo che viene trovato un riscontro che non può essere risolto immediatamente, 
 
 === "Germania (DE_EWPG)"
 
-    Inviare una segnalazione di operazione sospetta (SAR) alla **BaFin** e, se si sospetta riciclaggio di denaro, alla **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. Il modulo `screening` memorizza il riferimento della SAR in `ScreeningHit.regulatoryRef`.
+    Inviare una segnalazione di operazione sospetta (SAR) alla **BaFin** e, se si sospetta riciclaggio di denaro, alla **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. La presentazione avviene fuori dalla piattaforma; Registerwerk non memorizza alcun riferimento.
 
 === "Lussemburgo (LU_CSSF)"
 
@@ -162,7 +162,7 @@ Dopo che viene trovato un riscontro che non può essere risolto immediatamente, 
 
 === "Francia (FR_AMF)"
 
-    Inviare una segnalazione a **TRACFIN** tramite il meccanismo di notifica AMF/ACPR. `ScreeningService` registra il riferimento TRACFIN una volta presentata la segnalazione.
+    Inviare una segnalazione a **TRACFIN** tramite il meccanismo di notifica AMF/ACPR. La presentazione avviene fuori dalla piattaforma; Registerwerk non memorizza alcun riferimento.
 
 === "Liechtenstein (LI_TVTG)"
 

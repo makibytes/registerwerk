@@ -6,13 +6,19 @@ import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.customer.events.EntityCreatedEvent;
 import de.makibytes.registerwerk.customer.events.EntityUpdatedEvent;
 import de.makibytes.registerwerk.customer.events.EntitySuspendedEvent;
-import de.makibytes.registerwerk.customer.events.EntityDissolvedEvent;
 import de.makibytes.registerwerk.customer.events.EntityReactivatedEvent;
 import de.makibytes.registerwerk.customer.events.EntityRenamedEvent;
 import de.makibytes.registerwerk.customer.events.EntityMergedEvent;
 import de.makibytes.registerwerk.customer.events.ClientClassifiedEvent;
 import de.makibytes.registerwerk.customer.events.RelationshipManagerAssignedEvent;
+import de.makibytes.registerwerk.customer.events.EntityRiskDataChangedEvent;
 import de.makibytes.registerwerk.customer.events.SuitabilityAssessmentRecordedEvent;
+import de.makibytes.registerwerk.customer.api.EntityReactivationGuard;
+import de.makibytes.registerwerk.customer.api.EntityTask;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
+import de.makibytes.registerwerk.customer.api.KycStatus;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
+import de.makibytes.registerwerk.stepup.api.DualControlGate;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
@@ -38,6 +44,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -59,6 +67,10 @@ public class LegalEntityService {
     private final ApplicationEventPublisher eventPublisher;
     private final EntityNumberGenerator entityNumberGenerator;
     private final AppUserRepository appUserRepository;
+    private final CustomerOffboardingService offboardingService;
+    private final EntityTaskPort taskPort;
+    private final DualControlGate dualControlGate;
+    private final List<EntityReactivationGuard> reactivationGuards;
 
     public LegalEntityService(
             LegalEntityRepository legalEntityRepository,
@@ -67,7 +79,11 @@ public class LegalEntityService {
             SuitabilityAssessmentRepository suitabilityAssessmentRepository,
             ApplicationEventPublisher eventPublisher,
             EntityNumberGenerator entityNumberGenerator,
-            AppUserRepository appUserRepository) {
+            AppUserRepository appUserRepository,
+            CustomerOffboardingService offboardingService,
+            EntityTaskPort taskPort,
+            DualControlGate dualControlGate,
+            List<EntityReactivationGuard> reactivationGuards) {
         this.legalEntityRepository = legalEntityRepository;
         this.entityNameHistoryRepository = entityNameHistoryRepository;
         this.entityMergeRecordRepository = entityMergeRecordRepository;
@@ -75,6 +91,10 @@ public class LegalEntityService {
         this.eventPublisher = eventPublisher;
         this.entityNumberGenerator = entityNumberGenerator;
         this.appUserRepository = appUserRepository;
+        this.offboardingService = offboardingService;
+        this.taskPort = taskPort;
+        this.dualControlGate = dualControlGate;
+        this.reactivationGuards = reactivationGuards == null ? List.of() : reactivationGuards;
     }
 
     /**
@@ -116,52 +136,126 @@ public class LegalEntityService {
         return legalEntityRepository.findAll(pageable);
     }
 
+    /** Master-data fields whose change is risk relevant: re-screen and (for APPROVED entities) re-KYC. */
+    private static final List<String> RISK_FIELDS = List.of("currentName", "leiCode", "registrationCountry");
+
     /**
-     * Applies non-null fields from {@code patch} to the stored entity and emits an audit event.
+     * Applies non-null fields from {@code patch} to the stored entity and emits an audit event
+     * carrying before/after of every changed field. A change of name, LEI or country of
+     * registration triggers a re-screening ({@code ENTITY_DATA_CHANGED}, run by the screening
+     * module after commit) and, for an APPROVED entity, a {@code KYC_REVIEW_REQUIRED} task; the KYC
+     * status itself is not changed automatically (parked decision T6-14).
      */
     public LegalEntity updateEntity(UUID id, LegalEntity patch, UUID actorId) {
         LegalEntity existing = getEntity(id);
-        if (patch.getCurrentName() != null) existing.setCurrentName(patch.getCurrentName());
-        if (patch.getLeiCode() != null) existing.setLeiCode(patch.getLeiCode());
-        if (patch.getRegistrationNumber() != null) existing.setRegistrationNumber(patch.getRegistrationNumber());
-        if (patch.getRegistrationCountry() != null) existing.setRegistrationCountry(patch.getRegistrationCountry());
-        if (patch.getIncorporationDate() != null) existing.setIncorporationDate(patch.getIncorporationDate());
+        Map<String, Object> changes = new LinkedHashMap<>();
+        if (patch.getCurrentName() != null) {
+            recordChange(changes, "currentName", existing.getCurrentName(), patch.getCurrentName());
+            existing.setCurrentName(patch.getCurrentName());
+        }
+        if (patch.getLeiCode() != null) {
+            recordChange(changes, "leiCode", existing.getLeiCode(), patch.getLeiCode());
+            existing.setLeiCode(patch.getLeiCode());
+        }
+        if (patch.getRegistrationNumber() != null) {
+            recordChange(changes, "registrationNumber", existing.getRegistrationNumber(), patch.getRegistrationNumber());
+            existing.setRegistrationNumber(patch.getRegistrationNumber());
+        }
+        if (patch.getRegistrationCountry() != null) {
+            recordChange(changes, "registrationCountry", existing.getRegistrationCountry(), patch.getRegistrationCountry());
+            existing.setRegistrationCountry(patch.getRegistrationCountry());
+        }
+        if (patch.getIncorporationDate() != null) {
+            recordChange(changes, "incorporationDate", existing.getIncorporationDate(), patch.getIncorporationDate());
+            existing.setIncorporationDate(patch.getIncorporationDate());
+        }
         LegalEntity saved = legalEntityRepository.save(existing);
-        eventPublisher.publishEvent(new EntityUpdatedEvent(id, actorId, null, null));
-        log.info("Updated entity: id={}", id);
+        eventPublisher.publishEvent(new EntityUpdatedEvent(id, actorId, null, Map.of("changes", changes)));
+        onRiskDataChanged(saved, actorId, changes.keySet().stream().filter(RISK_FIELDS::contains).toList());
+        log.info("Updated entity: id={} changed={}", id, changes.keySet());
         return saved;
     }
 
-    /**
-     * Suspends an active entity.
-     */
-    public void suspendEntity(UUID id, UUID actorId) {
+    private static void recordChange(Map<String, Object> changes, String field, Object before, Object after) {
+        if (java.util.Objects.equals(before, after)) {
+            return;
+        }
+        Map<String, Object> change = new LinkedHashMap<>();
+        change.put("old", before == null ? null : before.toString());
+        change.put("new", after.toString());
+        changes.put(field, change);
+    }
+
+    /** Re-screening trigger plus the re-KYC task for an APPROVED entity; no-op for an empty list. */
+    private void onRiskDataChanged(LegalEntity entity, UUID actorId, List<String> riskFields) {
+        if (riskFields.isEmpty()) {
+            return;
+        }
+        eventPublisher.publishEvent(new EntityRiskDataChangedEvent(entity.getId(), actorId, riskFields));
+        if (entity.getKycStatus() == KycStatus.APPROVED) {
+            taskPort.open(entity.getId(), EntityTask.KYC_REVIEW_REQUIRED, "ENTITY_DATA_CHANGED",
+                    "Risk-relevant master data changed (" + String.join(", ", riskFields)
+                            + "); review the KYC file. The KYC status was not changed automatically.", actorId);
+        }
+    }
+
+    private LegalEntity transition(UUID id, EntityStatus target) {
         LegalEntity entity = getEntity(id);
-        entity.setStatus(EntityStatus.SUSPENDED);
-        legalEntityRepository.save(entity);
-        eventPublisher.publishEvent(new EntitySuspendedEvent(id, actorId, null, null));
+        if (!entity.getStatus().canTransitionTo(target)) {
+            throw new InvalidStateTransitionException("LegalEntity", entity.getStatus().name(), target.name());
+        }
+        entity.setStatus(target);
+        return legalEntityRepository.save(entity);
+    }
+
+    private static void requireReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("A reason is required");
+        }
+    }
+
+    /**
+     * Suspends an ACTIVE entity (reversible). The controller requires step-up and a second
+     * approver; the reason is persisted on the audit event. Chain-side effect: the org is
+     * suspended on every chain (orgidentity listens to {@link EntitySuspendedEvent}).
+     */
+    public void suspendEntity(UUID id, UUID actorId, String reason) {
+        requireReason(reason);
+        LegalEntity before = getEntity(id);
+        EntityStatus from = before.getStatus();
+        transition(id, EntityStatus.SUSPENDED);
+        eventPublisher.publishEvent(new EntitySuspendedEvent(id, actorId, null,
+                Map.of("reason", reason, "from", from.name(), "to", EntityStatus.SUSPENDED.name())));
         log.info("Suspended entity: id={}", id);
     }
 
     /**
-     * Marks an entity as dissolved.
+     * Reactivates a SUSPENDED entity. CLOSED/DISSOLVED are terminal and PENDING_ONBOARDING can
+     * only be activated by onboarding. Refused while KYC is EXPIRED/REJECTED, a screening hit is
+     * unresolved or a Sperrvermerk is active ({@link EntityReactivationGuard}). The on-chain
+     * org is NOT reinstated automatically: an operator task {@code CHAIN_REINSTATEMENT_REQUIRED}
+     * is raised for the 4-eyes reinstatement.
      */
-    public void dissolveEntity(UUID id, UUID actorId) {
+    public void reactivateEntity(UUID id, UUID actorId, String reason) {
+        requireReason(reason);
         LegalEntity entity = getEntity(id);
-        entity.setStatus(EntityStatus.DISSOLVED);
-        legalEntityRepository.save(entity);
-        eventPublisher.publishEvent(new EntityDissolvedEvent(id, actorId, null, null));
-        log.info("Dissolved entity: id={}", id);
-    }
-
-    /**
-     * Reactivates a suspended entity.
-     */
-    public void reactivateEntity(UUID id, UUID actorId) {
-        LegalEntity entity = getEntity(id);
-        entity.setStatus(EntityStatus.ACTIVE);
-        legalEntityRepository.save(entity);
-        eventPublisher.publishEvent(new EntityReactivatedEvent(id, actorId, null, null));
+        if (entity.getStatus() != EntityStatus.SUSPENDED) {
+            throw new InvalidStateTransitionException("LegalEntity", entity.getStatus().name(), "REACTIVATED");
+        }
+        List<String> blockers = new ArrayList<>();
+        if (entity.getKycStatus() == KycStatus.EXPIRED || entity.getKycStatus() == KycStatus.REJECTED) {
+            blockers.add("KYC status is " + entity.getKycStatus());
+        }
+        for (EntityReactivationGuard guard : reactivationGuards) {
+            blockers.addAll(guard.blockers(id));
+        }
+        if (!blockers.isEmpty()) {
+            throw new ComplianceGateException("Entity " + id + " cannot be reactivated: " + String.join("; ", blockers));
+        }
+        transition(id, EntityStatus.ACTIVE);
+        eventPublisher.publishEvent(new EntityReactivatedEvent(id, actorId, null,
+                Map.of("reason", reason, "from", EntityStatus.SUSPENDED.name(), "to", EntityStatus.ACTIVE.name())));
+        eventPublisher.publishEvent(new EntityRiskDataChangedEvent(id, actorId, List.of("REACTIVATION")));
         log.info("Reactivated entity: id={}", id);
     }
 
@@ -185,33 +279,46 @@ public class LegalEntityService {
         legalEntityRepository.save(entity);
 
         eventPublisher.publishEvent(new EntityRenamedEvent(id, actorId, null, java.util.Map.of("previousName", previousName, "newName", newName, "effectiveDate", effectiveDate.toString())));
+        if (!newName.equals(previousName)) {
+            onRiskDataChanged(entity, actorId, List.of("currentName"));
+        }
         log.info("Renamed entity: id={}, from='{}' to='{}'", id, previousName, newName);
     }
 
     /**
      * Records an entity merge (M&A event): the source entity is absorbed into (or consolidated
-     * with) the target entity and marked {@link EntityStatus#DISSOLVED} — it ceases independent
+     * with) the target entity and marked {@link EntityStatus#DISSOLVED} - it ceases independent
      * legal existence but its record, name history, and audit trail are retained (German
-     * commercial law retention requirements), consistent with how {@link #dissolveEntity} treats
-     * other entities that stop being an active legal person.
+     * commercial law retention requirements). DISSOLVED is reachable only here.
+     *
+     * <p>The source goes through the same off-ramp as a termination ({@link
+     * CustomerOffboardingService#dissolveByMerger}: users disabled, sessions and tokens revoked,
+     * {@code CustomerOffboardedEvent} for the other modules, open obligations recorded as
+     * follow-up tasks - a merger transfers them, it does not acknowledge them away). The target
+     * is re-screened and gets a {@code KYC_REVIEW_REQUIRED} task. The controller requires step-up
+     * and a second approver; {@code reason} (and optionally the evidence document id) are
+     * recorded on the event.
      */
     public EntityMergeRecord mergeEntities(UUID sourceEntityId, UUID targetEntityId,
                                             EntityMergeRecord.MergeType mergeType,
-                                            LocalDate effectiveDate, String notes, UUID actorId) {
+                                            LocalDate effectiveDate, String notes, UUID actorId,
+                                            String reason, UUID evidenceDocumentId) {
         if (sourceEntityId.equals(targetEntityId)) {
             throw new IllegalArgumentException("An entity cannot be merged into itself.");
         }
+        requireReason(reason);
         LegalEntity source = getEntity(sourceEntityId);
         LegalEntity target = getEntity(targetEntityId);
-        if (source.getStatus() == EntityStatus.DISSOLVED) {
+        if (!source.getStatus().canTransitionTo(EntityStatus.DISSOLVED)) {
             throw new InvalidStateTransitionException(
-                    "Source entity " + sourceEntityId + " is already dissolved and cannot be merged again.");
+                    "Source entity " + sourceEntityId + " is " + source.getStatus() + " and cannot be merged.");
         }
-        if (target.getStatus() == EntityStatus.DISSOLVED) {
+        if (target.getStatus().isTerminal()) {
             throw new InvalidStateTransitionException(
-                    "Target entity " + targetEntityId + " is dissolved and cannot absorb another entity.");
+                    "Target entity " + targetEntityId + " is " + target.getStatus() + " and cannot absorb another entity.");
         }
 
+        EntityStatus sourceFrom = source.getStatus();
         EntityMergeRecord record = new EntityMergeRecord();
         record.setSourceEntityId(sourceEntityId);
         record.setTargetEntityId(targetEntityId);
@@ -221,29 +328,54 @@ public class LegalEntityService {
         record.setRecordedBy(actorId);
         EntityMergeRecord saved = entityMergeRecordRepository.save(record);
 
-        source.setStatus(EntityStatus.DISSOLVED);
-        legalEntityRepository.save(source);
+        offboardingService.dissolveByMerger(sourceEntityId, targetEntityId, actorId, "REGISTRY_ADMIN", reason);
 
-        eventPublisher.publishEvent(new EntityMergedEvent(sourceEntityId, actorId, null, Map.of(
-                "targetEntityId", targetEntityId.toString(),
-                "mergeType", mergeType.name(),
-                "effectiveDate", effectiveDate.toString())));
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("targetEntityId", targetEntityId.toString());
+        details.put("mergeType", mergeType.name());
+        details.put("effectiveDate", effectiveDate.toString());
+        details.put("reason", reason);
+        details.put("from", sourceFrom.name());
+        details.put("to", EntityStatus.DISSOLVED.name());
+        if (evidenceDocumentId != null) details.put("evidenceDocumentId", evidenceDocumentId.toString());
+        eventPublisher.publishEvent(new EntityMergedEvent(sourceEntityId, actorId, null, details));
+
+        taskPort.open(targetEntityId, EntityTask.KYC_REVIEW_REQUIRED, "MERGER:" + sourceEntityId,
+                "Absorbed entity " + sourceEntityId + " (" + mergeType + "); review the KYC file and beneficial owners.",
+                actorId);
+        eventPublisher.publishEvent(new EntityRiskDataChangedEvent(targetEntityId, actorId, List.of("MERGER")));
         log.info("Merged entity: source={} into target={} type={}", sourceEntityId, targetEntityId, mergeType);
         return saved;
     }
 
     /**
-     * MiFID II client classification (Annex II) — set by the firm (REGISTRY_ADMIN /
+     * MiFID II client classification (Annex II) - set by the firm (REGISTRY_ADMIN /
      * COMPLIANCE_OFFICER at the controller boundary), never self-declared by the client.
+     * Moving to a less protective category (RETAIL -&gt; PROFESSIONAL -&gt; ELIGIBLE_COUNTERPARTY)
+     * gates the repo desk and lending, so it needs a reason and a second approver
+     * ({@link DualControlGate}); it also raises a {@code KYC_REVIEW_REQUIRED} task. The audit event
+     * carries the previous category, the reason and the optional evidence document id.
      */
-    public LegalEntity classifyClient(UUID id, ClientCategory category, UUID actorId) {
+    public LegalEntity classifyClient(UUID id, ClientCategory category, UUID actorId,
+                                      String reason, UUID evidenceDocumentId) {
         LegalEntity entity = getEntity(id);
+        ClientCategory previous = entity.getClientCategory() == null ? ClientCategory.RETAIL : entity.getClientCategory();
+        boolean lessProtective = category.ordinal() > previous.ordinal();
+        if (lessProtective) {
+            requireReason(reason);
+            dualControlGate.require("CLIENT_CLASSIFICATION_DOWNGRADE");
+        }
         entity.setClientCategory(category);
         entity.setClientCategoryClassifiedAt(Instant.now());
         entity.setClientCategoryClassifiedBy(actorId);
         LegalEntity saved = legalEntityRepository.save(entity);
-        eventPublisher.publishEvent(new ClientClassifiedEvent(id, actorId, null, category.name()));
-        log.info("Classified entity: id={} category={}", id, category);
+        eventPublisher.publishEvent(new ClientClassifiedEvent(id, actorId, null, category.name(),
+                previous.name(), reason, evidenceDocumentId));
+        if (lessProtective && saved.getKycStatus() == KycStatus.APPROVED) {
+            taskPort.open(id, EntityTask.KYC_REVIEW_REQUIRED, "CLIENT_CATEGORY",
+                    "Client category lowered " + previous + " -> " + category + "; confirm the evidence on file.", actorId);
+        }
+        log.info("Classified entity: id={} category={} (was {})", id, category, previous);
         return saved;
     }
 

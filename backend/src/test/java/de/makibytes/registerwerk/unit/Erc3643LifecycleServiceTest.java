@@ -47,6 +47,8 @@ class Erc3643LifecycleServiceTest {
     @Mock private BlockchainClientRegistry blockchainClientRegistry;
     @Mock private BlockchainTransactionService txService;
     @Mock private HolderBlockGate holderBlockGate;
+    @Mock private de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate;
+    @Mock private de.makibytes.registerwerk.travelrule.api.TravelRuleGate travelRuleGate;
 
     @InjectMocks
     private Erc3643LifecycleService service;
@@ -186,5 +188,43 @@ class Erc3643LifecycleServiceTest {
                     List.of(new java.math.BigDecimal("1")), UUID.randomUUID(), "REGISTRY_ADMIN"))
                     .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
         }
+    }
+
+    @Test
+    @DisplayName("6-27: T-REX forcedTransfer runs the Travel Rule gate (previously skipped) and a refusal stops the operation before any submit")
+    void forcedTransfer_runsTravelRuleGate() {
+        UUID suiteId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        UUID assetId = UUID.randomUUID();
+        Erc3643Suite suite = new Erc3643Suite();
+        suite.setId(suiteId);
+        suite.setAssetDeploymentId(deploymentId);
+        suite.setTokenAddress("0x9999999999999999999999999999999999999999");
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setAssetId(assetId);
+        when(suiteRepository.findById(suiteId)).thenReturn(Optional.of(suite));
+        when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        when(assetLookupPort.findById(assetId)).thenReturn(Optional.of(
+                new de.makibytes.registerwerk.deployment.api.AssetLookupPort.AssetInfo(
+                        assetId, "Bond A", null, null, null, null, null, "A-1", "ACTIVE")));
+        org.mockito.Mockito.doThrow(new de.makibytes.registerwerk.shared.ComplianceGateException("travel rule"))
+                .when(travelRuleGate).enforceOutbound(
+                        any(de.makibytes.registerwerk.travelrule.api.TravelRuleGate.TransferContext.class));
+        String from = "0x1111111111111111111111111111111111111111";
+        String to = "0x2222222222222222222222222222222222222222";
+
+        assertThatThrownBy(() -> service.forcedTransfer(suiteId, from, to, new java.math.BigDecimal("10"),
+                "Court order", UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class)
+                .hasMessageContaining("travel rule");
+
+        org.mockito.ArgumentCaptor<de.makibytes.registerwerk.travelrule.api.TravelRuleGate.TransferContext> ctx =
+                org.mockito.ArgumentCaptor.forClass(
+                        de.makibytes.registerwerk.travelrule.api.TravelRuleGate.TransferContext.class);
+        org.mockito.Mockito.verify(travelRuleGate).enforceOutbound(ctx.capture());
+        assertThat(ctx.getValue().assetId()).isEqualTo(assetId);
+        assertThat(ctx.getValue().toWallet()).isEqualTo(to);
+        assertThat(ctx.getValue().nativeAmount()).isEqualByComparingTo("10");
+        assertThat(ctx.getValue().assetReference()).isEqualTo(suite.getTokenAddress());
     }
 }

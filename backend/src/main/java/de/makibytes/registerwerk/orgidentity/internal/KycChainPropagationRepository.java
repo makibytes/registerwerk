@@ -11,6 +11,8 @@ interface KycChainPropagationRepository extends JpaRepository<KycChainPropagatio
 
     Optional<KycChainPropagation> findByLegalEntityIdAndChainConfigId(UUID legalEntityId, UUID chainConfigId);
 
+    List<KycChainPropagation> findByLegalEntityId(UUID legalEntityId);
+
     List<KycChainPropagation> findByStatusIn(Collection<KycChainPropagation.Status> statuses);
 
     long countByStatus(KycChainPropagation.Status status);

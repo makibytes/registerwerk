@@ -139,6 +139,7 @@ class KycDocumentApiIT {
             public String getFilename() { return fileName; }
         });
         body.add("documentType", "PASSPORT");
+        body.add("expiresAt", java.time.LocalDate.now().plusYears(5).toString());
 
         return restTemplate.exchange(
             url("/api/v1/entities/{entityId}/kyc/documents"),

@@ -60,7 +60,9 @@ The `HolderBlock` entity in the `kyc` module stores all active and historical bl
 stateDiagram-v2
     [*] --> ACTIVE : create (REGISTRY_ADMIN + step-up + 4-eyes)
     ACTIVE --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
-    ACTIVE --> EXPIRED : expiresAt reached (scheduler)
+    ACTIVE --> EXPIRY_REVIEW : expiresAt reached (scheduler, still blocking)
+    EXPIRY_REVIEW --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
+    ACTIVE --> EXPIRED : expiresAt reached, type in auto-expire-types
     LIFTED --> [*]
     EXPIRED --> [*]
 ```
@@ -77,7 +79,10 @@ stateDiagram-v2
 The same step-up + 4-eyes flow applies. Lifting calls the corresponding on-chain `unfreezeAddress()` and clears the `HolderBlock.liftedAt` field.
 
 **Automatic expiry:**
-A `@Scheduled` job runs nightly, finds all `HolderBlock` records where `expiresAt < NOW()` and `liftedAt IS NULL`, transitions them to `EXPIRED`, and calls on-chain unfreeze.
+A `@Scheduled` job runs nightly and finds all ACTIVE blocks with `expiresAt < NOW()`. By default **no block type expires automatically**: the block moves to `EXPIRY_REVIEW`, keeps blocking (registry gates and on-chain freeze), and an operator task and a compliance e-mail are raised. It is lifted only through the normal lift (step-up + second approver). Types listed in `registerwerk.sperrvermerk.auto-expire-types` (default empty) are still auto-lifted to `EXPIRED`.
+
+!!! note "Expiry dates (6-25)"
+    `expiresAt` must lie in the future. For court and authority types (`GERICHTSBESCHLUSS`, `PFAENDUNG`, `INSOLVENZ`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `REGULATORISCH`) an expiry date additionally needs a `courtRef` or `documentId`, and the second approver confirms it against the order. When the last block is lifted, every freeze that no remaining block covers is released across all of the wallet's assets, and entity-scoped blocks cover all of the entity's holder wallets. Wallet-only blocks are also visible to the repo desk and lending gates. Whether any type may expire automatically is a parked legal decision (T6-11).
 
 ---
 

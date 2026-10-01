@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.screening.api.NaturalPersonScreeningSubjectResolver;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningHitDto;
+import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort.ScreeningResult;
 import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import de.makibytes.registerwerk.screening.events.ScreeningHitDetectedEvent;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -43,7 +44,7 @@ class ScreeningServiceHitDetectedTest {
     @BeforeEach
     void setUp() {
         service = new ScreeningService(List.of(provider), runRepository, hitRepository, events,
-                legalEntityRepository, new SimpleMeterRegistry(), naturalPersonResolver);
+                legalEntityRepository, new SimpleMeterRegistry(), naturalPersonResolver, ScreeningPolicy.defaults());
         when(provider.providerName()).thenReturn("opensanctions");
         when(runRepository.save(any(ScreeningRun.class))).thenAnswer(inv -> inv.getArgument(0));
     }
@@ -51,9 +52,9 @@ class ScreeningServiceHitDetectedTest {
     @Test
     @DisplayName("a HIT on the periodic re-screen publishes ScreeningHitDetectedEvent")
     void hit_publishesEvent() {
-        when(provider.screenEntity(any())).thenReturn(List.of(
+        when(provider.screen(any())).thenReturn(new ScreeningResult(List.of(
                 new ScreeningHitDto("EU_FSF", "name", "Meridian", 0.93, null, "SANCTIONS"),
-                new ScreeningHitDto("OFAC_SDN", "name", "Meridian", 0.71, null, "SANCTIONS")));
+                new ScreeningHitDto("OFAC_SDN", "name", "Meridian", 0.71, null, "SANCTIONS")), null, null));
 
         service.screenEntity(entityId, "Meridian GmbH", "DE", null, ScreeningTrigger.PERIODIC_REFRESH);
 
@@ -72,7 +73,7 @@ class ScreeningServiceHitDetectedTest {
     @Test
     @DisplayName("a CLEAR run publishes nothing")
     void clear_publishesNothing() {
-        when(provider.screenEntity(any())).thenReturn(List.of());
+        when(provider.screen(any())).thenReturn(new ScreeningResult(List.of(), null, null));
 
         service.screenEntity(entityId, "Clean AG", "DE", null, ScreeningTrigger.PERIODIC_REFRESH);
 

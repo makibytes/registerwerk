@@ -147,6 +147,31 @@ if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
 
 ---
 
+## Contrôles CDD pour l'approbation d'une entité {#cdd-controls}
+
+`POST /api/v1/entities/{id}/kyc/approve` (step-up et second approbateur) exécute désormais les mêmes contrôles de preuves que l'approbation par juridiction, plus la couverture des bénéficiaires effectifs. Tous les seuils sont des valeurs provisoires dans l'attente des décisions de l'opérateur sur la méthodologie de risque ; ils ne constituent pas une conclusion juridique.
+
+| Contrôle | Règle |
+|---|---|
+| Statut de l'entité | uniquement `ACTIVE` ou `PENDING_ONBOARDING` |
+| Screening | aucune correspondance non résolue pour l'entité ; chaque bénéficiaire effectif actuel est filtré et sans alerte (un bénéficiaire cessé avec une correspondance ouverte continue de bloquer) |
+| Liste de contrôle documentaire | juridiction d'origine (pays d'immatriculation, ou `jurisdiction` dans le corps) ; une liste incomplète exige `overrideNote` et un `REGISTRY_ADMIN` (acceptation du risque, enregistrée dans le dossier de preuves) |
+| Bénéficiaires effectifs | au moins un ; part identifiée d'au moins 75 %, ou un repli documenté sur le dirigeant principal (`controlType=SENIOR_MANAGING_OFFICIAL` avec motif), qui exige aussi `overrideNote` et un `REGISTRY_ADMIN` |
+| Validité | `expiryDate` ne doit pas dépasser `registerwerk.kyc.max-validity-months` (12 par défaut) et est plafonnée à la date de revue EDD d'une PEP confirmée liée |
+
+Chaque approbation écrit un `kyc_approval_record` (instantané de la liste, note de dérogation, couverture, second approbateur) ; l'événement d'audit `KYC_APPROVED` porte les mêmes données. `KycJurisdictionApproval` reste indicatif : aucune porte ne le lit.
+
+!!! note "Les approbations existantes ne sont pas rétrogradées"
+    `GET /api/v1/kyc/evidence-gaps` liste les entités `APPROVED` qui échoueraient aux contrôles actuels (liste incomplète, aucun bénéficiaire effectif, part inexpliquée, échéance au-delà du plafond, PEP sans EDD, screening non résolu) pour traitement lors de la prochaine revue.
+
+**Documents.** Le téléversement accepte `issueDate` et `expiresAt`. `expiresAt` est obligatoire pour le passeport, la pièce d'identité et les extraits de registre et ne peut pas être dans le passé ; un document expiré n'est pas compté par la liste, et le délai « trop ancien » court à partir de `issueDate` si renseignée. La consultation et le téléchargement des documents (et la liste des bénéficiaires effectifs) sont réservés à `REGISTRY_ADMIN`, `COMPLIANCE_OFFICER`, `AUDIT` et au `COMPANY_ADMIN` de l'entité ; les téléchargements portent `X-Content-Type-Options: nosniff`.
+
+**Bénéficiaires effectifs.** `ownershipPct` doit être supérieur à 0 et au plus 100, le total actif ne peut dépasser 100 ; `GET .../beneficial-owners/summary` indique la part identifiée et le reste inexpliqué. `POST .../{id}/verify` enregistre le vérificateur et le document de preuve. La cessation (`DELETE` avec corps JSON) exige step-up, un second approbateur et un motif, et est refusée tant que le screening de la personne n'est pas résolu : résoudre d'abord la correspondance par la voie d'acceptation. Ajouter ou cesser un bénéficiaire sur une entité `APPROVED` ouvre une tâche `KYC_REVIEW_REQUIRED` ; le statut n'est pas modifié automatiquement.
+
+**PEP et EDD.** La confirmation d'une correspondance PEP positionne `NaturalPerson.pepStatus=CONFIRMED_PEP`. Une PEP confirmée ne passe la porte de screening que tant qu'une approbation EDD est en vigueur : `POST .../{id}/edd-approvals` (`REGISTRY_ADMIN`, step-up, second approbateur, note, date de revue de six mois au plus). Après la date de revue, la personne bloque de nouveau. Il n'existe ni notation de risque, ni liste de pays à risque, ni liste de contrôle EDD ; cela relève de l'analyse des risques de l'opérateur (GwG § 5).
+
+---
+
 ## Surveillance continue {#ongoing-monitoring}
 
 **GwG §10 Abs. 1 Nr. 5** et équivalents dans les quatre juridictions nécessitent une surveillance continue des relations d'affaires.

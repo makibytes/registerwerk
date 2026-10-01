@@ -191,10 +191,13 @@ class LegalEntityApiIT {
         EntityUpdateRequest updateRequest = new EntityUpdateRequest(
             "Updated Name AG", "213800XXXXXXXXXXXXXX", null, "DE", null);
 
+        HttpHeaders stepUpHeaders = authHeaders();
+        stepUpHeaders.setBearerAuth(de.makibytes.registerwerk.TestJwt.mint(TEST_JWT_SECRET,
+            UUID.fromString("00000000-0000-0000-0000-000000000001"), true, null, null, "REGISTRY_ADMIN"));
         ResponseEntity<EntityResponse> updated = restTemplate.exchange(
             url("/api/v1/entities/{id}"),
             HttpMethod.PATCH,
-            new HttpEntity<>(updateRequest, authHeaders()),
+            new HttpEntity<>(updateRequest, stepUpHeaders),
             EntityResponse.class,
             id
         );
@@ -206,21 +209,21 @@ class LegalEntityApiIT {
     }
 
     @Test
-    @DisplayName("POST /api/v1/entities/{id}/suspend should return 200 and entity with SUSPENDED status")
-    void suspendEntity_shouldReturn200AndChangedStatus() {
+    @DisplayName("POST /api/v1/entities/{id}/suspend without step-up and second approver is refused and changes nothing")
+    void suspendEntity_withoutStepUp_isRefused() {
         ResponseEntity<EntityResponse> created = createEntity("Suspendable Corp AG");
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         UUID id = created.getBody().id();
 
-        ResponseEntity<Void> suspendResponse = restTemplate.exchange(
+        // Lifecycle changes need step-up + a second approver (6-21): a plain admin token is refused.
+        ResponseEntity<String> suspendResponse = restTemplate.exchange(
             url("/api/v1/entities/{id}/suspend"),
             HttpMethod.POST,
-            new HttpEntity<>(authHeaders()),
-            Void.class,
+            new HttpEntity<>(Map.of("reason", "test"), authHeaders()),
+            String.class,
             id
         );
-
-        assertThat(suspendResponse.getStatusCode()).isIn(HttpStatus.NO_CONTENT, HttpStatus.OK);
+        assertThat(suspendResponse.getStatusCode()).isIn(HttpStatus.FORBIDDEN, HttpStatus.UNAUTHORIZED);
 
         ResponseEntity<EntityResponse> getResponse = restTemplate.exchange(
             url("/api/v1/entities/{id}"),
@@ -229,6 +232,6 @@ class LegalEntityApiIT {
             EntityResponse.class,
             id);
         assertThat(getResponse.getBody()).isNotNull();
-        assertThat(getResponse.getBody().status().name()).isEqualTo("SUSPENDED");
+        assertThat(getResponse.getBody().status().name()).isEqualTo("PENDING_ONBOARDING");
     }
 }

@@ -48,6 +48,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.EnumSet;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.TreeSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,6 +61,9 @@ public class CompanyUserService {
 
     private static final Logger log = LoggerFactory.getLogger(CompanyUserService.class);
     private static final int TOKEN_BYTES = 36;
+    /** Roles a company administrator may hand out; everything else (operator roles, RELATIONSHIP_MANAGER, DAPP_PUBLISHER) is operator-assigned. */
+    private static final Set<AppUserRole> MANAGED_ROLES = Set.of(
+        AppUserRole.COMPANY_ADMIN, AppUserRole.ISSUER, AppUserRole.INVESTOR, AppUserRole.TRADER);
 
     private final AppUserRepository appUserRepository;
     private final AppUserActionTokenRepository actionTokenRepository;
@@ -154,10 +159,11 @@ public class CompanyUserService {
         user.setEnabled(true);
         user.setCreatedBy(actorId);
         user.setRoles(request.roles());
+        user.markRolesChanged(actorId);
         AppUser saved = appUserRepository.save(user);
 
         String registrationToken = createActionToken(saved, AppUserActionTokenType.REGISTRATION, actorId);
-        eventPublisher.publishEvent(new CompanyUserInvitedEvent(entityId, saved.getId(), actorId, null,
+        eventPublisher.publishEvent(new CompanyUserInvitedEvent(entityId, saved.getId(), actorId, actorRole(authentication),
             saved.getEmail(), saved.getFullName(), customerFrontendUrl + "/register/" + registrationToken));
 
         // CompanyUserInvitedEvent already published above with notification data
@@ -175,10 +181,13 @@ public class CompanyUserService {
 
         AppUser user = requireEntityUser(userId, entityId);
         ensureNotLastCompanyAdmin(user, request.roles(), user.isEnabled());
+        Set<AppUserRole> previousRoles = new java.util.LinkedHashSet<>(user.getRoles());
         user.setRoles(request.roles());
+        user.markRolesChanged(actorId);
         AppUser saved = appUserRepository.save(user);
 
-        eventPublisher.publishEvent(new CompanyUserRolesUpdatedEvent(entityId, actorId, null, java.util.Map.of("userId", saved.getId().toString())));
+        eventPublisher.publishEvent(new CompanyUserRolesUpdatedEvent(entityId, actorId, actorRole(authentication),
+            details(saved, previousRoles)));
         return toResponse(saved);
     }
 
@@ -189,10 +198,18 @@ public class CompanyUserService {
 
         AppUser user = requireEntityUser(userId, entityId);
         ensureNotLastCompanyAdmin(user, user.getRoles(), enabled);
+        if (enabled && !user.isEnabled()) {
+            user.markRolesChanged(actorId);
+        }
         user.setEnabled(enabled);
         AppUser saved = appUserRepository.save(user);
+        if (!enabled) {
+            // A withdrawn invite / outstanding reset link must not bring the account back (6-02).
+            actionTokenRepository.invalidateAllForUser(saved.getId());
+        }
 
-        eventPublisher.publishEvent(new CompanyUserDisabledEvent(entityId, actorId, null, java.util.Map.of("userId", saved.getId().toString(), "enabled", enabled)));
+        eventPublisher.publishEvent(new CompanyUserDisabledEvent(entityId, actorId, actorRole(authentication),
+            details(saved, saved.getRoles())));
         return toResponse(saved);
     }
 
@@ -219,7 +236,8 @@ public class CompanyUserService {
         ensureNotLastCompanyAdmin(user, Set.of(), false);
         appUserRepository.delete(user);
 
-        eventPublisher.publishEvent(new CompanyUserDeletedEvent(entityId, actorId, null, java.util.Map.of("userId", userId.toString())));
+        eventPublisher.publishEvent(new CompanyUserDeletedEvent(entityId, actorId, actorRole(authentication),
+            details(user, user.getRoles())));
     }
 
     @Transactional(readOnly = true)
@@ -265,10 +283,11 @@ public class CompanyUserService {
 
     public void completeRegistration(PublicUserRegistrationCompleteRequest request) {
         AppUserActionToken token = requireValidActionTokenEntity(request.token(), AppUserActionTokenType.REGISTRATION);
-        AppUser user = requireUser(token.getAppUserId());
+        AppUser user = requireRedeemableUser(token);
         user.setFullName(request.name().trim());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
-        user.setEnabled(true);
+        // Deliberately no setEnabled(true): completing a token must never re-enable an account an
+        // administrator disabled after the invite (6-02). Invites already create enabled accounts.
         token.setConsumedAt(Instant.now());
         appUserRepository.save(user);
         actionTokenRepository.save(token);
@@ -282,8 +301,9 @@ public class CompanyUserService {
 
     public void completePasswordReset(PublicPasswordResetCompleteRequest request) {
         AppUserActionToken token = requireValidActionTokenEntity(request.token(), AppUserActionTokenType.PASSWORD_RESET);
-        AppUser user = requireUser(token.getAppUserId());
+        AppUser user = requireRedeemableUser(token);
         user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setMustChangePassword(false);
         token.setConsumedAt(Instant.now());
         appUserRepository.save(user);
         actionTokenRepository.save(token);
@@ -310,6 +330,9 @@ public class CompanyUserService {
             if (password == null || password.isBlank()) {
                 throw new IllegalArgumentException("password is required");
             }
+            if (password.length() < 8 || password.length() > 200) {
+                throw new IllegalArgumentException("password must be between 8 and 200 characters");
+            }
             user.setPasswordHash(passwordEncoder.encode(password));
         }
         AppUser saved = appUserRepository.save(user);
@@ -319,7 +342,27 @@ public class CompanyUserService {
 
     private AppUser findValidActionToken(String cleartextToken, AppUserActionTokenType tokenType) {
         AppUserActionToken token = requireValidActionTokenEntity(cleartextToken, tokenType);
-        return requireUser(token.getAppUserId());
+        return requireRedeemableUser(token);
+    }
+
+    /**
+     * The account behind a valid registration / reset token, only while it may still be redeemed:
+     * enabled, and (for customer users) with an ACTIVE entity. The same generic error as an invalid
+     * token, so the public endpoint does not reveal why (6-02).
+     */
+    private AppUser requireRedeemableUser(AppUserActionToken token) {
+        AppUser user = requireUser(token.getAppUserId());
+        if (!user.isEnabled()) {
+            throw new IllegalArgumentException("Invalid or expired token");
+        }
+        if (user.getLegalEntityId() != null) {
+            boolean active = legalEntityRepository.findById(user.getLegalEntityId())
+                .map(e -> e.getStatus() == EntityStatus.ACTIVE).orElse(false);
+            if (!active) {
+                throw new IllegalArgumentException("Invalid or expired token");
+            }
+        }
+        return user;
     }
 
     private AppUserActionToken requireValidActionTokenEntity(String cleartextToken, AppUserActionTokenType tokenType) {
@@ -377,11 +420,33 @@ public class CompanyUserService {
         if (roles == null || roles.isEmpty()) {
             throw new IllegalArgumentException("At least one role is required");
         }
-        if (roles.contains(AppUserRole.REGISTRY_ADMIN)
-                || roles.contains(AppUserRole.AUDIT)
-                || roles.contains(AppUserRole.COMPLIANCE_OFFICER)) {
-            throw new IllegalArgumentException("Operator roles cannot be assigned in company user management");
+        for (AppUserRole role : roles) {
+            if (!MANAGED_ROLES.contains(role)) {
+                throw new IllegalArgumentException("Role " + role + " cannot be assigned in company user management");
+            }
         }
+    }
+
+    /** Audit payload of company user-lifecycle events: who, which roles before/after, enabled. */
+    private static Map<String, Object> details(AppUser user, Set<AppUserRole> previousRoles) {
+        Map<String, Object> d = new LinkedHashMap<>();
+        d.put("userId", user.getId().toString());
+        d.put("email", user.getEmail());
+        d.put("roles", List.copyOf(names(user.getRoles())));
+        d.put("previousRoles", List.copyOf(names(previousRoles)));
+        d.put("legalEntityId", user.getLegalEntityId() == null ? "" : user.getLegalEntityId().toString());
+        d.put("enabled", user.isEnabled());
+        return d;
+    }
+
+    private static Set<String> names(Set<AppUserRole> roles) {
+        Set<String> out = new TreeSet<>();
+        for (AppUserRole r : roles) out.add(r.name());
+        return out;
+    }
+
+    private static String actorRole(Authentication authentication) {
+        return SecurityUtils.primaryRole(authentication, "COMPANY_ADMIN");
     }
 
     private void ensureLocalLifecycleEnabled() {

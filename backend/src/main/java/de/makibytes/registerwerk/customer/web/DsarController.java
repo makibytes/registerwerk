@@ -13,6 +13,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -55,17 +56,24 @@ public class DsarController {
 
         log.info("DSAR export requested for entityId={}", entityId);
 
-        Map<String, Object> export = Map.of(
-            "entityId",           entity.getId(),
-            "entityNumber",       entity.getEntityNumber(),
-            "registrationNumber", entity.getRegistrationNumber(),
-            "registrationCountry",entity.getRegistrationCountry(),
-            "kycStatus",          entity.getKycStatus(),
-            "kycExpiryDate",      entity.getKycExpiryDate() != null ? entity.getKycExpiryDate().toString() : null,
-            "gdprBasis",          "DSGVO Art. 15 / Art. 20 — Right of access and portability",
-            "retentionNote",      "Data is retained for 10 years post-relationship per eWpG §15(3) and GwG §8. " +
-                                  "Erasure of non-mandatory fields is available via POST /api/v1/me/dsar/erasure."
-        );
+        Map<String, Object> export = new java.util.LinkedHashMap<>();
+        export.put("scope", "ENTITY_MASTER_DATA_ONLY");
+        export.put("entityId", entity.getId());
+        export.put("entityNumber", entity.getEntityNumber());
+        export.put("registrationNumber", entity.getRegistrationNumber());
+        export.put("registrationCountry", entity.getRegistrationCountry());
+        export.put("kycStatus", entity.getKycStatus());
+        export.put("kycExpiryDate", entity.getKycExpiryDate() != null ? entity.getKycExpiryDate().toString() : null);
+        export.put("notIncluded", List.of(
+                "user accounts (name, e-mail, roles)", "natural persons (beneficial owners, directors) and KYC documents",
+                "screening runs and hits", "register holdings and transactions", "support tickets and trade notes",
+                "webhook data", "Travel Rule data", "audit log entries"));
+        export.put("fullAccessProcedure", "This export is NOT a complete Art. 15 answer. The remaining data is "
+                + "compiled manually by the operator (runbook: docs/compliance/data-protection).");
+        export.put("gdprBasis", "DSGVO Art. 15 / Art. 20 - partial: master data only");
+        export.put("retentionNote", "Retention enforcement is manual and not automated; nothing is purged automatically. "
+                + "Statutory periods: eWpG s.15(3) 10 years, GwG s.8 5 years. Erasure of non-mandatory fields: "
+                + "POST /api/v1/me/dsar/erasure (result COMPLETED_PARTIAL lists erased/retained/not covered).");
         return ResponseEntity.ok(export);
     }
 

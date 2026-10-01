@@ -32,5 +32,8 @@ public interface LegalEntityRepository extends JpaRepository<LegalEntity, UUID> 
     List<LegalEntity> findByKycStatusAndKycExpiryDateGreaterThanAndKycExpiryDateLessThanEqual(
             KycStatus kycStatus, LocalDate after, LocalDate until);
 
+    /** KYC evidence-gap report: every entity currently in the given KYC status. */
+    List<LegalEntity> findByKycStatus(KycStatus kycStatus);
+
     Optional<LegalEntity> findByLeiCode(String leiCode);
 }

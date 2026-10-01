@@ -222,6 +222,7 @@ export class RepoDisputesComponent implements OnInit {
         requireDualControl: true,
         reason: `Record repo dispute outcome: ${RESOLUTION_COPY[resolution].label} (trade ${dispute.id})`,
         action: 'REPO_DISPUTE_RESOLVE',
+        target: `POST /api/v1/admin/repo/disputes/${dispute.id}/resolve`,
       },
       width: '500px',
       disableClose: true,

@@ -130,3 +130,15 @@ Returns:
 ```
 
 If `brokenAt` is non-null, it contains the `sequence_no` of the first entry where the hash chain is broken. This triggers an automatic `IctIncident` of severity `MAJOR` and category `INTEGRITY`.
+
+---
+
+## Integrity model (canonical v2, anchors, retry)
+
+- **Canonical version.** Every row carries `canon_version`. Version 2 covers `eventType`, subject, payload, **actor id, actor role, event time (`occurred_at`, epoch microseconds), correlation id and the reversal link**, so editing any of them breaks the chain. Version 1 rows (written before this change) keep verifying under the legacy envelope; an unknown version fails verification.
+- **Event time.** `occurred_at` is captured synchronously when the event is published, not when the asynchronous listener writes it; `recorded_at` is the insert time. Actions performed while an operator impersonates a customer are recorded with role `REGISTRY_ADMIN_IMPERSONATING` and a hashed `_imp` object (session, impersonator, entity, mode).
+- **Verification** detects: a first row that is not the genesis (head truncation, dropped partition), a last row that differs from `audit_chain_tip`, rows removed after a signed daily anchor (`audit_chain_anchor`, optionally published through an external `AuditAnchorSink`), and a missing `entry_sig` at or after the signing watermark (first signed sequence number, write-once). Enabling signing later never signs earlier rows retroactively.
+- **Evidence export.** `/audit/events/export[/signed]` is ordered by `sequence_no` and starts with a `# key=value` block (`firstSeq`, `lastSeq`, `rowCount`, `truncated`, `nextAfterSeq`, `tipSeq`, `tipEntryHash`); rows include `prevHash` and `entryHash`. The signature covers header and rows. Use `afterSeq` to continue a truncated export.
+- **Failed writes** are retried every minute (publications older than two minutes) and, after `registerwerk.audit.max-attempts` (20) attempts, moved to `audit_event_dead_letter`. Alert on `registerwerk_audit_oldest_incomplete_seconds` and `registerwerk_audit_dead_letter_count`.
+- **Table ownership.** `REVOKE UPDATE, DELETE, TRUNCATE` and the WORM triggers do not bind the table owner. If the runtime login also runs the migrations it owns `audit_event`; in production mode the start-up check then fails unless `registerwerk.audit.allow-owner-runtime-role=true` acknowledges the interim risk. Remedy: separate migrator and runtime logins (open decision T6-17). Production mode also requires a signing key provider.
+- **Cut-over.** `registerwerk.audit.legacy-listener=true` (default) drains publications created before the upgrade; switch it off once `event_publication` has no incomplete audit rows.

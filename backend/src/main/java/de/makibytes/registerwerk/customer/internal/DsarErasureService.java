@@ -142,7 +142,31 @@ public class DsarErasureService {
             erasedCount++;
         }
         log.warn("DSAR erasure {} tombstoned {} AppUser(s) for entityId={}", requestId, erasedCount, req.getEntityId());
-        return resolve(requestId, ErasureRequestStatus.COMPLETED, operatorId, note, approverId);
+        // Honest outcome (6-30): this routine only erases AppUser contact data. Everything else is listed,
+        // never silently implied to be erased; no purge sweep exists (retention decision T6-10 is parked).
+        req.setResolutionDetail(coverageJson(erasedCount));
+        return resolve(requestId, ErasureRequestStatus.COMPLETED_PARTIAL, operatorId, note, approverId);
+    }
+
+    static final List<String> RETAINED = List.of(
+            "LegalEntity registration data (LEI, registration number, entity number): eWpG s.15(3) 10 y / GwG s.8 5 y, Art. 17(3)(b) DSGVO",
+            "register holdings and transfer history: eWpG retention",
+            "audit log: Art. 17(3)(b) DSGVO legal obligation");
+    static final List<String> NOT_COVERED = List.of(
+            "natural persons linked to the entity (beneficial owners, directors) and their KYC documents",
+            "screening runs and hits",
+            "support tickets and trade notes",
+            "webhook subscriptions and deliveries",
+            "Travel Rule / IVMS data",
+            "backups and exports already delivered");
+
+    private static String coverageJson(int erasedUsers) {
+        java.util.function.Function<List<String>, String> arr = l -> "[" + l.stream()
+                .map(s -> "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
+                .collect(java.util.stream.Collectors.joining(",")) + "]";
+        return "{\"erased\":" + arr.apply(List.of("AppUser full name, e-mail and password hash tombstoned (" + erasedUsers
+                + " user(s) newly erased); users disabled")) + ",\"retained\":" + arr.apply(RETAINED)
+                + ",\"notCovered\":" + arr.apply(NOT_COVERED) + "}";
     }
 
     private static boolean isAlreadyErased(AppUser user) {
@@ -170,6 +194,7 @@ public class DsarErasureService {
         details.put("erasureRequestId", requestId.toString());
         details.put("resolution", target.name());
         if (note != null && !note.isBlank()) details.put("note", note);
+        if (req.getResolutionDetail() != null) details.put("coverage", req.getResolutionDetail());
         if (req.getRetainedNoticeChannel() != null) details.put("retainedNoticeChannel", req.getRetainedNoticeChannel());
         eventPublisher.publishEvent(
                 new DsarErasureResolvedEvent(req.getEntityId(), operatorId, "REGISTRY_ADMIN", approverId, details));

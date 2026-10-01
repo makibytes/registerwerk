@@ -21,11 +21,14 @@ class HolderBlockGateImplTest {
     @Mock
     private HolderBlockRepository holderBlockRepository;
 
+    @Mock
+    private de.makibytes.registerwerk.deployment.api.AssetHolderRepository holderRepository;
+
     private HolderBlockGateImpl gate;
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
-        gate = new HolderBlockGateImpl(holderBlockRepository);
+        gate = new HolderBlockGateImpl(holderBlockRepository, holderRepository);
     }
 
     @Test
@@ -33,8 +36,8 @@ class HolderBlockGateImplTest {
     void notBlocked_whenNoActiveBlocks() {
         UUID entityId = UUID.randomUUID();
         String wallet = "0x1111111111111111111111111111111111111111";
-        when(holderBlockRepository.findByEntityIdAndStatus(entityId, HolderBlock.Status.ACTIVE)).thenReturn(List.of());
-        when(holderBlockRepository.findByWalletAddressAndStatus(wallet, HolderBlock.Status.ACTIVE)).thenReturn(List.of());
+        when(holderBlockRepository.findByEntityIdAndStatusIn(entityId, HolderBlock.BLOCKING)).thenReturn(List.of());
+        when(holderBlockRepository.findByWalletAddressAndStatusIn(wallet, HolderBlock.BLOCKING)).thenReturn(List.of());
 
         assertThat(gate.isBlocked(entityId, wallet)).isFalse();
     }
@@ -43,7 +46,7 @@ class HolderBlockGateImplTest {
     @DisplayName("returns true when the entity has an active block")
     void blocked_whenEntityHasActiveBlock() {
         UUID entityId = UUID.randomUUID();
-        when(holderBlockRepository.findByEntityIdAndStatus(entityId, HolderBlock.Status.ACTIVE))
+        when(holderBlockRepository.findByEntityIdAndStatusIn(entityId, HolderBlock.BLOCKING))
                 .thenReturn(List.of(new HolderBlock()));
 
         assertThat(gate.isBlocked(entityId, null)).isTrue();
@@ -53,7 +56,7 @@ class HolderBlockGateImplTest {
     @DisplayName("returns true when the wallet address has an active block, even without a known entity")
     void blocked_whenWalletHasActiveBlock() {
         String wallet = "0x2222222222222222222222222222222222222222";
-        when(holderBlockRepository.findByWalletAddressAndStatus(wallet, HolderBlock.Status.ACTIVE))
+        when(holderBlockRepository.findByWalletAddressAndStatusIn(wallet, HolderBlock.BLOCKING))
                 .thenReturn(List.of(new HolderBlock()));
 
         assertThat(gate.isBlocked(null, wallet)).isTrue();
@@ -63,7 +66,7 @@ class HolderBlockGateImplTest {
     @DisplayName("a lifted (non-ACTIVE) block on the wallet does not block")
     void notBlocked_whenOnlyLiftedBlockExists() {
         String wallet = "0x3333333333333333333333333333333333333333";
-        when(holderBlockRepository.findByWalletAddressAndStatus(wallet, HolderBlock.Status.ACTIVE)).thenReturn(List.of());
+        when(holderBlockRepository.findByWalletAddressAndStatusIn(wallet, HolderBlock.BLOCKING)).thenReturn(List.of());
 
         assertThat(gate.isBlocked(null, wallet)).isFalse();
     }
@@ -71,9 +74,40 @@ class HolderBlockGateImplTest {
     @Test
     @DisplayName("checksum-cased wallet argument matches the normalised stored block (T3-15)")
     void blocked_whenChecksumWalletMatchesNormalisedBlock() {
-        when(holderBlockRepository.findByWalletAddressAndStatus("0x" + "ab".repeat(20), HolderBlock.Status.ACTIVE))
+        when(holderBlockRepository.findByWalletAddressAndStatusIn("0x" + "ab".repeat(20), HolderBlock.BLOCKING))
                 .thenReturn(List.of(new HolderBlock()));
 
         assertThat(gate.isBlocked(null, " 0x" + "AB".repeat(20) + " ")).isTrue();
+    }
+
+    @Test
+    @DisplayName("6-25: isEntityBlocked sees a wallet-only block on one of the entity's holder wallets (repo gate used to miss it)")
+    void entityBlocked_whenWalletOnlyBlockOnHolderWallet() {
+        UUID entityId = UUID.randomUUID();
+        String wallet = "0x4444444444444444444444444444444444444444";
+        de.makibytes.registerwerk.deployment.api.AssetHolder holder = new de.makibytes.registerwerk.deployment.api.AssetHolder();
+        holder.setWalletAddress(wallet);
+        when(holderBlockRepository.findByEntityIdAndStatusIn(entityId, HolderBlock.BLOCKING)).thenReturn(List.of());
+        when(holderRepository.findActiveByInvestorId(entityId)).thenReturn(List.of(holder));
+        when(holderBlockRepository.findByWalletAddressAndStatusIn(wallet, HolderBlock.BLOCKING))
+                .thenReturn(List.of(new HolderBlock()));
+
+        assertThat(gate.isBlocked(entityId, null)).isFalse();
+        assertThat(gate.isEntityBlocked(entityId)).isTrue();
+    }
+
+    @Test
+    @DisplayName("isBlockedForAsset: an asset-scoped block on another asset does not cover this one; a wallet-wide one does")
+    void blockedForAsset_respectsScope() {
+        String wallet = "0x5555555555555555555555555555555555555555";
+        UUID assetA = UUID.randomUUID();
+        UUID assetB = UUID.randomUUID();
+        HolderBlock onA = new HolderBlock();
+        onA.setAssetId(assetA);
+        when(holderBlockRepository.findByWalletAddressAndStatusIn(wallet, HolderBlock.BLOCKING)).thenReturn(List.of(onA));
+        when(holderRepository.findByWalletAddressIn(List.of(wallet))).thenReturn(List.of());
+
+        assertThat(gate.isBlockedForAsset(wallet, assetA)).isTrue();
+        assertThat(gate.isBlockedForAsset(wallet, assetB)).isFalse();
     }
 }

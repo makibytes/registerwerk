@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.auth.web;
 
 import de.makibytes.registerwerk.auth.api.EntityDisplayNameResolver;
+import de.makibytes.registerwerk.auth.internal.ImpersonationSessionService;
 import de.makibytes.registerwerk.auth.internal.SessionCookieService;
 import de.makibytes.registerwerk.auth.web.dto.LoginResponse;
 import de.makibytes.registerwerk.shared.SecurityUtils;
@@ -34,11 +35,14 @@ public class SessionController {
     private final SessionCookieService cookies;
     private final JwtDecoder jwtDecoder;
     private final EntityDisplayNameResolver entityDisplayNameResolver;
+    private final ImpersonationSessionService impersonationSessions;
 
     public SessionController(
             SessionCookieService cookies,
             @Qualifier("jwtDecoder") JwtDecoder jwtDecoder,
-            EntityDisplayNameResolver entityDisplayNameResolver) {
+            EntityDisplayNameResolver entityDisplayNameResolver,
+            ImpersonationSessionService impersonationSessions) {
+        this.impersonationSessions = impersonationSessions;
         this.cookies = cookies;
         this.jwtDecoder = jwtDecoder;
         this.entityDisplayNameResolver = entityDisplayNameResolver;
@@ -62,7 +66,8 @@ public class SessionController {
                 entityId != null ? entityId.toString() : null,
                 entityName,
                 impersonating,
-                expiresAt
+                expiresAt,
+                impersonating && auth.getPrincipal() instanceof Jwt j ? j.getClaimAsString("imp_mode") : null
         ));
     }
 
@@ -82,6 +87,16 @@ public class SessionController {
             return ResponseEntity.noContent()
                     .header(HttpHeaders.SET_COOKIE, cookies.clearAdminSessionCookie().toString())
                     .build();
+        }
+
+        // Ending the session revokes its jti server-side: the impersonation token stops working
+        // everywhere, not just in this browser, and the end is audited.
+        if (auth.getPrincipal() instanceof Jwt current && current.getId() != null) {
+            try {
+                impersonationSessions.end(UUID.fromString(current.getId()), SecurityUtils.extractUserId(auth), "EXITED");
+            } catch (IllegalArgumentException ignored) {
+                // legacy token without a session id: nothing to end
+            }
         }
 
         var stashed = cookies.readAdminSessionCookie(request);

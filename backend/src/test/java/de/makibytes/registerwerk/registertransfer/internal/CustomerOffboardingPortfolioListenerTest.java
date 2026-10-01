@@ -37,7 +37,8 @@ class CustomerOffboardingPortfolioListenerTest {
 
     @BeforeEach
     void setUp() {
-        listener = new CustomerOffboardingPortfolioListener(holderRepository, migrationService);
+        listener = new CustomerOffboardingPortfolioListener(holderRepository, migrationService,
+                org.mockito.Mockito.mock(de.makibytes.registerwerk.customer.api.EntityTaskPort.class));
     }
 
     private static AssetHolder holder(UUID id, BigDecimal nominalAmount) {

@@ -28,6 +28,8 @@ class CustomerOffboardingAssetListenerTest {
     @Mock private AssetTokenAdminGrantRepository grantRepository;
     @Mock private AssetRepository assetRepository;
 
+    @Mock private de.makibytes.registerwerk.customer.api.EntityTaskPort taskPort;
+
     @InjectMocks
     private CustomerOffboardingAssetListener listener;
 
@@ -53,6 +55,7 @@ class CustomerOffboardingAssetListenerTest {
     void doesNotMutateAssets() {
         UUID entityId = UUID.randomUUID();
         Asset issuedAsset = new Asset();
+        issuedAsset.setId(UUID.randomUUID());
         issuedAsset.setStatus(AssetStatus.ISSUED);
         Asset draftAsset = new Asset();
         draftAsset.setStatus(AssetStatus.DRAFT);
@@ -61,6 +64,9 @@ class CustomerOffboardingAssetListenerTest {
 
         listener.onCustomerOffboarded(new CustomerOffboardedEvent(entityId, UUID.randomUUID(), "REGISTRY_ADMIN", "exit"));
 
+        org.mockito.Mockito.verify(taskPort).open(org.mockito.ArgumentMatchers.eq(entityId),
+                org.mockito.ArgumentMatchers.eq("ISSUER_ASSET_LIVE"), org.mockito.ArgumentMatchers.eq(issuedAsset.getId().toString()),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
         // No mutation methods called on Asset/AssetRepository beyond the read — this listener
         // only logs; it never calls assetRepository.save(...).
         verify(assetRepository, org.mockito.Mockito.never()).save(any());

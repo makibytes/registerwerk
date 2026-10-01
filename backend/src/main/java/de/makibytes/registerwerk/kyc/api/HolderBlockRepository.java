@@ -14,6 +14,12 @@ public interface HolderBlockRepository extends JpaRepository<HolderBlock, UUID> 
 
     List<HolderBlock> findByEntityIdAndStatus(UUID entityId, HolderBlock.Status status);
 
+    List<HolderBlock> findByWalletAddressAndStatusIn(String walletAddress, java.util.Collection<HolderBlock.Status> statuses);
+
+    List<HolderBlock> findByEntityIdAndStatusIn(UUID entityId, java.util.Collection<HolderBlock.Status> statuses);
+
+    List<HolderBlock> findByStatusInOrderByCreatedAtDesc(java.util.Collection<HolderBlock.Status> statuses);
+
     List<HolderBlock> findByAssetIdAndStatus(UUID assetId, HolderBlock.Status status);
 
     @Query("SELECT b FROM HolderBlock b WHERE b.status = 'ACTIVE' AND b.expiresAt IS NOT NULL AND b.expiresAt <= :now")

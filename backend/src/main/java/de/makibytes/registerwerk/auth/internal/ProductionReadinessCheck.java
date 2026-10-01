@@ -7,6 +7,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,6 +21,7 @@ class ProductionReadinessCheck {
 
     static final String DEFAULT_DEV_SECRET = "registerwerk-dev-jwt-secret-change-in-production!!";
     private static final int MIN_DUAL_CONTROL_APPROVERS = 2;
+    private static final java.time.Duration SEED_GRACE = java.time.Duration.ofHours(24);
 
     private final RegisterwerkAuthProperties authProps;
     private final String issuerUri;
@@ -31,6 +33,8 @@ class ProductionReadinessCheck {
     private final boolean stepUpAllowUnenrolled;
 
     private final AppUserRepository appUserRepository;
+
+    private final PasswordEncoder passwordEncoder;
 
     // Read as raw properties rather than through RegisterwerkEntraProperties: auth must not
     // depend on the entra module (entra already depends on auth.api), and these are only ever
@@ -52,8 +56,10 @@ class ProductionReadinessCheck {
             @Value("${registerwerk.entra.client-secret:}") String entraClientSecret,
             @Value("${registerwerk.entra.support-enabled:false}") boolean entraSupportEnabled,
             @Value("${registerwerk.auth.step-up.entra.auth-context-id:}") String stepUpAuthContextId,
-            AppUserRepository appUserRepository) {
+            AppUserRepository appUserRepository,
+            PasswordEncoder passwordEncoder) {
         this.authProps = authProps;
+        this.passwordEncoder = passwordEncoder;
         this.issuerUri = issuerUri;
         this.kekProviderName = kekProviderName;
         this.hsmEnabled = hsmEnabled;
@@ -117,10 +123,35 @@ class ProductionReadinessCheck {
                         "JWT_AUDIENCE is required in production when JWT_ISSUER_URI is set.");
             }
             checkEntraConfiguration(noIssuerUri);
+            checkSeededAdminPasswordRotated(adminEmail, adminPassword);
             log.info("Production readiness checks passed.");
         }
 
         checkDualControlAvailability();
+    }
+
+    /**
+     * The bootstrap administrator is created once (see {@code DefaultAdminSeeder}) with the
+     * password from the environment. 24 hours later production must no longer run with that
+     * password: the account must have set its own (or been replaced). Skipped on the very first
+     * deploy by the grace period, otherwise the first boot would brick itself.
+     */
+    private void checkSeededAdminPasswordRotated(String adminEmail, String adminPassword) {
+        appUserRepository.findByEmailIgnoreCase(adminEmail).ifPresent(admin -> {
+            if (!admin.isEnabled() || admin.getCreatedAt().isAfter(java.time.Instant.now().minus(SEED_GRACE))) {
+                return;
+            }
+            if (admin.isMustChangePassword()) {
+                throw new IllegalStateException("The seeded administrator " + adminEmail
+                        + " still has must_change_password after " + SEED_GRACE.toHours() + " h. Complete a password "
+                        + "reset for the account (or disable it once another REGISTRY_ADMIN exists).");
+            }
+            if (admin.getPasswordHash() != null && passwordEncoder.matches(adminPassword, admin.getPasswordHash())) {
+                throw new IllegalStateException("The seeded administrator " + adminEmail
+                        + " still uses the DEFAULT_ADMIN_PASSWORD from the environment after " + SEED_GRACE.toHours()
+                        + " h. Rotate the password.");
+            }
+        });
     }
 
     /**

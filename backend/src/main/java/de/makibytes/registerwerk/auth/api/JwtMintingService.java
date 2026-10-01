@@ -64,6 +64,16 @@ public class JwtMintingService {
         return encoder.encode(JwtEncoderParameters.from(header, builder.build())).getTokenValue();
     }
 
+    private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
+
+    /** Random 128-bit token id (URL-safe), the revocation handle of a session token. */
+    public static String newJti() {
+        byte[] bytes = new byte[16];
+        RANDOM.nextBytes(bytes);
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    /** Mints a session token: carries a {@code jti} (logout revocation) and {@code use=session}. */
     public String mint(AppUser user) {
         Map<String, Object> claims = new LinkedHashMap<>();
         claims.put("roles", user.getRoles().stream().map(Enum::name).toList());
@@ -73,24 +83,30 @@ public class JwtMintingService {
             claims.put("entityId", user.getLegalEntityId().toString());
             claims.put("entity_id", user.getLegalEntityId().toString());
         }
+        claims.put("jti", newJti());
+        claims.put("use", "session");
         return mintLocal(user.getId().toString(), tokenTtlSeconds, claims);
     }
 
     /**
-     * Mints an impersonation token for a REGISTRY_ADMIN acting on behalf of a legal entity.
-     * Deliberately assigns only customer-side functional roles so operator-only endpoints
-     * remain unreachable during the impersonation session. The {@code sub} claim remains
-     * the real admin's userId so audit events correctly attribute actions.
+     * Mints the token for an impersonation session once its one-time handoff code is exchanged.
+     * Deliberately assigns only customer-side functional roles so operator-only endpoints stay
+     * unreachable. {@code sub} remains the real admin's user id so audit attributes actions to
+     * them; {@code jti} is the {@code impersonation_session} id, which the session guard checks on
+     * every request. Expires with the session.
      */
-    public String mintImpersonationToken(AppUser actor, UUID targetEntityId) {
+    public String mintImpersonationToken(AppUser actor, ImpersonationSession session, long ttlSeconds) {
         Map<String, Object> claims = new LinkedHashMap<>();
         claims.put("roles", List.of("COMPANY_ADMIN", "ISSUER", "INVESTOR", "TRADER"));
         claims.put("email", actor.getEmail());
         claims.put("name", actor.getFullName() != null ? actor.getFullName() : actor.getEmail());
-        claims.put("entityId", targetEntityId.toString());
-        claims.put("entity_id", targetEntityId.toString());
+        claims.put("entityId", session.getTargetEntityId().toString());
+        claims.put("entity_id", session.getTargetEntityId().toString());
         claims.put("imp", true);
-        return mintLocal(actor.getId().toString(), tokenTtlSeconds, claims);
+        claims.put("imp_mode", session.getMode().name());
+        claims.put("jti", session.getId().toString());
+        claims.put("use", "session");
+        return mintLocal(actor.getId().toString(), ttlSeconds, claims);
     }
 
     public long getTokenTtlSeconds() {

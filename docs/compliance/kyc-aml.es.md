@@ -144,6 +144,31 @@ if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
 
 ---
 
+## Controles CDD para la aprobación de una entidad { #cdd-controls }
+
+`POST /api/v1/entities/{id}/kyc/approve` (step-up y segundo aprobador) ejecuta ahora las mismas comprobaciones de evidencia que la aprobación por jurisdicción, además de la cobertura de beneficiarios finales. Todos los umbrales son valores provisionales a la espera de las decisiones del operador sobre la metodología de riesgo; no son una conclusión jurídica.
+
+| Comprobación | Regla |
+|---|---|
+| Estado de la entidad | solo `ACTIVE` o `PENDING_ONBOARDING` |
+| Screening | ninguna coincidencia sin resolver de la entidad; cada beneficiario final actual filtrado y sin alertas (un beneficiario cesado con una coincidencia abierta sigue bloqueando) |
+| Lista de documentos | jurisdicción de origen (país de registro, o `jurisdiction` en el cuerpo); una lista incompleta exige `overrideNote` y un `REGISTRY_ADMIN` (aceptación de riesgo, guardada en el registro de evidencia) |
+| Beneficiarios finales | al menos uno; participación identificada del 75 % o más, o un recurso documentado al alto directivo (`controlType=SENIOR_MANAGING_OFFICIAL` con motivo), que también exige `overrideNote` y un `REGISTRY_ADMIN` |
+| Vigencia | `expiryDate` no puede superar `registerwerk.kyc.max-validity-months` (12 por defecto) y se limita a la fecha de revisión EDD de una PEP confirmada vinculada |
+
+Cada aprobación escribe un `kyc_approval_record` (instantánea de la lista, nota de excepción, cobertura, segundo aprobador) y el evento de auditoría `KYC_APPROVED` lleva los mismos datos. `KycJurisdictionApproval` sigue siendo orientativo: ninguna puerta lo lee.
+
+!!! note "Las aprobaciones existentes no se degradan"
+    `GET /api/v1/kyc/evidence-gaps` lista las entidades `APPROVED` que no superarían las comprobaciones actuales (lista incompleta, sin beneficiario final, participación sin explicar, vencimiento por encima del límite, PEP sin EDD, screening sin resolver) para tratarlas en la próxima revisión.
+
+**Documentos.** La carga acepta `issueDate` y `expiresAt`. `expiresAt` es obligatorio para pasaporte, documento de identidad y extractos de registro y no puede estar en el pasado; un documento vencido no cuenta en la lista, y el plazo «demasiado antiguo» empieza en `issueDate` si se indica. Listar y descargar documentos (y la lista de beneficiarios finales) queda limitado a `REGISTRY_ADMIN`, `COMPLIANCE_OFFICER`, `AUDIT` y el `COMPANY_ADMIN` de la propia entidad; las descargas llevan `X-Content-Type-Options: nosniff`.
+
+**Beneficiarios finales.** `ownershipPct` debe ser mayor que 0 y como máximo 100, y el total activo no puede superar 100; `GET .../beneficial-owners/summary` muestra la parte identificada y el resto sin explicar. `POST .../{id}/verify` registra al verificador y el documento de evidencia. El cese (`DELETE` con cuerpo JSON) exige step-up, un segundo aprobador y un motivo, y se rechaza mientras el screening de la persona esté sin resolver: resolver antes la coincidencia por la vía de aceptación. Añadir o cesar un beneficiario en una entidad `APPROVED` abre una tarea `KYC_REVIEW_REQUIRED`; el estado no cambia automáticamente.
+
+**PEP y EDD.** Confirmar una coincidencia PEP establece `NaturalPerson.pepStatus=CONFIRMED_PEP`. Una PEP confirmada solo supera la puerta de screening mientras haya una aprobación EDD vigente: `POST .../{id}/edd-approvals` (`REGISTRY_ADMIN`, step-up, segundo aprobador, nota, fecha de revisión de seis meses como máximo). Pasada la fecha de revisión, la persona vuelve a bloquear. No hay calificación de riesgo, lista de países de riesgo ni lista de comprobación EDD; eso corresponde al análisis de riesgos del operador (GwG § 5).
+
+---
+
 ## Monitoreo continuo { #ongoing-monitoring }
 
 **GwG §10 Abs. 1 Nr. 5** y equivalentes en las cuatro jurisdicciones requieren un seguimiento continuo de las relaciones comerciales.

@@ -90,7 +90,8 @@ class ScreeningDemoClearRunRepairTest {
         when(hitRepository.findByRunIdAndAcceptedIsNull(null)).thenReturn(List.of(open));
 
         repair = new ScreeningDemoClearRunRepair(entities, runRepository, List.of(provider));
-        gate = new ScreeningGateImpl(runRepository, hitRepository, mock(ScreeningService.class), List.of(provider));
+        gate = new ScreeningGateImpl(runRepository, hitRepository, mock(ScreeningService.class), List.of(provider),
+                ScreeningPolicy.defaults(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
     @Test

@@ -12,6 +12,13 @@ public enum ErasureRequestStatus {
     IN_REVIEW,
     /** Erasure of the erasable fields was carried out (or nothing was erasable). */
     COMPLETED,
+    /**
+     * The routine erased what it covers (user contact data) but deliberately did NOT touch, or
+     * must retain, other categories of personal data; {@code resolutionDetail} lists
+     * erased / retained (legal basis) / not covered. This is the honest outcome of a DSAR today
+     * (retention enforcement and the remaining data classes are a parked legal decision, T6-10).
+     */
+    COMPLETED_PARTIAL,
     /** Erasure was declined in full, e.g. all fields fall under a retention obligation. */
     REJECTED
 }

@@ -69,6 +69,8 @@ export interface OperatorUser {
   lastLoginAt: string | null;
   authProvider: 'LOCAL' | 'ENTRA';
   passwordSetupRequired: boolean;
+  /** True for a freshly seeded default admin until the password has been changed. */
+  mustChangePassword?: boolean;
 }
 
 export interface OperatorUserPage {
@@ -79,9 +81,10 @@ export interface OperatorUserPage {
   size: number;
 }
 
+/** No bearer token: `handoffUrl` carries a one-time code (`#code=...`, ~60 s) exchanged for a session cookie. */
 export interface ImpersonateResponse {
-  token: string;
-  tokenType: string;
+  sessionId: string;
+  mode: 'READ_ONLY' | 'ACT_ON_BEHALF';
   expiresAt: string;
   entityId: string;
   entityName: string;
@@ -93,6 +96,26 @@ export interface OperatorInviteRequest {
   name: string;
   legalEntityId: string | null;
   roles: AppUserRole[];
+}
+
+/** Step-up token as bearer; the second approver's token only where the backend gates the call. */
+export interface UserAdminTokens {
+  stepUpToken: string;
+  dualControlToken?: string;
+}
+
+function userAdminHeaders(tokens: UserAdminTokens): HttpHeaders {
+  let headers = new HttpHeaders({ Authorization: `Bearer ${tokens.stepUpToken}` });
+  if (tokens.dualControlToken) headers = headers.set('X-Dual-Control-Token', tokens.dualControlToken);
+  return headers;
+}
+
+/**
+ * Whether the backend gates a user-lifecycle change behind a second approver: operator accounts (no entity) and
+ * anything with an administrative role. (Bootstrap mode, fewer than two enrolled admins, waives the approver.)
+ */
+export function isGatedOperatorAccount(roles: AppUserRole[], entityId: string | null): boolean {
+  return !entityId || roles.some(r => r === 'REGISTRY_ADMIN' || r === 'COMPLIANCE_OFFICER' || r === 'AUDIT');
 }
 
 @Injectable({ providedIn: 'root' })
@@ -127,32 +150,64 @@ export class AdminUserService {
     return this.http.get<OperatorUser>(`${this.base}/users/${userId}`);
   }
 
-  inviteUser(request: OperatorInviteRequest): Observable<OperatorUser> {
-    return this.http.post<OperatorUser>(`${this.base}/users`, request);
+  /** Step-up; plus an approver token (`OPERATOR_USER_INVITE`) for operator/administrative accounts. */
+  inviteUser(request: OperatorInviteRequest, tokens: UserAdminTokens): Observable<OperatorUser> {
+    return this.http.post<OperatorUser>(`${this.base}/users`, request, { headers: userAdminHeaders(tokens) });
   }
 
-  updateRoles(userId: string, roles: AppUserRole[]): Observable<OperatorUser> {
-    return this.http.patch<OperatorUser>(`${this.base}/users/${userId}/roles`, { roles });
+  /** Step-up; approver (`OPERATOR_USER_ROLES`) when the change touches administrative roles. */
+  updateRoles(userId: string, roles: AppUserRole[], tokens: UserAdminTokens): Observable<OperatorUser> {
+    return this.http.patch<OperatorUser>(`${this.base}/users/${userId}/roles`, { roles }, { headers: userAdminHeaders(tokens) });
   }
 
-  enableUser(userId: string): Observable<OperatorUser> {
-    return this.http.post<OperatorUser>(`${this.base}/users/${userId}/enable`, {});
+  /**
+   * Step-up; approver (`OPERATOR_USER_ENABLE`) for operator/gated accounts. `reinstatementReason` (>= 10 chars) is
+   * mandatory after an access-review revocation, and that reinstatement always needs an approver (`OPERATOR_USER_REINSTATE`).
+   */
+  enableUser(userId: string, tokens: UserAdminTokens, reinstatementReason?: string): Observable<OperatorUser> {
+    return this.http.post<OperatorUser>(`${this.base}/users/${userId}/enable`,
+      reinstatementReason ? { reinstatementReason } : {}, { headers: userAdminHeaders(tokens) });
   }
 
-  disableUser(userId: string): Observable<OperatorUser> {
-    return this.http.post<OperatorUser>(`${this.base}/users/${userId}/disable`, {});
+  /** Step-up; `reason` is mandatory in Entra mode and always recorded. */
+  disableUser(userId: string, tokens: UserAdminTokens, reason?: string): Observable<OperatorUser> {
+    return this.http.post<OperatorUser>(`${this.base}/users/${userId}/disable`,
+      reason ? { reason } : {}, { headers: userAdminHeaders(tokens) });
   }
 
   sendPasswordReset(userId: string): Observable<void> {
     return this.http.post<void>(`${this.base}/users/${userId}/password-reset`, {});
   }
 
-  deleteUser(userId: string): Observable<void> {
-    return this.http.delete<void>(`${this.base}/users/${userId}`);
+  /** Step-up; approver (`OPERATOR_USER_DELETE`) for operator/gated accounts. */
+  deleteUser(userId: string, tokens: UserAdminTokens): Observable<void> {
+    return this.http.delete<void>(`${this.base}/users/${userId}`, { headers: userAdminHeaders(tokens) });
   }
 
-  impersonate(entityId: string): Observable<ImpersonateResponse> {
-    return this.http.post<ImpersonateResponse>(this.impersonationUrl, { entityId });
+  /** Clears the bound IdP identity so the next sign-in rebinds: step-up + second approver (`IDENTITY_REBIND`), reason >= 10 chars. */
+  resetIdentity(userId: string, reason: string, tokens: UserAdminTokens): Observable<void> {
+    return this.http.post<void>(`${this.base}/users/${userId}/reset-identity`, { reason }, { headers: userAdminHeaders(tokens) });
+  }
+
+  /** Removes a lost authenticator (`TOTP_RESET`): step-up + second approver; the user must re-enrol and their sessions end. */
+  resetTotp(userId: string, tokens: UserAdminTokens): Observable<void> {
+    return this.http.post<void>(`${this.base}/users/${userId}/totp-reset`, {}, { headers: userAdminHeaders(tokens) });
+  }
+
+  /**
+   * Starts a READ_ONLY support session in the customer portal (step-up as bearer, reason >= 15 chars).
+   * The customer's administrators can see the reason.
+   */
+  impersonate(entityId: string, reason: string, stepUpToken: string, ticket?: string): Observable<ImpersonateResponse> {
+    return this.http.post<ImpersonateResponse>(this.impersonationUrl,
+      { entityId, reason, ticket: ticket || undefined },
+      { headers: new HttpHeaders({ Authorization: `Bearer ${stepUpToken}` }) });
+  }
+
+  /** ACT_ON_BEHALF: step-up + second approver (`ADMIN_IMPERSONATION_ACT_ON_BEHALF`) bound to this request. */
+  impersonateActOnBehalf(entityId: string, reason: string, tokens: UserAdminTokens, ticket?: string): Observable<ImpersonateResponse> {
+    return this.http.post<ImpersonateResponse>(`${this.impersonationUrl}/act-on-behalf`,
+      { entityId, reason, ticket: ticket || undefined }, { headers: userAdminHeaders(tokens) });
   }
 
   // ── Microsoft Entra 2FA support ─────────────────────────────────────────────

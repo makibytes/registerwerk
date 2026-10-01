@@ -31,14 +31,21 @@ class AuditFailureRecorder {
 
     private final AuditEventRepository repository;
     private final AuditChainAppender chainAppender;
+    private final AuditEventCapture capture;
 
-    AuditFailureRecorder(AuditEventRepository repository, AuditChainAppender chainAppender) {
+    AuditFailureRecorder(AuditEventRepository repository, AuditChainAppender chainAppender,
+                         AuditEventCapture capture) {
         this.repository = repository;
         this.chainAppender = chainAppender;
+        this.capture = capture;
     }
 
+    /** Legacy listener signature: drains rejected-action publications created before the cut-over. */
     @ApplicationModuleListener
     void on(RejectedActionEvent event) {
+        if (capture.wasCaptured(event)) {
+            return;
+        }
         AuditEvent ae = new AuditEvent();
         ae.setEventType(event.eventType());
         ae.setSubjectType("HttpRequest");
@@ -47,11 +54,11 @@ class AuditFailureRecorder {
         ae.setActorId(event.actorId());
         ae.setActorRole(event.actorRole());
         ae.setPayload(Map.of("path", event.path(), "method", event.httpMethod(),
-                "reason", event.reason() != null ? event.reason() : ""));
-
+                "reason", event.reason() != null ? event.reason() : "",
+                "_occurredAtSource", "PROCESSING_TIME"));
+        ae.setCanonVersion((short) 2);
+        ae.setRecordedAt(ae.getOccurredAt());
         chainAppender.append(ae);
         repository.save(ae);
-        log.debug("Recorded rejected action: type={} path={} method={}",
-                event.eventType(), event.path(), event.httpMethod());
     }
 }

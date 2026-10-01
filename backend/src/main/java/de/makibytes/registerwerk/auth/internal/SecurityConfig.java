@@ -98,7 +98,10 @@ public class SecurityConfig {
             SessionCookieService sessionCookieService,
             // Named explicitly: two JwtDecoder beans exist (this one and localHs256JwtDecoder),
             // so resolving the resource server's decoder by type alone is ambiguous.
-            @Qualifier("jwtDecoder") JwtDecoder jwtDecoder) throws Exception {
+            @Qualifier("jwtDecoder") JwtDecoder jwtDecoder,
+            SessionStateService sessionState,
+            io.micrometer.core.instrument.MeterRegistry meterRegistry,
+            RegisterwerkAuthProperties authProps) throws Exception {
         http
             // The session token moved from the login response body into an httpOnly
             // `rw_session` cookie (SessionCookieService) — an ambient credential the browser
@@ -156,6 +159,13 @@ public class SecurityConfig {
             // for why this is a filter rather than a change to ~100 call sites.
             .addFilterAfter(new EntraPrincipalNormalizationFilter(principalResolver),
                             BearerTokenAuthenticationFilter.class)
+            // Per-request account/revocation check (6-01) and impersonation mode enforcement
+            // (6-31). Built here, not as @Component beans, so Boot does not also register them
+            // as plain servlet filters outside this chain.
+            .addFilterAfter(new UserSessionGuardFilter(sessionState, meterRegistry, authProps.isRejectUnknownUsers()),
+                            EntraPrincipalNormalizationFilter.class)
+            .addFilterAfter(new ImpersonationGuardFilter(sessionState, authProps.getImpersonationDenyPatterns()),
+                            UserSessionGuardFilter.class)
             // SessionManagementFilter invokes CsrfAuthenticationStrategy after a cookie-backed
             // bearer token is authenticated. That strategy deliberately expires the pre-login
             // token and installs a fresh deferred token. This filter therefore MUST run after

@@ -110,8 +110,8 @@ sequenceDiagram
     participant Approver
     participant Backend
 
-    Approver->>Backend: POST /api/v1/auth/step-up { code, action }
-    Backend-->>Approver: approver token (acr=stepup, stepup_scope=action, 10 min)
+    Approver->>Backend: POST /api/v1/auth/step-up { code, action, target[, targetBody] }
+    Backend-->>Approver: approver token (acr=stepup, stepup_scope, stepup_target, jti; 5 min, single use)
     Approver->>Initiator: Hand over the approver token
     Initiator->>Backend: POST /api/v1/auth/step-up { code, action }
     Backend-->>Initiator: initiator step-up token
@@ -124,7 +124,22 @@ Von `StepUpEnforcementAspect` und `StepUpTokenValidator` erzwungene Schlüsselin
 - Initiator und Genehmiger **müssen unterschiedliche Benutzer sein** (`sub`-Vergleich)
 - Das Token des Genehmigers muss `stepup_scope` **exakt gleich** dem `reason` der Annotation tragen — andernfalls wäre eine Genehmigung ein allgemeiner Berechtigungsnachweis, der für jede Vier-Augen-Aktion in ihrem Zeitfenster gültig wäre
 - Der Genehmiger muss weiterhin ein **aktivierter `REGISTRY_ADMIN` in der Datenbank** sein, nicht nur gemäß den Claims des Tokens, die den Status nur zum Zeitpunkt der Prägung widerspiegeln
-- Beide Token laufen nach 10 Minuten ab
+- Die Genehmigung ist **an die Anfrage gebunden, für die sie erteilt wurde** (K3). Der Genehmiger prägt sie mit `action` *und* `target` (`"METHOD /pfad?query"` des genauen Aufrufs; bei körpergebundenen Gründen wie Mint, Burn und erzwungener Übertragung zusätzlich `targetBody`, der JSON-Body). Das Token trägt `stepup_target`, den base64url-SHA-256 der kanonischen Anfrage (`v1`, Methode in Großbuchstaben, Pfad ohne abschließenden Schrägstrich, sortierte Query und bei körpergebundenen Gründen der Hash des kanonischen JSON: sortierte Schlüssel, keine Leerzeichen, Dezimalzahlen in einfacher Schreibweise). Das Backend leitet denselben Digest aus der laufenden Anfrage ab; weicht er ab, wird der Aufruf mit **403** abgelehnt. Token ohne Ziel werden nicht mehr akzeptiert
+- Die Genehmigung ist **einmalig verwendbar**: Ihre `jti` wird zusammen mit dem Audit-Ereignis in einer Transaktion in `dual_control_token_use` geschrieben (eine zweite Verwendung, auf jedem Replikat, ist ein **403**). Scheitert eine Aktion, nachdem die Genehmigung verbraucht wurde, ist eine neue Genehmigung nötig
+- Die Genehmigung wird nur in einem **kurzen Zeitfenster** nach der Prägung akzeptiert (`registerwerk.auth.step-up.dual-control.window-seconds`, Standard 300 s); das eigene Step-up-Token des Initiators behält seine 10 Minuten
+
+---
+
+## TOTP-Registrierung, Speicherung und Zurücksetzen { #totp-enrolment-storage-reset }
+
+- **Kein Vertrauen beim ersten Mal.** Zum Start einer Registrierung (`POST /api/v1/auth/step-up/enroll`) ist das aktuelle Passwort des Kontos im Body erforderlich (`{ "currentPassword": "…" }`); eine gestohlene oder unbeaufsichtigte Sitzung kann daher keinen Authenticator des Angreifers binden. Falsche Passwörter zählen zur selben Sperre wie falsche Codes. Konten, deren zweiter Faktor von einem externen Identity-Provider verwaltet wird, können keinen lokalen Authenticator registrieren. Die Bestätigung (`/enroll/confirm`) verbraucht den Zeitschritt des Codes, sodass er nicht als Step-up-Code wiederverwendet werden kann.
+- **Verschlüsselt gespeichert.** Das TOTP-Geheimnis wird per Envelope-Verschlüsselung (AES-256-GCM, pro Wert ein neuer Datenschlüssel, vom Plattform-KEK umhüllt, die Benutzer-ID als zusätzliche authentifizierte Daten) in `app_user.totp_secret` abgelegt; `totp_secret_kid` hält den KEK-Provider fest. Von früheren Versionen im Klartext gespeicherte Geheimnisse werden durch einen Startjob und andernfalls bei der nächsten erfolgreichen Prüfung verschlüsselt.
+- **Zustand über Replikate geteilt.** Replay-Schutz (RFC 6238 §5.2: ein Code auf oder vor dem zuletzt akzeptierten Zeitschritt wird abgelehnt) und Brute-Force-Sperre (5 falsche oder wiederverwendete Codes sperren Step-up für 15 Minuten) liegen in der Tabelle `totp_state` und werden atomar aktualisiert; ein auf einem Replikat akzeptierter Code wird auf allen anderen abgelehnt.
+- **Selbstbedienungs-Entfernung.** `POST /api/v1/auth/step-up/disenroll { "code": "…" }` verlangt einen gültigen aktuellen Code, löscht die Registrierung und beendet die Sitzungen des Benutzers. Vor jeder Step-up-Aktion muss der Benutzer sich neu registrieren.
+- **Zurücksetzen durch den Betreiber (Gerät verloren).** `POST /api/v1/admin/users/{id}/totp-reset` verlangt Step-up **und** einen zweiten Genehmiger (Grund `TOTP_RESET`). Es löscht die Registrierung, beendet die Sitzungen des Benutzers und schreibt das Audit-Ereignis `TOTP_RESET` mit beiden Identitäten; die eigene Registrierung lässt sich so nicht zurücksetzen. Der Benutzer registriert sich bei der nächsten Anmeldung neu.
+- **Überwachung.** Das Gauge `registerwerk_stepup_unenrolled_operators` zählt aktivierte lokale `REGISTRY_ADMIN`-/`COMPLIANCE_OFFICER`-Konten, die älter als sieben Tage sind und keinen Authenticator haben. Es ist eine Warnmetrik, kein Startfehler; alarmieren Sie bei Werten über null.
+
+Audit-Ereignisse des Lebenszyklus: `TOTP_ENROLMENT_STARTED`, `TOTP_ENROLLED`, `TOTP_DISENROLLED`, `TOTP_RESET`; `DUAL_CONTROL_APPROVED` enthält jetzt zusätzlich die Token-ID der Genehmigung und den Ziel-Digest, und `DUAL_CONTROL_BOOTSTRAP_USED` kennzeichnet die Ausnahme für einen einzelnen Akteur, solange weniger als zwei TOTP-registrierte Administratoren existieren.
 
 ---
 

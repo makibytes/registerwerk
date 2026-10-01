@@ -25,7 +25,8 @@ class KycServiceRejectTest {
     private final LegalEntityRepository entities = mock(LegalEntityRepository.class);
     private final ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
     private final KycService service = new KycService(entities, mock(KycJurisdictionApprovalRepository.class),
-            publisher, mock(ScreeningGate.class));
+            publisher, mock(ScreeningGate.class), mock(KycEvidenceService.class),
+            mock(de.makibytes.registerwerk.kyc.api.KycApprovalRecordRepository.class));
 
     private KycRejectedEvent reject(KycRejectionCategory category) {
         UUID id = UUID.randomUUID();

@@ -61,3 +61,12 @@ Das Modul kann Resilienztest-Metadaten aufzeichnen und auflisten und Datensätze
 ## Behördenweiterleitung und -einreichung – nicht implementiert { #authority-routing-and-filing-not-implemented }
 
 Das Repository implementiert keine gerichtsbarkeitsspezifische DORA-Behördenweiterleitung, keine offiziellen Formulare oder Schemata, keine authentifizierte Übertragung, Lieferbelege, Korrekturen, Ablehnungsbearbeitung oder behördliche Annahme. Die Aufzeichnung, dass ein Vorfall gemeldet wurde, ist kein Einreichungsnachweis.
+
+## Vorfallskontrollen (Phase 6)
+
+- **Kenntniszeitpunkt**: `awarenessAt` wird bei Anlage erfasst (Standard jetzt, nie in der Zukunft) und ist unveränderlich; die 24-Stunden- und 1-Monats-Fristen laufen ab diesem Zeitpunkt.
+- **Klassifizierung**: `POST /api/v1/dora/incidents/{id}/classify` (Step-up, Pflichtbegründung, optionale Kriterien) klassifiziert bzw. reklassifiziert; die Hochstufung auf `MAJOR` startet die 4-Stunden-Frist und berechnet alle Fristen neu. Das Zurücknehmen von `MAJOR` erfordert eine zweite Freigabe und hinterlässt eine Herabstufungsmarkierung. Wer klassifiziert, ist eine offene Betreiberentscheidung.
+- **Fristen**: Erstmeldung 4 Stunden ab Klassifizierung / 24 Stunden ab Kenntnis (die frühere gilt), Zwischenbericht 72 Stunden nach der Erstmeldung, Abschlussbericht 30 Tage ab Kenntnis (konservativ). Die Überwachung läuft alle 15 Minuten bis zum Abschlussbericht, unabhängig vom Status; Fristverletzungen werden per E-Mail an Registeradministratoren gemeldet.
+- **Meldungen** sind nur anhängbare Einträge (`INITIAL`, `INTERMEDIATE`, `FINAL`) mit Behördenreferenz; erste Zeitstempel und Referenz sind nicht überschreibbar. `REPORTED_TO_AUTHORITY` wird nur durch Erfassen des Abschlussberichts gesetzt. Das Schließen eines `MAJOR`-Vorfalls erfordert Nachweise für Erst- und Abschlussmeldung sowie eine zweite Freigabe.
+- **Automatische Entwürfe**: Ein dauerhaft fehlgeschlagener Audit-Schreibvorgang legt einen unklassifizierten Entwurf an, den eine Person klassifizieren muss.
+- CSV-Exporte beschriften die Fristen korrekt und neutralisieren Tabellenkalkulationsformeln in Textzellen.

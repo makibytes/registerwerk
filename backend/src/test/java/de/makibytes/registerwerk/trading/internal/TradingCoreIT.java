@@ -109,6 +109,8 @@ class TradingCoreIT {
     @Autowired JdbcTemplate jdbc;
 
     private static final UUID ACTOR = UUID.randomUUID();
+    /** The seller side acts as a different user: the same user on both legs is refused (6-31). */
+    private static final UUID SELLER_ACTOR = UUID.randomUUID();
 
     // ── scenario builders ───────────────────────────────────────────────────
 
@@ -119,7 +121,7 @@ class TradingCoreIT {
         LegalEntity seller = entity("SEL", KycStatus.APPROVED);
         Asset asset = asset();
         AssetHolder holder = holder(asset, seller, nominal);
-        var listing = trading.createListing(seller.getId(), ACTOR, new CreateTradeListingRequest(
+        var listing = trading.createListing(seller.getId(), SELLER_ACTOR, new CreateTradeListingRequest(
                 holder.getId(), new BigDecimal(listed), new BigDecimal("10"), false, List.of(PaymentOption.OFFCHAIN_SEPA), false, "EUR", null, null));
         return new Market(asset, seller, holder, listings.findById(listing.id()).orElseThrow());
     }
@@ -256,7 +258,7 @@ class TradingCoreIT {
         Buyer buyer = buyer(KycStatus.APPROVED);
         TradeExecutionResponse declared = declared(buyer, m, "4");
 
-        trading.disputePayment(m.seller().getId(), ACTOR, declared.id(), "no credit on our account");
+        trading.disputePayment(m.seller().getId(), SELLER_ACTOR, declared.id(), "no credit on our account");
 
         TradeExecution e = execution(declared.id());
         assertThat(e.getSettlementStatus()).isEqualTo(SettlementStatus.PAYMENT_UNRESOLVED); // passes the V26 check constraint
@@ -268,7 +270,7 @@ class TradingCoreIT {
         assertThat(queue.listUnresolved()).anyMatch(u -> u.trade().id().equals(declared.id()));
 
         // both parties may add evidence notes
-        queue.addNote(m.seller().getId(), ACTOR, "TRADER", declared.id(), "bank statement shows no credit");
+        queue.addNote(m.seller().getId(), SELLER_ACTOR, "TRADER", declared.id(), "bank statement shows no credit");
         queue.addNote(buyer.entity().getId(), ACTOR, "TRADER", declared.id(), "payment slip attached");
         assertThat(queue.listNotes(buyer.entity().getId(), declared.id())).hasSize(2);
 
@@ -284,7 +286,7 @@ class TradingCoreIT {
         Market m = market("100", "10");
         Buyer buyer = buyer(KycStatus.APPROVED);
         TradeExecutionResponse declared = declared(buyer, m, "4");
-        trading.disputePayment(m.seller().getId(), ACTOR, declared.id(), "disputed");
+        trading.disputePayment(m.seller().getId(), SELLER_ACTOR, declared.id(), "disputed");
 
         trading.forceSettleUnresolved(ACTOR, declared.id(), "payment evidenced by buyer bank", null, UUID.randomUUID());
 
@@ -304,7 +306,7 @@ class TradingCoreIT {
         e.setKycStatus(KycStatus.EXPIRED);
         entities.saveAndFlush(e);
 
-        TradeExecutionResponse result = trading.confirmPaymentReceived(m.seller().getId(), ACTOR, declared.id());
+        TradeExecutionResponse result = trading.confirmPaymentReceived(m.seller().getId(), SELLER_ACTOR, declared.id());
 
         assertThat(result.settlementStatus()).isEqualTo(SettlementStatus.PAYMENT_UNRESOLVED);
         assertThat(execution(declared.id()).getUnresolvedReason()).contains("GATE_FAILED_AT_CONFIRM");
@@ -354,7 +356,7 @@ class TradingCoreIT {
                 } catch (InterruptedException ex) {
                     throw new IllegalStateException(ex);
                 }
-                trading.confirmPaymentReceived(m.seller().getId(), ACTOR, declared.id());
+                trading.confirmPaymentReceived(m.seller().getId(), SELLER_ACTOR, declared.id());
             }));
             assertThat(confirmHoldsLock.await(10, TimeUnit.SECONDS)).isTrue();
             Future<Boolean> job = pool.submit(() -> {
@@ -380,7 +382,7 @@ class TradingCoreIT {
         Buyer buyer = buyer(KycStatus.APPROVED);
         TradeExecutionResponse declared = declared(buyer, m, "4");
         TradeExecution stale = execution(declared.id());                    // detached copy, AWAITING, version n
-        trading.confirmPaymentReceived(m.seller().getId(), ACTOR, declared.id());
+        trading.confirmPaymentReceived(m.seller().getId(), SELLER_ACTOR, declared.id());
 
         stale.setSettlementStatus(SettlementStatus.FAILED);
         assertThatThrownBy(() -> executions.saveAndFlush(stale)).isInstanceOf(OptimisticLockingFailureException.class);
@@ -424,7 +426,7 @@ class TradingCoreIT {
         row.setRemovedAt(Instant.now());
         holders.saveAndFlush(row);
 
-        TradeExecutionResponse result = trading.confirmPaymentReceived(m.seller().getId(), ACTOR, declared.id());
+        TradeExecutionResponse result = trading.confirmPaymentReceived(m.seller().getId(), SELLER_ACTOR, declared.id());
 
         assertThat(result.settlementStatus()).isEqualTo(SettlementStatus.PAYMENT_UNRESOLVED);
         assertThat(holders.findById(row.getId()).orElseThrow().getNominalAmount()).isEqualByComparingTo("100");
@@ -442,7 +444,7 @@ class TradingCoreIT {
         asset.setStatus(AssetStatus.SUSPENDED);
         assets.saveAndFlush(asset);
         assertThatThrownBy(() -> buy(buyer, m, "1")).isInstanceOf(InvalidStateTransitionException.class).hasMessageContaining("SUSPENDED");
-        assertThatThrownBy(() -> trading.createListing(m.seller().getId(), ACTOR, new CreateTradeListingRequest(
+        assertThatThrownBy(() -> trading.createListing(m.seller().getId(), SELLER_ACTOR, new CreateTradeListingRequest(
                 m.sellerHolder().getId(), BigDecimal.ONE, BigDecimal.TEN, false, List.of(PaymentOption.OFFCHAIN_SEPA))))
                 .isInstanceOf(InvalidStateTransitionException.class);
 
@@ -474,5 +476,18 @@ class TradingCoreIT {
         assertThat(r.settlementStatus()).isEqualTo(SettlementStatus.PENDING);
         assertThat(r.instantSettlement()).isFalse();
         assertThat(holders.findById(m.sellerHolder().getId()).orElseThrow().getNominalAmount()).isEqualByComparingTo("100");
+    }
+
+    @Test
+    @DisplayName("the same user acting for seller (listing) and buyer is refused, even across two entities (6-31)")
+    void sameActorOnBothLegsIsRefused() {
+        Market m = market("100", "10");
+        Buyer buyer = buyer(KycStatus.APPROVED);
+
+        assertThatThrownBy(() -> trading.buy(buyer.entity().getId(), SELLER_ACTOR, m.listing().getId(),
+                new BuyTradingOfferRequest(new BigDecimal("4"), OrderType.MARKET, null,
+                        PaymentOption.OFFCHAIN_SEPA, WalletPreferenceMode.ENDPOINT, buyer.endpoint().getId(), null)))
+                .isInstanceOf(ComplianceGateException.class)
+                .hasMessageContaining("same user");
     }
 }

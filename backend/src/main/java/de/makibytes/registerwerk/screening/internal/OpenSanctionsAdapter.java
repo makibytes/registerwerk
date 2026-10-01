@@ -22,6 +22,10 @@ import java.util.Map;
  * Free tier: https://api.opensanctions.org. Commercial: self-hosted or SaaS key.
  * Set OPENSANCTIONS_API_KEY or leave blank for the free public API (rate-limited).
  *
+ * <p>Every screening is one remote {@code /match} call (no local dataset). Sent properties: name,
+ * country, LEI and registration number for companies; name, country, birth date and nationality for
+ * persons. The match threshold is {@code registerwerk.screening.match-threshold} (default 0.85).
+ *
  * <p><strong>Fail-closed:</strong> any transport, authentication, or API error is
  * surfaced as {@link ScreeningProviderException} so the screening run is recorded
  * as {@code ERROR} — never silently treated as CLEAR. A screening that did not run
@@ -33,14 +37,16 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
 
     private static final Logger log = LoggerFactory.getLogger(OpenSanctionsAdapter.class);
     private static final String PROVIDER = "OPEN_SANCTIONS";
-    private static final BigDecimal MATCH_THRESHOLD = new BigDecimal("0.85");
 
     private final RestClient client;
+    private final BigDecimal matchThreshold;
 
     OpenSanctionsAdapter(
             RestClient.Builder restClientBuilder,
             @Value("${registerwerk.screening.open-sanctions.base-url:https://api.opensanctions.org}") String baseUrl,
-            @Value("${registerwerk.screening.open-sanctions.api-key:}") String apiKey) {
+            @Value("${registerwerk.screening.open-sanctions.api-key:}") String apiKey,
+            @Value("${registerwerk.screening.match-threshold:0.85}") BigDecimal matchThreshold) {
+        this.matchThreshold = matchThreshold;
         RestClient.Builder builder = restClientBuilder.baseUrl(baseUrl);
         if (apiKey != null && !apiKey.isBlank()) {
             builder.defaultHeader("Authorization", "ApiKey " + apiKey);
@@ -54,8 +60,13 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public List<ScreeningHitDto> screenEntity(ScreeningSubjectDto subject) {
+        return screen(subject).hits();
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public ScreeningResult screen(ScreeningSubjectDto subject) {
         if (subject.name() == null || subject.name().isBlank()) {
             throw new ScreeningProviderException(PROVIDER,
                     "Cannot screen subject " + subject.subjectId() + ": name is blank");
@@ -74,6 +85,15 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
         }
         if (hasText(subject.registrationNumber())) {
             properties.put("registrationNumber", List.of(subject.registrationNumber()));
+        }
+        // Natural persons: birth date and nationality let the provider tell namesakes apart.
+        if ("Person".equals(schema)) {
+            if (subject.dateOfBirth() != null) {
+                properties.put("birthDate", List.of(subject.dateOfBirth().toString()));
+            }
+            if (hasText(subject.nationality())) {
+                properties.put("nationality", List.of(subject.nationality().toLowerCase(Locale.ROOT)));
+            }
         }
         Map<String, Object> requestBody = Map.of(
                 "queries", Map.of("q1", Map.of("schema", schema, "properties", properties)));
@@ -99,7 +119,34 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
             throw new ScreeningProviderException(PROVIDER,
                     "OpenSanctions returned an empty response for subject " + subject.subjectId());
         }
-        return parseHits(response, subject);
+        return new ScreeningResult(parseHits(response, subject), dataVersionOf(response), matchThreshold);
+    }
+
+    /**
+     * Best-effort provenance of the answer: a top-level {@code version} if the API reports one, else the
+     * newest {@code last_change} among the matched records. Null when neither is present (e.g. a clear result).
+     */
+    @SuppressWarnings("unchecked")
+    static String dataVersionOf(Map<String, Object> response) {
+        Object version = response.get("version");
+        if (version != null && !String.valueOf(version).isBlank()) {
+            return String.valueOf(version);
+        }
+        if (response.get("responses") instanceof Map<?, ?> responses
+                && responses.get("q1") instanceof Map<?, ?> query
+                && query.get("results") instanceof List<?> results) {
+            String newest = null;
+            for (Object r : results) {
+                if (r instanceof Map<?, ?> m && m.get("last_change") != null) {
+                    String lc = String.valueOf(m.get("last_change"));
+                    if (newest == null || lc.compareTo(newest) > 0) {
+                        newest = lc;
+                    }
+                }
+            }
+            return newest != null ? "last_change:" + newest : null;
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")
@@ -127,17 +174,19 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
             Map<String, Object> entry = (Map<String, Object>) result;
             BigDecimal score = toScore(entry.get("score"));
             boolean apiMatch = Boolean.TRUE.equals(entry.get("match"));
-            if (!apiMatch && score.compareTo(MATCH_THRESHOLD) < 0) {
+            if (!apiMatch && score.compareTo(matchThreshold) < 0) {
                 continue;
             }
             String caption = String.valueOf(entry.getOrDefault("caption", subject.name()));
+            String id = entry.get("id") != null ? String.valueOf(entry.get("id")) : null;
             hits.add(new ScreeningHitDto(
                     PROVIDER,
                     "name",
                     caption,
                     score.doubleValue(),
-                    String.valueOf(entry.get("id")),
-                    categoryOf(entry)
+                    id,
+                    categoryOf(entry),
+                    id
             ));
         }
         return hits;
@@ -148,8 +197,10 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
      * {@code poi}, {@code crime}) summarising why the entity is on file. Not every deployment/
      * dataset populates it on match results, so this stays defensive: missing or unrecognized
      * topics fall back to {@code SANCTIONS}, preserving today's behavior rather than guessing.
+     *
+     * <p>Sanctions win: a record tagged both {@code sanction} and {@code role.pep} is a sanctions
+     * hit (a hard legal prohibition), never a PEP one that EDD could clear.
      */
-    @SuppressWarnings("unchecked")
     static String categoryOf(Map<String, Object> entry) {
         Object topicsObj = entry.get("topics");
         if (!(topicsObj instanceof List<?> topics)) {
@@ -157,14 +208,14 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
         }
         for (Object t : topics) {
             String topic = String.valueOf(t).toLowerCase(Locale.ROOT);
-            if (topic.startsWith("role.pep") || topic.equals("poi")) {
-                return HitCategory.PEP.name();
+            if (topic.contains("sanction")) {
+                return HitCategory.SANCTIONS.name();
             }
         }
         for (Object t : topics) {
             String topic = String.valueOf(t).toLowerCase(Locale.ROOT);
-            if (topic.contains("sanction")) {
-                return HitCategory.SANCTIONS.name();
+            if (topic.startsWith("role.pep") || topic.equals("poi")) {
+                return HitCategory.PEP.name();
             }
         }
         if (!topics.isEmpty()) {

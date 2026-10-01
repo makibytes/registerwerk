@@ -2,7 +2,11 @@ package de.makibytes.registerwerk.admin.web;
 
 import de.makibytes.registerwerk.admin.internal.OperatorUserService;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
+import de.makibytes.registerwerk.admin.web.dto.DisableUserRequest;
+import de.makibytes.registerwerk.admin.web.dto.EnableUserRequest;
 import de.makibytes.registerwerk.admin.web.dto.OperatorInviteRequest;
+import de.makibytes.registerwerk.admin.web.dto.RebindIdentityRequest;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import de.makibytes.registerwerk.admin.web.dto.OperatorUserResponse;
 import de.makibytes.registerwerk.customer.web.dto.UpdateCompanyUserRolesRequest;
 import jakarta.validation.Valid;
@@ -49,6 +53,7 @@ public class OperatorUserController {
     }
 
     @PostMapping
+    @RequiresStepUp(reason = "OPERATOR_USER_ADMIN")
     public ResponseEntity<OperatorUserResponse> invite(
             Authentication authentication,
             @Valid @RequestBody OperatorInviteRequest request) {
@@ -56,6 +61,7 @@ public class OperatorUserController {
     }
 
     @PatchMapping("/{userId}/roles")
+    @RequiresStepUp(reason = "OPERATOR_USER_ADMIN")
     public ResponseEntity<OperatorUserResponse> updateRoles(
             Authentication authentication,
             @PathVariable UUID userId,
@@ -64,17 +70,33 @@ public class OperatorUserController {
     }
 
     @PostMapping("/{userId}/enable")
+    @RequiresStepUp(reason = "OPERATOR_USER_ADMIN")
     public ResponseEntity<OperatorUserResponse> enableUser(
             Authentication authentication,
-            @PathVariable UUID userId) {
-        return ResponseEntity.ok(operatorUserService.setEnabled(authentication, userId, true));
+            @PathVariable UUID userId,
+            @Valid @RequestBody(required = false) EnableUserRequest request) {
+        return ResponseEntity.ok(operatorUserService.setEnabled(authentication, userId, true,
+            request == null ? null : request.reinstatementReason()));
     }
 
     @PostMapping("/{userId}/disable")
+    @RequiresStepUp(reason = "OPERATOR_USER_ADMIN")
     public ResponseEntity<OperatorUserResponse> disableUser(
             Authentication authentication,
-            @PathVariable UUID userId) {
-        return ResponseEntity.ok(operatorUserService.setEnabled(authentication, userId, false));
+            @PathVariable UUID userId,
+            @Valid @RequestBody(required = false) DisableUserRequest request) {
+        return ResponseEntity.ok(operatorUserService.setEnabled(authentication, userId, false,
+            request == null ? null : request.reason()));
+    }
+
+    /** Sanctioned re-bind of an IdP identity (step-up + second approver, mandatory reason). */
+    @PostMapping("/{userId}/reset-identity")
+    @RequiresStepUp(reason = "IDENTITY_REBIND", requireSecondApprover = true)
+    public ResponseEntity<OperatorUserResponse> resetIdentity(
+            Authentication authentication,
+            @PathVariable UUID userId,
+            @Valid @RequestBody RebindIdentityRequest request) {
+        return ResponseEntity.ok(operatorUserService.resetIdentityBinding(authentication, userId, request.reason()));
     }
 
     @PostMapping("/{userId}/password-reset")
@@ -86,6 +108,7 @@ public class OperatorUserController {
     }
 
     @DeleteMapping("/{userId}")
+    @RequiresStepUp(reason = "OPERATOR_USER_ADMIN")
     public ResponseEntity<Void> delete(
             Authentication authentication,
             @PathVariable UUID userId) {

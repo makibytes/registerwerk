@@ -20,8 +20,10 @@ import de.makibytes.registerwerk.shared.AddressNormalizer;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -101,19 +103,35 @@ class SperrvermerkOnchainSyncListener {
     }
 
     private void propagateFreeze(UUID holderBlockId, Map<String, Object> payload) {
-        String walletAddress = AddressNormalizer.normalize(stringDetail(payload, "walletAddress"));
-        if (walletAddress == null) {
-            return;
-        }
         UUID assetId = uuidDetail(payload, "assetId");
         String reason = "eWpG §16 Sperrvermerk: " + stringDetail(payload, "legalBasis");
-        List<AssetDeployment> deployments = deploymentsFor(walletAddress, assetId);
-        if (deployments.isEmpty()) {
-            alertIfNotPropagated(holderBlockId, walletAddress, assetId);
+        for (String walletAddress : walletsOf(payload)) {
+            List<AssetDeployment> deployments = deploymentsFor(walletAddress, assetId);
+            if (deployments.isEmpty()) {
+                alertIfNotPropagated(holderBlockId, walletAddress, assetId);
+            }
+            for (AssetDeployment deployment : deployments) {
+                freeze(deployment, walletAddress, reason);
+            }
         }
-        for (AssetDeployment deployment : deployments) {
-            freeze(deployment, walletAddress, reason);
+    }
+
+    /** The block's wallet plus, for an entity-scoped block, the entity's other holder wallets (6-25). */
+    private static Set<String> walletsOf(Map<String, Object> payload) {
+        Set<String> wallets = new LinkedHashSet<>();
+        String primary = AddressNormalizer.normalize(stringDetail(payload, "walletAddress"));
+        if (primary != null) {
+            wallets.add(primary);
         }
+        if (payload.get("walletAddresses") instanceof Collection<?> more) {
+            for (Object o : more) {
+                String w = o == null ? null : AddressNormalizer.normalize(o.toString());
+                if (w != null && !w.isBlank()) {
+                    wallets.add(w);
+                }
+            }
+        }
+        return wallets;
     }
 
     /**
@@ -145,20 +163,19 @@ class SperrvermerkOnchainSyncListener {
 
     @ApplicationModuleListener
     void onHolderBlockLifted(HolderBlockLiftedEvent event) {
-        String walletAddress = AddressNormalizer.normalize(stringDetail(event.payload(), "walletAddress"));
-        if (walletAddress == null) {
-            return;
-        }
-        // Another ACTIVE block may still cover this wallet (e.g. two independent court orders) —
-        // unfreezing on-chain must not race ahead of the register still considering it blocked.
-        if (holderBlockGate.isBlocked(null, walletAddress)) {
-            log.info("Sperrvermerk lifted for wallet={} but another ACTIVE block remains — not unfreezing on-chain.",
-                    walletAddress);
-            return;
-        }
-        UUID assetId = uuidDetail(event.payload(), "assetId");
-        for (AssetDeployment deployment : deploymentsFor(walletAddress, assetId)) {
-            unfreeze(deployment, walletAddress);
+        // Reconcile instead of "unfreeze the lifted block's asset": recompute, per wallet and per
+        // deployment of every asset the wallet holds, whether any remaining blocking block still
+        // covers it, and release exactly the rest. A freeze applied for asset A while another block
+        // covered asset B used to be stranded when the last block was lifted (6-25).
+        for (String walletAddress : walletsOf(event.payload())) {
+            for (AssetDeployment deployment : deploymentsFor(walletAddress, null)) {
+                if (holderBlockGate.isBlockedForAsset(walletAddress, deployment.getAssetId())) {
+                    log.info("Sperrvermerk lifted for wallet={} but a block still covers asset={} — not unfreezing deployment={}.",
+                            walletAddress, deployment.getAssetId(), deployment.getId());
+                    continue;
+                }
+                unfreeze(deployment, walletAddress);
+            }
         }
     }
 

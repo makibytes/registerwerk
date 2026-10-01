@@ -215,6 +215,7 @@ export class ErasureQueueComponent implements OnInit {
               requireDualControl: true,
               reason: `Complete erasure request for entity ${req.entityId} (irreversibly tombstones user PII)`,
               action: 'DSAR_ERASURE_COMPLETE',
+              target: `POST /api/v1/admin/dsar/erasure-requests/${req.id}/complete`,
             }
           : {
               requireDualControl: false,

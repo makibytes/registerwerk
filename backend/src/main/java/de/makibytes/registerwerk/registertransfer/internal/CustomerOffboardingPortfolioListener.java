@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.registertransfer.internal;
 
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
 import de.makibytes.registerwerk.customer.events.CustomerOffboardedEvent;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
@@ -26,11 +27,14 @@ class CustomerOffboardingPortfolioListener {
 
     private final AssetHolderRepository holderRepository;
     private final PortfolioMigrationService migrationService;
+    private final EntityTaskPort taskPort;
 
     CustomerOffboardingPortfolioListener(AssetHolderRepository holderRepository,
-                                         PortfolioMigrationService migrationService) {
+                                         PortfolioMigrationService migrationService,
+                                         EntityTaskPort taskPort) {
         this.holderRepository = holderRepository;
         this.migrationService = migrationService;
+        this.taskPort = taskPort;
     }
 
     @ApplicationModuleListener
@@ -53,6 +57,10 @@ class CustomerOffboardingPortfolioListener {
                 // a debug log an operator would never see.
                 log.warn("Portfolio migration NOT raised for holder={} (offboarded entity={}): {}",
                         holder.getId(), event.entityId(), blocked.getMessage());
+                // Persisted work item (6-23): the log line alone vanished with the next rotation.
+                taskPort.open(event.entityId(), "SPERRVERMERK_HOLDING", "holder:" + holder.getId(),
+                        "Holding " + holder.getId() + " is blocked and could not be migrated: " + blocked.getMessage(),
+                        event.actorId());
             } catch (IllegalStateException alreadyInProgress) {
                 log.debug("Portfolio migration already in progress for holder={}", holder.getId());
             }

@@ -20,6 +20,7 @@ ALTER TABLE trade_execution ADD COLUMN unresolved_at TIMESTAMPTZ;
 ALTER TABLE trade_execution ADD COLUMN unresolved_reason VARCHAR(1000);
 ALTER TABLE trade_execution ADD COLUMN buyer_cooldown_until TIMESTAMPTZ;
 
+-- migration-safety: ack (constraint is re-created below with the widened status set; no data removed)
 ALTER TABLE trade_execution DROP CONSTRAINT chk_trade_execution_settlement_status;
 ALTER TABLE trade_execution ADD CONSTRAINT chk_trade_execution_settlement_status CHECK (
     settlement_status IN ('PENDING','AWAITING_SELLER_CONFIRMATION','PAYMENT_UNRESOLVED',

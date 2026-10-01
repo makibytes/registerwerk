@@ -49,6 +49,11 @@ public class SessionCookieService {
         return build(SESSION_COOKIE, token, authProps.getTokenTtlSeconds());
     }
 
+    /** Session cookie with an explicit lifetime (impersonation sessions are shorter than logins). */
+    public ResponseCookie sessionCookie(String token, long maxAgeSeconds) {
+        return build(SESSION_COOKIE, token, maxAgeSeconds);
+    }
+
     public ResponseCookie adminSessionCookie(String token) {
         return build(ADMIN_SESSION_COOKIE, token, authProps.getTokenTtlSeconds());
     }

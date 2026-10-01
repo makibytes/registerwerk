@@ -2,6 +2,9 @@ package de.makibytes.registerwerk.auth.web;
 
 import de.makibytes.registerwerk.auth.api.EntityDisplayNameResolver;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
+import de.makibytes.registerwerk.auth.api.SessionRevocationPort;
+import de.makibytes.registerwerk.auth.internal.ImpersonationSessionService;
 import de.makibytes.registerwerk.auth.internal.AuthService;
 import de.makibytes.registerwerk.auth.internal.AuthService.LoginResult;
 import de.makibytes.registerwerk.auth.internal.SessionCookieService;
@@ -36,13 +39,19 @@ public class AuthController {
     private final RegisterwerkAuthProperties authProperties;
     private final JwtDecoder jwtDecoder;
     private final EntityDisplayNameResolver entityDisplayNameResolver;
+    private final ImpersonationSessionService impersonationSessions;
+    private final SessionRevocationPort revocation;
 
     public AuthController(
             AuthService authService,
             SessionCookieService cookies,
             RegisterwerkAuthProperties authProperties,
             @Qualifier("jwtDecoder") JwtDecoder jwtDecoder,
-            EntityDisplayNameResolver entityDisplayNameResolver) {
+            EntityDisplayNameResolver entityDisplayNameResolver,
+            ImpersonationSessionService impersonationSessions,
+            SessionRevocationPort revocation) {
+        this.impersonationSessions = impersonationSessions;
+        this.revocation = revocation;
         this.authService = authService;
         this.cookies = cookies;
         this.authProperties = authProperties;
@@ -51,8 +60,11 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest req) {
-        LoginResult result = authService.login(req.email(), req.password());
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest req,
+                                               jakarta.servlet.http.HttpServletRequest http) {
+        // Source address as resolved by the container: getRemoteAddr() already honours X-Forwarded-For
+        // only from the configured trusted proxies (server.tomcat.remoteip), never from a raw header.
+        LoginResult result = authService.login(req.email(), req.password(), http.getRemoteAddr());
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookies.sessionCookie(result.token()).toString())
                 // A successful fresh login must never inherit an admin session left by an
@@ -63,15 +75,49 @@ public class AuthController {
     }
 
     /**
-     * Unconditional — clearing cookies that may or may not exist is always safe, and a client
-     * whose session already expired still needs to be able to drop stale cookies.
+     * Revokes the presented session token by {@code jti} (an ended impersonation session is ended
+     * too) and clears the cookies. Always succeeds from the caller's view: a client whose session
+     * already expired still needs to drop stale cookies, and an undecodable token has nothing to
+     * revoke.
      */
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout() {
+    public ResponseEntity<Void> logout(HttpServletRequest request) {
+        java.util.stream.Stream.of(cookies.readSessionCookie(request), cookies.readAdminSessionCookie(request),
+                        bearerOf(request))
+                .flatMap(Optional::stream)
+                .forEach(this::revokeQuietly);
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, cookies.clearSessionCookie().toString())
                 .header(HttpHeaders.SET_COOKIE, cookies.clearAdminSessionCookie().toString())
                 .build();
+    }
+
+    private static Optional<String> bearerOf(HttpServletRequest request) {
+        String h = request.getHeader(HttpHeaders.AUTHORIZATION);
+        return h != null && h.startsWith("Bearer ") ? Optional.of(h.substring(7)) : Optional.empty();
+    }
+
+    private void revokeQuietly(String token) {
+        try {
+            Jwt jwt = jwtDecoder.decode(token);
+            if (!JwtMintingService.LOCAL_ISSUER.equals(jwt.getClaimAsString("iss")) || jwt.getId() == null) {
+                return;
+            }
+            UUID userId = null;
+            try {
+                userId = UUID.fromString(jwt.getSubject());
+            } catch (IllegalArgumentException | NullPointerException ignored) {
+                // revoke by jti regardless
+            }
+            if (Boolean.TRUE.equals(jwt.getClaimAsBoolean("imp"))) {
+                impersonationSessions.end(UUID.fromString(jwt.getId()), userId, "LOGOUT");
+            }
+            revocation.revokeSession(jwt.getId(), userId,
+                    jwt.getExpiresAt() != null ? jwt.getExpiresAt() : Instant.now().plusSeconds(authProperties.getTokenTtlSeconds()),
+                    "LOGOUT");
+        } catch (JwtException | IllegalArgumentException e) {
+            // nothing to revoke
+        }
     }
 
     /**
@@ -96,23 +142,18 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
 
+        Optional<ImpersonationSessionService.Exchange> exchange = impersonationSessions.exchange(req.code());
+        if (exchange.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        String token = exchange.get().token();
         Jwt jwt;
         try {
-            jwt = jwtDecoder.decode(req.token());
+            jwt = jwtDecoder.decode(token);
         } catch (JwtException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        UUID entityId;
-        if (!Boolean.TRUE.equals(jwt.getClaimAsBoolean("imp"))) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-        try {
-            entityId = UUID.fromString(jwt.getClaimAsString("entityId"));
-        } catch (IllegalArgumentException | NullPointerException e) {
-            // A signed JWT with an `imp` marker but no well-formed target is not a valid
-            // handoff token. Return a normal authorization failure instead of leaking a 500.
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+        UUID entityId = exchange.get().session().getTargetEntityId();
 
         ResponseEntity.BodyBuilder response = ResponseEntity.ok();
         Optional<String> stashedAdminSession = cookies.readAdminSessionCookie(request);
@@ -128,7 +169,7 @@ public class AuthController {
                     .ifPresent(existing -> response.header(
                         HttpHeaders.SET_COOKIE, cookies.adminSessionCookie(existing).toString()));
         }
-        response.header(HttpHeaders.SET_COOKIE, cookies.sessionCookie(req.token()).toString());
+        response.header(HttpHeaders.SET_COOKIE, cookies.sessionCookie(token, exchange.get().ttlSeconds()).toString());
 
         String entityIdClaim = entityId.toString();
         String entityName = entityDisplayNameResolver.resolveName(entityId);
@@ -141,7 +182,8 @@ public class AuthController {
                 entityIdClaim,
                 entityName,
                 true,
-                jwt.getExpiresAt() != null ? jwt.getExpiresAt().getEpochSecond() : Instant.now().getEpochSecond()
+                jwt.getExpiresAt() != null ? jwt.getExpiresAt().getEpochSecond() : Instant.now().getEpochSecond(),
+                exchange.get().session().getMode().name()
         ));
     }
 
@@ -154,7 +196,8 @@ public class AuthController {
                 result.entityId() != null ? result.entityId().toString() : null,
                 null,
                 false,
-                Instant.now().plusSeconds(result.ttlSeconds()).getEpochSecond()
+                Instant.now().plusSeconds(result.ttlSeconds()).getEpochSecond(),
+                null
         );
     }
 

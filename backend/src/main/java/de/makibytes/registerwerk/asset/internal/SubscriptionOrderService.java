@@ -12,7 +12,6 @@ import de.makibytes.registerwerk.asset.events.SubscriptionOrderReleasedEvent;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderSettledEvent;
 import de.makibytes.registerwerk.blockchain.api.TokenAdminPort;
 import de.makibytes.registerwerk.customer.api.ClientCategory;
-import de.makibytes.registerwerk.customer.api.KycStatus;
 import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
 import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
@@ -23,8 +22,9 @@ import de.makibytes.registerwerk.erc3643.api.Erc3643MintPort;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.finality.api.GatedOperation;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
-import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
+import de.makibytes.registerwerk.orgidentity.api.OrgMemberWallet;
+import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.shared.AddressNormalizer;
 import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderCancelledEvent;
@@ -83,8 +83,8 @@ public class SubscriptionOrderService {
     private final RegisterClock registerClock;
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetBondTermsRepository bondTermsRepository;
-    private final HolderBlockGate holderBlockGate;
-    private final ScreeningGate screeningGate;
+    private final PartyEligibilityGate partyGate;
+    private final OrgMemberWalletRepository memberWallets;
     private final FinalityGate finalityGate;
     private final TokenAdminPort tokenAdminPort;
     private final Erc3643MintPort erc3643MintPort;
@@ -101,8 +101,8 @@ public class SubscriptionOrderService {
             RegisterClock registerClock,
             AssetDeploymentRepository deploymentRepository,
             AssetBondTermsRepository bondTermsRepository,
-            HolderBlockGate holderBlockGate,
-            ScreeningGate screeningGate,
+            PartyEligibilityGate partyGate,
+            OrgMemberWalletRepository memberWallets,
             FinalityGate finalityGate,
             TokenAdminPort tokenAdminPort,
             Erc3643MintPort erc3643MintPort) {
@@ -117,8 +117,8 @@ public class SubscriptionOrderService {
         this.registerClock = registerClock;
         this.deploymentRepository = deploymentRepository;
         this.bondTermsRepository = bondTermsRepository;
-        this.holderBlockGate = holderBlockGate;
-        this.screeningGate = screeningGate;
+        this.partyGate = partyGate;
+        this.memberWallets = memberWallets;
         this.finalityGate = finalityGate;
         this.tokenAdminPort = tokenAdminPort;
         this.erc3643MintPort = erc3643MintPort;
@@ -140,6 +140,10 @@ public class SubscriptionOrderService {
         if (requestedAmount == null || requestedAmount.signum() <= 0) {
             throw new IllegalArgumentException("requestedAmount must be positive");
         }
+        // 6-33: the same party gate as trade settlement, and a wallet the investor has proven (bound) or
+        // already holds on — checked at submit so a bad order fails early and again at settle.
+        partyGate.require(investorEntityId, AddressNormalizer.normalize(walletAddress), "subscription");
+        requireSettlementWallet(assetId, investorEntityId, walletAddress);
         requireEligibleForTargetMarket(asset, investorEntityId);
         BigDecimal minInvestment = investorLimitService.effectiveMinInvestment(asset, investorEntityId);
         if (minInvestment != null && requestedAmount.compareTo(minInvestment) < 0) {
@@ -408,7 +412,12 @@ public class SubscriptionOrderService {
         UUID investorId = order.getInvestorEntityId();
         LegalEntity investor = legalEntityRepository.findById(investorId)
                 .orElseThrow(() -> new EntityNotFoundException("LegalEntity", investorId));
-        requireCompliant(investor, order.getWalletAddress());
+        // 6-33: PartyEligibilityGate (entity status, KYC incl. expiry, entity + beneficial-owner screening, Sperrvermerk);
+        // the wallet must be one the entity has bound or already holds this asset on. The gate also covers the
+        // off-chain credit branch below (OutboundDestinationGate itself needs an existing holder row, which a
+        // first subscription does not have yet; on-chain mints still pass it inside the mint port).
+        partyGate.require(investorId, order.getWalletAddress(), "subscription settlement");
+        requireSettlementWallet(asset.getId(), investorId, order.getWalletAddress());
         requireEligibleForTargetMarket(asset, investorId);
         BigDecimal allocated = order.getAllocatedAmount();
         BigDecimal maxHolding = investorLimitService.effectiveMaxHolding(asset, investorId);
@@ -462,20 +471,22 @@ public class SubscriptionOrderService {
         return saved;
     }
 
-    /** Same three checks as {@code TradingService.requireCompliant}: KYC, sanctions screening, Sperrvermerk. */
-    private void requireCompliant(LegalEntity entity, String walletAddress) {
-        UUID entityId = entity.getId();
-        if (entity.getKycStatus() != KycStatus.APPROVED) {
-            throw new ComplianceGateException("Entity " + entityId + " does not have an approved KYC status "
-                    + "(current: " + entity.getKycStatus() + ") — subscription cannot settle.");
-        }
-        if (screeningGate.hasUnresolvedHit(entityId)) {
-            throw new ComplianceGateException("Entity " + entityId
-                    + " has an unresolved sanctions screening hit — subscription cannot settle.");
-        }
-        if (holderBlockGate.isBlocked(entityId, walletAddress)) {
-            throw new ComplianceGateException("Entity " + entityId + " (or its wallet) is subject to an active "
-                    + "§16 eWpG Sperrvermerk (legal block) — subscription cannot settle.");
+    /**
+     * The settlement wallet must belong to the investor: an active member-wallet binding of the entity
+     * (proven with a bind-challenge signature) or a wallet it already holds this asset on. A customer-supplied
+     * free-text address could otherwise nominate a third party's wallet (6-33, parked T6-19).
+     */
+    private void requireSettlementWallet(UUID assetId, UUID entityId, String walletAddress) {
+        String wallet = AddressNormalizer.normalize(walletAddress);
+        boolean held = assetHolderRepository.findActiveByInvestorId(entityId).stream()
+                .filter(h -> assetId.equals(h.getAssetId()))
+                .anyMatch(h -> wallet != null && wallet.equalsIgnoreCase(AddressNormalizer.normalize(h.getWalletAddress())));
+        boolean bound = !held && memberWallets.findActiveByLegalEntityId(entityId).stream()
+                .map(OrgMemberWallet::getWalletAddress)
+                .anyMatch(w -> wallet != null && wallet.equalsIgnoreCase(AddressNormalizer.normalize(w)));
+        if (!held && !bound) {
+            throw new ComplianceGateException("Wallet " + walletAddress + " is not bound to entity " + entityId
+                    + " (and not an existing holder wallet for this asset) — bind the wallet first.");
         }
     }
 

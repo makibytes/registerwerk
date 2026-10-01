@@ -313,6 +313,7 @@ export class UnresolvedTradesComponent implements OnInit {
         requireDualControl: true,
         reason: `${RESOLUTIONS[resolution].title} (trade ${item.trade.id})`,
         action: RESOLUTIONS[resolution].stepUpReason,
+        target: `POST /api/v1/admin/trading/unresolved/${item.trade.id}/${resolution}`,
       },
       width: '500px',
       disableClose: true,

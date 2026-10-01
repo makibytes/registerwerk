@@ -74,3 +74,12 @@ TLPT, né certifica il risultato.
 
 Il repository non implementa l'instradamento verso le autorità DORA specifico per giurisdizione, moduli o
 schemi ufficiali, trasmissione autenticata, ricevute di consegna, correzioni, gestione dei rifiuti o accettazione da parte dell'autorità. Registrare che un incidente è stato segnalato non costituisce prova della presentazione.
+
+## Controlli sugli incidenti (fase 6)
+
+- **Momento di conoscenza**: `awarenessAt` è inserito alla creazione (predefinito adesso, mai nel futuro) ed è immutabile; i termini di 24 ore e di un mese decorrono da esso.
+- **Classificazione**: `POST /api/v1/dora/incidents/{id}/classify` (step-up, motivazione obbligatoria, criteri facoltativi) classifica o riclassifica; il passaggio a `MAJOR` avvia il termine di 4 ore e ricalcola tutti i termini. Revocare `MAJOR` richiede un secondo approvatore e lascia un indicatore di declassamento. Chi classifica resta una decisione aperta dell'operatore.
+- **Termini**: notifica iniziale 4 ore dalla classificazione / 24 ore dalla conoscenza (il più breve), rapporto intermedio 72 ore dopo la notifica iniziale, rapporto finale 30 giorni dalla conoscenza (prudenziale). Il monitoraggio gira ogni 15 minuti fino al rapporto finale, indipendentemente dallo stato; i superamenti sono segnalati via e-mail agli amministratori del registro.
+- **Rapporti**: righe solo in aggiunta (`INITIAL`, `INTERMEDIATE`, `FINAL`) con riferimento dell'autorità; i primi timestamp e il riferimento non possono essere sovrascritti. `REPORTED_TO_AUTHORITY` è impostato solo registrando il rapporto finale. La chiusura di un incidente `MAJOR` richiede le prove dei rapporti iniziale e finale e un secondo approvatore.
+- **Bozze automatiche**: una scrittura di audit definitivamente fallita apre una bozza non classificata che una persona deve classificare.
+- Le esportazioni CSV etichettano correttamente i termini e neutralizzano le formule dei fogli di calcolo nelle celle di testo.

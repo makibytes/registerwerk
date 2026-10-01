@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.stepup.internal.StepUpTokenIssuer;
 import de.makibytes.registerwerk.stepup.web.dto.StepUpRequest;
 import de.makibytes.registerwerk.stepup.web.dto.StepUpResponse;
 import de.makibytes.registerwerk.stepup.web.dto.TotpEnrollmentConfirmRequest;
+import de.makibytes.registerwerk.stepup.web.dto.TotpEnrollmentRequest;
 import de.makibytes.registerwerk.stepup.web.dto.TotpEnrollmentResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -42,7 +43,8 @@ public class StepUpController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestBody @Valid StepUpRequest request) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        String stepUpToken = tokenIssuer.issueAfterVerification(userId, request.code(), request.method(), request.action());
+        String stepUpToken = tokenIssuer.issueAfterVerification(userId, request.code(), request.method(),
+                request.action(), request.target(), request.targetBody());
         log.info("Step-up token issued for sub={} scope={}", userId, request.action());
         return ResponseEntity.ok(new StepUpResponse(stepUpToken));
     }
@@ -54,9 +56,11 @@ public class StepUpController {
      */
     @PostMapping("/enroll")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<TotpEnrollmentResponse> enroll(@AuthenticationPrincipal Jwt jwt) {
+    public ResponseEntity<TotpEnrollmentResponse> enroll(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody @Valid TotpEnrollmentRequest request) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        StepUpTokenIssuer.EnrollmentStart start = tokenIssuer.enroll(userId);
+        StepUpTokenIssuer.EnrollmentStart start = tokenIssuer.enroll(userId, request.currentPassword());
         log.info("TOTP enrolment started for sub={}", userId);
         return ResponseEntity.ok(new TotpEnrollmentResponse(start.secret(), start.otpauthUri()));
     }
@@ -70,6 +74,22 @@ public class StepUpController {
         UUID userId = UUID.fromString(jwt.getSubject());
         tokenIssuer.confirmEnrollment(userId, request.code());
         log.info("TOTP enrolment confirmed for sub={}", userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Removes the caller's own authenticator. Requires a valid current TOTP code; live sessions are
+     * revoked, and the user must re-enrol before any step-up action. An operator who lost the device
+     * uses the second-approver reset instead ({@code POST /api/v1/admin/users/{id}/totp-reset}).
+     */
+    @PostMapping("/disenroll")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Void> disenroll(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody @Valid TotpEnrollmentConfirmRequest request) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        tokenIssuer.disenroll(userId, request.code());
+        log.info("TOTP disenrolled for sub={}", userId);
         return ResponseEntity.noContent().build();
     }
 }

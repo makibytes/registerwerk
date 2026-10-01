@@ -74,7 +74,7 @@ class MandatoryIdempotencyIT {
         approver.setEmail("approver-" + UUID.randomUUID() + "@test.local");
         UUID approverId = appUserRepository.save(approver).getId();
         h.set("X-Dual-Control-Token",
-                TestJwt.mint(SECRET, approverId, true, "Payment rail creation", null, "REGISTRY_ADMIN"));
+                TestJwt.dualControl(SECRET, approverId, "Payment rail creation", "POST", "/api/v1/payment-rails", "REGISTRY_ADMIN"));
         String body = "{\"code\":\"" + code + "\",\"displayName\":\"Rail\",\"railType\":\"OFFCHAIN_SEPA\",\"currency\":\"EUR\","
                 + "\"emtFlag\":false,\"redemptionAtPar\":false}";
         return rest.exchange("http://localhost:" + port + "/api/v1/payment-rails", HttpMethod.POST,

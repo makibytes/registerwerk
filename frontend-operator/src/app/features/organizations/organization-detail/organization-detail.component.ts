@@ -261,7 +261,7 @@ export class OrganizationDetailComponent implements OnInit {
 
     this.dialog
       .open(StepUpDialogComponent, {
-        data: { requireDualControl: true, reason: 'Org suspension', action: 'Org suspension' },
+        data: { requireDualControl: true, reason: 'Org suspension', action: 'Org suspension', target: `POST /api/v1/org-identity/orgs/${this.orgId}/suspend` },
         width: '500px',
         disableClose: true,
       })
@@ -288,7 +288,7 @@ export class OrganizationDetailComponent implements OnInit {
   reinstate(): void {
     this.dialog
       .open(StepUpDialogComponent, {
-        data: { requireDualControl: true, reason: 'Org reinstatement', action: 'Org reinstatement' },
+        data: { requireDualControl: true, reason: 'Org reinstatement', action: 'Org reinstatement', target: `POST /api/v1/org-identity/orgs/${this.orgId}/reinstate` },
         width: '500px',
         disableClose: true,
       })

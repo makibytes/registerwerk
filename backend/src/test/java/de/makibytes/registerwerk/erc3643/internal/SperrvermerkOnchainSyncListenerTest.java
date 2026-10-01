@@ -135,7 +135,7 @@ class SperrvermerkOnchainSyncListenerTest {
     void lifted_unfreezesWhenNoOtherActiveBlock() {
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();
-        when(holderBlockGate.isBlocked(null, WALLET)).thenReturn(false);
+        when(holderBlockGate.isBlockedForAsset(WALLET, assetId)).thenReturn(false);
         when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of(holder(assetId)));
         when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment(deploymentId, assetId)));
         when(suiteRepository.findByAssetDeploymentId(deploymentId)).thenReturn(Optional.empty());
@@ -152,7 +152,7 @@ class SperrvermerkOnchainSyncListenerTest {
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();
         UUID suiteId = UUID.randomUUID();
-        when(holderBlockGate.isBlocked(null, WALLET)).thenReturn(false);
+        when(holderBlockGate.isBlockedForAsset(WALLET, assetId)).thenReturn(false);
         when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of(holder(assetId)));
         when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment(deploymentId, assetId)));
         Erc3643Suite suite = new Erc3643Suite();
@@ -228,16 +228,61 @@ class SperrvermerkOnchainSyncListenerTest {
     }
 
     @Test
-    @DisplayName("onHolderBlockLifted does NOT unfreeze when another ACTIVE block still covers the wallet")
+    @DisplayName("onHolderBlockLifted keeps the freeze of an asset another block still covers")
     void lifted_doesNotUnfreezeWhenAnotherBlockRemainsActive() {
-        when(holderBlockGate.isBlocked(null, WALLET)).thenReturn(true);
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        when(holderBlockGate.isBlockedForAsset(WALLET, assetId)).thenReturn(true);
+        when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of(holder(assetId)));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment(deploymentId, assetId)));
 
         listener.onHolderBlockLifted(new HolderBlockLiftedEvent(UUID.randomUUID(), UUID.randomUUID(), "REGISTRY_ADMIN",
                 null, Map.of("reason", "Debt settled", "walletAddress", WALLET, "assetId", "")));
 
         verify(tokenAdminPort, never()).unfreezeAfterBlockLift(any(), anyString());
         verify(erc3643LifecycleService, never()).unfreezeAddress(any(), anyString(), any(), anyString());
-        verify(holderRepository, never()).findByWalletAddressIn(any());
+    }
+
+    @Test
+    @DisplayName("6-25: lifting the last block releases deployments of ALL the wallet's assets, not only the lifted block's asset")
+    void lifted_unfreezesEveryAssetNoRemainingBlockCovers() {
+        UUID assetA = UUID.randomUUID();
+        UUID assetB = UUID.randomUUID();
+        UUID depA = UUID.randomUUID();
+        UUID depB = UUID.randomUUID();
+        // Block X covered asset A, block Y covered asset B; Y is lifted last and its payload names asset B.
+        when(holderBlockGate.isBlockedForAsset(eq(WALLET), any())).thenReturn(false);
+        when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of(holder(assetA), holder(assetB)));
+        when(deploymentRepository.findByAssetId(assetA)).thenReturn(List.of(deployment(depA, assetA)));
+        when(deploymentRepository.findByAssetId(assetB)).thenReturn(List.of(deployment(depB, assetB)));
+        when(suiteRepository.findByAssetDeploymentId(any())).thenReturn(Optional.empty());
+
+        listener.onHolderBlockLifted(new HolderBlockLiftedEvent(UUID.randomUUID(), UUID.randomUUID(), "REGISTRY_ADMIN",
+                null, Map.of("reason", "Order lifted", "walletAddress", WALLET, "assetId", assetB.toString())));
+
+        verify(tokenAdminPort).unfreezeAfterBlockLift(depA, WALLET);
+        verify(tokenAdminPort).unfreezeAfterBlockLift(depB, WALLET);
+    }
+
+    @Test
+    @DisplayName("an entity-scoped block freezes every wallet listed in walletAddresses")
+    void created_freezesAllEntityWallets() {
+        String second = "0x" + "bb".repeat(20);
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        AssetHolder h2 = holder(assetId);
+        h2.setWalletAddress(second);
+        when(holderRepository.findByWalletAddressIn(List.of(WALLET))).thenReturn(List.of(holder(assetId)));
+        when(holderRepository.findByWalletAddressIn(List.of(second))).thenReturn(List.of(h2));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deployment(deploymentId, assetId)));
+        when(suiteRepository.findByAssetDeploymentId(deploymentId)).thenReturn(Optional.empty());
+
+        listener.onHolderBlockCreated(new HolderBlockCreatedEvent(UUID.randomUUID(), UUID.randomUUID(), "REGISTRY_ADMIN",
+                null, Map.of("walletAddress", WALLET, "walletAddresses", List.of(WALLET, second),
+                        "legalBasis", "Court order", "assetId", "")));
+
+        verify(tokenAdminPort).freezeAddress(eq(deploymentId), eq(WALLET), anyString(), anyString(), any(), eq("SYSTEM"));
+        verify(tokenAdminPort).freezeAddress(eq(deploymentId), eq(second), anyString(), anyString(), any(), eq("SYSTEM"));
     }
 
     @Test

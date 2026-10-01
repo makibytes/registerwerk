@@ -77,6 +77,9 @@ public class KycDocument {
     @Column(name = "uploaded_by")
     private UUID uploadedBy;
 
+    @Column(name = "issue_date")
+    private LocalDate issueDate;
+
     @Column(name = "expires_at")
     private LocalDate expiresAt;
 
@@ -118,6 +121,9 @@ public class KycDocument {
 
     public UUID getUploadedBy() { return uploadedBy; }
     public void setUploadedBy(UUID uploadedBy) { this.uploadedBy = uploadedBy; }
+
+    public LocalDate getIssueDate() { return issueDate; }
+    public void setIssueDate(LocalDate issueDate) { this.issueDate = issueDate; }
 
     public LocalDate getExpiresAt() { return expiresAt; }
     public void setExpiresAt(LocalDate expiresAt) { this.expiresAt = expiresAt; }

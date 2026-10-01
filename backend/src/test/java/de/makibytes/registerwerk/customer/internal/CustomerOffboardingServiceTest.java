@@ -10,7 +10,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -33,11 +32,22 @@ class CustomerOffboardingServiceTest {
     @Mock private AppUserRepository userRepository;
     @Mock private ApplicationEventPublisher events;
 
-    @InjectMocks
+    @Mock private de.makibytes.registerwerk.auth.api.AppUserActionTokenRepository actionTokens;
+    @Mock private de.makibytes.registerwerk.auth.api.SessionRevocationPort sessions;
+    @Mock private de.makibytes.registerwerk.customer.api.EntityTaskPort taskPort;
+    @Mock private de.makibytes.registerwerk.customer.api.OffboardingObligationSource source;
+
     private CustomerOffboardingService service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void build() {
+        service = new CustomerOffboardingService(entityRepository, userRepository, events, actionTokens, sessions,
+                taskPort, List.of(source));
+    }
 
     private static AppUser user(boolean enabled) {
         AppUser u = new AppUser();
+        u.setId(UUID.randomUUID());
         u.setEnabled(enabled);
         return u;
     }
@@ -62,6 +72,9 @@ class CustomerOffboardingServiceTest {
         assertThat(enabledUser.isEnabled()).isFalse();
         verify(userRepository).save(enabledUser);
         verify(userRepository, org.mockito.Mockito.never()).save(alreadyDisabledUser); // already disabled — no redundant save
+        verify(actionTokens).invalidateAllForUser(enabledUser.getId());
+        verify(actionTokens).invalidateAllForUser(alreadyDisabledUser.getId());
+        verify(sessions).revokeAll(enabledUser.getId());
 
         ArgumentCaptor<CustomerOffboardedEvent> captor = ArgumentCaptor.forClass(CustomerOffboardedEvent.class);
         verify(events).publishEvent(captor.capture());
@@ -78,7 +91,7 @@ class CustomerOffboardingServiceTest {
         when(entityRepository.findById(entityId)).thenReturn(Optional.of(entity));
 
         assertThatThrownBy(() -> service.terminate(entityId, UUID.randomUUID(), "REGISTRY_ADMIN", "again?"))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
     }
 
     @Test
@@ -90,6 +103,30 @@ class CustomerOffboardingServiceTest {
         when(entityRepository.findById(entityId)).thenReturn(Optional.of(entity));
 
         assertThatThrownBy(() -> service.terminate(entityId, UUID.randomUUID(), "REGISTRY_ADMIN", "merged away"))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+    }
+
+    @Test
+    @DisplayName("terminate with an unacknowledged obligation is a 409 listing it; acknowledged -> follow-up task, CLOSED")
+    void terminate_obligationsNeedAcknowledgement() {
+        UUID entityId = UUID.randomUUID();
+        LegalEntity entity = new LegalEntity();
+        entity.setStatus(EntityStatus.ACTIVE);
+        when(entityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+        when(entityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(userRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(entityId)).thenReturn(List.of());
+        when(source.openObligations(entityId)).thenReturn(List.of(
+                new de.makibytes.registerwerk.customer.api.OffboardingObligation("ISSUER_ASSET_LIVE", "a1", "issuer of live asset")));
+
+        assertThatThrownBy(() -> service.terminate(entityId, UUID.randomUUID(), "REGISTRY_ADMIN", "exit"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class)
+                .hasMessageContaining("ISSUER_ASSET_LIVE:a1");
+        assertThat(entity.getStatus()).isEqualTo(EntityStatus.ACTIVE);
+
+        LegalEntity result = service.terminate(entityId, UUID.randomUUID(), "REGISTRY_ADMIN", "exit",
+                List.of(new de.makibytes.registerwerk.customer.api.ObligationAcknowledgement("ISSUER_ASSET_LIVE:a1", "successor named")));
+        assertThat(result.getStatus()).isEqualTo(EntityStatus.CLOSED);
+        verify(taskPort).open(org.mockito.ArgumentMatchers.eq(entityId), org.mockito.ArgumentMatchers.eq("ISSUER_ASSET_LIVE"),
+                org.mockito.ArgumentMatchers.eq("a1"), org.mockito.ArgumentMatchers.contains("successor named"), any());
     }
 }

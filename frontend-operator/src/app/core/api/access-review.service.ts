@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { HttpHeaders } from '@angular/common/http';
 import { environment } from '../../../environments/environment';
 
 export interface AccessReviewCampaign {
@@ -21,10 +22,16 @@ export interface AccessReviewItem {
   email: string;
   fullName: string | null;
   roles: string;
-  decision: 'PENDING' | 'CONFIRMED' | 'REVOKED';
+  /** REVOKE_PROPOSED: privileged account, waits for a different second reviewer; STALE: roles changed since the snapshot, reopen it. */
+  decision: 'PENDING' | 'CONFIRMED' | 'REVOKED' | 'REVOKE_PROPOSED' | 'STALE';
   reviewedBy: string | null;
   reviewedAt: string | null;
   notes: string | null;
+  proposedBy: string | null;
+  proposedAt: string | null;
+  /** Comma-separated segregation-of-duties role pairs ("A+B"): a warning only. */
+  sodConflicts: string | null;
+  reopenedCount: number;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -48,8 +55,16 @@ export class AccessReviewService {
     return this.http.get<AccessReviewItem[]>(`${this.base}/${campaignId}/items`);
   }
 
-  recordDecision(campaignId: string, itemId: string, decision: 'CONFIRMED' | 'REVOKED', notes?: string): Observable<AccessReviewItem> {
-    return this.http.post<AccessReviewItem>(`${this.base}/${campaignId}/items/${itemId}/decision`, { decision, notes });
+  /** Needs a step-up token as bearer. A privileged account's REVOKED first becomes REVOKE_PROPOSED. */
+  recordDecision(campaignId: string, itemId: string, decision: 'CONFIRMED' | 'REVOKED', stepUpToken: string, notes?: string): Observable<AccessReviewItem> {
+    return this.http.post<AccessReviewItem>(`${this.base}/${campaignId}/items/${itemId}/decision`, { decision, notes },
+      { headers: new HttpHeaders({ Authorization: `Bearer ${stepUpToken}` }) });
+  }
+
+  /** REGISTRY_ADMIN, step-up, reason: re-snapshots a decided or STALE item. */
+  reopenItem(campaignId: string, itemId: string, reason: string, stepUpToken: string): Observable<AccessReviewItem> {
+    return this.http.post<AccessReviewItem>(`${this.base}/${campaignId}/items/${itemId}/reopen`, { reason },
+      { headers: new HttpHeaders({ Authorization: `Bearer ${stepUpToken}` }) });
   }
 
   closeCampaign(campaignId: string): Observable<AccessReviewCampaign> {

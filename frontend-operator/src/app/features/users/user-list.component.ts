@@ -14,7 +14,8 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatMenuModule } from '@angular/material/menu';
-import { AdminUserService, AppUserRole, OperatorUser } from '../../core/api/admin-user.service';
+import { AdminUserService, AppUserRole, OperatorUser, isGatedOperatorAccount } from '../../core/api/admin-user.service';
+import { openStepUp } from '../../shared/components/step-up/open-step-up';
 import { InviteUserDialogComponent } from './invite-user-dialog.component';
 import { EditUserRolesDialogComponent } from './edit-user-roles-dialog.component';
 import { User2faDialogComponent } from './user-2fa-dialog.component';
@@ -318,6 +319,14 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
                 <mat-icon>lock_reset</mat-icon>
                 Reset password
               </button>
+              <button type="button" mat-menu-item (click)="resetIdentity(u)">
+                <mat-icon>badge</mat-icon>
+                Reset bound identity
+              </button>
+              <button type="button" mat-menu-item [disabled]="u.authProvider !== 'LOCAL'" (click)="resetTotp(u)">
+                <mat-icon>phonelink_erase</mat-icon>
+                Reset authenticator (TOTP)
+              </button>
               <button type="button" mat-menu-item [disabled]="u.authProvider !== 'ENTRA'" (click)="manage2fa(u)">
                 <mat-icon>security</mat-icon>
                 Manage 2FA
@@ -401,34 +410,102 @@ export class UserListComponent implements OnInit {
     });
     ref.afterClosed().subscribe((roles: AppUserRole[] | undefined) => {
       if (!roles) return;
-      this.adminUserService.updateRoles(user.id, roles).subscribe({
+      // Touching administrative roles (before or after) needs a second approver unless in bootstrap mode.
+      const gated = isGatedOperatorAccount(roles, user.entityId) || isGatedOperatorAccount(user.roles, user.entityId);
+      openStepUp(this.dialog, {
+        requireDualControl: gated, dualControlOptional: true,
+        reason: `Change the roles of ${user.name || user.email}`,
+        action: 'OPERATOR_USER_ROLES',
+        target: `PATCH /api/v1/admin/users/${user.id}/roles`,
+      }).subscribe(result => {
+        if (!result) return;
+        this.adminUserService.updateRoles(user.id, roles, result).subscribe({
+          next: (updated) => {
+            this.replaceUser(updated);
+            this.snackBar.open(`Roles updated for ${updated.name || updated.email}`, 'OK', { duration: 3000 });
+          },
+          error: (err) => {
+            this.snackBar.open(err?.error?.message ?? 'Failed to update roles', 'Dismiss', { duration: 6000 });
+          },
+        });
+      });
+    });
+  }
+
+  toggleEnabled(user: OperatorUser, reinstatementReason?: string): void {
+    let disableReason: string | undefined;
+    if (user.enabled) {
+      const reason = prompt(`Reason for disabling ${user.name || user.email} (recorded in the audit trail):`);
+      if (!reason || !reason.trim()) return;
+      disableReason = reason.trim();
+    }
+    const reinstating = !user.enabled && !!reinstatementReason;
+    openStepUp(this.dialog, {
+      requireDualControl: !user.enabled && (reinstating || isGatedOperatorAccount(user.roles, user.entityId)),
+      dualControlOptional: !reinstating,
+      reason: `${user.enabled ? 'Disable' : 'Enable'} ${user.name || user.email}`,
+      action: reinstating ? 'OPERATOR_USER_REINSTATE' : 'OPERATOR_USER_ENABLE',
+      target: `POST /api/v1/admin/users/${user.id}/${user.enabled ? 'disable' : 'enable'}`,
+    }).subscribe(tokens => {
+      if (!tokens) return;
+      const request$ = user.enabled
+        ? this.adminUserService.disableUser(user.id, tokens, disableReason)
+        : this.adminUserService.enableUser(user.id, tokens, reinstatementReason);
+      request$.subscribe({
         next: (updated) => {
           this.replaceUser(updated);
-          this.snackBar.open(`Roles updated for ${updated.name || updated.email}`, 'OK', { duration: 3000 });
+          this.snackBar.open(
+            user.enabled ? `${updated.name || updated.email} disabled` : `${updated.name || updated.email} enabled`,
+            'OK',
+            { duration: 3000 }
+          );
         },
         error: (err) => {
-          this.snackBar.open(err?.error?.message ?? 'Failed to update roles', 'Dismiss', { duration: 4000 });
+          const message: string = err?.error?.message ?? 'Failed to update status';
+          // An account revoked by an access review needs a documented reinstatement (and always a second approver).
+          if (!user.enabled && !reinstatementReason && err?.status === 400 && /reinstatement/i.test(message)) {
+            const reason = prompt('This account was revoked by an access review. Reinstatement reason (at least 10 characters):');
+            if (reason && reason.trim().length >= 10) this.toggleEnabled(user, reason.trim());
+            return;
+          }
+          this.snackBar.open(message, 'Dismiss', { duration: 6000 });
         },
       });
     });
   }
 
-  toggleEnabled(user: OperatorUser): void {
-    const request$ = user.enabled
-      ? this.adminUserService.disableUser(user.id)
-      : this.adminUserService.enableUser(user.id);
-    request$.subscribe({
-      next: (updated) => {
-        this.replaceUser(updated);
-        this.snackBar.open(
-          user.enabled ? `${updated.name || updated.email} disabled` : `${updated.name || updated.email} enabled`,
-          'OK',
-          { duration: 3000 }
-        );
-      },
-      error: (err) => {
-        this.snackBar.open(err?.error?.message ?? 'Failed to update status', 'Dismiss', { duration: 4000 });
-      },
+  /** Clears the bound IdP identity (oid/tid/subject) so the next sign-in rebinds; step-up + second approver. */
+  resetIdentity(user: OperatorUser): void {
+    const reason = prompt(`Reason for resetting the bound sign-in identity of ${user.email} (at least 10 characters):`);
+    if (!reason || reason.trim().length < 10) return;
+    openStepUp(this.dialog, {
+      requireDualControl: true,
+      reason: `Reset the bound identity of ${user.email}`,
+      action: 'IDENTITY_REBIND',
+      target: `POST /api/v1/admin/users/${user.id}/reset-identity`,
+    }).subscribe(tokens => {
+      if (!tokens) return;
+      this.adminUserService.resetIdentity(user.id, reason.trim(), tokens).subscribe({
+        next: () => this.snackBar.open(`Identity of ${user.email} reset; their sessions ended.`, 'OK', { duration: 4000 }),
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to reset identity', 'Dismiss', { duration: 6000 }),
+      });
+    });
+  }
+
+  /** Removes a lost authenticator; the user must re-enrol and their sessions end. Step-up + second approver. */
+  resetTotp(user: OperatorUser): void {
+    if (!confirm(`Remove the authenticator of ${user.email}? They must enrol again and are signed out.`)) return;
+    openStepUp(this.dialog, {
+      requireDualControl: true,
+      reason: `Reset the authenticator of ${user.email}`,
+      action: 'TOTP_RESET',
+      target: `POST /api/v1/admin/users/${user.id}/totp-reset`,
+    }).subscribe(tokens => {
+      if (!tokens) return;
+      this.adminUserService.resetTotp(user.id, tokens).subscribe({
+        next: () => this.snackBar.open(`Authenticator of ${user.email} reset.`, 'OK', { duration: 4000 }),
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to reset authenticator', 'Dismiss', { duration: 6000 }),
+      });
     });
   }
 
@@ -458,16 +535,24 @@ export class UserListComponent implements OnInit {
 
   deleteUser(user: OperatorUser): void {
     if (!confirm(`Delete ${user.name || user.email}? This cannot be undone.`)) return;
-    this.adminUserService.deleteUser(user.id).subscribe({
-      next: () => {
-        this.users = this.users.filter(u => u.id !== user.id);
-        this.totalElements = Math.max(0, this.totalElements - 1);
-        this.snackBar.open(`${user.name || user.email} deleted`, 'OK', { duration: 3000 });
-        this.cdr.markForCheck();
-      },
-      error: (err) => {
-        this.snackBar.open(err?.error?.message ?? 'Failed to delete user', 'Dismiss', { duration: 4000 });
-      },
+    openStepUp(this.dialog, {
+      requireDualControl: isGatedOperatorAccount(user.roles, user.entityId), dualControlOptional: true,
+      reason: `Delete ${user.name || user.email}`,
+      action: 'OPERATOR_USER_DELETE',
+      target: `DELETE /api/v1/admin/users/${user.id}`,
+    }).subscribe(tokens => {
+      if (!tokens) return;
+      this.adminUserService.deleteUser(user.id, tokens).subscribe({
+        next: () => {
+          this.users = this.users.filter(u => u.id !== user.id);
+          this.totalElements = Math.max(0, this.totalElements - 1);
+          this.snackBar.open(`${user.name || user.email} deleted`, 'OK', { duration: 3000 });
+          this.cdr.markForCheck();
+        },
+        error: (err) => {
+          this.snackBar.open(err?.error?.message ?? 'Failed to delete user', 'Dismiss', { duration: 6000 });
+        },
+      });
     });
   }
 

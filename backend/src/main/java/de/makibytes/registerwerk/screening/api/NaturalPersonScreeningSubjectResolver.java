@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.screening.api;
 
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -8,5 +9,11 @@ public interface NaturalPersonScreeningSubjectResolver {
 
     Optional<NaturalPersonScreeningSubject> findById(UUID naturalPersonId);
 
-    record NaturalPersonScreeningSubject(String fullName, String countryCode) {}
+    /** @param dateOfBirth and nationality may be null; they are sent to the provider to cut namesake hits */
+    record NaturalPersonScreeningSubject(String fullName, String countryCode, LocalDate dateOfBirth,
+                                         String nationality) {
+        public NaturalPersonScreeningSubject(String fullName, String countryCode) {
+            this(fullName, countryCode, null, null);
+        }
+    }
 }

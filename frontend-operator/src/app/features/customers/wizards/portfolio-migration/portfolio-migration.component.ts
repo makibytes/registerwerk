@@ -376,6 +376,7 @@ export class PortfolioMigrationComponent implements OnInit {
         requireDualControl: true,
         reason: `Record on-chain transfer for portfolio migration ${migration.id}`,
         action: 'PORTFOLIO_MIGRATION_ONCHAIN_TRANSFER',
+        target: `POST /api/v1/portfolio-migrations/${migration.id}/onchain-transfer`,
       },
       width: '500px',
       disableClose: true,

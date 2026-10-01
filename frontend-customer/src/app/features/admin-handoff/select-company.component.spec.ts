@@ -10,7 +10,7 @@ import { AdminService, EntityListItem, EntityPage, ImpersonateResponse } from '.
 
 describe('SelectCompanyComponent', () => {
     let authService: MockedObject<Pick<AuthService, 'enterImpersonation' | 'logout'>>;
-    let adminService: MockedObject<Pick<AdminService, 'listEntities' | 'impersonate'>>;
+    let adminService: MockedObject<Pick<AdminService, 'listEntities' | 'impersonate' | 'stepUp'>>;
     let router: MockedObject<Pick<Router, 'navigate'>>;
     let snackBarOpenSpy: Mock;
 
@@ -38,7 +38,8 @@ describe('SelectCompanyComponent', () => {
         };
         adminService = {
             listEntities: vi.fn().mockName("AdminService.listEntities"),
-            impersonate: vi.fn().mockName("AdminService.impersonate")
+            impersonate: vi.fn().mockName("AdminService.impersonate"),
+            stepUp: vi.fn().mockName("AdminService.stepUp")
         };
         router = {
             navigate: vi.fn().mockName("Router.navigate")
@@ -50,6 +51,7 @@ describe('SelectCompanyComponent', () => {
         snackBarOpenSpy = vi.spyOn(MatSnackBar.prototype, 'open').mockReturnValue({} as never);
 
         adminService.listEntities.mockReturnValue(of(page));
+        adminService.stepUp.mockReturnValue(of({ stepUpToken: 'su-tok' }));
 
         TestBed.configureTestingModule({
             imports: [SelectCompanyComponent],
@@ -90,12 +92,19 @@ describe('SelectCompanyComponent', () => {
 
     describe('selectEntity()', () => {
         const impersonateResponse: ImpersonateResponse = {
-            token: 'impersonation-tok',
-            tokenType: 'Bearer',
+            sessionId: 'sess-1',
+            mode: 'READ_ONLY',
             expiresAt: '2026-01-01T00:00:00Z',
             entityId: 'ent-1',
             entityName: 'Acme GmbH',
+            handoffUrl: 'http://localhost:44201/admin/handoff#code=one-time-code&entityId=ent-1&entityName=Acme%20GmbH',
         };
+
+        function select(component: SelectCompanyComponent) {
+            component.reason = 'Customer asked for help with an order';
+            component.totpCode = '123456';
+            component.selectEntity(entity);
+        }
 
         it('impersonates via AdminService then enters impersonation via AuthService, navigating on success', () => {
             const fixture = createComponent();
@@ -103,10 +112,11 @@ describe('SelectCompanyComponent', () => {
             adminService.impersonate.mockReturnValue(of(impersonateResponse));
             authService.enterImpersonation.mockReturnValue(of(void 0));
 
-            component.selectEntity(entity);
+            select(component);
 
-            expect(adminService.impersonate).toHaveBeenCalledWith('ent-1');
-            expect(authService.enterImpersonation).toHaveBeenCalledWith('impersonation-tok', 'ent-1', 'Acme GmbH');
+            expect(adminService.stepUp).toHaveBeenCalledWith('123456', 'ADMIN_IMPERSONATION');
+            expect(adminService.impersonate).toHaveBeenCalledWith('ent-1', 'Customer asked for help with an order', 'su-tok', '');
+            expect(authService.enterImpersonation).toHaveBeenCalledWith('one-time-code', 'ent-1', 'Acme GmbH');
             expect(router.navigate).toHaveBeenCalledWith(['/dashboard']);
         });
 
@@ -116,7 +126,7 @@ describe('SelectCompanyComponent', () => {
             adminService.impersonate.mockReturnValue(of(impersonateResponse));
             authService.enterImpersonation.mockReturnValue(throwError(() => ({ error: { message: 'Impersonation session exchange failed' } })));
 
-            component.selectEntity(entity);
+            select(component);
 
             expect(component.selecting).toBeNull();
             expect(router.navigate).not.toHaveBeenCalled();
@@ -128,7 +138,7 @@ describe('SelectCompanyComponent', () => {
             const component = fixture.componentInstance;
             adminService.impersonate.mockReturnValue(throwError(() => ({ error: { message: 'Forbidden' } })));
 
-            component.selectEntity(entity);
+            select(component);
 
             expect(authService.enterImpersonation).not.toHaveBeenCalled();
             expect(component.selecting).toBeNull();

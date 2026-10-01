@@ -1013,13 +1013,19 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         incident.setTitle(title);
         incident.setDescription(description);
         incident.setDetectedAt(detectedAt);
+        incident.setAwarenessAt(detectedAt);
         incident.setStatus(status);
         if (severity == IctIncident.Severity.MAJOR) {
+            incident.setClassifiedAt(detectedAt);
+            incident.setClassificationDeadline(detectedAt.plus(4, ChronoUnit.HOURS));
+            incident.setClassificationReason("Demo data");
             incident.setInitialReportDeadline(detectedAt.plus(24, ChronoUnit.HOURS));
             incident.setFinalReportDeadline(detectedAt.plus(30, ChronoUnit.DAYS));
             if (status == IctIncident.Status.REPORTED_TO_AUTHORITY) {
                 incident.setInitialReportedAt(detectedAt.plus(6, ChronoUnit.HOURS));
                 incident.setAuthorityRef("BAFIN-2026-DORA-0042");
+                incident.setIntermediateReportDeadline(incident.getInitialReportedAt().plus(72, ChronoUnit.HOURS));
+                incident.setIntermediateReportedAt(incident.getInitialReportedAt().plus(60, ChronoUnit.HOURS));
             }
         }
         if (status == IctIncident.Status.RESOLVED) {

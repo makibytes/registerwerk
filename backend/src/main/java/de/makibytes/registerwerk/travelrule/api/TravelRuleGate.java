@@ -51,4 +51,34 @@ public interface TravelRuleGate {
                                  BigDecimal nativeAmount, String nativeSymbol) {
         enforceOutbound(assetId, fromWallet, toWallet, amountEur);
     }
+
+    /**
+     * Full-context entry point (6-26/6-27): every value-moving admin path (ERC-20/721/1155 forced
+     * transfer, ERC-3643 forced transfer, ...) funnels through this one method so the paths cannot
+     * drift. There is deliberately no court-order override: until the legal position on Art. 14 for
+     * court-ordered transfers is settled (parked T6-06) the information must be delivered (or the
+     * Art. 14(5) proof exist) before the on-chain operation is submitted.
+     */
+    default void enforceOutbound(TransferContext context) {
+        enforceOutbound(context.assetId(), context.fromWallet(), context.toWallet(), context.amountEur(),
+                context.nativeAmount(), context.nativeSymbol());
+    }
+
+    /**
+     * @param amountEur          EUR valuation computed by the caller, or {@code null} when not determinable
+     * @param valuationSource    where the valuation came from (e.g. {@code NOMINAL x UNIT_PRICE}, FX source)
+     * @param valuationAt        timestamp of the valuation inputs
+     * @param nativeAmount       instructed amount in the asset's own denomination (token units)
+     * @param nativeSymbol       ticker the amount is denominated in
+     * @param assetReference     contract address / ISIN identifying the transferred asset
+     */
+    record TransferContext(UUID assetId, String fromWallet, String toWallet,
+                           BigDecimal amountEur, String valuationSource, java.time.Instant valuationAt,
+                           BigDecimal nativeAmount, String nativeSymbol, String assetReference) {
+
+        public TransferContext(UUID assetId, String fromWallet, String toWallet,
+                               BigDecimal nativeAmount, String nativeSymbol, String assetReference) {
+            this(assetId, fromWallet, toWallet, null, null, null, nativeAmount, nativeSymbol, assetReference);
+        }
+    }
 }

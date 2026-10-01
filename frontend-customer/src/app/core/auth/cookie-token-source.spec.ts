@@ -150,11 +150,18 @@ describe('CookieTokenSource', () => {
             const result = firstEmission(source.enterImpersonation('impersonation-tok', 'ent-9', 'Other Co'));
             const req = httpMock.expectOne(impersonateUrl);
             expect(req.request.method).toBe('POST');
-            expect(req.request.body).toEqual({ token: 'impersonation-tok' });
+            expect(req.request.body).toEqual({ code: 'impersonation-tok' });
             req.flush(impersonatedProfile);
 
             await result;
             expect(source.getImpersonationMeta()).toEqual({ entityId: 'ent-9', entityName: 'Acme' });
+        });
+
+        it('exposes the impersonation mode from the session profile', async () => {
+            const result = firstEmission(source.enterImpersonation('c', 'ent-9', 'Other Co'));
+            httpMock.expectOne(impersonateUrl).flush({ ...profile, impersonating: true, entityId: 'ent-9', impersonationMode: 'READ_ONLY' });
+            await result;
+            expect(source.getImpersonationMode()).toBe('READ_ONLY');
         });
     });
 

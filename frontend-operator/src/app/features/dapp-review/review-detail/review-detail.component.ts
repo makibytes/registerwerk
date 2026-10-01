@@ -384,7 +384,7 @@ export class ReviewDetailComponent implements OnInit {
   approve(): void {
     this.dialog
       .open(StepUpDialogComponent, {
-        data: { requireDualControl: true, reason: 'dApp marketplace approval', action: 'dApp marketplace approval' },
+        data: { requireDualControl: true, reason: 'dApp marketplace approval', action: 'dApp marketplace approval', target: `POST /api/v1/marketplace/review/${this.versionId}/approve` },
         width: '500px',
         disableClose: true,
       })

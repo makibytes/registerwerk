@@ -51,10 +51,10 @@ class NotabeneAdapter implements TravelRuleProtocolPort {
     public String protocolName() { return "NOTABENE"; }
 
     @Override
-    public CompletableFuture<String> send(UUID transferId, Ivms101.TravelRuleMessage payload) {
+    public CompletableFuture<String> send(UUID transferId, Ivms101.TravelRuleMessage payload, VaspInfo beneficiary) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                Map<String, Object> body = buildTransactionPayload(transferId, payload);
+                Map<String, Object> body = buildTransactionPayload(transferId, payload, beneficiary);
                 @SuppressWarnings("unchecked")
                 Map<String, Object> response = rest.post()
                         .uri("/tf/transaction")
@@ -86,7 +86,8 @@ class NotabeneAdapter implements TravelRuleProtocolPort {
                     String.valueOf(response.getOrDefault("did", "")),
                     String.valueOf(response.getOrDefault("name", "")),
                     String.valueOf(response.getOrDefault("jurisdictionCountry", "")),
-                    String.valueOf(response.getOrDefault("addressUri", ""))
+                    String.valueOf(response.getOrDefault("addressUri", "")),
+                    response.get("lei") == null ? null : String.valueOf(response.get("lei"))
             ));
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) {
@@ -104,21 +105,32 @@ class NotabeneAdapter implements TravelRuleProtocolPort {
                         + "; beneficiary type cannot be established safely", cause);
     }
 
-    private Map<String, Object> buildTransactionPayload(UUID transferId, Ivms101.TravelRuleMessage msg) {
+    /** Notabene transaction body from the real transfer details (asset, amount, tx reference). */
+    Map<String, Object> buildTransactionPayload(UUID transferId, Ivms101.TravelRuleMessage msg, VaspInfo beneficiary) {
+        Ivms101.TransferDetails details = msg.transferDetails();
+        if (details == null || details.currencyOfTransfer() == null || details.currencyOfTransfer().isBlank()
+                || details.instructedAmount() == null || details.instructedAmount().isBlank()) {
+            throw new IllegalStateException("Notabene transaction requires transferDetails with asset and amount");
+        }
         Map<String, Object> body = new HashMap<>();
-        body.put("transactionAsset", "ETH");
-        body.put("transactionAmount", "0");
-        body.put("notificationEmail", "");
+        body.put("transactionAsset", details.currencyOfTransfer());
+        body.put("transactionAmount", details.instructedAmount());
+        if (details.assetIdentifier() != null) {
+            body.put("assetIdentifier", details.assetIdentifier());
+        }
         body.put("originatorDid", config.getVaspDid());
 
-        if (msg.beneficiaryVasp() != null && msg.beneficiaryVasp().beneficiaryVasp() != null) {
-            body.put("beneficiaryDid", msg.beneficiaryVasp().beneficiaryVasp().vaspId());
+        String beneficiaryDid = beneficiary != null && beneficiary.vaspId() != null ? beneficiary.vaspId()
+                : msg.beneficiaryVasp() != null && msg.beneficiaryVasp().beneficiaryVasp() != null
+                ? msg.beneficiaryVasp().beneficiaryVasp().vaspId() : null;
+        if (beneficiaryDid != null) {
+            body.put("beneficiaryDid", beneficiaryDid);
         }
 
         try {
             body.put("ivms101", mapper.writeValueAsString(msg));
         } catch (Exception e) {
-            log.warn("Failed to serialize IVMS-101 payload for transferId={}", transferId);
+            throw new IllegalStateException("IVMS-101 payload could not be serialized for transferId=" + transferId, e);
         }
 
         body.put("transactionRef", transferId.toString());

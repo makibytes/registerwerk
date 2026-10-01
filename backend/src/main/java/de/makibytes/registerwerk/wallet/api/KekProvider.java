@@ -7,7 +7,7 @@ package de.makibytes.registerwerk.wallet.api;
  * The current EnvVarKekProvider is dev-only and is rejected when
  * REGISTERWERK_PRODUCTION_MODE=true (see ProductionReadinessCheck).
  */
-public interface KekProvider {
+public interface KekProvider extends de.makibytes.registerwerk.shared.EnvelopeCipher.KeyWrapper {
 
     /** Human-readable name logged at startup. */
     String name();

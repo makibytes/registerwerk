@@ -84,8 +84,10 @@ public class KycComplianceService implements de.makibytes.registerwerk.kyc.KycAp
             boolean isExpired = present
                 && best.getExpiresAt() != null
                 && best.getExpiresAt().isBefore(LocalDate.now());
+            // The age of a document runs from its issue date when one was captured (6-17), not from the upload.
+            Instant documentDate = present ? documentDate(best) : null;
             boolean isTooOld = present && req.maxAge() != null
-                && best.getUploadedAt().isBefore(Instant.now().minus(req.maxAge()));
+                && documentDate.isBefore(Instant.now().minus(req.maxAge()));
 
             if (req.mandatory()) {
                 if (!present) missing++;
@@ -101,12 +103,18 @@ public class KycComplianceService implements de.makibytes.registerwerk.kyc.KycAp
                 present,
                 isExpired,
                 isTooOld,
-                present ? best.getUploadedAt() : null,
+                documentDate,
                 present ? best.getId() : null
             ));
         }
 
         boolean fullyCompliant = missing == 0 && expired == 0 && tooOld == 0;
         return new ComplianceResult(jurisdiction, entityId, statuses, fullyCompliant, missing, expired, tooOld);
+    }
+
+    private static Instant documentDate(KycDocument doc) {
+        return doc.getIssueDate() != null
+            ? doc.getIssueDate().atStartOfDay(java.time.ZoneOffset.UTC).toInstant()
+            : doc.getUploadedAt();
     }
 }

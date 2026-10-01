@@ -22,7 +22,7 @@ Alle Konfiguration erfolgt über Umgebungsvariablen. Kopieren Sie `.env.example`
 |---|---|---|
 | `ENTRA_ENABLED` | `false` | `false` → Benutzername/Passwort-Formular im Operator-Frontend; `true` → Microsoft-Schaltfläche |
 | `DEFAULT_ADMIN_EMAIL` | — | E-Mail des vorbelegten Admin-Benutzers (nur integrierter Modus) |
-| `DEFAULT_ADMIN_PASSWORD` | — | Klartext-Passwort, beim Start mit BCrypt gehasht; rotieren, indem Sie es ändern und neu starten |
+| `DEFAULT_ADMIN_PASSWORD` | — | Klartext-Passwort, beim Anlegen des Administrators mit BCrypt gehasht; nur verwendet, wenn kein `REGISTRY_ADMIN` existiert, wird auf ein vorhandenes Konto nie erneut angewendet |
 | `JWT_DEV_SECRET` | integriert | HS256-Signaturschlüssel, der im Entwicklungs-/Demomodus verwendet wird; für lokal nicht festgelegt lassen, im Staging überschreiben |
 
 ### OAuth2 / OIDC (Produktion)

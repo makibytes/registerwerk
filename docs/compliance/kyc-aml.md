@@ -146,6 +146,31 @@ if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
 
 ---
 
+## CDD controls for entity approval { #cdd-controls }
+
+`POST /api/v1/entities/{id}/kyc/approve` (step-up and second approver) now runs the same evidence checks the jurisdiction approval uses, plus beneficial-owner coverage. All thresholds are interim values pending operator decisions on the risk methodology; they are not a legal conclusion.
+
+| Check | Rule |
+|---|---|
+| Entity status | `ACTIVE` or `PENDING_ONBOARDING` only |
+| Screening | no unresolved entity hit and every current beneficial owner screened and clear (a ceased owner with an open hit keeps blocking) |
+| Document checklist | home jurisdiction (from the registration country, or `jurisdiction` in the body); an incomplete checklist needs `overrideNote` and a `REGISTRY_ADMIN` (risk acceptance, stored in the evidence record) |
+| Beneficial owners | at least one; identified ownership of 75 % or more, or a documented senior-managing-official fallback (`controlType=SENIOR_MANAGING_OFFICIAL` with a reason), which also needs `overrideNote` and a `REGISTRY_ADMIN` |
+| Validity | `expiryDate` must not exceed `registerwerk.kyc.max-validity-months` (default 12) and is capped at the EDD review date of a linked confirmed PEP |
+
+Every approval writes a `kyc_approval_record` (checklist snapshot, override note, ownership coverage, second approver) and the `KYC_APPROVED` audit event carries the same payload. `KycJurisdictionApproval` stays advisory: no gate reads it.
+
+!!! note "Existing approvals are not downgraded"
+    `GET /api/v1/kyc/evidence-gaps` lists `APPROVED` entities that would fail today's checks (incomplete checklist, no beneficial owner, unexplained ownership, expiry beyond the cap, PEP without EDD, unresolved screening) for work at the next review.
+
+**Documents.** The upload accepts `issueDate` and `expiresAt`. `expiresAt` is mandatory for passport, identity document and register extracts and must not be in the past; an expired document is not counted by the checklist, and the "too old" clock starts at `issueDate` when given. Listing and downloading documents (and the beneficial-owner list) is limited to `REGISTRY_ADMIN`, `COMPLIANCE_OFFICER`, `AUDIT` and the entity's own `COMPANY_ADMIN`; downloads are served with `X-Content-Type-Options: nosniff`.
+
+**Beneficial owners.** `ownershipPct` must be above 0 and at most 100 and the active total must not exceed 100; `GET .../beneficial-owners/summary` shows the identified share and the unexplained remainder. `POST .../{id}/verify` records the verifier and the evidence document. Ceasing an owner (`DELETE`, with a JSON body) needs step-up, a second approver and a reason, and is refused while the person's screening is unresolved: resolve the hit through the acceptance path first. Adding or ceasing an owner on an `APPROVED` entity opens a `KYC_REVIEW_REQUIRED` task; the status is not changed automatically.
+
+**PEP and EDD.** Confirming a PEP screening hit sets `NaturalPerson.pepStatus=CONFIRMED_PEP`. A confirmed PEP passes the screening gate only while an EDD approval is in force: `POST .../{id}/edd-approvals` (`REGISTRY_ADMIN`, step-up, second approver, note, review date of at most six months). After the review date the person blocks again. There is no risk rating, country-risk list or EDD checklist; those belong to the operator's risk analysis (GwG s.5).
+
+---
+
 ## Ongoing monitoring
 
 **GwG §10 Abs. 1 Nr. 5** and equivalents in all four jurisdictions require ongoing monitoring of business relationships.

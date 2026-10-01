@@ -118,3 +118,11 @@ En cas de violation de données personnelles :
 - Art. 34 : Avertir les **personnes concernées** sans délai injustifié si la violation présente un risque élevé
 
 Aucun processus automatisé de notification, à l'autorité de contrôle ou aux personnes concernées, en cas de violation de données n'est mis en œuvre au titre du GDPR. Les opérateurs doivent établir, tester et prouver un processus spécifique au déploiement.
+
+## Cycle de vie de l'entité et périmètre DSAR {#entity-lifecycle}
+
+- **Machine à états :** PENDING_ONBOARDING -> ACTIVE uniquement via l'onboarding ; ACTIVE <-> SUSPENDED (suspension et réactivation exigent step-up, un second approbateur et un motif) ; CLOSED (résiliation) et DISSOLVED (fusion) sont définitifs. La réactivation est refusée tant que le KYC est expiré/rejeté, qu'une alerte de filtrage est non résolue ou qu'un Sperrvermerk est actif.
+- **La résiliation** est refusée tant que des obligations sont ouvertes (titres émis, trades non réglés, positions repo/lending, opérations sur titres et transferts de registre en cours, positions sous Sperrvermerk), sauf si chacune est confirmée avec un motif. Les obligations confirmées deviennent des tâches de suivi (`/api/v1/entity-tasks`, jauge `registerwerk_offboarding_open_tasks`) ouvertes jusqu'à clôture par un opérateur. Les utilisateurs sont désactivés, leurs sessions et jetons d'action inutilisés révoqués.
+- **On-chain :** la suspension suspend l'org sur chaque chaîne ; la résiliation et la fusion révoquent en plus les claims KYC/AML. Une réactivation ne rétablit rien automatiquement on-chain ; elle crée la tâche `CHAIN_REINSTATEMENT_REQUIRED` pour le rétablissement en double contrôle.
+- **Modifications de données :** un changement de nom, LEI ou pays relance le filtrage et crée une tâche `KYC_REVIEW_REQUIRED` pour les entités APPROVED (le statut KYC n'est pas modifié automatiquement). L'abaissement de la catégorie client et les fusions exigent un second approbateur et un motif ; l'événement d'audit contient l'avant et l'après.
+- **DSAR :** l'export ne couvre que les données de base de l'entité et indique ce qui n'est pas inclus. Un effacement se termine en `COMPLETED_PARTIAL` avec les listes effacé, conservé (base légale) et non couvert. L'application des durées de conservation est manuelle ; rien n'est purgé automatiquement (durées = décision juridique ouverte).

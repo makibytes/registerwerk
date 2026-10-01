@@ -146,6 +146,31 @@ if (screeningGate.hasUnresolvedBeneficialOwnerHit(entityId)) {
 
 ---
 
+## Controlli CDD per l'approvazione di un'entità { #cdd-controls }
+
+`POST /api/v1/entities/{id}/kyc/approve` (step-up e secondo approvatore) esegue ora gli stessi controlli di evidenza dell'approvazione per giurisdizione, più la copertura dei titolari effettivi. Tutte le soglie sono valori provvisori in attesa delle decisioni dell'operatore sulla metodologia di rischio; non sono una conclusione giuridica.
+
+| Controllo | Regola |
+|---|---|
+| Stato dell'entità | solo `ACTIVE` o `PENDING_ONBOARDING` |
+| Screening | nessun riscontro non risolto dell'entità; ogni titolare effettivo attuale sottoposto a screening e senza segnalazioni (un titolare cessato con un riscontro aperto continua a bloccare) |
+| Checklist documentale | giurisdizione d'origine (paese di registrazione, o `jurisdiction` nel body); una checklist incompleta richiede `overrideNote` e un `REGISTRY_ADMIN` (accettazione del rischio, salvata nel record di evidenza) |
+| Titolari effettivi | almeno uno; quota identificata pari ad almeno il 75 %, oppure un ripiego documentato sul dirigente principale (`controlType=SENIOR_MANAGING_OFFICIAL` con motivazione), che richiede anch'esso `overrideNote` e un `REGISTRY_ADMIN` |
+| Validità | `expiryDate` non può superare `registerwerk.kyc.max-validity-months` (12 di default) ed è limitata alla data di revisione EDD di una PEP confermata collegata |
+
+Ogni approvazione scrive un `kyc_approval_record` (snapshot della checklist, nota di deroga, copertura, secondo approvatore) e l'evento di audit `KYC_APPROVED` riporta gli stessi dati. `KycJurisdictionApproval` resta indicativo: nessun gate lo legge.
+
+!!! note "Le approvazioni esistenti non vengono declassate"
+    `GET /api/v1/kyc/evidence-gaps` elenca le entità `APPROVED` che non supererebbero i controlli attuali (checklist incompleta, nessun titolare effettivo, quota non spiegata, scadenza oltre il limite, PEP senza EDD, screening non risolto) da trattare alla prossima revisione.
+
+**Documenti.** Il caricamento accetta `issueDate` e `expiresAt`. `expiresAt` è obbligatoria per passaporto, documento d'identità ed estratti di registro e non può essere nel passato; un documento scaduto non viene contato dalla checklist e il termine «troppo vecchio» decorre da `issueDate` se indicata. Elenco e download dei documenti (e l'elenco dei titolari effettivi) sono limitati a `REGISTRY_ADMIN`, `COMPLIANCE_OFFICER`, `AUDIT` e al `COMPANY_ADMIN` dell'entità; i download recano `X-Content-Type-Options: nosniff`.
+
+**Titolari effettivi.** `ownershipPct` deve essere maggiore di 0 e al massimo 100, e il totale attivo non può superare 100; `GET .../beneficial-owners/summary` mostra la quota identificata e il resto non spiegato. `POST .../{id}/verify` registra il verificatore e il documento di evidenza. La cessazione (`DELETE` con body JSON) richiede step-up, un secondo approvatore e un motivo, ed è rifiutata finché lo screening della persona non è risolto: risolvere prima il riscontro tramite il percorso di accettazione. Aggiungere o cessare un titolare su un'entità `APPROVED` apre un'attività `KYC_REVIEW_REQUIRED`; lo stato non cambia automaticamente.
+
+**PEP ed EDD.** La conferma di un riscontro PEP imposta `NaturalPerson.pepStatus=CONFIRMED_PEP`. Una PEP confermata supera il gate di screening solo finché è in vigore un'approvazione EDD: `POST .../{id}/edd-approvals` (`REGISTRY_ADMIN`, step-up, secondo approvatore, nota, data di revisione al massimo di sei mesi). Dopo la data di revisione la persona torna a bloccare. Non esistono rating di rischio, elenco dei paesi a rischio né checklist EDD; spettano all'analisi dei rischi dell'operatore (GwG § 5).
+
+---
+
 ## Monitoraggio continuo { #ongoing-monitoring }
 
 **GwG §10 Abs. 1 Nr. 5** ed equivalenti in tutte e quattro le giurisdizioni richiedono un monitoraggio continuo dei rapporti commerciali.

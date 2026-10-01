@@ -76,7 +76,7 @@ class BeneficialOwnerServiceTest {
 
         BeneficialOwner result = service.addBeneficialOwner(
                 entityId, personInput(), new java.math.BigDecimal("30.00"),
-                BeneficialOwner.ControlType.DIRECT_OWNERSHIP, "onboarding-form", actorId, "COMPLIANCE_OFFICER");
+                BeneficialOwner.ControlType.DIRECT_OWNERSHIP, "onboarding-form", null, actorId, "COMPLIANCE_OFFICER");
 
         assertThat(result.getEntityId()).isEqualTo(entityId);
         assertThat(result.getControlType()).isEqualTo(BeneficialOwner.ControlType.DIRECT_OWNERSHIP);
@@ -96,7 +96,7 @@ class BeneficialOwnerServiceTest {
         when(legalEntityRepository.findById(entityId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.addBeneficialOwner(
-                entityId, personInput(), null, BeneficialOwner.ControlType.OTHER_CONTROL, null,
+                entityId, personInput(), null, BeneficialOwner.ControlType.OTHER_CONTROL, null, null,
                 UUID.randomUUID(), "REGISTRY_ADMIN"))
                 .isInstanceOf(EntityNotFoundException.class);
 
@@ -119,7 +119,7 @@ class BeneficialOwnerServiceTest {
                 .when(screeningGate).screenNaturalPerson(any(), anyString(), any(), eq(ScreeningTrigger.BENEFICIAL_OWNER_ADD));
 
         BeneficialOwner result = service.addBeneficialOwner(
-                entityId, personInput(), null, BeneficialOwner.ControlType.TRUSTEE, null,
+                entityId, personInput(), null, BeneficialOwner.ControlType.TRUSTEE, null, null,
                 UUID.randomUUID(), "REGISTRY_ADMIN");
 
         assertThat(result).isNotNull();
@@ -138,7 +138,7 @@ class BeneficialOwnerServiceTest {
         when(beneficialOwnerRepository.save(any(BeneficialOwner.class))).thenAnswer(inv -> inv.getArgument(0));
 
         BeneficialOwner result = service.ceaseBeneficialOwner(
-                entityId, boId, UUID.randomUUID(), "REGISTRY_ADMIN");
+                entityId, boId, "ownership ended", null, UUID.randomUUID(), "REGISTRY_ADMIN", UUID.randomUUID());
 
         assertThat(result.getCeasedAt()).isNotNull();
         ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
@@ -157,7 +157,7 @@ class BeneficialOwnerServiceTest {
         when(beneficialOwnerRepository.findByIdAndEntityId(boId, entityId)).thenReturn(Optional.of(bo));
 
         assertThatThrownBy(() -> service.ceaseBeneficialOwner(
-                entityId, boId, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                entityId, boId, "ownership ended", null, UUID.randomUUID(), "REGISTRY_ADMIN", UUID.randomUUID()))
                 .isInstanceOf(InvalidStateTransitionException.class);
     }
 }

@@ -28,6 +28,18 @@ export interface StepUpDialogData {
    * approver's token is unconditionally rejected with 403, regardless of a valid TOTP code.
    */
   action: string;
+  /**
+   * The exact request the second approver is approving, as `"METHOD /api/v1/path[?query]"`. An
+   * approver token is bound to it; shown to the approver and pre-filled in the generator.
+   */
+  target?: string;
+  /**
+   * The second approver is only required outside bootstrap mode (fewer than two enrolled admins), so the
+   * field may be left empty; the backend decides and refuses with 403 when one was needed.
+   */
+  dualControlOptional?: boolean;
+  /** JSON body of that request, for body-bound reasons (mint, burn, forced transfer/allowance). */
+  targetBody?: unknown;
 }
 
 export interface StepUpDialogResult {
@@ -102,6 +114,14 @@ export interface StepUpDialogResult {
       border: 1px solid rgba(59, 130, 246, 0.18);
     }
 
+    .request-box {
+      margin: 6px 0 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--rw-text-primary);
+    }
     .generate-link {
       display: inline-flex;
       align-items: center;
@@ -174,7 +194,17 @@ export interface StepUpDialogResult {
         <div class="dual-control-note">
           A second REGISTRY_ADMIN or COMPLIANCE_OFFICER must separately authenticate and paste
           their scoped step-up token below. Both tokens must be from different users.
+          @if (data.dualControlOptional) {
+            Leave it empty only while fewer than two administrators have an authenticator enrolled (bootstrap).
+          }
         </div>
+        @if (data.target) {
+          <div class="dual-control-note">
+            The approval is bound to exactly this request and works once for 5 minutes:
+            <pre class="request-box">{{ data.target }}@if (bodyText) {
+{{ bodyText }}}</pre>
+          </div>
+        }
         <button type="button" mat-button color="primary" class="generate-link" (click)="openTokenGenerator()">
           <mat-icon>open_in_new</mat-icon>
           Generate approver token…
@@ -200,7 +230,7 @@ export interface StepUpDialogResult {
       <button type="button" mat-stroked-button (click)="cancel()" [disabled]="loading">Cancel</button>
       <button type="button" mat-raised-button color="primary"
               (click)="submit()"
-              [disabled]="loading || !totpCode || totpCode.length < 6 || (data.requireDualControl && !approverToken)">
+              [disabled]="loading || !totpCode || totpCode.length < 6 || (data.requireDualControl && !data.dualControlOptional && !approverToken)">
         <mat-icon>{{ loading ? 'hourglass_empty' : 'lock_open' }}</mat-icon>
         {{ loading ? 'Verifying…' : 'Verify & Confirm' }}
       </button>
@@ -219,6 +249,10 @@ export class StepUpDialogComponent {
   loading = false;
   errorMessage: string | null = null;
 
+  get bodyText(): string {
+    return this.data.targetBody === undefined ? '' : JSON.stringify(this.data.targetBody);
+  }
+
   cancel(): void {
     this.dialogRef.close(undefined);
   }
@@ -227,7 +261,7 @@ export class StepUpDialogComponent {
     this.dialog
       .open(ApprovalTokenGeneratorDialogComponent, {
         width: '480px',
-        data: { action: this.data.action },
+        data: { action: this.data.action, target: this.data.target, targetBody: this.data.targetBody },
       })
       .afterClosed()
       .subscribe((token: string | undefined) => {
@@ -240,14 +274,14 @@ export class StepUpDialogComponent {
 
   submit(): void {
     if (!this.totpCode || this.totpCode.length < 6) return;
-    if (this.data.requireDualControl && !this.approverToken.trim()) return;
+    if (this.data.requireDualControl && !this.data.dualControlOptional && !this.approverToken.trim()) return;
 
     submitTotpForStepUpToken(
-      this.stepUpService, this.cdr, this, this.totpCode, this.data.action,
+      this.stepUpService, this.cdr, this, this.totpCode, null,
       (res) => {
         const result: StepUpDialogResult = {
           stepUpToken: res.stepUpToken,
-          dualControlToken: this.data.requireDualControl
+          dualControlToken: this.data.requireDualControl && this.approverToken.trim()
             ? this.approverToken.trim()
             : undefined,
         };

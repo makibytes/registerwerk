@@ -49,6 +49,10 @@ public class ErasureRequest {
     @Column(name = "retained_notice_channel", columnDefinition = "text")
     private String retainedNoticeChannel;
 
+    /** JSON: {@code erased}, {@code retained} (with legal basis) and {@code notCovered} lists (6-30). */
+    @Column(name = "resolution_detail", columnDefinition = "text")
+    private String resolutionDetail;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -77,6 +81,8 @@ public class ErasureRequest {
 
     public String getResolutionNote() { return resolutionNote; }
     public void setResolutionNote(String resolutionNote) { this.resolutionNote = resolutionNote; }
+    public String getResolutionDetail() { return resolutionDetail; }
+    public void setResolutionDetail(String resolutionDetail) { this.resolutionDetail = resolutionDetail; }
     public String getRetainedNoticeChannel() { return retainedNoticeChannel; }
     public void setRetainedNoticeChannel(String retainedNoticeChannel) { this.retainedNoticeChannel = retainedNoticeChannel; }
 }

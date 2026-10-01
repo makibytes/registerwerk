@@ -41,7 +41,6 @@ flowchart LR
 
     subgraph Adapters
         A1[OpenSanctionsAdapter — default]
-        A2[RefinitivWorldCheckAdapter — commercial]
     end
 
     subgraph Results
@@ -53,8 +52,7 @@ flowchart LR
     T2 & T3 & T5 --> SBO
     SS & SBO --> P
     P --> A1
-    P --> A2
-    A1 & A2 --> SR
+    A1 --> SR
     SR --> SH
     SH -->|Unresolved| KG[KycService — blocks approval]
 ```
@@ -75,12 +73,11 @@ Le `OpenSanctionsAdapter` vérifie par défaut les listes suivantes :
 | Liste de gel BaFin/UE | BaFin via OpenSanctions | Ajouts de gel spécifiques à l'Allemagne |
 | Liste PPE de l'UE | Agrégation OpenSanctions | Personnes politiquement exposées |
 
-OpenSanctions fournit une API REST unifiée couvrant toutes ces listes. L'adaptateur met en cache localement
-l'ensemble de données complet (actualisé toutes les 24 heures) et effectue une correspondance floue sur les
-noms d'entités, les alias, les dates de naissance et les numéros de passeport.
+OpenSanctions fournit une API REST unifiée couvrant toutes ces listes. Chaque screening est un appel d'API (pas de jeu de données local). L'adaptateur envoie le nom, le pays, le LEI et le numéro d'immatriculation pour les sociétés, et le nom, le pays, la date de naissance et la nationalité pour les personnes physiques ; les numéros de passeport ne sont pas comparés. Le seuil est `registerwerk.screening.match-threshold` (0,85 par défaut) et il est enregistré à chaque exécution, avec la version du jeu de données si l'API la fournit. L'API publique gratuite est limitée en débit et sans SLA ; un fournisseur sous licence nécessite un second adaptateur pour `SanctionsScreeningPort` (aucun n'est fourni). Seuls l'entité et ses bénéficiaires effectifs enregistrés sont contrôlés, pas les dirigeants, signataires, chaînes de détention ni adresses de portefeuille.
 
-Pour les déploiements nécessitant un niveau de confiance plus élevé, le `RefinitivWorldCheckAdapter`
-(commercial) peut être configuré en définissant `REFINITIV_WORLDCHECK_API_KEY` dans l'environnement.
+**Nouveaux contrôles et pannes.** Une correspondance retrouvée, déjà acceptée comme faux positif par un agent et un second approbateur, est reportée pendant 90 jours (même enregistrement du fournisseur, même catégorie, score au plus 0,05 plus élevé), avec une entrée d'audit par report ; tout le reste est rouvert. En cas de panne du fournisseur, le dernier bon résultat est utilisé au plus 24 heures après la première exécution échouée (jamais s'il a plus de 72 heures). L'état dégradé est visible (métriques `registerwerk_screening_degraded_subjects` et `registerwerk_screening_stale_results`, alerte auditée), les sujets en échec sont relancés toutes les 30 minutes, les sujets jamais contrôlés restent bloqués et, passé le délai de grâce, l'erreur bloque à nouveau.
+
+**Catégories.** Une correspondance étiquetée à la fois sanction et PPE est une correspondance de sanction. Une correspondance PPE sur une personne physique n'est pas un faux positif : elle est confirmée (`CONFIRM_PEP`, step-up plus second approbateur) et maintient la porte fermée jusqu'à l'enregistrement d'une approbation de vigilance renforcée (EDD).
 
 ---
 
@@ -172,8 +169,7 @@ des obligations d'escalade spécifiques :
 === "Allemagne (DE_EWPG)"
 
     Soumettez une déclaration d'activité suspecte (SAR) à **BaFin** et, en cas de soupçon de blanchiment
-    d'argent, à la **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. Le module `screening` stocke
-    la référence de la SAR dans `ScreeningHit.regulatoryRef`.
+    d'argent, à la **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. Le dépôt se fait hors de la plateforme ; Registerwerk ne stocke aucune référence.
 
 === "Luxembourg (LU_CSSF)"
 
@@ -182,8 +178,7 @@ des obligations d'escalade spécifiques :
 
 === "France (FR_AMF)"
 
-    Soumettez un rapport à **TRACFIN** via le mécanisme de notification AMF/ACPR. Le `ScreeningService`
-    enregistre la référence TRACFIN une fois la déclaration déposée.
+    Soumettez un rapport à **TRACFIN** via le mécanisme de notification AMF/ACPR. Le dépôt se fait hors de la plateforme ; Registerwerk ne stocke aucune référence.
 
 === "Liechtenstein (LI_TVTG)"
 

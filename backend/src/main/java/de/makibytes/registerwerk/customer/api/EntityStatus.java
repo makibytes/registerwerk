@@ -14,5 +14,24 @@ public enum EntityStatus {
      * only terminal state and conflated "the legal entity ceased to exist" with "the customer
      * left this registry" — two very different events with different consequences.
      */
-    CLOSED
+    CLOSED;
+
+    /**
+     * The lifecycle table (6-21). PENDING_ONBOARDING leaves only through onboarding completion
+     * (-&gt; ACTIVE); ACTIVE &lt;-&gt; SUSPENDED is the reversible pair; CLOSED is reached only by
+     * {@code CustomerOffboardingService.terminate} and DISSOLVED only by a merger. CLOSED and
+     * DISSOLVED are terminal (re-entry is a new onboarding; interim for parked decision T6-12).
+     */
+    public boolean canTransitionTo(EntityStatus target) {
+        return switch (this) {
+            case PENDING_ONBOARDING -> target == ACTIVE;
+            case ACTIVE -> target == SUSPENDED || target == CLOSED || target == DISSOLVED;
+            case SUSPENDED -> target == ACTIVE || target == CLOSED || target == DISSOLVED;
+            case CLOSED, DISSOLVED -> false;
+        };
+    }
+
+    public boolean isTerminal() {
+        return this == CLOSED || this == DISSOLVED;
+    }
 }

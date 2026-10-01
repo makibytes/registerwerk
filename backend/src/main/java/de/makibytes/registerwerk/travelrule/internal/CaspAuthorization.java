@@ -30,13 +30,24 @@ public class CaspAuthorization {
     @Column(name = "legal_name", nullable = false)
     private String legalName;
 
+    @Column(length = 20)
     private String lei;
+
+    /** Who recorded a THIRD_COUNTRY_REVIEWED due-diligence row, and the second approver (T6-07). */
+    @Column(name = "reviewed_by")
+    private UUID reviewedBy;
+
+    @Column(name = "second_approver_id")
+    private UUID secondApproverId;
+
+    @Column(length = 2)
+    private String country;
 
     @Column(name = "home_member_state", length = 2)
     private String homeMemberState;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(nullable = false, length = 30)
     private CaspAuthorizationStatus status;
 
     @Column(name = "authorization_id")
@@ -76,7 +87,13 @@ public class CaspAuthorization {
     public String getLegalName() { return legalName; }
     public void setLegalName(String legalName) { this.legalName = legalName; }
     public String getLei() { return lei; }
-    public void setLei(String lei) { this.lei = lei; }
+    public void setLei(String lei) { this.lei = lei == null || lei.isBlank() ? null : lei.trim().toUpperCase(java.util.Locale.ROOT); }
+    public UUID getReviewedBy() { return reviewedBy; }
+    public void setReviewedBy(UUID reviewedBy) { this.reviewedBy = reviewedBy; }
+    public UUID getSecondApproverId() { return secondApproverId; }
+    public void setSecondApproverId(UUID secondApproverId) { this.secondApproverId = secondApproverId; }
+    public String getCountry() { return country; }
+    public void setCountry(String country) { this.country = country; }
     public String getHomeMemberState() { return homeMemberState; }
     public void setHomeMemberState(String homeMemberState) { this.homeMemberState = homeMemberState; }
     public CaspAuthorizationStatus getStatus() { return status; }

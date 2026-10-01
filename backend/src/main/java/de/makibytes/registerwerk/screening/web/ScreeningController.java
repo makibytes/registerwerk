@@ -57,7 +57,10 @@ public class ScreeningController {
     public ResponseEntity<List<OpenHitResponse>> listOpenHits(
             @RequestParam(defaultValue = "open")
             @Pattern(regexp = "open", message = "only the open work queue is supported") String status) {
-        List<ScreeningHit> hits = hitRepository.findByAcceptedIsNullOrderByCreatedAtDesc();
+        java.time.Instant now = java.time.Instant.now();
+        // confirmed PEPs under an unexpired EDD approval are no longer open work
+        List<ScreeningHit> hits = hitRepository.findByAcceptedIsNullOrderByCreatedAtDesc().stream()
+                .filter(h -> h.blocksGate(now)).toList();
         if (hits.isEmpty()) return ResponseEntity.ok(List.of());
 
         Set<UUID> runIds = hits.stream().map(ScreeningHit::getRunId).collect(Collectors.toSet());
@@ -106,9 +109,29 @@ public class ScreeningController {
 
     /** List unresolved hits for a screening run. */
     @GetMapping("/runs/{runId}/hits")
-    public ResponseEntity<List<ScreeningHitResponse>> listHits(@PathVariable UUID runId) {
-        List<ScreeningHit> hits = hitRepository.findByRunIdAndAcceptedIsNull(runId);
+    public ResponseEntity<List<ScreeningHitResponse>> listHits(@PathVariable UUID runId,
+            @RequestParam(defaultValue = "open") @Pattern(regexp = "open|all") String status) {
+        List<ScreeningHit> hits = "all".equals(status) ? hitRepository.findByRunId(runId)
+                : hitRepository.findByRunIdAndAcceptedIsNull(runId);
         return ResponseEntity.ok(hits.stream().map(ScreeningHitResponse::from).toList());
+    }
+
+    /**
+     * Confirm a PEP hit on a natural person (not a false positive): keeps the hit unresolved until an
+     * EDD approval is recorded and tells kyc to set the PEP status. Step-up + second approver + note.
+     */
+    @PostMapping("/hits/{hitId}/confirm-pep")
+    @RequiresStepUp(reason = "SCREENING_PEP_CONFIRM", requireSecondApprover = true, maxAgeMinutes = 15)
+    public ResponseEntity<ScreeningHitResponse> confirmPep(
+            @PathVariable UUID hitId,
+            @RequestBody @Valid ConfirmPepRequest req,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID actorId = UUID.fromString(jwt.getSubject());
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        String actorRole = (roles != null && !roles.isEmpty()) ? roles.get(0) : "COMPLIANCE_OFFICER";
+        return ResponseEntity.ok(ScreeningHitResponse.from(
+                screeningService.confirmPep(hitId, actorId, actorRole, approverId, req.note())));
     }
 
     /**
@@ -136,6 +159,10 @@ public class ScreeningController {
 
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
+    public record ConfirmPepRequest(
+            @NotBlank @Size(max = 2000) String note
+    ) {}
+
     public record AcceptHitRequest(
             @NotBlank @Size(max = 2000) String reason
     ) {}
@@ -155,7 +182,9 @@ public class ScreeningController {
             String runStatus,
             String provider,
             String createdAt,
-            String startedAt
+            String startedAt,
+            String resolution,
+            String eddReviewDue
     ) {
         static OpenHitResponse from(ScreeningHit h, ScreeningRun r) {
             return new OpenHitResponse(
@@ -168,7 +197,9 @@ public class ScreeningController {
                     r != null ? r.getStatus().name() : null,
                     r != null ? r.getProvider() : null,
                     h.getCreatedAt() != null ? h.getCreatedAt().toString() : null,
-                    r != null && r.getStartedAt() != null ? r.getStartedAt().toString() : null);
+                    r != null && r.getStartedAt() != null ? r.getStartedAt().toString() : null,
+                    h.getResolution() != null ? h.getResolution().name() : null,
+                    h.getEddReviewDue() != null ? h.getEddReviewDue().toString() : null);
         }
     }
 
@@ -180,14 +211,17 @@ public class ScreeningController {
             String status,
             String provider,
             String startedAt,
-            String completedAt
+            String completedAt,
+            java.math.BigDecimal thresholdUsed,
+            String dataVersion
     ) {
         static ScreeningRunResponse from(ScreeningRun r) {
             return new ScreeningRunResponse(
                     r.getId(), r.getEntityId(), r.getNaturalPersonId(),
                     r.getTriggerType().name(), r.getStatus().name(), r.getProvider(),
                     r.getStartedAt() != null ? r.getStartedAt().toString() : null,
-                    r.getCompletedAt() != null ? r.getCompletedAt().toString() : null);
+                    r.getCompletedAt() != null ? r.getCompletedAt().toString() : null,
+                    r.getThresholdUsed(), r.getDataVersion());
         }
     }
 
@@ -201,7 +235,10 @@ public class ScreeningController {
             Double matchScore,
             Boolean accepted,
             String acceptReason,
-            String acceptedAt
+            String acceptedAt,
+            String resolution,
+            UUID carriedFromHitId,
+            String eddReviewDue
     ) {
         static ScreeningHitResponse from(ScreeningHit h) {
             return new ScreeningHitResponse(
@@ -209,7 +246,10 @@ public class ScreeningController {
                     h.getMatchedField(), h.getMatchedValue(),
                     h.getMatchScore() != null ? h.getMatchScore().doubleValue() : null,
                     h.getAccepted(), h.getAcceptReason(),
-                    h.getAcceptedAt() != null ? h.getAcceptedAt().toString() : null);
+                    h.getAcceptedAt() != null ? h.getAcceptedAt().toString() : null,
+                    h.getResolution() != null ? h.getResolution().name() : null,
+                    h.getCarriedFromHitId(),
+                    h.getEddReviewDue() != null ? h.getEddReviewDue().toString() : null);
         }
     }
 }

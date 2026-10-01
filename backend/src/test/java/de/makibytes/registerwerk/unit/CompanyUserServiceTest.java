@@ -186,6 +186,7 @@ class CompanyUserServiceTest {
         AppUserActionToken token = buildActionToken(user.getId(), AppUserActionTokenType.REGISTRATION);
         when(actionTokenRepository.findByTokenHash(any(String.class))).thenReturn(Optional.of(token));
         when(appUserRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(buildEntity()));
         when(passwordEncoder.encode("Sup3rSecret!")).thenReturn("encoded-password");
 
         service.completeRegistration(new PublicUserRegistrationCompleteRequest(tokenValue(), "Alice Example", "Sup3rSecret!"));
@@ -204,6 +205,7 @@ class CompanyUserServiceTest {
         AppUserActionToken token = buildActionToken(user.getId(), AppUserActionTokenType.PASSWORD_RESET);
         when(actionTokenRepository.findByTokenHash(any(String.class))).thenReturn(Optional.of(token));
         when(appUserRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(buildEntity()));
         when(passwordEncoder.encode("N3wSecret!")).thenReturn("new-encoded-password");
 
         service.completePasswordReset(new PublicPasswordResetCompleteRequest(tokenValue(), "N3wSecret!"));
@@ -212,6 +214,67 @@ class CompanyUserServiceTest {
         assertThat(token.getConsumedAt()).isNotNull();
         verify(appUserRepository).save(user);
         verify(actionTokenRepository).save(token);
+    }
+
+    @Test
+    @DisplayName("6-02: completing a registration token never re-enables a disabled invitee")
+    void completeRegistration_disabledUser_isRefusedAndStaysDisabled() {
+        AppUser user = buildCompanyAdmin();
+        user.setPasswordHash(null);
+        user.setEnabled(false);
+        AppUserActionToken token = buildActionToken(user.getId(), AppUserActionTokenType.REGISTRATION);
+        when(actionTokenRepository.findByTokenHash(any(String.class))).thenReturn(Optional.of(token));
+        when(appUserRepository.findById(user.getId())).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.completeRegistration(
+            new PublicUserRegistrationCompleteRequest(tokenValue(), "Alice Example", "Sup3rSecret!")))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Invalid or expired");
+
+        assertThat(user.isEnabled()).isFalse();
+        assertThat(user.getPasswordHash()).isNull();
+        assertThat(token.getConsumedAt()).isNull();
+        verify(appUserRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("6-02: a terminated (non-ACTIVE) entity's invitee cannot register or reset")
+    void completeRegistration_closedEntity_isRefused() {
+        AppUser user = buildCompanyAdmin();
+        AppUserActionToken token = buildActionToken(user.getId(), AppUserActionTokenType.PASSWORD_RESET);
+        LegalEntity closed = buildEntity();
+        closed.setStatus(EntityStatus.DISSOLVED);
+        when(actionTokenRepository.findByTokenHash(any(String.class))).thenReturn(Optional.of(token));
+        when(appUserRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(closed));
+
+        assertThatThrownBy(() -> service.completePasswordReset(
+            new PublicPasswordResetCompleteRequest(tokenValue(), "N3wSecret!")))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThat(token.getConsumedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("6-02: disabling a user burns their unconsumed action tokens")
+    void setUserEnabled_false_invalidatesActionTokens() {
+        AppUser colleague = buildCompanyAdmin();
+        colleague.setRoles(Set.of(AppUserRole.TRADER));
+        when(appUserRepository.findByIdAndLegalEntityId(colleague.getId(), entityId)).thenReturn(Optional.of(colleague));
+        when(appUserRepository.save(any(AppUser.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.setUserEnabled(authentication, colleague.getId(), false);
+
+        assertThat(colleague.isEnabled()).isFalse();
+        verify(actionTokenRepository).invalidateAllForUser(colleague.getId());
+    }
+
+    @Test
+    @DisplayName("6-07: company administrators can only hand out the customer role allow-list")
+    void inviteUser_rejectsRolesOutsideAllowList() {
+        for (AppUserRole role : List.of(AppUserRole.RELATIONSHIP_MANAGER, AppUserRole.DAPP_PUBLISHER, AppUserRole.REGISTRY_ADMIN)) {
+            assertThatThrownBy(() -> service.inviteUser(authentication,
+                new InviteCompanyUserRequest("x@test.local", "X", Set.of(role))))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test

@@ -43,7 +43,8 @@ class ScreeningGateImplTest {
     @BeforeEach
     void setUp() {
         when(provider.providerName()).thenReturn("provider-a");
-        gate = new ScreeningGateImpl(runRepository, hitRepository, screeningService, List.of(provider));
+        gate = new ScreeningGateImpl(runRepository, hitRepository, screeningService, List.of(provider),
+                ScreeningPolicy.defaults(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
     private ScreeningRun run(ScreeningStatus status) {
@@ -110,7 +111,8 @@ class ScreeningGateImplTest {
     @DisplayName("beneficial owner with ERROR run — blocks approval (fail closed)")
     void beneficialOwnerErrorRun_blocks() {
         UUID personId = UUID.randomUUID();
-        when(runRepository.findNaturalPersonIdsByEntityLinkedRuns(entityId)).thenReturn(List.of(personId));
+        when(runRepository.findCurrentBeneficialOwnerPersons(entityId))
+                .thenReturn(java.util.Collections.singletonList(new Object[] {personId, false}));
         ScreeningRun erroredRun = run(ScreeningStatus.ERROR);
         when(runRepository.findTopByNaturalPersonIdAndProviderOrderByStartedAtDesc(personId, "provider-a"))
                 .thenReturn(erroredRun);
@@ -123,7 +125,7 @@ class ScreeningGateImplTest {
         SanctionsScreeningPort providerB = org.mockito.Mockito.mock(SanctionsScreeningPort.class);
         when(providerB.providerName()).thenReturn("provider-b");
         gate = new ScreeningGateImpl(
-                runRepository, hitRepository, screeningService, List.of(provider, providerB));
+                runRepository, hitRepository, screeningService, List.of(provider, providerB), ScreeningPolicy.defaults(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
         when(runRepository.findTopByEntityIdAndProviderOrderByStartedAtDesc(entityId, "provider-a"))
                 .thenReturn(run(ScreeningStatus.CLEAR));
         ScreeningRun error = run(ScreeningStatus.ERROR);

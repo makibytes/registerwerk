@@ -77,7 +77,8 @@ class PaymentRailAttestationIT {
         h.setBearerAuth(TestJwt.mint(SECRET, actor, true, null, null, "REGISTRY_ADMIN"));
         h.set("Idempotency-Key", UUID.randomUUID().toString());
         if (approver != null) {
-            h.set("X-Dual-Control-Token", TestJwt.mint(SECRET, approver, true, reason, null, "REGISTRY_ADMIN"));
+            h.set("X-Dual-Control-Token", TestJwt.dualControl(SECRET, approver, reason, method.name(),
+                    "/api/v1/payment-rails" + path, "REGISTRY_ADMIN"));
         }
         return rest.exchange("http://localhost:" + port + "/api/v1/payment-rails" + path, method,
                 new HttpEntity<>(body, h), String.class);

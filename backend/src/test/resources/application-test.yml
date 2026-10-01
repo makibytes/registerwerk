@@ -39,6 +39,9 @@ registerwerk:
       base-url: http://127.0.0.1:1
   auth:
     dev-secret: "registerwerk-test-jwt-secret-not-for-production!!"
+    # Many ITs mint tokens for synthetic subs without an app_user row; the session guard's
+    # unknown-user rejection is exercised explicitly by SessionGuardIT.
+    reject-unknown-users: false
     step-up:
       # Tests use step-up endpoints without TOTP enrolment; production default is false.
       allow-unenrolled: true

@@ -13,5 +13,11 @@ public enum CaspAuthorizationStatus {
     /** Confirmed to hold no authorization and no transitional status. */
     NOT_AUTHORIZED,
     /** Authorization was withdrawn by the competent authority. */
-    REVOKED
+    REVOKED,
+    /**
+     * Non-EU / third-country VASP for which an operator recorded an explicit due-diligence review
+     * (reviewer + expiry in {@code validUntil}, created with step-up and a second approver). Without
+     * such a row an unknown counterparty is blocked after the enforcement date (T6-07).
+     */
+    THIRD_COUNTRY_REVIEWED
 }

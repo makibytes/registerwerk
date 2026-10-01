@@ -628,7 +628,7 @@ public class RegisterTransferService {
             if (h.getWalletAddress() != null) wallets.add(h.getWalletAddress().toLowerCase(java.util.Locale.ROOT));
         }
         List<Map<String, Object>> out = new ArrayList<>();
-        for (HolderBlock b : blockRepository.findByStatusOrderByCreatedAtDesc(HolderBlock.Status.ACTIVE)) {
+        for (HolderBlock b : blockRepository.findByStatusInOrderByCreatedAtDesc(HolderBlock.BLOCKING)) {
             boolean applies = assetId.equals(b.getAssetId())
                     || (b.getEntityId() != null && investors.contains(b.getEntityId()) && b.getAssetId() == null)
                     || (b.getWalletAddress() != null && wallets.contains(b.getWalletAddress().toLowerCase(java.util.Locale.ROOT))

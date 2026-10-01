@@ -24,6 +24,7 @@ import { forkJoin } from 'rxjs';
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
 import { DoraService, ProviderRequest } from '../../../core/api/dora.service';
 import { IctIncident, ResilienceTest, ThirdPartyProvider } from '../../../core/models';
+import { openStepUp } from '../../../shared/components/step-up/open-step-up';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 
 @Component({
@@ -91,7 +92,11 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
                     matTooltip="Update status / add root cause">
               <mat-icon>edit</mat-icon>
             </button>
-            @if (inc.status !== 'REPORTED_TO_AUTHORITY' && inc.status !== 'CLOSED') {
+            <button type="button" mat-icon-button (click)="openClassifyDialog(inc)"
+                    matTooltip="Reclassify (severity + reason; step-up)">
+              <mat-icon>rule</mat-icon>
+            </button>
+            @if (inc.status !== 'CLOSED') {
               <button type="button" mat-icon-button (click)="openReportToAuthorityDialog(inc)"
                       matTooltip="Report to BaFin / authority">
                 <mat-icon>send</mat-icon>
@@ -207,12 +212,23 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             </mat-select>
           </mat-form-field>
         </div>
+        <mat-form-field appearance="outline">
+          <mat-label>Aware since (default: now)</mat-label>
+          <input matInput type="datetime-local" [(ngModel)]="incidentForm.awarenessAt" />
+          <mat-hint>The regulatory clocks run from this moment; it cannot be changed later.</mat-hint>
+        </mat-form-field>
+        @if (incidentForm.severity === 'MAJOR') {
+          <mat-form-field appearance="outline">
+            <mat-label>Why this is a major incident *</mat-label>
+            <textarea matInput [(ngModel)]="incidentForm.classificationReason" rows="2"></textarea>
+          </mat-form-field>
+        }
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
         <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
         <button type="button" mat-raised-button color="warn"
                 (click)="submitReport()"
-                [disabled]="!incidentForm.title || !incidentForm.category || !incidentForm.severity">
+                [disabled]="!incidentForm.title || !incidentForm.category || !incidentForm.severity || (incidentForm.severity === 'MAJOR' && !incidentForm.classificationReason.trim())">
           <mat-icon>warning_amber</mat-icon>
           Report
         </button>
@@ -251,6 +267,34 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       </mat-dialog-actions>
     </ng-template>
 
+    <!-- Reclassify Dialog -->
+    <ng-template #classifyDialog>
+      <h2 mat-dialog-title>Reclassify Incident</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;min-width:420px;padding-top:8px">
+        <mat-form-field appearance="outline">
+          <mat-label>Severity *</mat-label>
+          <mat-select [(ngModel)]="classifyForm.severity">
+            @for (s of severities; track s) {
+              <mat-option [value]="s">{{ s }}</mat-option>
+            }
+          </mat-select>
+          <mat-hint>Withdrawing MAJOR needs step-up and a second approver.</mat-hint>
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Reason *</mat-label>
+          <textarea matInput [(ngModel)]="classifyForm.reason" rows="3"></textarea>
+        </mat-form-field>
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" (click)="submitClassify()"
+                [disabled]="!classifyForm.severity || !classifyForm.reason.trim()">
+          <mat-icon>save</mat-icon>
+          Reclassify
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
+
     <!-- Report to Authority Dialog -->
     <ng-template #reportToAuthorityDialog>
       <h2 mat-dialog-title>Report to Competent Authority</h2>
@@ -263,12 +307,22 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
           <mat-label>Authority reference / ticket number *</mat-label>
           <input matInput [(ngModel)]="authorityForm.authorityRef" />
         </mat-form-field>
-        <div style="display:flex;align-items:center;gap:8px">
-          <input type="checkbox" [(ngModel)]="authorityForm.isFinalReport" id="finalReport" />
-          <label for="finalReport" style="font-size:13px;cursor:pointer">
-            This is the final report (Art. 19 para. 4c)
-          </label>
-        </div>
+        <mat-form-field appearance="outline">
+          <mat-label>Report type *</mat-label>
+          <mat-select [(ngModel)]="authorityForm.reportType">
+            <mat-option value="INITIAL">Initial notification</mat-option>
+            <mat-option value="INTERMEDIATE">Intermediate report</mat-option>
+            <mat-option value="FINAL">Final report</mat-option>
+          </mat-select>
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Submitted at (default: now)</mat-label>
+          <input matInput type="datetime-local" [(ngModel)]="authorityForm.submittedAt" />
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Note</mat-label>
+          <input matInput [(ngModel)]="authorityForm.note" />
+        </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
         <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
@@ -471,6 +525,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
 export class DoraDashboardComponent implements OnInit {
   @ViewChild('reportDialog') reportDialogTpl!: TemplateRef<unknown>;
   @ViewChild('updateStatusDialog') updateStatusDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('classifyDialog') classifyDialogTpl!: TemplateRef<unknown>;
   @ViewChild('reportToAuthorityDialog') reportToAuthorityDialogTpl!: TemplateRef<unknown>;
   @ViewChild('recordTestDialog') recordTestDialogTpl!: TemplateRef<unknown>;
   @ViewChild('providerDialog') providerDialogTpl!: TemplateRef<unknown>;
@@ -496,9 +551,12 @@ export class DoraDashboardComponent implements OnInit {
   readonly testTypes = ['VULNERABILITY_SCAN', 'SCENARIO_BASED', 'TLPT'];
   readonly testResults = ['PASSED', 'FINDINGS_OPEN', 'FAILED'];
 
-  incidentForm = { title: '', description: '', category: '', severity: '' };
+  incidentForm = { title: '', description: '', category: '', severity: '', awarenessAt: '', classificationReason: '' };
+  classifyForm = { severity: '', reason: '' };
+  private classifyIncident: IctIncident | null = null;
   statusForm = { status: '', rootCause: '', remediationSteps: '' };
-  authorityForm = { authorityRef: '', isFinalReport: false };
+  authorityForm: { authorityRef: string; reportType: 'INITIAL' | 'INTERMEDIATE' | 'FINAL'; note: string; submittedAt: string } =
+    { authorityRef: '', reportType: 'INITIAL', note: '', submittedAt: '' };
   testForm: {
     testType: string; result: string; scope: string; performedAt: string; nextDueDate: string;
     tlptRequired: boolean; testerName: string; reportRef: string; findings: string;
@@ -657,7 +715,7 @@ export class DoraDashboardComponent implements OnInit {
   }
 
   openReportDialog(): void {
-    this.incidentForm = { title: '', description: '', category: '', severity: 'HIGH' };
+    this.incidentForm = { title: '', description: '', category: '', severity: 'HIGH', awarenessAt: '', classificationReason: '' };
     this.dialog.open(this.reportDialogTpl, { width: '500px' });
   }
 
@@ -669,7 +727,12 @@ export class DoraDashboardComponent implements OnInit {
 
   openReportToAuthorityDialog(incident: IctIncident): void {
     this.selectedIncidentId = incident.id;
-    this.authorityForm = { authorityRef: '', isFinalReport: false };
+    // The first report is INITIAL; offer the next one that is still missing.
+    this.authorityForm = {
+      authorityRef: '',
+      reportType: !incident.initialReportedAt ? 'INITIAL' : !incident.intermediateReportedAt ? 'INTERMEDIATE' : 'FINAL',
+      note: '', submittedAt: '',
+    };
     this.dialog.open(this.reportToAuthorityDialogTpl, { width: '480px' });
   }
 
@@ -680,6 +743,8 @@ export class DoraDashboardComponent implements OnInit {
       description: this.incidentForm.description || undefined,
       category: this.incidentForm.category,
       severity: this.incidentForm.severity,
+      awarenessAt: this.incidentForm.awarenessAt ? new Date(this.incidentForm.awarenessAt).toISOString() : undefined,
+      classificationReason: this.incidentForm.severity === 'MAJOR' ? this.incidentForm.classificationReason.trim() : undefined,
     }).subscribe({
       next: (incident) => {
         this.incidents = [incident, ...this.incidents];
@@ -692,18 +757,64 @@ export class DoraDashboardComponent implements OnInit {
 
   submitStatusUpdate(): void {
     if (!this.selectedIncidentId) return;
-    this.dialog.closeAll();
-    this.doraService.updateStatus(this.selectedIncidentId, {
+    const id = this.selectedIncidentId;
+    const incident = this.incidents.find(i => i.id === id);
+    const body = {
       status: this.statusForm.status,
       rootCause: this.statusForm.rootCause || undefined,
       remediationSteps: this.statusForm.remediationSteps || undefined,
-    }).subscribe({
-      next: (updated) => {
-        this.incidents = this.incidents.map(i => i.id === updated.id ? updated : i);
-        this.cdr.markForCheck();
-        this.snackBar.open('Incident status updated.', 'Dismiss', { duration: 4000 });
-      },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to update status.', 'Dismiss', { duration: 6000 }),
+    };
+    this.dialog.closeAll();
+    const finish = (stepUpToken?: string, dualControlToken?: string): void => {
+      this.doraService.updateStatus(id, body, stepUpToken, dualControlToken).subscribe({
+        next: (updated) => {
+          this.incidents = this.incidents.map(i => i.id === updated.id ? updated : i);
+          this.cdr.markForCheck();
+          this.snackBar.open('Incident status updated.', 'Dismiss', { duration: 4000 });
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to update status.', 'Dismiss', { duration: 8000 }),
+      });
+    };
+    if (body.status === 'CLOSED' && incident?.severity === 'MAJOR') {
+      // Closing a MAJOR incident: step-up + second approver, and the reports must be on file.
+      openStepUp(this.dialog, {
+        requireDualControl: true,
+        reason: `Close major incident "${incident.title}"`,
+        action: 'DORA_INCIDENT_CLOSE',
+        target: `PATCH /api/v1/dora/incidents/${id}/status`,
+      }).subscribe(result => { if (result) finish(result.stepUpToken, result.dualControlToken); });
+    } else {
+      finish();
+    }
+  }
+
+  openClassifyDialog(incident: IctIncident): void {
+    this.classifyIncident = incident;
+    this.classifyForm = { severity: incident.severity, reason: '' };
+    this.dialog.open(this.classifyDialogTpl, { width: '480px' });
+  }
+
+  submitClassify(): void {
+    const incident = this.classifyIncident;
+    if (!incident) return;
+    const withdrawsMajor = incident.severity === 'MAJOR' && this.classifyForm.severity !== 'MAJOR';
+    const body = { severity: this.classifyForm.severity, reason: this.classifyForm.reason.trim() };
+    this.dialog.closeAll();
+    openStepUp(this.dialog, {
+      requireDualControl: withdrawsMajor,
+      reason: `Reclassify "${incident.title}" as ${body.severity}`,
+      action: 'DORA_INCIDENT_DOWNGRADE',
+      target: `POST /api/v1/dora/incidents/${incident.id}/classify`,
+    }).subscribe(result => {
+      if (!result) return;
+      this.doraService.classifyIncident(incident.id, body, result.stepUpToken, result.dualControlToken).subscribe({
+        next: (updated) => {
+          this.incidents = this.incidents.map(i => i.id === updated.id ? updated : i);
+          this.cdr.markForCheck();
+          this.snackBar.open('Incident reclassified.', 'Dismiss', { duration: 4000 });
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to reclassify.', 'Dismiss', { duration: 8000 }),
+      });
     });
   }
 
@@ -712,7 +823,9 @@ export class DoraDashboardComponent implements OnInit {
     this.dialog.closeAll();
     this.doraService.reportToAuthority(this.selectedIncidentId, {
       authorityRef: this.authorityForm.authorityRef,
-      isFinalReport: this.authorityForm.isFinalReport,
+      reportType: this.authorityForm.reportType,
+      note: this.authorityForm.note || undefined,
+      submittedAt: this.authorityForm.submittedAt ? new Date(this.authorityForm.submittedAt).toISOString() : undefined,
     }).subscribe({
       next: (updated) => {
         this.incidents = this.incidents.map(i => i.id === updated.id ? updated : i);

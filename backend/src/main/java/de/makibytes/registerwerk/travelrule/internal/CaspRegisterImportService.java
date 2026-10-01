@@ -47,11 +47,41 @@ public class CaspRegisterImportService {
         this.writer = writer;
     }
 
-    public record ImportResult(int created, int updated, int failed, List<String> errors) {}
+    /**
+     * @param statusChanged rows (counted within created/updated) whose status differs from the stored one
+     * @param committed     false for a preview: nothing was written
+     * @param diffDigest    SHA-256 of the CSV; the commit step must present it (6-28: reviewed diff, then confirm)
+     */
+    public record ImportResult(int created, int updated, int failed, List<String> errors,
+                               int statusChanged, boolean committed, String diffDigest) {
+        public ImportResult(int created, int updated, int failed, List<String> errors) {
+            this(created, updated, failed, errors, 0, true, null);
+        }
+    }
+
+    /** Dry run: classifies every row (created/updated/status-changed) without writing. */
+    public ImportResult previewCsv(String csvContent, String source) {
+        return importCsv(csvContent, source, null, null, null, false, null);
+    }
 
     public ImportResult importCsv(String csvContent, String source, UUID actorId, String actorRole) {
+        return importCsv(csvContent, source, actorId, actorRole, null, true, null);
+    }
+
+    /**
+     * @param commit        false = preview only
+     * @param confirmDigest for a commit made through the API: the digest of the reviewed preview
+     * @param approverId    validated second approver (mandatory for API commits)
+     */
+    public ImportResult importCsv(String csvContent, String source, UUID actorId, String actorRole,
+                                  UUID approverId, boolean commit, String confirmDigest) {
         if (csvContent == null || csvContent.isBlank()) {
             return new ImportResult(0, 0, 0, List.of("Empty file."));
+        }
+        String digest = TravelRuleService.sha256Hex(csvContent);
+        if (commit && confirmDigest != null && !confirmDigest.equalsIgnoreCase(digest)) {
+            throw new IllegalArgumentException(
+                    "The CSV differs from the previewed one (digest mismatch) - preview the diff again before committing");
         }
         if (csvContent.length() > MAX_CSV_CHARS) {
             throw new IllegalArgumentException("CSV import exceeds the 5,000,000 character limit");
@@ -66,7 +96,7 @@ public class CaspRegisterImportService {
                     "Found: " + header.keySet()));
         }
 
-        int created = 0, updated = 0, failed = 0;
+        int created = 0, updated = 0, failed = 0, statusChanged = 0;
         List<String> errors = new ArrayList<>();
 
         for (int i = 1; i < lines.length; i++) {
@@ -100,12 +130,18 @@ public class CaspRegisterImportService {
                 entry.setValidUntil(parseDate(cell(cells, header, "valid_until")));
                 entry.setNotes(trimToNull(cell(cells, header, "notes")));
                 entry.setSource(source);
+                entry.setCountry(entry.getHomeMemberState());
 
-                boolean existed = writer.upsert(entry, actorId, actorRole);
-                if (existed) {
+                CaspRegisterImportWriter.Outcome outcome = commit
+                        ? writer.upsert(entry, actorId, actorRole, approverId)
+                        : writer.classify(entry);
+                if (outcome.existed()) {
                     updated++;
                 } else {
                     created++;
+                }
+                if (outcome.statusChanged()) {
+                    statusChanged++;
                 }
             } catch (Exception e) {
                 failed++;
@@ -114,10 +150,12 @@ public class CaspRegisterImportService {
                 }
             }
         }
-        log.info("CASP register import: {} created, {} updated, {} failed (source: {})",
-                created, updated, failed, source);
-        writer.recordCompleted(source, created, updated, failed, actorId, actorRole);
-        return new ImportResult(created, updated, failed, errors);
+        log.info("CASP register import ({}): {} created, {} updated, {} status changes, {} failed (source: {})",
+                commit ? "commit" : "preview", created, updated, statusChanged, failed, source);
+        if (commit) {
+            writer.recordCompleted(source, created, updated, statusChanged, failed, digest, actorId, actorRole, approverId);
+        }
+        return new ImportResult(created, updated, failed, errors, statusChanged, commit, digest);
     }
 
     /** Tolerant status mapping — covers ESMA's British spelling and common variants. */

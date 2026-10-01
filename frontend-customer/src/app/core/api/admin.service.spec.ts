@@ -39,18 +39,20 @@ describe('AdminService', () => {
     });
 
     it('impersonate() POSTs to the dedicated /impersonation URL — deliberately outside /admin/**', () => {
-        service.impersonate('ent-1').subscribe();
+        service.impersonate('ent-1', 'Customer asked for help', 'su-tok', 'TCK-1').subscribe();
         // Regression-relevant: this must NOT be under /api/v1/admin/**, which carries an
         // operator-network ip-restriction plugin that the customer portal cannot reach through Kong.
         const req = httpMock.expectOne(`${environment.apiUrl}/impersonation`);
         expect(req.request.method).toBe('POST');
-        expect(req.request.body).toEqual({ entityId: 'ent-1' });
+        expect(req.request.body).toEqual({ entityId: 'ent-1', reason: 'Customer asked for help', ticket: 'TCK-1' });
+        expect(req.request.headers.get('Authorization')).toBe('Bearer su-tok');
         req.flush({
-            token: 'tok',
-            tokenType: 'Bearer',
+            sessionId: 's1',
+            mode: 'READ_ONLY',
             expiresAt: '2026-01-01T00:00:00Z',
             entityId: 'ent-1',
             entityName: 'Acme',
+            handoffUrl: 'http://x/admin/handoff#code=c',
         });
     });
 });

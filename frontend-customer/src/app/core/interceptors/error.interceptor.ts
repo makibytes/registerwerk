@@ -67,13 +67,25 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
           break;
         }
 
-        case HttpStatusCode.Forbidden:
+        case HttpStatusCode.Forbidden: {
+          const code = (err.error as { code?: string } | null)?.code;
+          if (code === 'IMPERSONATION_READ_ONLY' || code === 'IMPERSONATION_ACTION_DENIED') {
+            snackBar.open(
+              code === 'IMPERSONATION_READ_ONLY'
+                ? 'This is a read-only support session. Changes are blocked.'
+                : 'This action is not allowed during an impersonation session.',
+              'Dismiss',
+              { duration: 6000, panelClass: 'snack-error' }
+            );
+            break;
+          }
           snackBar.open(
             'Access denied. You do not have permission to perform this action.',
             'Dismiss',
             { duration: 5000, panelClass: 'snack-error' }
           );
           break;
+        }
 
         case HttpStatusCode.UnprocessableEntity:
           // Validation errors — let individual components handle these

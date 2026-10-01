@@ -22,7 +22,7 @@ Toute la configuration se fait via des variables d'environnement. Copiez `.env.e
 |---|---|---|
 | `ENTRA_ENABLED` | `false` | `false` → formulaire nom d'utilisateur/mot de passe dans le frontend opérateur ; `true` → bouton Microsoft |
 | `DEFAULT_ADMIN_EMAIL` | — | E-mail de l'utilisateur administrateur prédéfini (mode intégré uniquement) |
-| `DEFAULT_ADMIN_PASSWORD` | — | Mot de passe en texte brut haché avec BCrypt au démarrage ; faites pivoter en modifiant et en redémarrant |
+| `DEFAULT_ADMIN_PASSWORD` | — | Mot de passe en texte brut haché avec BCrypt à la création de l'administrateur ; utilisé uniquement si aucun `REGISTRY_ADMIN` n'existe, jamais réappliqué à un compte existant |
 | `JWT_DEV_SECRET` | intégré | Clé de signature HS256 utilisée en mode développement/démo ; laisser non défini pour le local, remplacer dans l'environnement de staging |
 
 ### OAuth2 / OIDC (production)

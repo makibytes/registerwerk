@@ -7,6 +7,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { switchMap } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
 import { AdminService, EntityListItem } from '../../core/api/admin.service';
 
@@ -177,6 +178,9 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
       margin-top: 2px;
     }
 
+    .reason-panel { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .reason-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
     .loading-row {
       display: flex;
       justify-content: center;
@@ -261,7 +265,7 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
               <button
                 class="entity-row"
                 type="button"
-                (click)="selectEntity(entity)"
+                (click)="chooseEntity(entity)"
                 [disabled]="!!selecting"
                 [attr.aria-label]="'Manage ' + entity.currentName"
               >
@@ -275,6 +279,28 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
                 }
               </button>
             }
+          </div>
+        }
+
+        @if (pending) {
+          <div class="reason-panel" role="group" aria-label="Start support session">
+            <div class="entity-name">Read-only support session for {{ pending.currentName }}</div>
+            <p class="entity-meta">
+              You will see the customer's data but cannot change anything. The reason is shown to the
+              company's administrators and written to the audit trail. Acting on behalf of a customer is
+              a separate action with a second approver in the operator console.
+            </p>
+            <input class="search-input" type="text" [(ngModel)]="reason" maxlength="500"
+                   placeholder="Reason (at least 15 characters)" aria-label="Reason" />
+            <input class="search-input" type="text" [(ngModel)]="ticket" maxlength="100"
+                   placeholder="Ticket reference (optional)" aria-label="Ticket reference" />
+            <input class="search-input" type="text" [(ngModel)]="totpCode" maxlength="6" inputmode="numeric"
+                   autocomplete="one-time-code" placeholder="Authenticator code (6 digits)" aria-label="Authenticator code" />
+            <div class="reason-actions">
+              <button class="retry-btn" type="button" (click)="pending = null">Cancel</button>
+              <button class="retry-btn" type="button" (click)="selectEntity(pending)"
+                      [disabled]="!!selecting || reason.trim().length < 15 || totpCode.length < 6">Start session</button>
+            </div>
           </div>
         }
 
@@ -313,12 +339,32 @@ export class SelectCompanyComponent implements OnInit, OnDestroy {
     if (this.searchTimer) clearTimeout(this.searchTimer);
   }
 
+  pending: EntityListItem | null = null;
+  reason = '';
+  ticket = '';
+  totpCode = '';
+
+  chooseEntity(entity: EntityListItem): void {
+    this.pending = entity;
+    this.cdr.markForCheck();
+  }
+
+  /** Step-up (TOTP) -> start the read-only session -> exchange the one-time handoff code for the session cookie. */
   selectEntity(entity: EntityListItem): void {
     if (this.selecting) return;
     this.selecting = entity.id;
-    this.adminService.impersonate(entity.id).subscribe({
+    this.adminService.stepUp(this.totpCode, 'ADMIN_IMPERSONATION').pipe(
+      switchMap(r => this.adminService.impersonate(entity.id, this.reason.trim(), r.stepUpToken, this.ticket.trim())),
+    ).subscribe({
       next: (res) => {
-        this.auth.enterImpersonation(res.token, res.entityId, res.entityName).subscribe({
+        const code = new URLSearchParams(res.handoffUrl.split('#')[1] ?? '').get('code');
+        if (!code) {
+          this.selecting = null;
+          this.cdr.markForCheck();
+          this.snackBar.open('Impersonation failed: no handoff code returned.', 'Dismiss', { duration: 6000 });
+          return;
+        }
+        this.auth.enterImpersonation(code, res.entityId, res.entityName).subscribe({
           next: () => this.router.navigate(['/dashboard']),
           error: (err) => {
             this.selecting = null;

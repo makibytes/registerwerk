@@ -5,8 +5,10 @@ import de.makibytes.registerwerk.accessreview.internal.AccessReviewService;
 import de.makibytes.registerwerk.accessreview.web.dto.CampaignResponse;
 import de.makibytes.registerwerk.accessreview.web.dto.ItemResponse;
 import de.makibytes.registerwerk.accessreview.web.dto.RecordDecisionRequest;
+import de.makibytes.registerwerk.accessreview.web.dto.ReopenItemRequest;
 import de.makibytes.registerwerk.accessreview.web.dto.StartCampaignRequest;
 import de.makibytes.registerwerk.shared.SecurityUtils;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -66,12 +68,29 @@ public class AccessReviewController {
         return ResponseEntity.ok(service.listItems(campaignId).stream().map(ItemResponse::from).toList());
     }
 
+    /**
+     * Needs a step-up token (send it as the bearer). Decisions are write-once; REVOKED on a
+     * privileged account is a proposal until a second reviewer confirms with REVOKED.
+     */
     @PostMapping("/{campaignId}/items/{itemId}/decision")
+    @RequiresStepUp(reason = "ACCESS_REVIEW_DECISION")
     public ResponseEntity<ItemResponse> recordDecision(
             @PathVariable UUID campaignId, @PathVariable UUID itemId,
             @RequestBody @Valid RecordDecisionRequest request, Authentication auth) {
         var item = service.recordDecision(campaignId, itemId, AccessReviewDecision.valueOf(request.decision()),
                 request.notes(), SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(ItemResponse.from(item));
+    }
+
+    /** The only way to correct a decision: re-snapshots the live account and returns the item to PENDING. */
+    @PostMapping("/{campaignId}/items/{itemId}/reopen")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(reason = "ACCESS_REVIEW_REOPEN")
+    public ResponseEntity<ItemResponse> reopen(
+            @PathVariable UUID campaignId, @PathVariable UUID itemId,
+            @RequestBody @Valid ReopenItemRequest request, Authentication auth) {
+        var item = service.reopen(campaignId, itemId, request.reason(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
         return ResponseEntity.ok(ItemResponse.from(item));
     }
 

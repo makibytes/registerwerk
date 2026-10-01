@@ -1,6 +1,14 @@
 package de.makibytes.registerwerk.orgidentity.internal;
 
+import de.makibytes.registerwerk.customer.api.EntityStatus;
+import de.makibytes.registerwerk.customer.api.EntityTask;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
 import de.makibytes.registerwerk.customer.api.KycStatus;
+import de.makibytes.registerwerk.customer.api.LegalEntity;
+import de.makibytes.registerwerk.customer.events.CustomerOffboardedEvent;
+import de.makibytes.registerwerk.customer.events.EntityReactivatedEvent;
+import de.makibytes.registerwerk.customer.events.EntitySuspendedEvent;
+import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationStatus;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.erc3643.Erc3643Api;
 import de.makibytes.registerwerk.kyc.events.KycExpiringEvent;
@@ -42,7 +50,14 @@ import java.util.UUID;
  *   <li>{@code ONCHAINID.removeClaim} plus issuer-level {@code ClaimIssuer.revokeClaimBySignature}
  *       for the KYC (1) / AML (2) claims, via the {@link Erc3643Api} port.</li>
  * </ol>
- * Triggers: {@link KycExpiringEvent} with {@code reason=EXPIRED} and {@link KycRejectedEvent}.
+ * Triggers: {@link KycExpiringEvent} with {@code reason=EXPIRED} and {@link KycRejectedEvent}, and
+ * (6-22) the entity lifecycle: {@link EntitySuspendedEvent} (org suspension only, reversible -
+ * claims stay), {@link CustomerOffboardedEvent} with final status CLOSED or DISSOLVED (a merger
+ * source) - org suspension AND revocation of the KYC/AML claims. No automatic wallet freeze (that
+ * needs a legal basis; holdings go through portfolio migration or an operator Sperrvermerk).
+ * A reactivation does not reinstate anything on chain: it supersedes an unfinished suspension and
+ * raises the operator task {@code CHAIN_REINSTATEMENT_REQUIRED} for the existing 4-eyes
+ * reinstatement.
  * The response to an unreviewed sanctions hit ({@code ScreeningHitDetectedEvent}) is a parked
  * product decision and is deliberately not consumed here.
  *
@@ -64,6 +79,9 @@ class KycChainPropagationListener {
 
     static final String TRIGGER_EXPIRED = "KYC_EXPIRED";
     static final String TRIGGER_REJECTED = "KYC_REJECTED";
+    static final String TRIGGER_ENTITY_SUSPENDED = "ENTITY_SUSPENDED";
+    static final String TRIGGER_ENTITY_CLOSED = "ENTITY_CLOSED";
+    static final String TRIGGER_ENTITY_DISSOLVED = "ENTITY_DISSOLVED";
 
     /** Org step outcomes; only SUSPENDED and NOT_REGISTERED let a row complete. */
     static final String ORG_SUSPENDED = "SUSPENDED";
@@ -78,6 +96,7 @@ class KycChainPropagationListener {
     private final LegalEntityRepository legalEntityRepository;
     private final Erc3643Api erc3643Api;
     private final ApplicationEventPublisher eventPublisher;
+    private final EntityTaskPort taskPort;
     private final TransactionTemplate stepTransactions;
 
     KycChainPropagationListener(
@@ -87,6 +106,7 @@ class KycChainPropagationListener {
             LegalEntityRepository legalEntityRepository,
             Erc3643Api erc3643Api,
             ApplicationEventPublisher eventPublisher,
+            EntityTaskPort taskPort,
             PlatformTransactionManager transactionManager,
             MeterRegistry meterRegistry) {
         this.propagationRepository = propagationRepository;
@@ -95,12 +115,13 @@ class KycChainPropagationListener {
         this.legalEntityRepository = legalEntityRepository;
         this.erc3643Api = erc3643Api;
         this.eventPublisher = eventPublisher;
+        this.taskPort = taskPort;
         this.stepTransactions = new TransactionTemplate(transactionManager);
         this.stepTransactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         Gauge.builder("registerwerk_kyc_chain_propagation_failed", propagationRepository,
                         repo -> (double) repo.countByStatus(KycChainPropagation.Status.FAILED))
-                .description("KYC lapses (expiry/rejection) whose on-chain suspension/claim revocation "
-                        + "is failing; the entity may still pass on-chain gates")
+                .description("KYC lapses (expiry/rejection) and entity suspension/termination/merger whose "
+                        + "on-chain org suspension/claim revocation is failing; the entity may still pass on-chain gates")
                 .register(meterRegistry);
     }
 
@@ -114,6 +135,45 @@ class KycChainPropagationListener {
     @ApplicationModuleListener
     void on(KycRejectedEvent event) {
         record(event.entityId(), TRIGGER_REJECTED);
+    }
+
+    @ApplicationModuleListener
+    void on(EntitySuspendedEvent event) {
+        record(event.entityId(), TRIGGER_ENTITY_SUSPENDED);
+    }
+
+    @ApplicationModuleListener
+    void on(CustomerOffboardedEvent event) {
+        record(event.entityId(), "DISSOLVED".equals(event.finalStatus())
+                ? TRIGGER_ENTITY_DISSOLVED : TRIGGER_ENTITY_CLOSED);
+    }
+
+    /**
+     * A reactivated entity is NOT reinstated on chain automatically: an unfinished suspension is
+     * superseded and, where an org is (being) suspended, the operator gets a
+     * {@code CHAIN_REINSTATEMENT_REQUIRED} task for the existing 4-eyes reinstatement.
+     */
+    @ApplicationModuleListener
+    void on(EntityReactivatedEvent event) {
+        UUID entityId = event.entityId();
+        for (KycChainPropagation row : propagationRepository.findByLegalEntityId(entityId)) {
+            if (TRIGGER_ENTITY_SUSPENDED.equals(row.getTriggerReason())
+                    && (row.getStatus() == KycChainPropagation.Status.PENDING
+                    || row.getStatus() == KycChainPropagation.Status.FAILED)) {
+                finish(row, KycChainPropagation.Status.SUPERSEDED, null, "entity reactivated");
+            }
+        }
+        List<String> suspended = registrationRepository.findByLegalEntityId(entityId).stream()
+                .filter(r -> r.getStatus() == OrgRegistrationStatus.SUSPENDED
+                        || r.getStatus() == OrgRegistrationStatus.SUSPEND_PENDING
+                        || r.getStatus() == OrgRegistrationStatus.REINSTATE_FAILED)
+                .map(r -> "chain " + r.getChainConfigId() + " org " + r.getId() + " (" + r.getStatus() + ")")
+                .toList();
+        if (!suspended.isEmpty()) {
+            taskPort.open(entityId, EntityTask.CHAIN_REINSTATEMENT_REQUIRED, "",
+                    "Entity reactivated; reinstate the org (4-eyes) on: " + String.join("; ", suspended)
+                            + ". Revoked claims, if any, must be re-issued explicitly.", event.actorId());
+        }
     }
 
     /** Records (or resets) one PENDING row per chain and drives them once this tx commits. */
@@ -174,19 +234,22 @@ class KycChainPropagationListener {
         }
         UUID entityId = row.getLegalEntityId();
         UUID chainConfigId = row.getChainConfigId();
-        KycStatus kycStatus = legalEntityRepository.findById(entityId)
-                .map(e -> e.getKycStatus()).orElse(null);
-        if (kycStatus != KycStatus.EXPIRED && kycStatus != KycStatus.REJECTED) {
-            // Re-approved (through 4-eyes) before this lapse finished propagating: stop pushing it.
-            // Whatever already reached the chain stays until explicit reinstatement / re-issuance.
-            finish(row, KycChainPropagation.Status.SUPERSEDED, null, "kycStatus=" + kycStatus);
+        String trigger = row.getTriggerReason();
+        LegalEntity entity = legalEntityRepository.findById(entityId).orElse(null);
+        boolean revokeClaims = !TRIGGER_ENTITY_SUSPENDED.equals(trigger);
+        String lapse = stillApplies(trigger, entity);
+        if (lapse != null) {
+            // Re-approved (through 4-eyes) / reactivated before this lapse finished propagating: stop
+            // pushing it. Whatever already reached the chain stays until explicit reinstatement.
+            finish(row, KycChainPropagation.Status.SUPERSEDED, null, lapse);
             return;
         }
 
         Map<String, Object> audit = new LinkedHashMap<>();
         audit.put("trigger", row.getTriggerReason());
         audit.put("chainConfigId", chainConfigId.toString());
-        String reason = "KYC lapse (" + row.getTriggerReason() + ") — automatic on-chain propagation";
+        String reason = (trigger.startsWith("KYC_") ? "KYC lapse (" : "Entity lifecycle (") + trigger
+                + ") — automatic on-chain propagation";
 
         List<String> errors = new ArrayList<>();
         String orgAction;
@@ -201,8 +264,9 @@ class KycChainPropagationListener {
         }
         Integer unresolved;
         try {
-            unresolved = stepTransactions.execute(tx -> erc3643Api.revokeComplianceClaims(
-                    entityId, chainConfigId, null, "SYSTEM", audit));
+            // A mere suspension is reversible and leaves the claims alone (parked decision T6-12).
+            unresolved = revokeClaims ? stepTransactions.execute(tx -> erc3643Api.revokeComplianceClaims(
+                    entityId, chainConfigId, null, "SYSTEM", audit)) : Integer.valueOf(0);
         } catch (RuntimeException e) {
             unresolved = null;
             errors.add("claim revocation: " + e.getMessage());
@@ -227,6 +291,25 @@ class KycChainPropagationListener {
             row.setUpdatedAt(Instant.now());
             stepTransactions.executeWithoutResult(tx -> propagationRepository.save(row));
         }
+    }
+
+    /**
+     * Null while the lapse still applies, otherwise a note on why the row is superseded.
+     * Closure and dissolution are terminal, so they never supersede.
+     */
+    private static String stillApplies(String trigger, LegalEntity entity) {
+        if (entity == null) {
+            return "entity no longer exists";
+        }
+        return switch (trigger) {
+            case TRIGGER_ENTITY_SUSPENDED -> entity.getStatus() == EntityStatus.SUSPENDED
+                    ? null : "entityStatus=" + entity.getStatus();
+            case TRIGGER_ENTITY_CLOSED, TRIGGER_ENTITY_DISSOLVED ->
+                    entity.getStatus() == EntityStatus.CLOSED || entity.getStatus() == EntityStatus.DISSOLVED
+                            ? null : "entityStatus=" + entity.getStatus();
+            default -> entity.getKycStatus() == KycStatus.EXPIRED || entity.getKycStatus() == KycStatus.REJECTED
+                    ? null : "kycStatus=" + entity.getKycStatus();
+        };
     }
 
     /**

@@ -8,4 +8,6 @@ import java.util.UUID;
 interface CaspAuthorizationRepository extends JpaRepository<CaspAuthorization, UUID> {
 
     Optional<CaspAuthorization> findByVaspDidIgnoreCase(String vaspDid);
+
+    Optional<CaspAuthorization> findByLeiIgnoreCase(String lei);
 }

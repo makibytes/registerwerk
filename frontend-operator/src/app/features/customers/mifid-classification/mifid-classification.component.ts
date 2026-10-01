@@ -12,6 +12,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { DatePipe } from '@angular/common';
 import { EntityService } from '../../../core/api/entity.service';
+import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/components/step-up/step-up-dialog.component';
 import {
   ClientCategory, KnowledgeExperienceLevel, LegalEntity, RiskTolerance, SuitabilityAssessment
 } from '../../../core/models';
@@ -107,10 +108,18 @@ import {
             <mat-option value="ELIGIBLE_COUNTERPARTY">Eligible counterparty</mat-option>
           </mat-select>
         </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Reason{{ isDowngrade ? ' (required)' : ' (optional)' }}</mat-label>
+          <input matInput [(ngModel)]="classifyReason" />
+          <mat-hint>
+            @if (isDowngrade) { Lowering client protection needs a reason, step-up and a second approver. }
+            @else { Needs step-up. }
+          </mat-hint>
+        </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
         <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
-        <button type="button" mat-raised-button color="primary" [disabled]="!selectedCategory" (click)="submitClassify()">
+        <button type="button" mat-raised-button color="primary" [disabled]="!selectedCategory || (isDowngrade && !classifyReason.trim())" (click)="submitClassify()">
           Save classification
         </button>
       </mat-dialog-actions>
@@ -212,6 +221,17 @@ export class MifidClassificationComponent implements OnInit {
   loading = false;
 
   selectedCategory: ClientCategory | null = null;
+  classifyReason = '';
+
+  private static readonly PROTECTION_RANK: Record<ClientCategory, number> =
+    { RETAIL: 0, PROFESSIONAL: 1, ELIGIBLE_COUNTERPARTY: 2 };
+
+  /** True when the chosen category protects the client less than the current one. */
+  get isDowngrade(): boolean {
+    const current = this.entity?.clientCategory;
+    return !!current && !!this.selectedCategory
+      && MifidClassificationComponent.PROTECTION_RANK[this.selectedCategory] > MifidClassificationComponent.PROTECTION_RANK[current];
+  }
 
   assessForm: {
     knowledgeExperience: KnowledgeExperienceLevel;
@@ -245,18 +265,37 @@ export class MifidClassificationComponent implements OnInit {
 
   openClassifyDialog(): void {
     this.selectedCategory = this.entity?.clientCategory ?? null;
+    this.classifyReason = '';
     this.dialog.open(this.classifyDialogTpl, { width: '460px' });
   }
 
   submitClassify(): void {
     if (!this.selectedCategory) return;
+    const category = this.selectedCategory;
+    const downgrade = this.isDowngrade;
+    const reason = this.classifyReason.trim();
     this.dialog.closeAll();
-    this.entityService.classifyClient(this.entityId, this.selectedCategory).subscribe({
-      next: () => {
-        this.snackBar.open('Client classified.', 'Dismiss', { duration: 4000 });
-        this.load();
+    this.dialog.open(StepUpDialogComponent, {
+      data: {
+        requireDualControl: downgrade,
+        reason: `${downgrade ? 'Lower' : 'Set'} the MiFID II client category to ${category}`,
+        action: 'CLIENT_CLASSIFICATION_DOWNGRADE',
+        target: `POST /api/v1/entities/${this.entityId}/classification`,
       },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to classify client.', 'Dismiss', { duration: 5000 }),
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (!result?.stepUpToken) return;
+      this.entityService.classifyClient(
+        this.entityId, { clientCategory: category, reason: reason || undefined },
+        result.stepUpToken, result.dualControlToken,
+      ).subscribe({
+        next: () => {
+          this.snackBar.open('Client classified.', 'Dismiss', { duration: 4000 });
+          this.load();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to classify client.', 'Dismiss', { duration: 5000 }),
+      });
     });
   }
 

@@ -138,7 +138,7 @@ class TermsAmendmentIT {
         UUID approverId = appUserRepository.save(approver).getId();
         HttpHeaders fourEyes = json(TestJwt.mint(SECRET, OPERATOR, true, null, null, "REGISTRY_ADMIN"));
         fourEyes.set("X-Dual-Control-Token",
-                TestJwt.mint(SECRET, approverId, true, "TERMS_AMENDMENT", null, "REGISTRY_ADMIN"));
+                TestJwt.dualControl(SECRET, approverId, "TERMS_AMENDMENT", "POST", path, "REGISTRY_ADMIN"));
 
         ResponseEntity<String> amended = rest.exchange(url(path), HttpMethod.POST, new HttpEntity<>(body, fourEyes), String.class);
         assertThat(amended.getStatusCode()).isEqualTo(HttpStatus.OK);

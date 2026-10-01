@@ -1832,7 +1832,9 @@ export class AssetDetailComponent implements OnInit {
         next: (r) => { this.txService.track(r.txId, `Unfreeze ${addr.slice(0, 8)}…`); this.freezeAddress = ''; this.cdr.markForCheck(); },
         error: (err) => this.showActionError('Failed to unfreeze address.', err),
       });
-    });
+    }, this.isConfidential
+      ? `POST /api/v1/assets/${this.id}/deployments/${depId}/admin/confidential-unfreeze`
+      : `POST /api/v1/assets/${this.id}/erc3643/${depId}/unfreeze`);
   }
 
   executeForceTransfer(): void {
@@ -1863,7 +1865,10 @@ export class AssetDetailComponent implements OnInit {
         },
         error: (err) => this.showActionError('Forced transfer failed.', err),
       });
-    });
+    }, this.isConfidential
+      ? `POST /api/v1/assets/${this.id}/deployments/${depId}/admin/confidential-forced-transfer`
+      : `POST /api/v1/assets/${this.id}/erc3643/${depId}/forced-transfer`,
+    this.isConfidential ? { from, to, value: amount, legalBasis: reason } : { from, to, amount, reason });
   }
 
 
@@ -1892,7 +1897,10 @@ export class AssetDetailComponent implements OnInit {
         },
         error: (err) => this.showActionError('Forced burn failed.', err),
       });
-    });
+    }, this.isConfidential
+      ? `POST /api/v1/assets/${this.id}/deployments/${depId}/admin/force-burn-confidential`
+      : `POST /api/v1/assets/${this.id}/erc3643/${depId}/force-burn`,
+    this.isConfidential ? { from, value: amount, legalBasis } : { from, amount, legalBasis });
   }
 
   // ── Standard asset actions ────────────────────────────────────────────────
@@ -1946,14 +1954,15 @@ export class AssetDetailComponent implements OnInit {
         this.assetService.redeemAsset(this.id, body, tokens).subscribe({
           next: () => this.loadAsset(),
           error: (err) => this.showActionError('Failed to redeem asset.', err),
-        }));
+        }), `POST /api/v1/assets/${this.id}/redeem`);
     });
   }
 
   /** Opens the step-up dialog for a 4-eyes action and runs `action` with both tokens. */
-  private withDualControl(action: string, reason: string, run: (tokens: DualControlTokens) => void): void {
+  private withDualControl(action: string, reason: string, run: (tokens: DualControlTokens) => void,
+                          target?: string, targetBody?: unknown): void {
     this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: true, reason, action },
+      data: { requireDualControl: true, reason, action, target, targetBody },
       width: '500px',
       disableClose: true,
     }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
@@ -1982,7 +1991,7 @@ export class AssetDetailComponent implements OnInit {
           this.loadHolders();
         },
         error: (err) => this.showActionError('Mint failed.', err),
-      }));
+      }), `POST /api/v1/assets/${this.id}/deployments/${depId}/issuer/mint`, body);
   }
 
   /** Register holders (wallet) selectable as mint recipients; `holders` carries the register rows. */
@@ -2019,7 +2028,7 @@ export class AssetDetailComponent implements OnInit {
           this.loadHolders();
         },
         error: (err) => this.showActionError('Burn failed.', err),
-      }));
+      }), `POST /api/v1/assets/${this.id}/deployments/${depId}/issuer/burn`, body);
   }
 
   // ── KYC Compliance ────────────────────────────────────────────────────────
@@ -2056,6 +2065,29 @@ export class AssetDetailComponent implements OnInit {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
     this.tsUploading = true;
+    // On an issued asset the public term sheet can only be replaced by an approved amendment.
+    const issued = !!this.asset && ['ISSUED', 'SUSPENDED', 'REDEEMED'].includes(this.asset.status);
+    if (issued) {
+      this.tsUploading = false;
+      this.withDualControl('TERM_SHEET_AMENDMENT', `Amend the term sheet of ${this.asset?.name ?? 'this asset'}`, (tokens) => {
+        this.tsUploading = true;
+        this.cdr.markForCheck();
+        this.assetService.amendTermSheet(this.id, file, tokens).subscribe({
+          next: () => {
+            this.tsUploading = false;
+            this.cdr.markForCheck();
+            this.snackBar.open('Term sheet amended; the previous version is kept as superseded.', 'OK', { duration: 5000 });
+            this.loadTermSheetDocs();
+          },
+          error: (err) => {
+            this.tsUploading = false;
+            this.cdr.markForCheck();
+            this.snackBar.open(err?.error?.message ?? 'The amendment was refused.', 'Close', { duration: 6000 });
+          },
+        });
+      }, `POST /api/v1/assets/${this.id}/documents/term-sheet-amendment`);
+      return;
+    }
     this.assetService.uploadDocument(this.id, file).subscribe({
       next: doc => {
         this.termSheetDocs = [doc, ...this.termSheetDocs];

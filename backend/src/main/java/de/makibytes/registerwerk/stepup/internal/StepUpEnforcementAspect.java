@@ -1,10 +1,6 @@
 package de.makibytes.registerwerk.stepup.internal;
 
-import de.makibytes.registerwerk.stepup.api.ClaimsChallengeException;
-import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
-import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
-import de.makibytes.registerwerk.stepup.events.DualControlApprovedEvent;
 import jakarta.servlet.http.HttpServletRequest;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -12,21 +8,15 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.lang.reflect.Method;
-import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
 
 /**
  * AOP aspect enforcing {@code @RequiresStepUp} on regulator-grade endpoints: a recently proved
@@ -54,23 +44,13 @@ import java.util.UUID;
 class StepUpEnforcementAspect {
 
     private static final Logger log = LoggerFactory.getLogger(StepUpEnforcementAspect.class);
-    private static final String DUAL_CONTROL_HEADER = "X-Dual-Control-Token";
-    private static final String ACR_CLAIM = "acr";
-    private static final String ACR_STEPUP = "stepup";
-    private static final String ACRS_CLAIM = "acrs";
-    private static final String AUTH_TIME_CLAIM = "auth_time";
 
-    private final StepUpTokenValidator validator;
-    private final StepUpPolicy policy;
-    private final ApplicationEventPublisher eventPublisher;
-    private final TransactionTemplate transactionTemplate;
+    private final StepUpEnforcer enforcer;
+    private final DualControlService dualControl;
 
-    StepUpEnforcementAspect(StepUpTokenValidator validator, StepUpPolicy policy,
-                            ApplicationEventPublisher eventPublisher, PlatformTransactionManager txManager) {
-        this.validator = validator;
-        this.policy = policy;
-        this.eventPublisher = eventPublisher;
-        this.transactionTemplate = new TransactionTemplate(txManager);
+    StepUpEnforcementAspect(StepUpEnforcer enforcer, DualControlService dualControl) {
+        this.enforcer = enforcer;
+        this.dualControl = dualControl;
     }
 
     @Around("@annotation(de.makibytes.registerwerk.stepup.api.RequiresStepUp) || " +
@@ -84,122 +64,19 @@ class StepUpEnforcementAspect {
             throw new AccessDeniedException("Step-up auth requires a valid JWT.");
         }
 
-        switch (policy.mode()) {
-            case LOCAL_TOTP -> enforceLocalTotp(jwt, stepUp);
-            case ENTRA_AUTH_CONTEXT -> enforceEntraAuthContext(jwt, stepUp);
-        }
+        enforcer.enforce(jwt, stepUp.reason(), stepUp.maxAgeMinutes());
 
         // 4-eyes: second approver. Identical in both modes — a dual-control token is always
         // minted locally by StepUpTokenIssuer and verified against the local HS256 decoder, so
-        // it does not depend on how the primary factor was proved.
+        // it does not depend on how the primary factor was proved. The approval is bound to this
+        // exact request and consumed here (K3, 6-08).
         if (stepUp.requireSecondApprover()) {
-            HttpServletRequest request = getCurrentRequest();
-            String dualControlToken = request != null ? request.getHeader(DUAL_CONTROL_HEADER) : null;
-            if (dualControlToken == null || dualControlToken.isBlank()) {
-                throw new AccessDeniedException(
-                        "This action requires dual control: provide a second REGISTRY_ADMIN " +
-                        "step-up token in the " + DUAL_CONTROL_HEADER + " header.");
-            }
-            UUID approverId = validator.validateDualControlToken(dualControlToken, jwt.getSubject(), stepUp.reason());
-            if (request != null) {
-                request.setAttribute(StepUpAttributes.DUAL_CONTROL_APPROVER_ID, approverId);
-            }
-            recordDualControl(auth, jwt, stepUp, approverId, request);
+            dualControl.approveAndConsume(auth, jwt, stepUp.reason(), getCurrentRequest());
         }
 
         log.info("Step-up auth passed: mode={} sub={} action={} 4eyes={}",
-                policy.mode(), jwt.getSubject(), stepUp.reason(), stepUp.requireSecondApprover());
+                enforcer.mode(), jwt.getSubject(), stepUp.reason(), stepUp.requireSecondApprover());
         return pjp.proceed();
-    }
-
-    /**
-     * P4C-4: writes the generic 4-eyes evidence event BEFORE the guarded method runs. The event is
-     * published inside a transaction so Spring Modulith's event-publication registry persists it
-     * synchronously; if that write fails the exception propagates and the action does not proceed
-     * (fail closed). The audit row itself is appended after commit by the audit module.
-     */
-    private void recordDualControl(Authentication auth, Jwt jwt, RequiresStepUp stepUp, UUID approverId,
-                                   HttpServletRequest request) {
-        UUID requestId = UUID.randomUUID();
-        if (request != null) {
-            request.setAttribute(StepUpAttributes.DUAL_CONTROL_REQUEST_ID, requestId);
-        }
-        DualControlApprovedEvent event = new DualControlApprovedEvent(
-                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"),
-                approverId, requestId, stepUp.reason(),
-                request != null ? request.getMethod() : null,
-                request != null ? request.getRequestURI() : null,
-                policy.mode().name());
-        transactionTemplate.executeWithoutResult(status -> eventPublisher.publishEvent(event));
-    }
-
-    /**
-     * Local mode: the caller replaces their session token with a short-lived {@code acr=stepup}
-     * token minted by {@link StepUpTokenIssuer} after TOTP verification.
-     */
-    private void enforceLocalTotp(Jwt jwt, RequiresStepUp stepUp) {
-        String acr = jwt.getClaimAsString(ACR_CLAIM);
-        if (!ACR_STEPUP.equals(acr)) {
-            log.warn("Step-up required but acr='{}' on sub={} for action={}",
-                    acr, jwt.getSubject(), stepUp.reason());
-            throw new AccessDeniedException(
-                    "This action requires step-up authentication (acr=stepup). " +
-                    "Complete MFA step-up at /api/v1/auth/step-up first.");
-        }
-
-        Instant iat = jwt.getIssuedAt();
-        int maxAgeMinutes = stepUp.maxAgeMinutes();
-        if (iat == null || iat.isBefore(Instant.now().minusSeconds(maxAgeMinutes * 60L))) {
-            throw new AccessDeniedException(
-                    "Step-up token expired. Re-authenticate at /api/v1/auth/step-up (max age: "
-                    + maxAgeMinutes + " min).");
-        }
-    }
-
-    /**
-     * Entra mode: the access token must carry the required Conditional Access authentication
-     * context in {@code acrs}. When it does not, reply with a claims challenge so the SPA can
-     * re-acquire a token that does — the caller keeps their session either way.
-     *
-     * <p><strong>Freshness works differently here, on purpose.</strong> An Entra access token
-     * lives 60–90 minutes and {@code acrs} persists for its whole lifetime, so applying
-     * {@code maxAgeMinutes} to {@code iat} would force a full browser redirect on nearly every
-     * protected call. The real freshness control is the Conditional Access policy attached to
-     * the authentication context ("Sign-in frequency: Every time"); this check reads
-     * {@code auth_time} — when the user actually authenticated — and acts as a backstop.
-     *
-     * <p>{@code auth_time} is an optional claim that has to be requested on the API app
-     * registration. Absent it, we fall back to {@code iat}, which is weaker;
-     * {@code EntraPrincipalNormalizationFilter} logs a warning the first time it sees that.
-     */
-    private void enforceEntraAuthContext(Jwt jwt, RequiresStepUp stepUp) {
-        String required = policy.authContextIdFor(stepUp.reason());
-
-        List<String> acrs = jwt.getClaimAsStringList(ACRS_CLAIM);
-        if (acrs == null || !acrs.contains(required)) {
-            log.info("Step-up challenge: sub={} action={} required={} present={}",
-                    jwt.getSubject(), stepUp.reason(), required, acrs);
-            throw new ClaimsChallengeException(required, policy.authorizationUri(), stepUp.reason());
-        }
-
-        Instant authTime = authTimeOf(jwt);
-        if (authTime == null
-                || authTime.isBefore(Instant.now().minusSeconds(stepUp.maxAgeMinutes() * 60L))) {
-            log.info("Step-up re-challenge (stale authentication): sub={} action={} authTime={}",
-                    jwt.getSubject(), stepUp.reason(), authTime);
-            throw new ClaimsChallengeException(required, policy.authorizationUri(), stepUp.reason());
-        }
-    }
-
-    private static Instant authTimeOf(Jwt jwt) {
-        Object authTime = jwt.getClaim(AUTH_TIME_CLAIM);
-        if (authTime instanceof Instant instant) {
-            return instant;
-        }
-        if (authTime instanceof Number seconds) {
-            return Instant.ofEpochSecond(seconds.longValue());
-        }
-        return jwt.getIssuedAt();
     }
 
     private static RequiresStepUp resolveAnnotation(ProceedingJoinPoint pjp) {

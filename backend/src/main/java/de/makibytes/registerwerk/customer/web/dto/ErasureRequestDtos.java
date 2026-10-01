@@ -21,13 +21,14 @@ public final class ErasureRequestDtos {
             UUID reviewedBy,
             Instant reviewedAt,
             String resolutionNote,
-            String retainedNoticeChannel) {
+            String retainedNoticeChannel,
+            String resolutionDetail) {
 
         public static ErasureRequestResponse from(ErasureRequest r) {
             return new ErasureRequestResponse(
                     r.getId(), r.getEntityId(), r.getRequestedByUserId(), r.getStatus().name(),
                     r.getRequestedAt(), r.getDueAt(), r.getReviewedBy(), r.getReviewedAt(), r.getResolutionNote(),
-                    r.getRetainedNoticeChannel());
+                    r.getRetainedNoticeChannel(), r.getResolutionDetail());
         }
     }
 

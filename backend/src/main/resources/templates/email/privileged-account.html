@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<body style="font-family: Arial, sans-serif; color: #111827;">
+  <p>A privileged Registerwerk account was changed.</p>
+  <p>
+    Account: <strong th:text="${email}">user@example.com</strong><br/>
+    Change: <span th:text="${change}">INVITED</span><br/>
+    Roles: <span th:text="${roles}">REGISTRY_ADMIN</span><br/>
+    Bootstrap exception (fewer than two enrolled administrators): <span th:text="${bootstrap}">false</span>
+  </p>
+  <p>If you do not expect this change, disable the account and review the audit trail.</p>
+</body>
+</html>

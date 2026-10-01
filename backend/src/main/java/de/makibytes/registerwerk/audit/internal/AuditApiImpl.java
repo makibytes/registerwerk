@@ -19,8 +19,11 @@ class AuditApiImpl implements AuditApi {
 
     private final AuditEventRepository repository;
     private final AuditChainVerificationService chainVerificationService;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
-    AuditApiImpl(AuditEventRepository repository, AuditChainVerificationService chainVerificationService) {
+    AuditApiImpl(AuditEventRepository repository, AuditChainVerificationService chainVerificationService,
+                 org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
         this.repository = repository;
         this.chainVerificationService = chainVerificationService;
     }
@@ -66,8 +69,9 @@ class AuditApiImpl implements AuditApi {
     @Override
     public List<AuditEventView> findForExport(
             String subjectType, UUID subjectId, String eventType, UUID actorId,
-            Instant from, Instant to, Pageable pageable) {
-        return repository.findForExport(subjectType, subjectId, eventType, actorId, from, to, pageable)
+            Instant from, Instant to, Long afterSequenceNo, Pageable pageable) {
+        return repository.findForExport(subjectType, subjectId, eventType, actorId, from, to,
+                        afterSequenceNo != null ? afterSequenceNo : -1L, pageable)
                 .stream().map(this::toView).toList();
     }
 
@@ -81,14 +85,24 @@ class AuditApiImpl implements AuditApi {
         return toView(chainVerificationService.verifyNow());
     }
 
+    @Override
+    public de.makibytes.registerwerk.audit.api.ChainTipView chainTip() {
+        var m = jdbc.queryForMap("SELECT entry_hash, sequence_no, updated_at FROM audit_chain_tip WHERE id = TRUE");
+        Number seq = (Number) m.get("sequence_no");
+        java.sql.Timestamp ts = (java.sql.Timestamp) m.get("updated_at");
+        return new de.makibytes.registerwerk.audit.api.ChainTipView(seq != null ? seq.longValue() : null,
+                hex((byte[]) m.get("entry_hash")), ts != null ? ts.toInstant() : null);
+    }
+
     private ChainVerificationView toView(AuditChainVerificationService.VerificationResult r) {
-        return new ChainVerificationView(r.valid(), r.rowsChecked(), r.firstBrokenSeq(), r.checkedAt());
+        return new ChainVerificationView(r.valid(), r.rowsChecked(), r.firstBrokenSeq(), r.checkedAt(), r.reason());
     }
 
     private AuditEventView toView(AuditEvent e) {
         return new AuditEventView(e.getId(), e.getEventType(), e.getSubjectType(), e.getSubjectId(),
                 e.getActorId(), e.getActorRole(), e.getPayload(), e.getOccurredAt(),
-                e.getSequenceNo(), hex(e.getEntryHash()), hex(e.getEntrySig()));
+                e.getSequenceNo(), hex(e.getEntryHash()), hex(e.getEntrySig()),
+                e.getReversesEventId(), e.getCorrelationId(), e.getCanonVersion(), hex(e.getPrevHash()), e.getRecordedAt());
     }
 
     private static String hex(byte[] bytes) {

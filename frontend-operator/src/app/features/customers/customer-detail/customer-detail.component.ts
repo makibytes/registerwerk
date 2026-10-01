@@ -29,6 +29,8 @@ import { AddressComponent } from '../../../shared/components/address.component';
 import { KycService } from '../../../core/api/kyc.service';
 import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor } from '../../../core/api/gas-sponsorship.service';
 import { DualControlTokens } from '../../../core/api/dual-control-headers';
+import { ImpersonateDialogComponent, ImpersonateDialogResult } from './impersonate-dialog.component';
+import { openStepUp } from '../../../shared/components/step-up/open-step-up';
 import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/components/step-up/step-up-dialog.component';
 import { KycRejectDialogComponent, KycRejectDialogResult } from './kyc-reject-dialog.component';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
@@ -212,9 +214,6 @@ interface OnchainIdentityView {
           @if (entity.status === 'SUSPENDED') {
             <button type="button" mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
           }
-          @if (entity.status !== 'DISSOLVED') {
-            <button type="button" mat-stroked-button color="warn" (click)="dissolve()">Dissolve</button>
-          }
           @if (entity.status !== 'CLOSED' && entity.status !== 'DISSOLVED') {
             <button type="button" mat-stroked-button color="warn" (click)="terminate()" matTooltip="End the customer relationship: disables users, cancels open listings, revokes admin grants, moves to CLOSED. Requires step-up + a second approver.">
               Terminate
@@ -222,9 +221,14 @@ interface OnchainIdentityView {
           }
           @if (entity.kycStatus !== 'APPROVED') {
             <button type="button" mat-stroked-button (click)="approveKyc()"
-                    matTooltip="Approve this customer's KYC for one year. Requires step-up + a second approver.">
+                    matTooltip="Approve this customer's KYC (the server sets the expiry, at most 12 months). Requires step-up + a second approver.">
               <mat-icon>verified</mat-icon>
               Approve KYC
+            </button>
+            <button type="button" mat-stroked-button (click)="approveKyc(true)"
+                    matTooltip="Approve despite a failed gate (registry administrator only): needs a documented override note, step-up and a second approver.">
+              <mat-icon>rule</mat-icon>
+              Approve with override
             </button>
           }
           @if (entity.kycStatus !== 'REJECTED') {
@@ -498,6 +502,18 @@ interface OnchainIdentityView {
                   <th mat-header-cell *matHeaderCellDef></th>
                   <td mat-cell *matCellDef="let bo">
                     @if (canMutate) {
+                    @if (!bo.verifiedAt) {
+                      <button type="button" mat-icon-button matTooltip="Verify against a KYC document (needed for the identified share)"
+                              (click)="verifyBeneficialOwner(bo)">
+                        <mat-icon style="font-size:18px">fact_check</mat-icon>
+                      </button>
+                    }
+                    @if (bo.pepStatus === 'CONFIRMED_PEP') {
+                      <button type="button" mat-icon-button matTooltip="Approve enhanced due diligence (step-up + second approver)"
+                              (click)="approveEdd(bo)">
+                        <mat-icon style="font-size:18px">policy</mat-icon>
+                      </button>
+                    }
                     <button type="button" mat-icon-button color="warn" matTooltip="Cease (mark no longer a beneficial owner)"
                             (click)="ceaseBeneficialOwner(bo)">
                       <mat-icon style="font-size:18px">person_remove</mat-icon>
@@ -551,14 +567,21 @@ interface OnchainIdentityView {
                   <mat-option value="OTHER_CONTROL">Other control</mat-option>
                   <mat-option value="LEGAL_REPRESENTATIVE">Legal representative</mat-option>
                   <mat-option value="TRUSTEE">Trustee</mat-option>
+                  <mat-option value="SENIOR_MANAGING_OFFICIAL">Senior managing official (fallback)</mat-option>
                 </mat-select>
               </mat-form-field>
+              @if (uboForm.controlType === 'SENIOR_MANAGING_OFFICIAL') {
+                <mat-form-field appearance="outline">
+                  <mat-label>Why no beneficial owner could be identified</mat-label>
+                  <input matInput [(ngModel)]="uboForm.fallbackReason" />
+                </mat-form-field>
+              }
               <mat-form-field appearance="outline">
                 <mat-label>Source</mat-label>
                 <input matInput [(ngModel)]="uboForm.source" placeholder="e.g. Commercial register extract" />
               </mat-form-field>
               <button type="button" mat-raised-button color="primary"
-                      [disabled]="!uboForm.givenName || !uboForm.familyName || uboSaving"
+                      [disabled]="!uboForm.givenName || !uboForm.familyName || uboSaving || (uboForm.controlType === 'SENIOR_MANAGING_OFFICIAL' && !uboForm.fallbackReason.trim())"
                       (click)="addBeneficialOwner()">
                 <mat-icon>person_add</mat-icon>
                 Register
@@ -696,7 +719,7 @@ interface OnchainIdentityView {
                 <mat-divider style="margin:16px 0" />
                 <h4 style="margin:0 0 8px">Record a Merger</h4>
                 <p class="hint-text" style="margin:0 0 8px;font-size:12px;color:var(--rw-text-secondary)">
-                  Records this entity as absorbed into another (M&amp;A event) and marks it dissolved —
+                  Records this entity as absorbed into another (M&amp;A event) and marks it dissolved (needs step-up and a second approver) —
                   German commercial law requires this history to be retained, not deleted.
                 </p>
                 <div class="row-2" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:640px">
@@ -719,9 +742,13 @@ interface OnchainIdentityView {
                     <mat-label>Notes</mat-label>
                     <input matInput [(ngModel)]="mergeForm.notes" />
                   </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Reason (required, audited)</mat-label>
+                    <input matInput [(ngModel)]="mergeForm.reason" />
+                  </mat-form-field>
                 </div>
                 <button type="button" mat-raised-button color="warn"
-                        [disabled]="!mergeForm.targetEntityId || !mergeForm.effectiveDate"
+                        [disabled]="!mergeForm.targetEntityId || !mergeForm.effectiveDate || !mergeForm.reason.trim()"
                         (click)="recordMerger()">
                   <mat-icon>call_merge</mat-icon>
                   Record Merger
@@ -1016,8 +1043,8 @@ export class CustomerDetailComponent implements OnInit {
   documents: KycDocument[] = [];
   nameHistory: LegalEntityNameHistory[] = [];
   mergeRecords: EntityMergeRecordView[] = [];
-  mergeForm: { targetEntityId: string; mergeType: 'ABSORPTION' | 'CONSOLIDATION'; effectiveDate: string; notes: string } =
-    { targetEntityId: '', mergeType: 'ABSORPTION', effectiveDate: '', notes: '' };
+  mergeForm: { targetEntityId: string; mergeType: 'ABSORPTION' | 'CONSOLIDATION'; effectiveDate: string; notes: string; reason: string } =
+    { targetEntityId: '', mergeType: 'ABSORPTION', effectiveDate: '', notes: '', reason: '' };
   identities: OnchainIdentityView[] = [];
   screeningRuns: ScreeningRun[] = [];
   holderBlocks: HolderBlock[] = [];
@@ -1027,10 +1054,10 @@ export class CustomerDetailComponent implements OnInit {
   uboForm: {
     givenName: string; familyName: string; dateOfBirth: string; nationality: string;
     countryOfResidence: string; ownershipPct: number | null;
-    controlType: BeneficialOwner['controlType']; source: string;
+    controlType: BeneficialOwner['controlType']; source: string; fallbackReason: string;
   } = {
     givenName: '', familyName: '', dateOfBirth: '', nationality: '',
-    countryOfResidence: '', ownershipPct: null, controlType: 'DIRECT_OWNERSHIP', source: '',
+    countryOfResidence: '', ownershipPct: null, controlType: 'DIRECT_OWNERSHIP', source: '', fallbackReason: '',
   };
 
   readonly currentYear = new Date().getFullYear();
@@ -1197,15 +1224,16 @@ export class CustomerDetailComponent implements OnInit {
         countryOfResidence: this.uboForm.countryOfResidence || undefined,
         country: this.uboForm.countryOfResidence || undefined,
       },
-      ownershipPct: this.uboForm.ownershipPct ?? undefined,
+      ownershipPct: this.uboForm.controlType === 'SENIOR_MANAGING_OFFICIAL' ? undefined : (this.uboForm.ownershipPct ?? undefined),
       controlType: this.uboForm.controlType,
       source: this.uboForm.source || undefined,
+      fallbackReason: this.uboForm.controlType === 'SENIOR_MANAGING_OFFICIAL' ? this.uboForm.fallbackReason.trim() : undefined,
     }).subscribe({
       next: (owner) => {
         this.beneficialOwners = [owner, ...this.beneficialOwners];
         this.uboForm = {
           givenName: '', familyName: '', dateOfBirth: '', nationality: '',
-          countryOfResidence: '', ownershipPct: null, controlType: 'DIRECT_OWNERSHIP', source: '',
+          countryOfResidence: '', ownershipPct: null, controlType: 'DIRECT_OWNERSHIP', source: '', fallbackReason: '',
         };
         this.uboSaving = false;
         this.cdr.markForCheck();
@@ -1220,15 +1248,54 @@ export class CustomerDetailComponent implements OnInit {
   }
 
   ceaseBeneficialOwner(bo: BeneficialOwner): void {
-    if (!confirm(`Mark ${bo.givenName} ${bo.familyName} as no longer a beneficial owner?`)) return;
-    this.beneficialOwnerService.cease(this.id, bo.id).subscribe({
+    const reason = prompt(`Reason for ceasing ${bo.givenName} ${bo.familyName} as beneficial owner (required, audited):`);
+    if (!reason || !reason.trim()) return;
+    this.withDualControl('BENEFICIAL_OWNER_CEASE', `Cease beneficial owner ${bo.givenName} ${bo.familyName}`,
+      `DELETE /api/v1/entities/${this.id}/beneficial-owners/${bo.id}`, tokens => {
+      this.beneficialOwnerService.cease(this.id, bo.id, { reason: reason.trim() }, tokens).subscribe({
+        next: (updated) => {
+          this.beneficialOwners = this.beneficialOwners.map(o => o.id === updated.id ? updated : o)
+            .filter(o => !o.ceasedAt);
+          this.cdr.markForCheck();
+          this.snackBar.open('Beneficial owner ceased.', 'Dismiss', { duration: 4000 });
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to cease beneficial owner.', 'Dismiss', { duration: 6000 }),
+      });
+    });
+  }
+
+  /** Picks one of the entity's stored KYC documents by number; verification links the owner to it. */
+  verifyBeneficialOwner(bo: BeneficialOwner): void {
+    if (this.documents.length === 0) {
+      this.snackBar.open('Upload a register extract or identity document first.', 'Dismiss', { duration: 5000 });
+      return;
+    }
+    const list = this.documents.map((d, i) => `${i + 1}) ${d.fileName} (${d.documentType})`).join('\n');
+    const answer = prompt(`Verify ${bo.givenName} ${bo.familyName} against which document?\n${list}`, '1');
+    const doc = this.documents[Number(answer) - 1];
+    if (!doc) return;
+    this.beneficialOwnerService.verify(this.id, bo.id, doc.id).subscribe({
       next: (updated) => {
-        this.beneficialOwners = this.beneficialOwners.map(o => o.id === updated.id ? updated : o)
-          .filter(o => !o.ceasedAt);
+        this.beneficialOwners = this.beneficialOwners.map(o => o.id === updated.id ? updated : o);
         this.cdr.markForCheck();
-        this.snackBar.open('Beneficial owner ceased.', 'Dismiss', { duration: 4000 });
+        this.snackBar.open('Beneficial owner verified.', 'Dismiss', { duration: 4000 });
       },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to cease beneficial owner.', 'Dismiss', { duration: 6000 }),
+      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to verify beneficial owner.', 'Dismiss', { duration: 6000 }),
+    });
+  }
+
+  approveEdd(bo: BeneficialOwner): void {
+    const note = prompt(`Enhanced due diligence note for ${bo.givenName} ${bo.familyName} (required, audited):`);
+    if (!note || !note.trim()) return;
+    this.withDualControl('PEP_EDD_APPROVE', `Approve EDD for ${bo.givenName} ${bo.familyName}`,
+      `POST /api/v1/entities/${this.id}/beneficial-owners/${bo.id}/edd-approvals`, tokens => {
+      this.beneficialOwnerService.approveEdd(this.id, bo.id, { note: note.trim() }, tokens).subscribe({
+        next: () => {
+          this.snackBar.open('EDD approved; review due within 6 months.', 'Dismiss', { duration: 5000 });
+          this.loadBeneficialOwners();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to approve EDD.', 'Dismiss', { duration: 6000 }),
+      });
     });
   }
 
@@ -1281,9 +1348,9 @@ export class CustomerDetailComponent implements OnInit {
   }
 
   /** Step-up plus second approver for a KYC decision; calls back with the tokens or not at all when cancelled. */
-  private withDualControl(action: string, reason: string, then: (tokens: DualControlTokens) => void): void {
+  private withDualControl(action: string, reason: string, target: string, then: (tokens: DualControlTokens) => void): void {
     this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: true, reason, action },
+      data: { requireDualControl: true, reason, action, target },
       width: '500px',
       disableClose: true,
     }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
@@ -1293,7 +1360,8 @@ export class CustomerDetailComponent implements OnInit {
   }
 
   approveJurisdiction(jur: Jurisdiction): void {
-    this.withDualControl('KYC_JURISDICTION_APPROVE', `Approve KYC for ${this.jurisdictionLabel(jur)}`, tokens => {
+    this.withDualControl('KYC_JURISDICTION_APPROVE', `Approve KYC for ${this.jurisdictionLabel(jur)}`,
+      `POST /api/v1/entities/${this.id}/kyc/jurisdictions/${jur}/approve`, tokens => {
       this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
       this.kycService.approveJurisdiction(this.id, jur, undefined, tokens).subscribe({
         next: () => {
@@ -1318,7 +1386,8 @@ export class CustomerDetailComponent implements OnInit {
       data: { title: `Reject KYC for ${this.jurisdictionLabel(jur)}`, reasonVisibleToCustomer: true },
     }).afterClosed().subscribe((decision: KycRejectDialogResult | undefined) => {
       if (!decision) return;
-      this.withDualControl('KYC_JURISDICTION_REJECT', `Reject KYC for ${this.jurisdictionLabel(jur)}`, tokens => {
+      this.withDualControl('KYC_JURISDICTION_REJECT', `Reject KYC for ${this.jurisdictionLabel(jur)}`,
+        `POST /api/v1/entities/${this.id}/kyc/jurisdictions/${jur}/reject`, tokens => {
         this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
         this.kycService.rejectJurisdiction(this.id, jur, decision.reason, decision.customerReasonCode, tokens).subscribe({
           next: () => {
@@ -1378,11 +1447,21 @@ export class CustomerDetailComponent implements OnInit {
     });
   }
 
-  approveKyc(): void {
-    const expiry = new Date();
-    expiry.setFullYear(expiry.getFullYear() + 1);
-    this.withDualControl('KYC_APPROVE', 'Approve KYC for this customer', tokens => {
-      this.kycService.approveKyc(this.id, expiry.toISOString().split('T')[0], tokens).subscribe({
+  /**
+   * The server defaults the expiry (12 months, shortened for PEPs) and refuses without a beneficial-owner
+   * register or sufficient identification; read `kycExpiryDate` back instead of choosing one here.
+   * `withOverride` records an administrator's documented override of a failed gate.
+   */
+  approveKyc(withOverride = false): void {
+    let overrideNote: string | undefined;
+    if (withOverride) {
+      const note = prompt('Override note (required, kept in the audit trail). Only a registry administrator may override a failed KYC gate:');
+      if (!note || !note.trim()) return;
+      overrideNote = note.trim();
+    }
+    this.withDualControl('KYC_APPROVE', 'Approve KYC for this customer',
+      `POST /api/v1/entities/${this.id}/kyc/approve`, tokens => {
+      this.kycService.approveKyc(this.id, { overrideNote }, tokens).subscribe({
         next: () => {
           this.loadEntity();
           // Prompt operator to also issue on-chain KYC claim
@@ -1455,7 +1534,8 @@ export class CustomerDetailComponent implements OnInit {
     this.dialog.open(KycRejectDialogComponent, { width: '520px', maxWidth: '95vw' })
       .afterClosed().subscribe((decision: KycRejectDialogResult | undefined) => {
         if (!decision) return;
-        this.withDualControl('KYC_REJECT', 'Reject KYC for this customer', tokens => {
+        this.withDualControl('KYC_REJECT', 'Reject KYC for this customer',
+          `POST /api/v1/entities/${this.id}/kyc/reject`, tokens => {
           this.kycService.rejectKyc(this.id, decision.reason, decision.customerReasonCode, tokens).subscribe({
             next: () => {
               this.snackBar.open('KYC rejected. The customer is told the selected category only.', 'Dismiss', { duration: 6000 });
@@ -1467,25 +1547,23 @@ export class CustomerDetailComponent implements OnInit {
       });
   }
 
-  suspend(): void {
-    this.entityService.suspendEntity(this.id).subscribe({
-      next: () => this.loadEntity(),
-      error: (err) => this.showActionError('Failed to suspend customer.', err),
-    });
-  }
+  suspend(): void { this.lifecycleChange('suspend', 'ENTITY_SUSPEND', 'Suspend customer', 'Failed to suspend customer.'); }
 
-  reactivate(): void {
-    this.entityService.reactivateEntity(this.id).subscribe({
-      next: () => this.loadEntity(),
-      error: (err) => this.showActionError('Failed to reactivate customer.', err),
-    });
-  }
+  reactivate(): void { this.lifecycleChange('reactivate', 'ENTITY_REACTIVATE', 'Reactivate customer', 'Failed to reactivate customer.'); }
 
-  dissolve(): void {
-    if (!confirm('Are you sure you want to dissolve this entity? This action cannot be undone.')) return;
-    this.entityService.dissolveEntity(this.id).subscribe({
-      next: () => this.loadEntity(),
-      error: (err) => this.showActionError('Failed to dissolve customer.', err),
+  /** Suspend/reactivate: a reason, step-up and a second approver; reactivation can be refused by compliance gates (409 message shown). */
+  private lifecycleChange(path: 'suspend' | 'reactivate', action: string, label: string, failure: string): void {
+    const reason = prompt(`Reason for this action (required, written to the audit trail):`);
+    if (!reason || !reason.trim()) return;
+    this.withDualControl(action, `${label} ${this.entity?.currentName ?? ''}`.trim(),
+      `POST /api/v1/entities/${this.id}/${path}`, tokens => {
+      const call = path === 'suspend'
+        ? this.entityService.suspendEntity(this.id, reason.trim(), tokens)
+        : this.entityService.reactivateEntity(this.id, reason.trim(), tokens);
+      call.subscribe({
+        next: () => this.loadEntity(),
+        error: (err) => this.showActionError(failure, err),
+      });
     });
   }
 
@@ -1514,45 +1592,56 @@ export class CustomerDetailComponent implements OnInit {
     const reason = prompt(
       'Reason for terminating this customer relationship (required for audit trail):'
     );
-    if (!reason) return;
+    if (!reason || !reason.trim()) return;
 
-    const ref = this.dialog.open(StepUpDialogComponent, {
-      data: {
-        requireDualControl: true,
-        reason: `Terminate customer relationship for ${this.entity?.currentName} (offboarding)`,
-        action: 'CUSTOMER_OFFBOARDING',
+    // Open obligations (tokens outstanding, trades, repos, loans, Sperrvermerk ...) must be acknowledged one by one.
+    this.entityService.getOffboardingObligations(this.id).subscribe({
+      next: (obligations) => {
+        let acknowledged: { obligationId: string; reason: string }[] = [];
+        if (obligations.length > 0) {
+          const list = obligations.map(o => `- ${o.kind}: ${o.description}`).join('\n');
+          if (!confirm(`${obligations.length} open obligation(s) remain:\n${list}\n\nTerminate anyway? Each will be acknowledged with your reason and becomes an operator task.`)) return;
+          acknowledged = obligations.map(o => ({ obligationId: o.obligationId, reason: reason.trim() }));
+        }
+        this.openTerminateStepUp(reason.trim(), acknowledged);
       },
-      width: '500px',
-      disableClose: true,
+      error: (err) => this.showActionError('Could not load the open obligations.', err),
     });
+  }
 
-    ref.afterClosed().subscribe((result) => {
-      if (!result) return;
-
-      this.entityService.terminateEntity(this.id, reason, result.stepUpToken, result.dualControlToken!).subscribe({
+  private openTerminateStepUp(reason: string, acknowledged: { obligationId: string; reason: string }[]): void {
+    this.withDualControl('CUSTOMER_OFFBOARDING',
+      `Terminate customer relationship for ${this.entity?.currentName} (offboarding)`,
+      `POST /api/v1/entities/${this.id}/terminate`, tokens => {
+      this.entityService.terminateEntity(this.id, reason, acknowledged, tokens).subscribe({
         next: () => {
           this.snackBar.open('Customer relationship terminated. Audit event recorded.', 'Dismiss', { duration: 5000 });
           this.loadEntity();
         },
-        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to terminate customer.', 'Dismiss', { duration: 6000 }),
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to terminate customer.', 'Dismiss', { duration: 8000 }),
       });
     });
   }
 
   recordMerger(): void {
+    if (!this.mergeForm.reason.trim()) return;
     if (!confirm('This will mark the current entity as dissolved (absorbed). Continue?')) return;
-    this.entityService.mergeEntity(this.id, {
-      targetEntityId: this.mergeForm.targetEntityId,
-      mergeType: this.mergeForm.mergeType,
-      effectiveDate: this.mergeForm.effectiveDate,
-      notes: this.mergeForm.notes || undefined,
-    }).subscribe({
-      next: () => {
-        this.mergeForm = { targetEntityId: '', mergeType: 'ABSORPTION', effectiveDate: '', notes: '' };
-        this.loadEntity();
-        this.loadHistory();
-      },
-      error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to record merger.', 'Dismiss', { duration: 6000 }),
+    this.withDualControl('ENTITY_MERGE', `Record merger of ${this.entity?.currentName ?? 'this entity'}`,
+      `POST /api/v1/entities/${this.id}/merge`, tokens => {
+      this.entityService.mergeEntity(this.id, {
+        targetEntityId: this.mergeForm.targetEntityId,
+        mergeType: this.mergeForm.mergeType,
+        effectiveDate: this.mergeForm.effectiveDate,
+        notes: this.mergeForm.notes || undefined,
+        reason: this.mergeForm.reason.trim(),
+      }, tokens).subscribe({
+        next: () => {
+          this.mergeForm = { targetEntityId: '', mergeType: 'ABSORPTION', effectiveDate: '', notes: '', reason: '' };
+          this.loadEntity();
+          this.loadHistory();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to record merger.', 'Dismiss', { duration: 6000 }),
+      });
     });
   }
 
@@ -1562,32 +1651,52 @@ export class CustomerDetailComponent implements OnInit {
 
   openAsCompany(): void {
     if (!this.entity) return;
-    const handoffTab = window.open('', '_blank');
-    if (handoffTab) {
-      handoffTab.opener = null;
-      handoffTab.document.title = 'Opening customer portal…';
-    }
-    this.adminUserService.impersonate(this.entity.id).subscribe({
-      next: (res) => {
-        let url: URL;
-        try {
-          url = new URL(res.handoffUrl, window.location.origin);
-          if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Unsupported protocol');
-        } catch {
-          handoffTab?.close();
-          this.snackBar.open('The server returned an invalid customer-portal URL.', 'Dismiss', { duration: 6000 });
-          return;
-        }
+    const entity = this.entity;
+    this.dialog.open(ImpersonateDialogComponent, {
+      width: '520px', maxWidth: '95vw', data: { entityName: entity.currentName },
+    }).afterClosed().subscribe((choice: ImpersonateDialogResult | undefined) => {
+      if (!choice) return;
+      const onBehalf = choice.mode === 'ACT_ON_BEHALF';
+      openStepUp(this.dialog, {
+        requireDualControl: onBehalf,
+        reason: `${onBehalf ? 'Act on behalf of' : 'Open a read-only support session for'} ${entity.currentName}`,
+        action: 'ADMIN_IMPERSONATION_ACT_ON_BEHALF',
+        target: 'POST /api/v1/impersonation/act-on-behalf',
+      }).subscribe(tokens => {
+        if (!tokens) return;
+        // The tab must be opened inside the click gesture chain; the handoff URL (one-time code) is navigated to afterwards.
+        const handoffTab = window.open('', '_blank');
         if (handoffTab) {
-          handoffTab.location.replace(url.href);
-        } else {
-          this.snackBar.open('The customer portal was blocked. Allow pop-ups and try again.', 'Dismiss', { duration: 6000 });
+          handoffTab.opener = null;
+          handoffTab.document.title = 'Opening customer portal…';
         }
-      },
-      error: (err) => {
-        handoffTab?.close();
-        this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
-      },
+        const request$ = onBehalf
+          ? this.adminUserService.impersonateActOnBehalf(entity.id, choice.reason, {
+              stepUpToken: tokens.stepUpToken, dualControlToken: tokens.dualControlToken }, choice.ticket)
+          : this.adminUserService.impersonate(entity.id, choice.reason, tokens.stepUpToken, choice.ticket);
+        request$.subscribe({
+          next: (res) => {
+            let url: URL;
+            try {
+              url = new URL(res.handoffUrl, window.location.origin);
+              if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Unsupported protocol');
+            } catch {
+              handoffTab?.close();
+              this.snackBar.open('The server returned an invalid customer-portal URL.', 'Dismiss', { duration: 6000 });
+              return;
+            }
+            if (handoffTab) {
+              handoffTab.location.replace(url.href);
+            } else {
+              this.snackBar.open('The customer portal was blocked. Allow pop-ups and try again.', 'Dismiss', { duration: 6000 });
+            }
+          },
+          error: (err) => {
+            handoffTab?.close();
+            this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
+          },
+        });
+      });
     });
   }
 

@@ -26,7 +26,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -67,8 +66,26 @@ class LegalEntityServiceTest {
     @Mock
     private AppUserRepository appUserRepository;
 
-    @InjectMocks
+    @Mock
+    private de.makibytes.registerwerk.customer.internal.CustomerOffboardingService offboardingService;
+
+    @Mock
+    private de.makibytes.registerwerk.customer.api.EntityTaskPort taskPort;
+
+    @Mock
+    private de.makibytes.registerwerk.stepup.api.DualControlGate dualControlGate;
+
+    @Mock
+    private de.makibytes.registerwerk.customer.api.EntityReactivationGuard guard;
+
     private LegalEntityService legalEntityService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void buildService() {
+        legalEntityService = new LegalEntityService(legalEntityRepository, entityNameHistoryRepository,
+                entityMergeRecordRepository, suitabilityAssessmentRepository, eventPublisher, entityNumberGenerator,
+                appUserRepository, offboardingService, taskPort, dualControlGate, java.util.List.of(guard));
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -108,7 +125,7 @@ class LegalEntityServiceTest {
         legalEntityService.createEntity(entity, actorId);
 
         verify(legalEntityRepository).save(entity);
-        verify(eventPublisher).publishEvent(any(Object.class));
+        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(any(Object.class));
     }
 
     @Test
@@ -123,31 +140,83 @@ class LegalEntityServiceTest {
     }
 
     @Test
-    @DisplayName("suspendEntity should set status to SUSPENDED and save the entity")
+    @DisplayName("suspendEntity moves ACTIVE to SUSPENDED and records the reason")
     void suspendEntity_shouldChangeStatus() {
         LegalEntity entity = buildEntity();
-        UUID actorId = UUID.randomUUID();
+        entity.setStatus(EntityStatus.ACTIVE);
         when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
         when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        legalEntityService.suspendEntity(entity.getId(), actorId);
+        legalEntityService.suspendEntity(entity.getId(), UUID.randomUUID(), "sanctions inquiry");
 
         assertThat(entity.getStatus()).isEqualTo(EntityStatus.SUSPENDED);
-        verify(legalEntityRepository).save(entity);
+        ArgumentCaptor<de.makibytes.registerwerk.customer.events.EntitySuspendedEvent> c =
+                ArgumentCaptor.forClass(de.makibytes.registerwerk.customer.events.EntitySuspendedEvent.class);
+        verify(eventPublisher).publishEvent(c.capture());
+        assertThat(c.getValue().payload()).containsEntry("reason", "sanctions inquiry").containsEntry("from", "ACTIVE");
     }
 
     @Test
-    @DisplayName("dissolveEntity should set status to DISSOLVED and save the entity")
-    void dissolveEntity_shouldChangeStatus() {
+    @DisplayName("state machine: reactivating CLOSED, DISSOLVED or PENDING_ONBOARDING is a 409, ACTIVE cannot be suspended twice")
+    void reactivate_invalidSources_areRefused() {
+        for (EntityStatus s : new EntityStatus[]{EntityStatus.CLOSED, EntityStatus.DISSOLVED,
+                EntityStatus.PENDING_ONBOARDING, EntityStatus.ACTIVE}) {
+            LegalEntity entity = buildEntity();
+            entity.setStatus(s);
+            when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
+            assertThatThrownBy(() -> legalEntityService.reactivateEntity(entity.getId(), UUID.randomUUID(), "why"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+            assertThat(entity.getStatus()).isEqualTo(s);
+        }
+        LegalEntity closed = buildEntity();
+        closed.setStatus(EntityStatus.CLOSED);
+        when(legalEntityRepository.findById(closed.getId())).thenReturn(Optional.of(closed));
+        assertThatThrownBy(() -> legalEntityService.suspendEntity(closed.getId(), UUID.randomUUID(), "x"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+    }
+
+    @Test
+    @DisplayName("reactivate is refused while a guard reports a blocker or KYC is expired; allowed otherwise")
+    void reactivate_guards() {
         LegalEntity entity = buildEntity();
-        UUID actorId = UUID.randomUUID();
+        entity.setStatus(EntityStatus.SUSPENDED);
         when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
         when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(guard.blockers(entity.getId())).thenReturn(java.util.List.of("active Sperrvermerk"));
+        assertThatThrownBy(() -> legalEntityService.reactivateEntity(entity.getId(), UUID.randomUUID(), "ok"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class)
+                .hasMessageContaining("Sperrvermerk");
+        when(guard.blockers(entity.getId())).thenReturn(java.util.List.of());
+        entity.setKycStatus(de.makibytes.registerwerk.customer.api.KycStatus.EXPIRED);
+        assertThatThrownBy(() -> legalEntityService.reactivateEntity(entity.getId(), UUID.randomUUID(), "ok"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class);
+        entity.setKycStatus(de.makibytes.registerwerk.customer.api.KycStatus.APPROVED);
+        legalEntityService.reactivateEntity(entity.getId(), UUID.randomUUID(), "cleared");
+        assertThat(entity.getStatus()).isEqualTo(EntityStatus.ACTIVE);
+    }
 
-        legalEntityService.dissolveEntity(entity.getId(), actorId);
+    @Test
+    @DisplayName("updateEntity of an APPROVED entity audits old/new LEI, triggers re-screening and a KYC_REVIEW_REQUIRED task")
+    void updateEntity_riskChange_triggersRescreenAndTask() {
+        LegalEntity entity = buildEntity();
+        entity.setLeiCode("OLDLEI00000000000001");
+        entity.setKycStatus(de.makibytes.registerwerk.customer.api.KycStatus.APPROVED);
+        when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
+        when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        LegalEntity patch = new LegalEntity();
+        patch.setLeiCode("NEWLEI00000000000001");
 
-        assertThat(entity.getStatus()).isEqualTo(EntityStatus.DISSOLVED);
-        verify(legalEntityRepository).save(entity);
+        legalEntityService.updateEntity(entity.getId(), patch, UUID.randomUUID());
+
+        ArgumentCaptor<Object> c = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, org.mockito.Mockito.atLeast(2)).publishEvent(c.capture());
+        de.makibytes.registerwerk.customer.events.EntityUpdatedEvent upd = c.getAllValues().stream()
+                .filter(de.makibytes.registerwerk.customer.events.EntityUpdatedEvent.class::isInstance)
+                .map(de.makibytes.registerwerk.customer.events.EntityUpdatedEvent.class::cast).findFirst().orElseThrow();
+        assertThat(upd.payload().toString()).contains("OLDLEI00000000000001").contains("NEWLEI00000000000001");
+        assertThat(c.getAllValues()).anyMatch(
+                de.makibytes.registerwerk.customer.events.EntityRiskDataChangedEvent.class::isInstance);
+        verify(taskPort).open(eq(entity.getId()), eq("KYC_REVIEW_REQUIRED"), anyString(), anyString(), any());
     }
 
     @Test
@@ -165,7 +234,7 @@ class LegalEntityServiceTest {
 
         assertThat(entity.getCurrentName()).isEqualTo("Updated GmbH");
         verify(legalEntityRepository).save(entity);
-        verify(eventPublisher).publishEvent(any(Object.class));
+        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(any(Object.class));
     }
 
     @Test
@@ -203,19 +272,19 @@ class LegalEntityServiceTest {
 
         when(legalEntityRepository.findById(source.getId())).thenReturn(Optional.of(source));
         when(legalEntityRepository.findById(target.getId())).thenReturn(Optional.of(target));
-        when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(entityMergeRecordRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         EntityMergeRecord result = legalEntityService.mergeEntities(
                 source.getId(), target.getId(), EntityMergeRecord.MergeType.ABSORPTION,
-                effectiveDate, "Absorbed via share purchase agreement", actorId);
+                effectiveDate, "Absorbed via share purchase agreement", actorId, "SPA", null);
 
-        assertThat(source.getStatus()).isEqualTo(EntityStatus.DISSOLVED);
+        verify(offboardingService).dissolveByMerger(eq(source.getId()), eq(target.getId()), eq(actorId), anyString(), eq("SPA"));
+        verify(taskPort).open(eq(target.getId()), eq("KYC_REVIEW_REQUIRED"), anyString(), anyString(), any());
         assertThat(result.getSourceEntityId()).isEqualTo(source.getId());
         assertThat(result.getTargetEntityId()).isEqualTo(target.getId());
         assertThat(result.getMergeType()).isEqualTo(EntityMergeRecord.MergeType.ABSORPTION);
         assertThat(result.getRecordedBy()).isEqualTo(actorId);
-        verify(eventPublisher).publishEvent(any(Object.class));
+        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(any(Object.class));
     }
 
     @Test
@@ -231,9 +300,9 @@ class LegalEntityServiceTest {
 
         assertThatThrownBy(() -> legalEntityService.mergeEntities(
                 source.getId(), target.getId(), EntityMergeRecord.MergeType.ABSORPTION,
-                LocalDate.now(), null, UUID.randomUUID()))
+                LocalDate.now(), null, UUID.randomUUID(), "r", null))
             .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class)
-            .hasMessageContaining("dissolved");
+            .hasMessageContaining("DISSOLVED");
         assertThat(source.getStatus()).isEqualTo(EntityStatus.ACTIVE);
     }
 
@@ -242,7 +311,7 @@ class LegalEntityServiceTest {
     void mergeEntities_rejectsSelfMerge() {
         UUID id = UUID.randomUUID();
         assertThatThrownBy(() -> legalEntityService.mergeEntities(
-                id, id, EntityMergeRecord.MergeType.ABSORPTION, LocalDate.now(), null, UUID.randomUUID()))
+                id, id, EntityMergeRecord.MergeType.ABSORPTION, LocalDate.now(), null, UUID.randomUUID(), "r", null))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("cannot be merged into itself");
     }
@@ -257,7 +326,7 @@ class LegalEntityServiceTest {
         when(legalEntityRepository.save(any(LegalEntity.class))).thenAnswer(inv -> inv.getArgument(0));
         UUID actorId = UUID.randomUUID();
 
-        LegalEntity result = legalEntityService.classifyClient(entity.getId(), ClientCategory.PROFESSIONAL, actorId);
+        LegalEntity result = legalEntityService.classifyClient(entity.getId(), ClientCategory.PROFESSIONAL, actorId, "MiFID opt-up evidence", null);
 
         assertThat(result.getClientCategory()).isEqualTo(ClientCategory.PROFESSIONAL);
         assertThat(result.getClientCategoryClassifiedAt()).isNotNull();
@@ -267,6 +336,8 @@ class LegalEntityServiceTest {
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().entityId()).isEqualTo(entity.getId());
         assertThat(captor.getValue().clientCategory()).isEqualTo("PROFESSIONAL");
+        assertThat(captor.getValue().payload()).containsEntry("previousCategory", "RETAIL");
+        verify(dualControlGate).require("CLIENT_CLASSIFICATION_DOWNGRADE");
     }
 
     @Test
@@ -275,7 +346,7 @@ class LegalEntityServiceTest {
         UUID id = UUID.randomUUID();
         when(legalEntityRepository.findById(id)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> legalEntityService.classifyClient(id, ClientCategory.RETAIL, UUID.randomUUID()))
+        assertThatThrownBy(() -> legalEntityService.classifyClient(id, ClientCategory.RETAIL, UUID.randomUUID(), null, null))
                 .isInstanceOf(EntityNotFoundException.class);
     }
 

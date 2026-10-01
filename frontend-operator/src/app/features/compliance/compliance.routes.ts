@@ -39,6 +39,15 @@ export const COMPLIANCE_ROUTES: Routes = [
       ),
   },
   {
+    path: 'entity-tasks',
+    canActivate: [roleGuard],
+    data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+    loadComponent: () =>
+      import('./entity-tasks/entity-tasks.component').then(
+        (m) => m.EntityTasksComponent,
+      ),
+  },
+  {
     path: 'holder-blocks',
     canActivate: [roleGuard],
     data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },

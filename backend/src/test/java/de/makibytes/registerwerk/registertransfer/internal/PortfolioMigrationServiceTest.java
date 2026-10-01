@@ -613,7 +613,7 @@ class PortfolioMigrationServiceTest {
         when(holderRepository.findById(holderId)).thenReturn(Optional.of(h));
         de.makibytes.registerwerk.kyc.api.HolderBlock block = new de.makibytes.registerwerk.kyc.api.HolderBlock();
         ReflectionTestUtils.setField(block, "id", UUID.randomUUID());
-        when(holderBlockRepository.findByEntityIdAndStatus(investorId, de.makibytes.registerwerk.kyc.api.HolderBlock.Status.ACTIVE))
+        when(holderBlockRepository.findByEntityIdAndStatusIn(investorId, de.makibytes.registerwerk.kyc.api.HolderBlock.BLOCKING))
                 .thenReturn(List.of(block));
 
         service.export(migrationId, UUID.randomUUID());

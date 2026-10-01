@@ -130,3 +130,15 @@ Retours :
 ```
 
 Si `brokenAt` n'est pas nul, il contient le `sequence_no` de la première entrée où la chaîne de hachage est rompue. Cela déclenche un `IctIncident` automatique de gravité `MAJOR` et de catégorie `INTEGRITY`.
+
+---
+
+## Modèle d'intégrité (canonique v2, ancres, reprise)
+
+- **Version canonique.** Chaque ligne porte `canon_version`. La version 2 couvre `eventType`, le sujet, la charge utile, **l'identifiant et le rôle de l'acteur, l'heure de l'événement (`occurred_at`, époque en microsecondes), l'identifiant de corrélation et le lien d'annulation** : modifier l'un d'eux rompt la chaîne. Les lignes de version 1 (écrites avant ce changement) restent vérifiées selon l'ancien format ; une version inconnue fait échouer la vérification.
+- **Heure de l'événement.** `occurred_at` est capturée de façon synchrone à la publication de l'événement, et non lors de l'écriture asynchrone ; `recorded_at` est l'heure d'insertion. Les actions effectuées par un opérateur agissant au nom d'un client (usurpation d'identité) sont enregistrées avec le rôle `REGISTRY_ADMIN_IMPERSONATING` et un objet `_imp` haché (session, opérateur, entité, mode).
+- **La vérification** détecte : une première ligne qui n'est pas l'origine de la chaîne (tête tronquée, partition supprimée), une dernière ligne différente de `audit_chain_tip`, des lignes supprimées après une ancre quotidienne signée (`audit_chain_anchor`, publiée en option via un `AuditAnchorSink` externe) et une `entry_sig` absente à partir du seuil de signature (premier numéro de séquence signé, inscriptible une seule fois). Activer la signature plus tard ne signe pas rétroactivement les lignes antérieures.
+- **Export de preuve.** `/audit/events/export[/signed]` est trié par `sequence_no` et commence par un bloc `# key=value` (`firstSeq`, `lastSeq`, `rowCount`, `truncated`, `nextAfterSeq`, `tipSeq`, `tipEntryHash`) ; les lignes contiennent `prevHash` et `entryHash`. La signature couvre l'en-tête et les lignes. `afterSeq` permet de poursuivre un export tronqué.
+- **Les écritures échouées** sont retentées chaque minute (publications de plus de deux minutes) puis, après `registerwerk.audit.max-attempts` (20) tentatives, déplacées vers `audit_event_dead_letter`. Alertez sur `registerwerk_audit_oldest_incomplete_seconds` et `registerwerk_audit_dead_letter_count`.
+- **Propriété de la table.** `REVOKE UPDATE, DELETE, TRUNCATE` et les déclencheurs WORM ne lient pas le propriétaire de la table. Si le compte d'exécution lance aussi les migrations, il possède `audit_event` ; en mode production, la vérification au démarrage échoue alors, sauf si `registerwerk.audit.allow-owner-runtime-role=true` reconnaît le risque provisoire. Remède : comptes séparés pour la migration et l'exécution (décision ouverte T6-17). Le mode production exige aussi un fournisseur de clé de signature.
+- **Bascule.** `registerwerk.audit.legacy-listener=true` (par défaut) traite les publications créées avant la mise à niveau ; désactivez-le lorsque `event_publication` ne contient plus de lignes d'audit incomplètes.

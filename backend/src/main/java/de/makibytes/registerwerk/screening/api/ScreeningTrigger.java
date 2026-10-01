@@ -6,5 +6,6 @@ public enum ScreeningTrigger {
     BENEFICIAL_OWNER_ADD,
     ERC3643_CLAIM_ISSUANCE,
     PERIODIC_REFRESH,
+    ENTITY_DATA_CHANGED,
     MANUAL
 }

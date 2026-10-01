@@ -82,3 +82,12 @@ TLPT scope, or certify the result.
 The repository does not implement jurisdiction-specific DORA authority routing, official forms or
 schemas, authenticated transmission, delivery receipts, corrections, rejection handling, or
 authority acceptance. Recording that an incident was reported is not filing evidence.
+
+## Incident controls (Phase 6)
+
+- **Awareness time**: `awarenessAt` is entered at creation (default now, never in the future) and is immutable; the 24 h and 1-month clocks run from it.
+- **Classification**: `POST /api/v1/dora/incidents/{id}/classify` (step-up, mandatory reason, optional criteria) classifies or reclassifies; escalating to `MAJOR` starts the 4 h clock and recomputes all deadlines. Withdrawing `MAJOR` needs a second approver and leaves a downgrade marker. Who classifies is an open operator decision.
+- **Deadlines**: initial notification 4 h from classification / 24 h from awareness (whichever is earlier), intermediate report 72 h after the initial notification, final report 30 days from awareness (conservative). Monitoring runs every 15 minutes until the final report, independent of status; overdue alerts are emailed to registry administrators.
+- **Reports** are append-only rows (`INITIAL`, `INTERMEDIATE`, `FINAL`) with an authority reference; first-submission timestamps and the reference cannot be overwritten. `REPORTED_TO_AUTHORITY` is set only by recording the final report. Closing a `MAJOR` incident requires initial and final report evidence and a second approver.
+- **Automatic drafts**: a permanently failed audit write opens an unclassified draft incident that must be classified by a person.
+- CSV exports label the deadlines correctly and neutralise spreadsheet formulas in text cells.

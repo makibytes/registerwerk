@@ -109,6 +109,12 @@ public final class Ivms101 {
             String executionDate,
             String instructedAmount,
             String currencyOfTransfer,
-            String settlementMethod
-    ) {}
+            String settlementMethod,
+            String assetIdentifier
+    ) {
+        public TransferDetails(String transactionIdentifier, String executionDate, String instructedAmount,
+                               String currencyOfTransfer, String settlementMethod) {
+            this(transactionIdentifier, executionDate, instructedAmount, currencyOfTransfer, settlementMethod, null);
+        }
+    }
 }

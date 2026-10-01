@@ -11,7 +11,9 @@
 ALTER TABLE repo_quote ADD COLUMN quote_version INTEGER NOT NULL DEFAULT 1;
 
 -- One row per submission: the per-counterparty uniqueness constraint moves to "one ACTIVE quote".
+-- migration-safety: ack (unique constraint replaced by the desk-aware rule; no data removed)
 ALTER TABLE repo_quote DROP CONSTRAINT uq_repo_quote_counterparty;
+-- migration-safety: ack (constraint re-created with the widened status set)
 ALTER TABLE repo_quote DROP CONSTRAINT ck_repo_quote_status;
 ALTER TABLE repo_quote ADD CONSTRAINT ck_repo_quote_status
     CHECK (status IN ('ACTIVE', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED'));
@@ -51,6 +53,7 @@ ALTER TABLE repo_trade
     ADD COLUMN disputed_at TIMESTAMPTZ,
     ADD COLUMN disputed_by UUID REFERENCES legal_entity(id);
 
+-- migration-safety: ack (constraint re-created with the widened status set)
 ALTER TABLE repo_trade DROP CONSTRAINT ck_repo_trade_status;
 ALTER TABLE repo_trade ADD CONSTRAINT ck_repo_trade_status CHECK (status IN (
     'PENDING_OPEN_SETTLEMENT', 'OPEN', 'MARGIN_CALL', 'PENDING_CLOSE', 'DISPUTED', 'CLOSED', 'DEFAULTED', 'CANCELLED'));
@@ -65,6 +68,7 @@ CREATE INDEX idx_repo_trade_open_collateral ON repo_trade(collateral_asset_id, c
 
 -- Lifecycle events by the platform operator (dispute resolution) or the system (corporate-action notice)
 -- have no acting company.
+-- migration-safety: ack (relaxes NOT NULL only; no data removed)
 ALTER TABLE repo_lifecycle_event ALTER COLUMN actor_entity_id DROP NOT NULL;
 
 -- ── substitution requests ───────────────────────────────────────────────────────────────────────

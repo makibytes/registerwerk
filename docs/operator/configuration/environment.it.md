@@ -22,7 +22,7 @@ Tutta la configurazione viene eseguita tramite variabili d'ambiente. Copia `.env
 |---|---|---|
 | `ENTRA_ENABLED` | `false` | `false` → modulo nome utente/password nel frontend dell'operatore (FE); `true` → pulsante Microsoft |
 | `DEFAULT_ADMIN_EMAIL` | — | E-mail dell'utente amministratore precaricato (seed) (solo modalità integrata) |
-| `DEFAULT_ADMIN_PASSWORD` | — | Password in testo normale sottoposta ad hashing con BCrypt all'avvio; ruotare modificando e riavviando |
+| `DEFAULT_ADMIN_PASSWORD` | — | Password in testo normale sottoposta ad hashing con BCrypt alla creazione dell'amministratore; usata solo se non esiste alcun `REGISTRY_ADMIN`, mai riapplicata a un account esistente |
 | `JWT_DEV_SECRET` | integrato | Chiave di firma HS256 utilizzata in modalità dev/demo; lasciare non impostato per locale, sovrascrivere nello staging |
 
 ### OAuth2 / OIDC (produzione) { #oauth2-oidc-production }

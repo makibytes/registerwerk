@@ -59,7 +59,9 @@ L'entità `HolderBlock` nel modulo `kyc` memorizza tutti i blocchi attivi e stor
 stateDiagram-v2
     [*] --> ACTIVE : create (REGISTRY_ADMIN + step-up + 4-eyes)
     ACTIVE --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
-    ACTIVE --> EXPIRED : expiresAt reached (scheduler)
+    ACTIVE --> EXPIRY_REVIEW : expiresAt reached (scheduler, still blocking)
+    EXPIRY_REVIEW --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
+    ACTIVE --> EXPIRED : expiresAt reached, type in auto-expire-types
     LIFTED --> [*]
     EXPIRED --> [*]
 ```
@@ -76,7 +78,10 @@ stateDiagram-v2
 Si applica lo stesso flusso step-up + quattro occhi. La revoca richiama il corrispondente `unfreezeAddress()` on-chain e cancella il campo `HolderBlock.liftedAt`.
 
 **Scadenza automatica:**
-Un job `@Scheduled` viene eseguito ogni notte, trova tutti i record `HolderBlock` in cui `expiresAt < NOW()` e `liftedAt IS NULL`, li fa transitare a `EXPIRED` e richiama l'unfreeze on-chain.
+Un job `@Scheduled` viene eseguito ogni notte e trova tutti i blocchi ACTIVE con `expiresAt < NOW()`. Per impostazione predefinita **nessun tipo di blocco scade automaticamente**: il blocco passa a `EXPIRY_REVIEW`, continua a bloccare (controlli del registro e congelamento on-chain) e vengono generati un task per l'operatore e un'e-mail alla compliance. Viene revocato solo con la revoca normale (step-up + secondo approvatore). I tipi elencati in `registerwerk.sperrvermerk.auto-expire-types` (vuoto di default) continuano a essere revocati automaticamente in `EXPIRED`.
+
+!!! note "Date di scadenza (6-25)"
+    `expiresAt` deve essere nel futuro. Per i tipi giudiziari e di autorità (`GERICHTSBESCHLUSS`, `PFAENDUNG`, `INSOLVENZ`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `REGULATORISCH`) una data di scadenza richiede inoltre `courtRef` o `documentId`, e il secondo approvatore la conferma rispetto al provvedimento. Quando l'ultimo blocco viene revocato, vengono rilasciati tutti i congelamenti che nessun blocco residuo copre, su tutti gli asset del wallet; i blocchi di entità coprono tutti i wallet di titolare dell'entità. I blocchi solo wallet sono visibili anche ai controlli di repo desk e lending. Se un tipo possa scadere automaticamente è una decisione legale parcheggiata (T6-11).
 
 ---
 

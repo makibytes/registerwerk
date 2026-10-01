@@ -293,6 +293,8 @@ export class SlotAdminComponent implements OnInit {
         requireDualControl: true,
         reason: `Forced value transfer ${f.value} from token #${f.tokenId} to token #${f.toTokenId}`,
         action: 'ERC3525_FORCED_VALUE_TRANSFER_EWG24',
+        target: `POST /api/v1/deployments/${this.deploymentId}/tokens/${String(f.tokenId).trim()}/forced-value-transfer`,
+        targetBody: { toTokenId: String(f.toTokenId).trim(), value: String(f.value).trim(), legalBasis: f.legalBasis.trim() },
       },
       width: '500px',
       disableClose: true,

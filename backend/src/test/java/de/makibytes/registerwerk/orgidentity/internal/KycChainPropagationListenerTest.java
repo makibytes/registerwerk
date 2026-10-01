@@ -56,6 +56,7 @@ class KycChainPropagationListenerTest {
     @Mock Erc3643Api erc3643Api;
     @Mock ApplicationEventPublisher eventPublisher;
     @Mock PlatformTransactionManager transactionManager;
+    @Mock de.makibytes.registerwerk.customer.api.EntityTaskPort taskPort;
 
     private SimpleMeterRegistry meterRegistry;
     private KycChainPropagationListener listener;
@@ -71,7 +72,7 @@ class KycChainPropagationListenerTest {
         meterRegistry = new SimpleMeterRegistry();
         listener = new KycChainPropagationListener(propagationRepository, registrationRepository,
                 registrationService, legalEntityRepository, erc3643Api, eventPublisher,
-                transactionManager, meterRegistry);
+                taskPort, transactionManager, meterRegistry);
 
         // In-memory propagation table.
         when(propagationRepository.save(any(KycChainPropagation.class))).thenAnswer(inv -> {
@@ -202,5 +203,31 @@ class KycChainPropagationListenerTest {
         registration.setStatus(OrgRegistrationStatus.ACTIVE);
         listener.retryOpen();
         verify(registrationService).suspend(eq(registrationId), anyString(), eq(null), eq("SYSTEM"));
+    }
+
+    @Test
+    @DisplayName("entity suspension suspends the org on chain but does NOT revoke claims; closure revokes both")
+    void entityLifecycle_effects() {
+        entity.setStatus(de.makibytes.registerwerk.customer.api.EntityStatus.SUSPENDED);
+        listener.on(new de.makibytes.registerwerk.customer.events.EntitySuspendedEvent(entityId, null, null, Map.of()));
+        verify(registrationService).suspend(eq(registrationId), anyString(), eq(null), eq("SYSTEM"));
+        verify(erc3643Api, never()).revokeComplianceClaims(any(), any(), any(), any(), anyMap());
+        assertThat(onlyRow().getTriggerReason()).isEqualTo("ENTITY_SUSPENDED");
+
+        entity.setStatus(de.makibytes.registerwerk.customer.api.EntityStatus.CLOSED);
+        when(erc3643Api.revokeComplianceClaims(any(), any(), any(), any(), anyMap())).thenReturn(0);
+        listener.on(new de.makibytes.registerwerk.customer.events.CustomerOffboardedEvent(entityId, null, null, "exit"));
+        verify(erc3643Api).revokeComplianceClaims(eq(entityId), eq(chainId), eq(null), eq("SYSTEM"), anyMap());
+        assertThat(onlyRow().getTriggerReason()).isEqualTo("ENTITY_CLOSED");
+    }
+
+    @Test
+    @DisplayName("reactivation never reinstates on chain: it raises CHAIN_REINSTATEMENT_REQUIRED for a suspended org")
+    void reactivation_raisesTask() {
+        registration.setStatus(OrgRegistrationStatus.SUSPENDED);
+        when(propagationRepository.findByLegalEntityId(entityId)).thenReturn(List.of());
+        listener.on(new de.makibytes.registerwerk.customer.events.EntityReactivatedEvent(entityId, UUID.randomUUID(), null, Map.of()));
+        verify(taskPort).open(eq(entityId), eq("CHAIN_REINSTATEMENT_REQUIRED"), eq(""), anyString(), any());
+        verify(registrationService, never()).suspend(any(), anyString(), any(), anyString());
     }
 }

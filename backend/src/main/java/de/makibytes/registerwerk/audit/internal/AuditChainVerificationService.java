@@ -1,5 +1,7 @@
 package de.makibytes.registerwerk.audit.internal;
 
+import de.makibytes.registerwerk.audit.api.AuditAnchor;
+import de.makibytes.registerwerk.audit.api.AuditAnchorSink;
 import de.makibytes.registerwerk.audit.api.SigningKeyProvider;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -40,12 +42,17 @@ public class AuditChainVerificationService implements HealthIndicator {
     private static final Logger log = LoggerFactory.getLogger(AuditChainVerificationService.class);
     private static final int BATCH_SIZE = 2000;
 
-    record VerificationResult(boolean valid, long rowsChecked, Long firstBrokenSeq, Instant checkedAt) {}
+    record VerificationResult(boolean valid, long rowsChecked, Long firstBrokenSeq, Instant checkedAt, String reason) {
+        VerificationResult(boolean valid, long rowsChecked, Long firstBrokenSeq, Instant checkedAt) {
+            this(valid, rowsChecked, firstBrokenSeq, checkedAt, null);
+        }
+    }
 
     private final AuditEventRepository repository;
     private final JdbcTemplate jdbc;
     private final AuditCanonicalJson canonicalJson;
     private final Optional<SigningKeyProvider> signingKeyProvider;
+    private final Optional<AuditAnchorSink> anchorSink;
     private final AtomicReference<VerificationResult> lastResult =
             new AtomicReference<>(new VerificationResult(true, 0, null, Instant.now()));
 
@@ -64,7 +71,9 @@ public class AuditChainVerificationService implements HealthIndicator {
     private long legacyHashGapMaxSequenceNo;
 
     AuditChainVerificationService(AuditEventRepository repository, JdbcTemplate jdbc, AuditCanonicalJson canonicalJson,
-                                  Optional<SigningKeyProvider> signingKeyProvider, MeterRegistry meterRegistry) {
+                                  Optional<SigningKeyProvider> signingKeyProvider, Optional<AuditAnchorSink> anchorSink,
+                                  MeterRegistry meterRegistry) {
+        this.anchorSink = anchorSink;
         this.repository = repository;
         this.jdbc = jdbc;
         this.canonicalJson = canonicalJson;
@@ -74,6 +83,10 @@ public class AuditChainVerificationService implements HealthIndicator {
         // current lastResult/key age — no separate push step needed.
         Gauge.builder("registerwerk_audit_chain_valid", lastResult, r -> r.get().valid() ? 1.0 : 0.0)
                 .description("1 if the audit hash chain's last verification was valid, 0 if broken")
+                .register(meterRegistry);
+
+        Gauge.builder("registerwerk_audit_chain_tip_age_seconds", this, AuditChainVerificationService::tipAgeSeconds)
+                .description("Seconds since the audit chain tip was last advanced")
                 .register(meterRegistry);
 
         signingKeyProvider.ifPresent(provider ->
@@ -94,13 +107,13 @@ public class AuditChainVerificationService implements HealthIndicator {
         }
         return Health.down()
                 .withDetail("firstBrokenSequenceNo", r.firstBrokenSeq())
+                .withDetail("reason", String.valueOf(r.reason()))
                 .withDetail("rowsChecked", r.rowsChecked())
                 .withDetail("checkedAt", r.checkedAt())
                 .build();
     }
 
     /** Result of verifying one page: how far continuity got, and where/why it broke (if it did). */
-    private record PageOutcome(long rowsChecked, byte[] continuedPrevHash, Long brokenSeq, String brokenReason) {}
 
     /**
      * Nightly full-chain verification, paged to avoid loading the whole table into memory.
@@ -127,82 +140,181 @@ public class AuditChainVerificationService implements HealthIndicator {
         return lastResult.get();
     }
 
+    private volatile long tipAgeCachedAt;
+    private volatile double tipAgeCached;
+
+    private double tipAgeSeconds() {
+        long now = System.currentTimeMillis();
+        if (now - tipAgeCachedAt > 15_000) {
+            try {
+                Double v = jdbc.queryForObject(
+                        "SELECT EXTRACT(EPOCH FROM (now() - updated_at))::float8 FROM audit_chain_tip WHERE id = TRUE",
+                        Double.class);
+                tipAgeCached = v != null ? v : 0.0;
+            } catch (RuntimeException e) {
+                tipAgeCached = -1;
+            }
+            tipAgeCachedAt = now;
+        }
+        return tipAgeCached;
+    }
+
+    /** Mutable scan state carried across pages. */
+    private static final class Scan {
+        byte[] expectedPrev;
+        boolean sawAny;
+        boolean afterLegacyGap;
+        byte[] lastHash;
+        Long lastSeq;
+        long count;
+    }
+
+    private record Break(Long seq, String reason) {}
+
     private VerificationResult runFullVerification() {
         log.info("Starting audit chain verification...");
-        long count = 0;
-        byte[] expectedPrevHash = null;
+        Scan scan = new Scan();
+        Long signingFrom = jdbc.queryForObject("SELECT signing_from_seq FROM audit_chain_meta WHERE id = TRUE", Long.class);
+        byte[] archivedAnchor = archivedAnchorHash();
+        Break broken = null;
 
-        for (int page = 0; ; page++) {
+        for (int page = 0; broken == null; page++) {
             Slice<AuditEvent> batch = repository.findAllSliceBy(
                     PageRequest.of(page, BATCH_SIZE, Sort.by(Sort.Direction.ASC, "sequenceNo")));
-
-            PageOutcome outcome = verifyPage(batch.getContent(), expectedPrevHash);
-            count += outcome.rowsChecked();
-            if (outcome.brokenSeq() != null) {
-                log.error("Audit chain BROKEN at sequence_no={}: {}", outcome.brokenSeq(), outcome.brokenReason());
-                VerificationResult result = new VerificationResult(false, count, outcome.brokenSeq(), Instant.now());
-                lastResult.set(result);
-                return result;
-            }
-            expectedPrevHash = outcome.continuedPrevHash();
-
+            broken = verifyPage(batch.getContent(), scan, signingFrom, archivedAnchor);
             if (batch.isLast()) {
                 break;
             }
         }
-
-        log.info("Audit chain verification complete: {} rows verified, chain intact.", count);
-        VerificationResult result = new VerificationResult(true, count, null, Instant.now());
+        if (broken == null) {
+            broken = verifyTailAndAnchors(scan);
+        }
+        VerificationResult result;
+        if (broken != null) {
+            log.error("Audit chain BROKEN at sequence_no={}: {}", broken.seq(), broken.reason());
+            result = new VerificationResult(false, scan.count, broken.seq(), Instant.now(), broken.reason());
+        } else {
+            log.info("Audit chain verification complete: {} rows verified, chain intact.", scan.count);
+            result = new VerificationResult(true, scan.count, null, Instant.now());
+        }
         lastResult.set(result);
         return result;
     }
 
-    /** Verifies one page in isolation; stops at the first mismatch instead of scanning past it. */
-    private PageOutcome verifyPage(java.util.List<AuditEvent> rows, byte[] expectedPrevHash) {
-        long checked = 0;
+    private byte[] archivedAnchorHash() {
+        var rows = jdbc.queryForList(
+                "SELECT entry_hash FROM audit_chain_anchor WHERE kind = 'ARCHIVED_UP_TO' ORDER BY sequence_no DESC LIMIT 1",
+                byte[].class);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /** Head/tail truncation, dropped partitions and rolled-back tips: compare with tip, anchors, sink. */
+    private Break verifyTailAndAnchors(Scan scan) {
+        var tip = jdbc.queryForMap("SELECT entry_hash, sequence_no FROM audit_chain_tip WHERE id = TRUE");
+        byte[] tipHash = (byte[]) tip.get("entry_hash");
+        Number tipSeq = (Number) tip.get("sequence_no");
+        if (tipHash != null && !Arrays.equals(tipHash, scan.lastHash)) {
+            return new Break(tipSeq != null ? tipSeq.longValue() : scan.lastSeq,
+                    "chain tail does not match audit_chain_tip (rows removed or tip rewritten)");
+        }
+        if (tipSeq != null && !tipSeq.equals(scan.lastSeq)) {
+            return new Break(tipSeq.longValue(), "last verified sequence_no differs from audit_chain_tip");
+        }
+        for (var a : jdbc.queryForList("SELECT sequence_no, entry_hash, sig FROM audit_chain_anchor WHERE kind = 'DAILY'")) {
+            long seq = ((Number) a.get("sequence_no")).longValue();
+            Break b = checkAnchor(seq, (byte[]) a.get("entry_hash"), (byte[]) a.get("sig"), "anchor");
+            if (b != null) {
+                return b;
+            }
+        }
+        if (anchorSink.isPresent()) {
+            Optional<AuditAnchor> ext = anchorSink.get().latest();
+            if (ext.isPresent()) {
+                var h = java.util.HexFormat.of();
+                return checkAnchor(ext.get().sequenceNo(), h.parseHex(ext.get().entryHashHex()),
+                        ext.get().sigHex() != null ? h.parseHex(ext.get().sigHex()) : null, "external anchor");
+            }
+        }
+        return null;
+    }
+
+    private Break checkAnchor(long seq, byte[] hash, byte[] sig, String what) {
+        var rows = jdbc.queryForList("SELECT entry_hash FROM audit_event WHERE sequence_no = ?", byte[].class, seq);
+        if (rows.isEmpty()) {
+            return new Break(seq, what + " references sequence_no " + seq + " which is missing (tail truncated or partition dropped)");
+        }
+        if (!Arrays.equals(rows.get(0), hash)) {
+            return new Break(seq, what + " hash differs from the row at sequence_no " + seq + " (history rewritten)");
+        }
+        if (sig != null && signingKeyProvider.isPresent()
+                && !signingKeyProvider.get().verify(AuditAnchorService.anchorDigest(seq, hash), sig)) {
+            return new Break(seq, what + " signature invalid at sequence_no " + seq);
+        }
+        return null;
+    }
+
+    /** Verifies one page; returns the first break or null, carrying continuity in {@code scan}. */
+    private Break verifyPage(java.util.List<AuditEvent> rows, Scan scan, Long signingFrom, byte[] archivedAnchor) {
         for (AuditEvent e : rows) {
-            checked++;
+            scan.count++;
             Long seq = e.getSequenceNo();
             byte[] prevHash = e.getPrevHash();
             byte[] entryHash = e.getEntryHash();
 
             if (entryHash == null) {
                 if (seq == null || seq > legacyHashGapMaxSequenceNo) {
-                    return new PageOutcome(checked, null, seq,
-                            "NULL entry_hash beyond the configured legacy-gap cutoff "
-                                    + "(registerwerk.audit.legacy-hash-gap-max-sequence-no="
-                                    + legacyHashGapMaxSequenceNo + ") — possible unchained/out-of-band insert");
+                    return new Break(seq, "NULL entry_hash beyond the configured legacy-gap cutoff "
+                            + "(registerwerk.audit.legacy-hash-gap-max-sequence-no="
+                            + legacyHashGapMaxSequenceNo + ") — possible unchained/out-of-band insert");
                 }
-                // Known historical gap (rows written before the chain-append fix shipped),
-                // at or before the configured cutoff — continuity resets here rather than
-                // failing the whole chain.
-                expectedPrevHash = null;
+                // Known historical gap: continuity resets here rather than failing the whole chain.
+                scan.expectedPrev = null;
+                scan.afterLegacyGap = true;
+                scan.sawAny = true;
                 continue;
             }
 
-            if (expectedPrevHash != null && !Arrays.equals(prevHash, expectedPrevHash)) {
-                return new PageOutcome(checked, null, seq, "prev_hash pointer mismatch");
+            if (!scan.sawAny && !scan.afterLegacyGap) {
+                // Head check: the first row must be the genesis or follow the recorded archive point.
+                if (prevHash != null && (archivedAnchor == null || !Arrays.equals(prevHash, archivedAnchor))) {
+                    return new Break(seq, "first row is not the chain genesis (head truncated or partition dropped)");
+                }
+            } else if (scan.expectedPrev != null && !Arrays.equals(prevHash, scan.expectedPrev)) {
+                return new Break(seq, "prev_hash pointer mismatch");
             }
+            scan.sawAny = true;
 
-            byte[] recomputed = sha256(prevHash,
-                    canonicalJson.canonicalize(e.getEventType(), e.getSubjectType(), e.getSubjectId(), e.getPayload()),
-                    seq);
+            byte[] recomputed;
+            try {
+                recomputed = sha256(prevHash, canonicalJson.canonicalize(e), seq);
+            } catch (IllegalArgumentException ex) {
+                return new Break(seq, ex.getMessage());
+            }
             if (!Arrays.equals(recomputed, entryHash)) {
-                return new PageOutcome(checked, null, seq, "content hash mismatch (tampered payload?)");
+                return new Break(seq, "content hash mismatch (tampered row?)");
             }
 
-            // Only attempted when both a signing key and a stored signature exist — rows
-            // written before signing was opted into have no entry_sig, and a provider that's
-            // since been removed/reconfigured can't retroactively re-verify old rows; neither
-            // case weakens the mandatory hash-chain check above, which always runs.
-            if (e.getEntrySig() != null && signingKeyProvider.isPresent()
-                    && !signingKeyProvider.get().verify(entryHash, e.getEntrySig())) {
-                return new PageOutcome(checked, null, seq, "entry_sig verification failed (tampered or wrong signing key)");
+            // From the signing watermark on, a missing signature is a break (a rewritten suffix with
+            // NULL signatures must not verify). Before it (signing not yet enabled) NULL is expected.
+            boolean mustBeSigned = signingFrom != null && seq != null && seq >= signingFrom;
+            if (mustBeSigned && e.getEntrySig() == null) {
+                return new Break(seq, "entry_sig missing at or after the signing watermark (" + signingFrom + ")");
+            }
+            if (e.getEntrySig() != null) {
+                if (signingKeyProvider.isEmpty()) {
+                    if (mustBeSigned) {
+                        return new Break(seq, "signed rows exist but no signing key provider is configured");
+                    }
+                } else if (!signingKeyProvider.get().verify(entryHash, e.getEntrySig())) {
+                    return new Break(seq, "entry_sig verification failed (tampered or wrong signing key)");
+                }
             }
 
-            expectedPrevHash = entryHash;
+            scan.expectedPrev = entryHash;
+            scan.lastHash = entryHash;
+            scan.lastSeq = seq;
         }
-        return new PageOutcome(checked, expectedPrevHash, null, null);
+        return null;
     }
 
     /** Returns the current hash-chain tip (for anchoring / external attestation). */

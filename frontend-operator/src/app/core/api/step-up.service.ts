@@ -15,18 +15,34 @@ export class StepUpService {
    * Exchange a TOTP code for a short-lived step-up JWT (acr=stepup).
    * The returned token must be used as the Authorization Bearer for @RequiresStepUp endpoints.
    *
-   * @param action the exact `@RequiresStepUp(reason=...)` value of the action this token will
-   *   be used to approve. Required when minting a token that will be
-   *   used as a dual-control APPROVER's token — the backend's StepUpTokenValidator rejects any
-   *   dual-control approval whose token has no `stepup_scope` claim, or one that doesn't exactly
-   *   match the target action's reason string. Previously this was never sent, so every
-   *   dual-control (requireSecondApprover=true) action failed unconditionally.
+   * Your OWN step-up token (the initiator's) is minted with only `totpCode`. Passing `action`
+   * makes this a dual-control APPROVER token, and the backend then requires `target` too: the
+   * exact `"METHOD /api/v1/path[?query]"` of the call being approved (and `targetBody`, the JSON
+   * body, for body-bound reasons such as mint/burn/forced transfer). The approver token lives
+   * 5 minutes, works for that one request and is burnt by a single use, even a failed one.
    */
-  issueToken(totpCode: string, action?: string): Observable<StepUpTokenResponse> {
+  issueToken(totpCode: string, action?: string, target?: string, targetBody?: unknown): Observable<StepUpTokenResponse> {
     return this.http.post<StepUpTokenResponse>(`${environment.apiUrl}/auth/step-up`, {
       code: totpCode,
       method: 'TOTP',
       action: action ?? undefined,
+      target: action ? (target ?? undefined) : undefined,
+      targetBody: action && targetBody !== undefined ? targetBody : undefined,
     });
+  }
+
+  /** Starts TOTP enrolment; re-proves the account password. IdP-managed accounts get 403. */
+  enroll(currentPassword: string): Observable<{ secret: string; otpauthUri: string }> {
+    return this.http.post<{ secret: string; otpauthUri: string }>(
+      `${environment.apiUrl}/auth/step-up/enroll`, { currentPassword });
+  }
+
+  confirmEnrollment(code: string): Observable<void> {
+    return this.http.post<void>(`${environment.apiUrl}/auth/step-up/enroll/confirm`, { code });
+  }
+
+  /** Removes the authenticator (needs a current code); ends all sessions of the user. */
+  disenroll(code: string): Observable<void> {
+    return this.http.post<void>(`${environment.apiUrl}/auth/step-up/disenroll`, { code });
   }
 }

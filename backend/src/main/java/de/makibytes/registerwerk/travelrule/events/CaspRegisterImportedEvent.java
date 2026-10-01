@@ -9,7 +9,11 @@ import java.util.UUID;
  * itself (there is no single row to key this event on) — {@code details} carries the
  * created/updated/failed counts and source label.
  */
-public record CaspRegisterImportedEvent(UUID importId, UUID actorId, String actorRole, Map<String, Object> details) implements AuditableEvent {
+public record CaspRegisterImportedEvent(UUID importId, UUID actorId, String actorRole, Map<String, Object> details,
+        UUID dualControlApproverId) implements AuditableEvent {
+    public CaspRegisterImportedEvent(UUID importId, UUID actorId, String actorRole, Map<String, Object> details) {
+        this(importId, actorId, actorRole, details, null);
+    }
     public String eventType()   { return "CASP_REGISTER_IMPORTED"; }
     public String subjectType() { return "CaspRegisterImport"; }
     public UUID   subjectId()   { return importId; }

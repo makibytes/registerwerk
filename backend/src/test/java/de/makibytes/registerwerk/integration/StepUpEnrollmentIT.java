@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.auth.web.dto.LoginRequest;
 import de.makibytes.registerwerk.auth.web.dto.LoginResponse;
 import de.makibytes.registerwerk.stepup.internal.StepUpTokenIssuer;
 import de.makibytes.registerwerk.stepup.web.dto.StepUpRequest;
+import de.makibytes.registerwerk.stepup.web.dto.TotpEnrollmentRequest;
 import de.makibytes.registerwerk.stepup.web.dto.StepUpResponse;
 import de.makibytes.registerwerk.stepup.web.dto.TotpEnrollmentConfirmRequest;
 import de.makibytes.registerwerk.stepup.web.dto.TotpEnrollmentResponse;
@@ -107,7 +108,7 @@ class StepUpEnrollmentIT {
 
         ResponseEntity<TotpEnrollmentResponse> enrollResponse = rest.postForEntity(
                 "/api/v1/auth/step-up/enroll",
-                new HttpEntity<>(null, authHeaders()),
+                new HttpEntity<>(new TotpEnrollmentRequest(ADMIN_PASSWORD), authHeaders()),
                 TotpEnrollmentResponse.class);
         assertThat(enrollResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         String secret = enrollResponse.getBody().secret();
@@ -126,12 +127,14 @@ class StepUpEnrollmentIT {
         // A second enroll attempt must now be refused — already active.
         ResponseEntity<String> secondEnroll = rest.postForEntity(
                 "/api/v1/auth/step-up/enroll",
-                new HttpEntity<>(null, authHeaders()),
+                new HttpEntity<>(new TotpEnrollmentRequest(ADMIN_PASSWORD), authHeaders()),
                 String.class);
         assertThat(secondEnroll.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
 
         // A fresh code from the now-enrolled secret must successfully mint a step-up token.
-        long stepUpStep = Instant.now().getEpochSecond() / 30;
+        // The enrolment code consumed the current time step (replay protection records it at confirm), so
+        // the step-up code must come from the next step - still inside the +-1 step window.
+        long stepUpStep = Instant.now().getEpochSecond() / 30 + 1;
         String stepUpCode = StepUpTokenIssuer.generateTotp(secret, stepUpStep);
         ResponseEntity<StepUpResponse> stepUpResponse = rest.postForEntity(
                 "/api/v1/auth/step-up",

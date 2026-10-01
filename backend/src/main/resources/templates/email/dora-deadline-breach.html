@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<body style="font-family: Arial, sans-serif; color: #111827;">
+  <p>A DORA ICT incident has missed a reporting deadline.</p>
+  <p>
+    Incident: <strong th:text="${title}">Incident title</strong> (<span th:text="${incidentId}">id</span>)<br/>
+    Missed: <span th:text="${breachType}">initial_report</span><br/>
+    Deadline: <span th:text="${deadline}">2026-01-01T00:00:00Z</span>
+  </p>
+  <p>Submit the outstanding report to the competent authority and record it on the incident in the operator portal. This alert repeats every few hours until the report is recorded.</p>
+</body>
+</html>

@@ -1,6 +1,9 @@
 package de.makibytes.registerwerk.dora.web;
 
 import de.makibytes.registerwerk.dora.api.IctIncident;
+import de.makibytes.registerwerk.dora.api.IctIncidentReport;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpBearerAccepted;
 import de.makibytes.registerwerk.dora.api.ResilienceTest;
 import de.makibytes.registerwerk.dora.api.ThirdPartyProvider;
 import de.makibytes.registerwerk.dora.internal.DoraService;
@@ -16,9 +19,12 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.UUID;
 
 /**
@@ -41,7 +47,13 @@ public class DoraController {
 
     @GetMapping("/incidents")
     public ResponseEntity<List<IctIncidentResponse>> listOpenIncidents() {
-        return ResponseEntity.ok(doraService.listOpen().stream().map(IctIncidentResponse::from).toList());
+        return ResponseEntity.ok(doraService.listOpen().stream()
+                .map(i -> IctIncidentResponse.from(i, doraService.closeBlockers(i), List.of())).toList());
+    }
+
+    @GetMapping("/incidents/{id}")
+    public ResponseEntity<IctIncidentResponse> getIncident(@PathVariable UUID id) {
+        return ResponseEntity.ok(detail(id));
     }
 
     @PostMapping("/incidents")
@@ -53,11 +65,27 @@ public class DoraController {
                 req.title(), req.description(),
                 IctIncident.Category.valueOf(req.category()),
                 IctIncident.Severity.valueOf(req.severity()),
+                req.awarenessAt(), req.classificationReason(), req.classificationCriteria(),
                 req.sourceEventType(), req.sourceEventRef(), actorId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(IctIncidentResponse.from(incident));
+        return ResponseEntity.status(HttpStatus.CREATED).body(IctIncidentResponse.from(incident, doraService.closeBlockers(incident), List.of()));
+    }
+
+    /** (Re)classify: severity + mandatory reason (+ criteria). Withdrawing MAJOR also needs a second approver. */
+    @PostMapping("/incidents/{id}/classify")
+    @RequiresStepUp(reason = "DORA_INCIDENT_CLASSIFY")
+    public ResponseEntity<IctIncidentResponse> classify(
+            @PathVariable UUID id,
+            @RequestBody @Valid ClassifyRequest req,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID actorId = UUID.fromString(jwt.getSubject());
+        doraService.classify(id, IctIncident.Severity.valueOf(req.severity()), req.reason(), req.criteria(), actorId);
+        return ResponseEntity.ok(detail(id));
     }
 
     @PatchMapping("/incidents/{id}/status")
+    // Closing a MAJOR incident goes through DualControlGate, which needs the caller's step-up token as
+    // bearer; the marker lets StepUpTokenAsSessionGuard accept it here (other status updates need none).
+    @StepUpBearerAccepted
     public ResponseEntity<IctIncidentResponse> updateStatus(
             @PathVariable UUID id,
             @RequestBody @Valid UpdateStatusRequest req,
@@ -66,7 +94,7 @@ public class DoraController {
         IctIncident incident = doraService.updateStatus(
                 id, IctIncident.Status.valueOf(req.status()),
                 req.rootCause(), req.remediationSteps(), actorId);
-        return ResponseEntity.ok(IctIncidentResponse.from(incident));
+        return ResponseEntity.ok(detail(incident.getId()));
     }
 
     @PostMapping("/incidents/{id}/report-to-authority")
@@ -75,8 +103,16 @@ public class DoraController {
             @RequestBody @Valid ReportToAuthorityRequest req,
             @AuthenticationPrincipal Jwt jwt) {
         UUID actorId = UUID.fromString(jwt.getSubject());
-        IctIncident incident = doraService.markReportedToAuthority(id, req.authorityRef(), req.isFinalReport(), actorId);
-        return ResponseEntity.ok(IctIncidentResponse.from(incident));
+        IctIncidentReport.Type type = req.reportType() != null && !req.reportType().isBlank()
+                ? IctIncidentReport.Type.valueOf(req.reportType())
+                : Boolean.TRUE.equals(req.isFinalReport()) ? IctIncidentReport.Type.FINAL : IctIncidentReport.Type.INITIAL;
+        doraService.markReportedToAuthority(id, type, req.authorityRef(), req.note(), req.submittedAt(), actorId);
+        return ResponseEntity.ok(detail(id));
+    }
+
+    private IctIncidentResponse detail(UUID id) {
+        IctIncident incident = doraService.getIncident(id);
+        return IctIncidentResponse.from(incident, doraService.closeBlockers(incident), doraService.listReports(id));
     }
 
     /**
@@ -99,18 +135,31 @@ public class DoraController {
         rows.add(List.of("Status", i.getStatus()));
         rows.add(List.of("Title", i.getTitle()));
         rows.add(List.of("Description", nullToEmpty(i.getDescription())));
-        rows.add(List.of("Detected at", i.getDetectedAt()));
+        rows.add(List.of("Entered in register at", i.getDetectedAt()));
+        rows.add(List.of("Awareness time", i.getAwarenessAt()));
         rows.add(List.of("Classified as major at", nullToEmpty(i.getClassifiedAt())));
-        rows.add(List.of("Classification deadline (4h)", nullToEmpty(i.getClassificationDeadline())));
-        rows.add(List.of("Initial notification deadline (24h)", nullToEmpty(i.getInitialReportDeadline())));
-        rows.add(List.of("Final report deadline (72h)", nullToEmpty(i.getFinalReportDeadline())));
+        rows.add(List.of("Classification reason", nullToEmpty(i.getClassificationReason())));
+        rows.add(List.of("Classification criteria", nullToEmpty(i.getClassificationCriteria())));
+        rows.add(List.of("Initial notification deadline, 4h from classification", nullToEmpty(i.getClassificationDeadline())));
+        rows.add(List.of("Initial notification deadline, 24h from awareness", nullToEmpty(i.getInitialReportDeadline())));
+        rows.add(List.of("Intermediate report deadline (72h after initial notification)", nullToEmpty(i.getIntermediateReportDeadline())));
+        rows.add(List.of("Final report deadline (1 month from awareness)", nullToEmpty(i.getFinalReportDeadline())));
         rows.add(List.of("Initial report submitted at", nullToEmpty(i.getInitialReportedAt())));
+        rows.add(List.of("Intermediate report submitted at", nullToEmpty(i.getIntermediateReportedAt())));
         rows.add(List.of("Final report submitted at", nullToEmpty(i.getFinalReportedAt())));
-        rows.add(List.of("Authority reference", nullToEmpty(i.getAuthorityRef())));
+        rows.add(List.of("Authority reference (initial notification)", nullToEmpty(i.getAuthorityRef())));
+        int n = 0;
+        for (IctIncidentReport r : doraService.listReports(id)) {
+            n++;
+            rows.add(List.of("Report " + n + " (" + r.getReportType() + ")",
+                    r.getSubmittedAt() + " ref=" + nullToEmpty(r.getAuthorityRef())
+                            + (r.getNote() != null ? " note=" + r.getNote() : "")));
+        }
         rows.add(List.of("Contained at", nullToEmpty(i.getContainedAt())));
         rows.add(List.of("Resolved at", nullToEmpty(i.getResolvedAt())));
         rows.add(List.of("Root cause", nullToEmpty(i.getRootCause())));
         rows.add(List.of("Remediation actions taken", nullToEmpty(i.getRemediationSteps())));
+        rows = rows.stream().map(DoraController::safeRow).toList();
         String csv = CsvWriter.write(header, rows);
         return ResponseEntity.ok()
                 .header("Content-Disposition", "attachment; filename=\"dora-incident-report-" + id + ".csv\"")
@@ -144,7 +193,7 @@ public class DoraController {
                 "contractStart", "contractEnd", "subOutsourcing", "subOutsourcingDetails",
                 "primaryContact", "slaAvailabilityPct", "rtoHours", "rpoHours",
                 "notifiedAuthority", "notifiedAt", "notes");
-        List<List<Object>> rows = doraService.listProviders().stream().map(p -> List.<Object>of(
+        List<List<Object>> rows = doraService.listProviders().stream().map(p -> safeRow(List.<Object>of(
                 p.getName(), nullToEmpty(p.getCategory()), p.getCriticality(),
                 nullToEmpty(p.getLei()), nullToEmpty(p.getCountry()),
                 nullToEmpty(p.getContractStart()), nullToEmpty(p.getContractEnd()),
@@ -153,7 +202,7 @@ public class DoraController {
                 nullToEmpty(p.getRtoHours()), nullToEmpty(p.getRpoHours()),
                 p.isNotifiedAuthority() ? "Y" : "N", nullToEmpty(p.getNotifiedAt()),
                 nullToEmpty(p.getNotes())
-        )).toList();
+        ))).toList();
         String csv = CsvWriter.write(header, rows);
         return ResponseEntity.ok()
                 .header("Content-Disposition", "attachment; filename=\"dora-register-of-information.csv\"")
@@ -191,6 +240,27 @@ public class DoraController {
     }
 
     private static Object nullToEmpty(Object v) { return v == null ? "" : v; }
+
+    private static final Pattern PLAIN_NUMBER = Pattern.compile("[+-]?\\d+([.,]\\d+)?");
+    private static final Pattern ISO_DATE_TIME = Pattern.compile(
+            "\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:?\\d{2})?)?");
+
+    private static List<Object> safeRow(List<Object> row) {
+        return row.stream().map(DoraController::csvSafe).toList();
+    }
+
+    /**
+     * CSV formula-injection guard for issuer/user-supplied text: a text cell that spreadsheet software
+     * would evaluate (leading {@code = + - @}, tab or CR) is prefixed with an apostrophe. Real numbers and
+     * ISO dates/instants, and non-text values, are left untouched.
+     */
+    static Object csvSafe(Object v) {
+        if (!(v instanceof String s) || s.isEmpty()) return v;
+        char c = s.charAt(0);
+        if (c != '=' && c != '+' && c != '-' && c != '@' && c != '\t' && c != '\r') return v;
+        if (PLAIN_NUMBER.matcher(s).matches() || ISO_DATE_TIME.matcher(s).matches()) return v;
+        return "'" + s;
+    }
 
     // ── Resilience Testing ─────────────────────────────────────────────────────
 
@@ -260,8 +330,19 @@ public class DoraController {
             String description,
             @NotBlank String category,
             @NotBlank String severity,
+            /** When the operator became aware; default now, never in the future, immutable afterwards. */
+            Instant awarenessAt,
+            /** Required when severity is MAJOR. */
+            String classificationReason,
+            Map<String, Object> classificationCriteria,
             String sourceEventType,
             UUID sourceEventRef
+    ) {}
+
+    public record ClassifyRequest(
+            @NotBlank String severity,
+            @NotBlank String reason,
+            Map<String, Object> criteria
     ) {}
 
     public record UpdateStatusRequest(
@@ -270,25 +351,53 @@ public class DoraController {
             String remediationSteps
     ) {}
 
+    /** {@code reportType} INITIAL|INTERMEDIATE|FINAL; legacy {@code isFinalReport} still accepted when it is absent. */
     public record ReportToAuthorityRequest(
             @NotBlank String authorityRef,
-            @NotNull Boolean isFinalReport
+            Boolean isFinalReport,
+            String reportType,
+            String note,
+            Instant submittedAt
     ) {}
 
+    public record IctIncidentReportView(
+            UUID id, String reportType, String submittedAt, String authorityRef, UUID submittedBy,
+            String note, String recordedAt
+    ) {
+        static IctIncidentReportView from(IctIncidentReport r) {
+            return new IctIncidentReportView(r.getId(), r.getReportType().name(), r.getSubmittedAt().toString(),
+                    r.getAuthorityRef(), r.getSubmittedBy(), r.getNote(), r.getRecordedAt().toString());
+        }
+    }
+
+    /**
+     * {@code closeBlockers}: why CLOSED is currently refused (CLASSIFICATION_PENDING, INITIAL_REPORT_MISSING,
+     * FINAL_REPORT_MISSING); closing a MAJOR incident additionally needs step-up and a second approver.
+     * {@code reports} is filled on the detail/mutation responses only.
+     */
     public record IctIncidentResponse(
             UUID id, String title, String category, String severity, String status,
-            String detectedAt, String initialReportDeadline, String finalReportDeadline,
-            String initialReportedAt, String finalReportedAt, String authorityRef,
-            String rootCause, String remediationSteps, String resolvedAt
+            String detectedAt, String awarenessAt, String classifiedAt, String classificationReason,
+            Map<String, Object> classificationCriteria, boolean classificationPending,
+            String classificationDeadline, String initialReportDeadline, String intermediateReportDeadline,
+            String finalReportDeadline,
+            String initialReportedAt, String intermediateReportedAt, String finalReportedAt, String authorityRef,
+            String downgradedAt, String downgradeReason, List<String> closeBlockers,
+            String rootCause, String remediationSteps, String resolvedAt,
+            List<IctIncidentReportView> reports
     ) {
-        static IctIncidentResponse from(IctIncident i) {
+        static IctIncidentResponse from(IctIncident i, List<String> closeBlockers, List<IctIncidentReport> reports) {
             return new IctIncidentResponse(
                     i.getId(), i.getTitle(),
                     i.getCategory().name(), i.getSeverity().name(), i.getStatus().name(),
-                    ts(i.getDetectedAt()), ts(i.getInitialReportDeadline()), ts(i.getFinalReportDeadline()),
-                    ts(i.getInitialReportedAt()), ts(i.getFinalReportedAt()),
-                    i.getAuthorityRef(), i.getRootCause(), i.getRemediationSteps(),
-                    ts(i.getResolvedAt()));
+                    ts(i.getDetectedAt()), ts(i.getAwarenessAt()), ts(i.getClassifiedAt()), i.getClassificationReason(),
+                    i.getClassificationCriteria(), i.isClassificationPending(),
+                    ts(i.getClassificationDeadline()), ts(i.getInitialReportDeadline()),
+                    ts(i.getIntermediateReportDeadline()), ts(i.getFinalReportDeadline()),
+                    ts(i.getInitialReportedAt()), ts(i.getIntermediateReportedAt()), ts(i.getFinalReportedAt()),
+                    i.getAuthorityRef(), ts(i.getDowngradedAt()), i.getDowngradeReason(), closeBlockers,
+                    i.getRootCause(), i.getRemediationSteps(), ts(i.getResolvedAt()),
+                    reports.stream().map(IctIncidentReportView::from).toList());
         }
         private static String ts(java.time.Instant t) { return t != null ? t.toString() : null; }
     }

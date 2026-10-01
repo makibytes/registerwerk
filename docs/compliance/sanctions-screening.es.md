@@ -40,7 +40,6 @@ flowchart LR
 
     subgraph Adapters
         A1[OpenSanctionsAdapter — default]
-        A2[RefinitivWorldCheckAdapter — commercial]
     end
 
     subgraph Results
@@ -52,8 +51,7 @@ flowchart LR
     T2 & T3 & T5 --> SBO
     SS & SBO --> P
     P --> A1
-    P --> A2
-    A1 & A2 --> SR
+    A1 --> SR
     SR --> SH
     SH -->|Unresolved| KG[KycService — blocks approval]
 ```
@@ -74,9 +72,11 @@ El `OpenSanctionsAdapter` compara las siguientes listas de forma predeterminada:
 | Lista de congelación BaFin / UE | BaFin a través de OpenSanctions | Adiciones de congelación interna alemana |
 | Lista UE PEP | Agregación OpenSanctions | Personas políticamente expuestas |
 
-OpenSanctions proporciona una API REST unificada que cubre todas estas listas. El adaptador almacena en caché el conjunto de datos completo localmente (se actualiza cada 24 horas) y realiza coincidencias aproximadas con nombres de entidades, alias, fechas de nacimiento y números de pasaporte.
+OpenSanctions proporciona una API REST unificada que cubre todas estas listas. Cada cribado es una llamada a la API (sin conjunto de datos local). El adaptador envía nombre, país, LEI y número de registro para sociedades, y nombre, país, fecha de nacimiento y nacionalidad para personas físicas; los números de pasaporte no se comparan. El umbral es `registerwerk.screening.match-threshold` (0,85 por defecto) y se guarda en cada ejecución, junto con la versión del conjunto de datos si la API la informa. La API pública gratuita tiene límite de tasa y no tiene SLA; un proveedor con licencia requiere un segundo adaptador de `SanctionsScreeningPort` (no se incluye ninguno). Solo se criba la entidad y sus titulares reales registrados, no administradores, firmantes, cadenas de control ni direcciones de wallet.
 
-Para implementaciones que requieren mayor confianza, `RefinitivWorldCheckAdapter` (comercial) puede habilitarse configurando `REFINITIV_WORLDCHECK_API_KEY` en el entorno.
+**Recribados y caídas.** Una coincidencia reencontrada que un oficial y un segundo aprobador ya aceptaron como falso positivo se traslada durante 90 días (mismo registro del proveedor, misma categoría, puntuación como máximo 0,05 mayor), con una entrada de auditoría por traslado; todo lo demás se reabre. Si el proveedor falla, se usa el último buen resultado como máximo 24 horas tras la primera ejecución fallida (nunca si tiene más de 72 horas). El estado degradado es visible (métricas `registerwerk_screening_degraded_subjects` y `registerwerk_screening_stale_results`, alerta auditada), los sujetos fallidos se reintentan cada 30 minutos, los nunca cribados siguen bloqueados y, pasado el plazo de gracia, el error vuelve a bloquear.
+
+**Categorías.** Una coincidencia etiquetada como sanción y PEP es una coincidencia de sanción. Una coincidencia PEP en una persona física no es un falso positivo: se confirma (`CONFIRM_PEP`, step-up más segundo aprobador) y mantiene la puerta cerrada hasta que se registre una aprobación de diligencia reforzada (EDD).
 
 ---
 
@@ -153,13 +153,13 @@ Todas las resoluciones se escriben en el registro de auditoría con la identidad
 Después de que se encuentra una coincidencia y no se puede resolver de inmediato, cada jurisdicción tiene obligaciones de escalada específicas:
 
 === "Alemania (DE_EWPG)"
-    Envíe un informe de actividad sospechosa (SAR) a **BaFin** y, si se sospecha de blanqueo de capitales, a la **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. El módulo `screening` almacena la referencia del SAR en `ScreeningHit.regulatoryRef`.
+    Envíe un informe de actividad sospechosa (SAR) a **BaFin** y, si se sospecha de blanqueo de capitales, a la **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. La presentación se realiza fuera de la plataforma; Registerwerk no almacena ninguna referencia.
 
 === "Luxemburgo (LU_CSSF)"
     Envíe un informe a la **CSSF Cellule Juridique de Prévention (JFP)**. Para casos graves, escale a la **CRF (Cellule de Renseignement Financier)**.
 
 === "Francia (FR_AMF)"
-    Envíe un informe a **TRACFIN** a través del mecanismo de notificación de la AMF/ACPR. El `ScreeningService` registra la referencia de TRACFIN una vez presentada.
+    Envíe un informe a **TRACFIN** a través del mecanismo de notificación de la AMF/ACPR. La presentación se realiza fuera de la plataforma; Registerwerk no almacena ninguna referencia.
 
 === "Liechtenstein (LI_TVTG)"
     Notifique a la **FMA** (cumplimiento de sanciones) y presente el informe a la **FIU Liechtenstein** en casos graves.

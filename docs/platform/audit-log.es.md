@@ -128,3 +128,15 @@ Devuelve:
 ```
 
 Si `brokenAt` no es nulo, contiene el `sequence_no` de la primera entrada donde se rompe la cadena hash. Esto activa un `IctIncident` automático de gravedad `MAJOR` y categoría `INTEGRITY`.
+
+---
+
+## Modelo de integridad (canónico v2, anclas, reintento)
+
+- **Versión canónica.** Cada fila lleva `canon_version`. La versión 2 cubre `eventType`, sujeto, carga útil, **id y rol del actor, hora del evento (`occurred_at`, época en microsegundos), id de correlación y vínculo de reversión**: modificar cualquiera rompe la cadena. Las filas de versión 1 (escritas antes de este cambio) se siguen verificando con el formato anterior; una versión desconocida hace fallar la verificación.
+- **Hora del evento.** `occurred_at` se captura de forma síncrona al publicar el evento, no al escribirlo de forma asíncrona; `recorded_at` es la hora de inserción. Las acciones que un operador realiza en nombre de un cliente (suplantación) se registran con el rol `REGISTRY_ADMIN_IMPERSONATING` y un objeto `_imp` con hash (sesión, operador, entidad, modo).
+- **La verificación** detecta: una primera fila que no es el origen de la cadena (cabecera truncada, partición eliminada), una última fila distinta de `audit_chain_tip`, filas eliminadas tras un ancla diaria firmada (`audit_chain_anchor`, publicada opcionalmente mediante un `AuditAnchorSink` externo) y una `entry_sig` ausente a partir del umbral de firma (primer número de secuencia firmado, de escritura única). Activar la firma más tarde no firma retroactivamente las filas anteriores.
+- **Exportación probatoria.** `/audit/events/export[/signed]` se ordena por `sequence_no` y comienza con un bloque `# key=value` (`firstSeq`, `lastSeq`, `rowCount`, `truncated`, `nextAfterSeq`, `tipSeq`, `tipEntryHash`); las filas incluyen `prevHash` y `entryHash`. La firma cubre cabecera y filas. `afterSeq` permite continuar una exportación truncada.
+- **Las escrituras fallidas** se reintentan cada minuto (publicaciones de más de dos minutos) y, tras `registerwerk.audit.max-attempts` (20) intentos, se mueven a `audit_event_dead_letter`. Configure alertas sobre `registerwerk_audit_oldest_incomplete_seconds` y `registerwerk_audit_dead_letter_count`.
+- **Propiedad de la tabla.** `REVOKE UPDATE, DELETE, TRUNCATE` y los disparadores WORM no vinculan al propietario de la tabla. Si el usuario de ejecución también lanza las migraciones, posee `audit_event`; en modo producción la comprobación de arranque falla entonces, salvo que `registerwerk.audit.allow-owner-runtime-role=true` reconozca el riesgo provisional. Remedio: usuarios separados para migración y ejecución (decisión abierta T6-17). El modo producción exige además un proveedor de clave de firma.
+- **Transición.** `registerwerk.audit.legacy-listener=true` (por defecto) procesa las publicaciones creadas antes de la actualización; desactívelo cuando `event_publication` ya no contenga filas de auditoría incompletas.

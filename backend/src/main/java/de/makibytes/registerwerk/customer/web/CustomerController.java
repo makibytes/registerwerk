@@ -12,6 +12,7 @@ import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
 import de.makibytes.registerwerk.customer.web.dto.EntityUpdateRequest;
 import de.makibytes.registerwerk.customer.web.dto.MergeEntityRequest;
+import de.makibytes.registerwerk.customer.web.dto.LifecycleReasonRequest;
 import de.makibytes.registerwerk.customer.web.dto.TerminateEntityRequest;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.shared.api.PageResponse;
@@ -132,6 +133,7 @@ public class CustomerController {
      */
     @RequestMapping(path = "/{id}", method = {RequestMethod.PUT, RequestMethod.PATCH})
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(reason = "ENTITY_MASTER_DATA_CHANGE")
     public ResponseEntity<EntityResponse> updateEntity(
             @PathVariable UUID id,
             @RequestBody @Valid EntityUpdateRequest request,
@@ -147,33 +149,49 @@ public class CustomerController {
     }
 
     /**
-     * Suspends a legal entity.
+     * Suspends an ACTIVE legal entity (reversible; the on-chain org is suspended too). Step-up and
+     * a second approver; the reason is mandatory and persisted.
      */
     @PostMapping("/{id}/suspend")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> suspendEntity(@PathVariable UUID id, Authentication auth) {
-        legalEntityService.suspendEntity(id, extractActorId(auth));
+    @RequiresStepUp(requireSecondApprover = true, reason = "ENTITY_SUSPEND")
+    public ResponseEntity<Void> suspendEntity(@PathVariable UUID id,
+                                              @RequestBody @Valid LifecycleReasonRequest request,
+                                              Authentication auth) {
+        legalEntityService.suspendEntity(id, extractActorId(auth), request.reason());
         return ResponseEntity.noContent().build();
     }
 
     /**
-     * Marks a legal entity as dissolved.
-     */
-    @PostMapping("/{id}/dissolve")
-    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> dissolveEntity(@PathVariable UUID id, Authentication auth) {
-        legalEntityService.dissolveEntity(id, extractActorId(auth));
-        return ResponseEntity.noContent().build();
-    }
-
-    /**
-     * Reactivates a suspended entity.
+     * Reactivates a SUSPENDED entity only (CLOSED/DISSOLVED are terminal, PENDING_ONBOARDING is
+     * activated by onboarding). Step-up, second approver and a reason; refused while KYC is
+     * EXPIRED/REJECTED, a screening hit is unresolved or a Sperrvermerk is active. The on-chain org
+     * stays suspended until an operator completes the {@code CHAIN_REINSTATEMENT_REQUIRED} task.
      */
     @PostMapping("/{id}/reactivate")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
-    public ResponseEntity<Void> reactivateEntity(@PathVariable UUID id, Authentication auth) {
-        legalEntityService.reactivateEntity(id, extractActorId(auth));
+    @RequiresStepUp(requireSecondApprover = true, reason = "ENTITY_REACTIVATE")
+    public ResponseEntity<Void> reactivateEntity(@PathVariable UUID id,
+                                                 @RequestBody @Valid LifecycleReasonRequest request,
+                                                 Authentication auth) {
+        legalEntityService.reactivateEntity(id, extractActorId(auth), request.reason());
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * The open obligations that {@link #terminateEntity} requires an acknowledgement for. (The
+     * former {@code POST /{id}/dissolve} is gone: DISSOLVED is reached only through a merger, an
+     * exit goes through terminate.)
+     */
+    @GetMapping("/{id}/offboarding-obligations")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    public ResponseEntity<List<Map<String, String>>> offboardingObligations(@PathVariable UUID id) {
+        legalEntityService.getEntity(id);
+        List<Map<String, String>> body = offboardingService.openObligations(id).stream()
+                .map(o -> Map.of("obligationId", o.id(), "kind", o.kind(), "refId", o.refId(),
+                        "description", o.description()))
+                .toList();
+        return ResponseEntity.ok(body);
     }
 
     /**
@@ -190,7 +208,7 @@ public class CustomerController {
                                                            @Valid @RequestBody TerminateEntityRequest request,
                                                            Authentication auth) {
         LegalEntity terminated = offboardingService.terminate(id, extractActorId(auth),
-                SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"), request.reason());
+                SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"), request.reason(), request.acknowledgements());
         return ResponseEntity.ok(toResponse(terminated, auth));
     }
 
@@ -220,13 +238,15 @@ public class CustomerController {
      */
     @PostMapping("/{id}/merge")
     @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ENTITY_MERGE")
     public ResponseEntity<EntityMergeRecord> mergeEntities(
             @PathVariable UUID id,
             @RequestBody @Valid MergeEntityRequest request,
             Authentication auth) {
         EntityMergeRecord record = legalEntityService.mergeEntities(
                 id, request.targetEntityId(), request.mergeType(),
-                request.effectiveDate(), request.notes(), extractActorId(auth));
+                request.effectiveDate(), request.notes(), extractActorId(auth),
+                request.reason(), request.evidenceDocumentId());
         return ResponseEntity.status(HttpStatus.CREATED).body(record);
     }
 
@@ -236,11 +256,13 @@ public class CustomerController {
      */
     @PostMapping("/{id}/classification")
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER')")
+    @RequiresStepUp(reason = "CLIENT_CLASSIFICATION")
     public ResponseEntity<EntityResponse> classifyClient(
             @PathVariable UUID id,
             @RequestBody @Valid de.makibytes.registerwerk.customer.web.dto.ClassifyClientRequest request,
             Authentication auth) {
-        LegalEntity updated = legalEntityService.classifyClient(id, request.clientCategory(), extractActorId(auth));
+        LegalEntity updated = legalEntityService.classifyClient(id, request.clientCategory(), extractActorId(auth),
+                request.reason(), request.evidenceDocumentId());
         return ResponseEntity.ok(toResponse(updated, auth));
     }
 

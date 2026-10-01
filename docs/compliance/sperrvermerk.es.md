@@ -60,7 +60,9 @@ La entidad `HolderBlock` en el módulo `kyc` almacena todos los bloques activos 
 stateDiagram-v2
     [*] --> ACTIVE : create (REGISTRY_ADMIN + step-up + 4-eyes)
     ACTIVE --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
-    ACTIVE --> EXPIRED : expiresAt reached (scheduler)
+    ACTIVE --> EXPIRY_REVIEW : expiresAt reached (scheduler, still blocking)
+    EXPIRY_REVIEW --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
+    ACTIVE --> EXPIRED : expiresAt reached, type in auto-expire-types
     LIFTED --> [*]
     EXPIRED --> [*]
 ```
@@ -77,7 +79,10 @@ stateDiagram-v2
 Se aplica el mismo flujo de autenticación reforzada (step-up) + doble control (4-eyes). Levantar el bloque llama al `unfreezeAddress()` correspondiente on-chain y borra el campo `HolderBlock.liftedAt`.
 
 **Vencimiento automático:**
-Un trabajo `@Scheduled` se ejecuta todas las noches, encuentra todos los registros `HolderBlock` cuyo `expiresAt < NOW()` y `liftedAt IS NULL`, los hace transicionar a `EXPIRED` e invoca el unfreeze on-chain correspondiente.
+Un trabajo `@Scheduled` se ejecuta todas las noches y encuentra todos los bloqueos ACTIVE con `expiresAt < NOW()`. Por defecto **ningún tipo de bloqueo vence automáticamente**: el bloqueo pasa a `EXPIRY_REVIEW`, sigue bloqueando (controles del registro y congelación on-chain) y se genera una tarea de operador y un correo a cumplimiento. Solo se levanta mediante el levantamiento normal (step-up + segundo aprobador). Los tipos listados en `registerwerk.sperrvermerk.auto-expire-types` (vacío por defecto) se siguen levantando automáticamente a `EXPIRED`.
+
+!!! note "Fechas de vencimiento (6-25)"
+    `expiresAt` debe estar en el futuro. Para los tipos judiciales y de autoridad (`GERICHTSBESCHLUSS`, `PFAENDUNG`, `INSOLVENZ`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `REGULATORISCH`), una fecha de vencimiento exige además `courtRef` o `documentId`, y el segundo aprobador la confirma frente a la orden. Al levantar el último bloqueo se liberan todas las congelaciones que ningún bloqueo restante cubre, en todos los activos de la wallet; los bloqueos de entidad cubren todas las wallets de titular de la entidad. Los bloqueos solo de wallet también son visibles para los controles del repo desk y de préstamos. Si algún tipo puede vencer automáticamente es una decisión legal aparcada (T6-11).
 
 ---
 

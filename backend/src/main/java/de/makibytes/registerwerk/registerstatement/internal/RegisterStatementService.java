@@ -135,7 +135,7 @@ public class RegisterStatementService {
     private DocumentContext buildContext(Asset asset, AssetHolder holder) {
         LegalEntity issuer = entityRepository.findById(asset.getIssuerId()).orElse(null);
         List<HolderBlock> blocks = blockRepository
-                .findByWalletAddressAndStatus(holder.getWalletAddress(), HolderBlock.Status.ACTIVE);
+                .findByWalletAddressAndStatusIn(holder.getWalletAddress(), HolderBlock.BLOCKING);
         AssetBondTerms bondTerms = bondTermsRepository.findById(asset.getId()).orElse(null);
         AssetDocument termSheet = documentRepository
                 .findByAssetIdAndDocumentTypeAndDeletedAtIsNull(asset.getId(), AssetDocumentType.TERM_SHEET)

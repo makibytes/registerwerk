@@ -134,7 +134,10 @@ class DelegatingJwtDecoderTest {
     @Test
     @DisplayName("an impersonation token also carries the local issuer, so it stays decodable")
     void impersonationToken_carriesLocalIssuer() {
-        Jwt decoded = localDecoder.decode(minting.mintImpersonationToken(user(), UUID.randomUUID()));
+        Jwt decoded = localDecoder.decode(minting.mintImpersonationToken(user(),
+                new de.makibytes.registerwerk.auth.api.ImpersonationSession(UUID.randomUUID(), userId, UUID.randomUUID(),
+                        de.makibytes.registerwerk.auth.api.ImpersonationMode.READ_ONLY, "support case reason", null, null,
+                        java.time.Instant.now().plusSeconds(600), "h", java.time.Instant.now().plusSeconds(60)), 600));
 
         assertThat(decoded.getClaimAsBoolean("imp")).isTrue();
         assertThat(decoded.getClaimAsString("iss")).isEqualTo(JwtMintingService.LOCAL_ISSUER);

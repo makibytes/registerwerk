@@ -136,8 +136,8 @@ sequenceDiagram
     participant Approver
     participant Backend
 
-    Approver->>Backend: POST /api/v1/auth/step-up { code, action }
-    Backend-->>Approver: approver token (acr=stepup, stepup_scope=action, 10 min)
+    Approver->>Backend: POST /api/v1/auth/step-up { code, action, target[, targetBody] }
+    Backend-->>Approver: approver token (acr=stepup, stepup_scope, stepup_target, jti; 5 min, single use)
     Approver->>Initiator: Hand over the approver token
     Initiator->>Backend: POST /api/v1/auth/step-up { code, action }
     Backend-->>Initiator: initiator step-up token
@@ -153,7 +153,22 @@ Invariantes clave aplicadas por `StepUpEnforcementAspect` y `StepUpTokenValidato
   control dentro de su ventana de validez
 - El aprobador debe seguir siendo un **`REGISTRY_ADMIN` habilitado en la base de datos**, no solo según las
   claims del token, que reflejan el estado únicamente en el momento en que se acuñó
-- Ambos tokens caducan a los 10 minutos
+- La aprobación está **vinculada a la solicitud para la que se concedió** (K3). El aprobador la emite con `action` *y* `target` (`"METHOD /ruta?query"` de la llamada exacta; para los motivos vinculados al cuerpo, como mint, burn y transferencia forzosa, también `targetBody`, el cuerpo JSON). El token lleva `stepup_target`, el SHA-256 en base64url de la solicitud canónica (`v1`, método en mayúsculas, ruta sin barra final, query ordenada y, para los motivos vinculados al cuerpo, el hash del JSON canónico: claves ordenadas, sin espacios, números decimales en forma simple). El backend calcula el mismo resumen a partir de la solicitud real; si difiere, la llamada se rechaza con **403**. Ya no se aceptan tokens sin destino
+- La aprobación es de **un solo uso**: su `jti` se escribe en `dual_control_token_use` junto con el evento de auditoría en una única transacción (un segundo uso, en cualquier réplica, da **403**). Una acción que falla después de consumirse la aprobación requiere una nueva aprobación
+- La aprobación solo se acepta durante una **ventana corta** tras su emisión (`registerwerk.auth.step-up.dual-control.window-seconds`, 300 s por defecto); el token de autenticación reforzada del iniciador conserva sus 10 minutos
+
+---
+
+## Alta de TOTP, almacenamiento y restablecimiento { #totp-enrolment-storage-reset }
+
+- **Sin confianza en el primer uso.** Iniciar un alta (`POST /api/v1/auth/step-up/enroll`) exige la contraseña actual de la cuenta en el cuerpo (`{ "currentPassword": "…" }`): una sesión robada o desatendida no puede vincular el autenticador de un atacante. Las contraseñas erróneas cuentan para el mismo bloqueo que los códigos erróneos. Las cuentas cuyo segundo factor gestiona un proveedor de identidad externo no pueden dar de alta un autenticador local. La confirmación (`/enroll/confirm`) consume el intervalo de tiempo del código, por lo que no puede reutilizarse como código de autenticación reforzada.
+- **Cifrado en reposo.** El secreto TOTP se cifra con cifrado de sobre (AES-256-GCM, una clave de datos nueva por valor envuelta por la KEK de la plataforma, el id de usuario como datos autenticados adicionales) en `app_user.totp_secret`; `totp_secret_kid` registra el proveedor de KEK. Los secretos guardados en claro por versiones anteriores se cifran mediante una tarea de arranque y, si esta falla, en la siguiente verificación correcta.
+- **Estado compartido entre réplicas.** La protección contra repetición (RFC 6238 §5.2: se rechaza un código en el último intervalo aceptado o anterior) y el bloqueo contra fuerza bruta (5 códigos erróneos o repetidos bloquean la autenticación reforzada durante 15 minutos) residen en la tabla `totp_state` y se actualizan de forma atómica: un código aceptado en una réplica se rechaza en todas las demás.
+- **Baja por el propio usuario.** `POST /api/v1/auth/step-up/disenroll { "code": "…" }` exige un código actual válido, elimina el alta y finaliza las sesiones del usuario. El usuario debe volver a darse de alta antes de cualquier acción de autenticación reforzada.
+- **Restablecimiento por el operador (dispositivo perdido).** `POST /api/v1/admin/users/{id}/totp-reset` exige autenticación reforzada **y** un segundo aprobador (motivo `TOTP_RESET`). Elimina el alta, finaliza las sesiones del usuario y escribe el evento de auditoría `TOTP_RESET` con ambas identidades; no se puede restablecer así el alta propia. El usuario se da de alta de nuevo en el siguiente inicio de sesión.
+- **Supervisión.** El indicador `registerwerk_stepup_unenrolled_operators` cuenta las cuentas locales habilitadas `REGISTRY_ADMIN` / `COMPLIANCE_OFFICER` con más de siete días y sin autenticador. Es una métrica de aviso, no un fallo de arranque; genere una alerta con valores superiores a cero.
+
+Eventos de auditoría del ciclo de vida: `TOTP_ENROLMENT_STARTED`, `TOTP_ENROLLED`, `TOTP_DISENROLLED`, `TOTP_RESET`; `DUAL_CONTROL_APPROVED` registra ahora también el id del token de aprobación y el resumen del destino, y `DUAL_CONTROL_BOOTSTRAP_USED` señala la excepción de actor único mientras existan menos de dos administradores con TOTP.
 
 ---
 

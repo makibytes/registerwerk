@@ -50,6 +50,15 @@ export class ScreeningService {
    * Requires a step-up JWT as the Bearer token; dual-control requires a second
    * approver's step-up JWT in X-Dual-Control-Token.
    */
+  /**
+   * Confirms a PEP hit on a natural person (not a false positive). Step-up + second approver
+   * (`SCREENING_PEP_CONFIRM`); the hit stays unresolved until an EDD approval is recorded.
+   */
+  confirmPep(hitId: string, note: string, stepUpToken: string, dualControlToken: string): Observable<ScreeningHit> {
+    const headers = new HttpHeaders({ Authorization: `Bearer ${stepUpToken}`, 'X-Dual-Control-Token': dualControlToken });
+    return this.http.post<ScreeningHit>(`${this.base}/hits/${hitId}/confirm-pep`, { note }, { headers });
+  }
+
   acceptHit(
     hitId: string,
     body: { reason: string; approverActorId?: string },

@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<body style="font-family: Arial, sans-serif; color: #111827;">
+  <p>A §16 eWpG Sperrvermerk has passed its expiry date. It was <strong>not</strong> lifted automatically and keeps blocking the holder.</p>
+  <p>
+    Block: <span th:text="${blockId}">id</span><br/>
+    Type: <span th:text="${blockType}">GERICHTSBESCHLUSS</span><br/>
+    Wallet: <span th:text="${walletAddress}">0x...</span><br/>
+    Expired at: <span th:text="${expiresAt}">2026-01-01T00:00:00Z</span>
+  </p>
+  <p>Confirm the expiry against the order and lift the block in the operator portal (step-up and a second approver are required), or extend it.</p>
+</body>
+</html>

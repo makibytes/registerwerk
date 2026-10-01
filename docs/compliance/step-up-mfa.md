@@ -131,8 +131,8 @@ sequenceDiagram
     participant Approver
     participant Backend
 
-    Approver->>Backend: POST /api/v1/auth/step-up { code, action }
-    Backend-->>Approver: approver token (acr=stepup, stepup_scope=action, 10 min)
+    Approver->>Backend: POST /api/v1/auth/step-up { code, action, target[, targetBody] }
+    Backend-->>Approver: approver token (acr=stepup, stepup_scope, stepup_target, jti; 5 min, single use)
     Approver->>Initiator: Hand over the approver token
     Initiator->>Backend: POST /api/v1/auth/step-up { code, action }
     Backend-->>Initiator: initiator step-up token
@@ -147,7 +147,22 @@ Key invariants enforced by `StepUpEnforcementAspect` and `StepUpTokenValidator`:
   otherwise one approval would be a generic credential valid for any 4-eyes action in its window
 - The approver must still be an **enabled `REGISTRY_ADMIN` in the database**, not merely per the
   token's claims, which reflect status only as of mint time
-- Both tokens expire after 10 minutes
+- The approval is **bound to the request it was given for** (K3). The approver mints it with `action` *and* `target` (`"METHOD /path?query"` of the exact call; for body-bound reasons such as mint, burn and forced transfer also `targetBody`, the JSON body). The token carries `stepup_target`, the base64url SHA-256 of the canonical request (`v1`, upper-case method, path without trailing slash, sorted query, and for body-bound reasons the hash of the canonical JSON: sorted keys, no whitespace, plain decimal numbers). The backend derives the same digest from the live request; if it differs, the call is refused with **403**. Tokens without a target are no longer accepted
+- The approval is **single use**: its `jti` is written to `dual_control_token_use` together with the audit event in one transaction (a second use, on any replica, is a **403**). An action that fails after the approval was consumed needs a fresh approval
+- The approval is only accepted for a **short window** after it was minted (`registerwerk.auth.step-up.dual-control.window-seconds`, default 300 s); the initiator's own step-up token keeps its 10 minutes
+
+---
+
+## TOTP enrolment, storage and reset
+
+- **No trust on first use.** Starting an enrolment (`POST /api/v1/auth/step-up/enroll`) requires the account's current password in the body (`{ "currentPassword": "…" }`), so a stolen or unattended session cannot bind an attacker's authenticator. Wrong passwords count towards the same lockout as wrong codes. Accounts whose second factor is managed by an external identity provider cannot enrol a local authenticator. Confirming (`/enroll/confirm`) consumes the code's time step, so it cannot be replayed as a step-up code.
+- **Encrypted at rest.** The TOTP secret is envelope-encrypted (AES-256-GCM, a fresh data key per value wrapped by the platform KEK, the user id as additional authenticated data) in `app_user.totp_secret`; `totp_secret_kid` records the KEK provider. Secrets stored in plaintext by earlier versions are encrypted by a startup job and, if that is missed, on the next successful verification.
+- **State shared across replicas.** Replay protection (RFC 6238 §5.2: a code at or before the last accepted time step is refused) and the brute-force lockout (5 wrong or replayed codes lock step-up for 15 minutes) live in the table `totp_state` and are updated atomically, so a code accepted on one replica is refused on every other.
+- **Self-service removal.** `POST /api/v1/auth/step-up/disenroll { "code": "…" }` requires a valid current code, clears the enrolment and ends the user's sessions. The user must enrol again before any step-up action.
+- **Operator reset (lost device).** `POST /api/v1/admin/users/{id}/totp-reset` requires step-up **and** a second approver (reason `TOTP_RESET`). It clears the enrolment, ends the user's sessions and writes the audit event `TOTP_RESET` with both identities; you cannot reset your own enrolment this way. The user enrols again at next login.
+- **Monitoring.** The gauge `registerwerk_stepup_unenrolled_operators` counts enabled local `REGISTRY_ADMIN` / `COMPLIANCE_OFFICER` accounts older than seven days without an authenticator. It is a warning metric, not a startup failure; alert on values above zero.
+
+Lifecycle audit events: `TOTP_ENROLMENT_STARTED`, `TOTP_ENROLLED`, `TOTP_DISENROLLED`, `TOTP_RESET`; `DUAL_CONTROL_APPROVED` now also records the approval's token id and target digest, and `DUAL_CONTROL_BOOTSTRAP_USED` marks the single-actor exception while fewer than two TOTP-enrolled administrators exist.
 
 ---
 

@@ -31,6 +31,14 @@ class CustomerApiImpl implements CustomerApi {
     @Override
     public void activateLegalEntity(UUID id) {
         repository.findById(id).ifPresent(e -> {
+            // Onboarding activation only (6-21): never a back door out of SUSPENDED/CLOSED/DISSOLVED.
+            if (e.getStatus() == EntityStatus.ACTIVE) {
+                return;
+            }
+            if (e.getStatus() != EntityStatus.PENDING_ONBOARDING) {
+                throw new de.makibytes.registerwerk.shared.InvalidStateTransitionException(
+                        "LegalEntity", e.getStatus().name(), EntityStatus.ACTIVE.name());
+            }
             e.setStatus(EntityStatus.ACTIVE);
             repository.save(e);
         });

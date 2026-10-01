@@ -3,6 +3,10 @@ package de.makibytes.registerwerk.asset.internal;
 import de.makibytes.registerwerk.asset.events.TermSheetUploadedEvent;
 import de.makibytes.registerwerk.asset.events.TermSheetDeletedEvent;
 import de.makibytes.registerwerk.asset.events.TermSheetSyncedEvent;
+import de.makibytes.registerwerk.asset.events.TermSheetSupersededEvent;
+import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.asset.api.AssetDocument;
@@ -24,7 +28,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.Optional;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -54,6 +60,10 @@ public class TermSheetService {
         "text/xml",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     );
+
+    /** After issuance the term sheet is public and may change only through an operator-approved amendment. */
+    static final Set<AssetStatus> PUBLIC_STATUSES = Set.of(AssetStatus.ISSUED, AssetStatus.SUSPENDED, AssetStatus.REDEEMED);
+    static final Set<AssetStatus> POST_ISSUANCE = PUBLIC_STATUSES;
 
     private final AssetDocumentRepository assetDocumentRepository;
     private final AssetDocumentContentRepository assetDocumentContentRepository;
@@ -100,8 +110,97 @@ public class TermSheetService {
             AssetDocumentType type,
             UUID uploadedBy) {
 
-        assetRepository.findById(assetId)
+        Asset asset = assetRepository.findById(assetId)
                 .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
+        if (type == AssetDocumentType.TERM_SHEET && POST_ISSUANCE.contains(asset.getStatus())) {
+            // 6-34 / T6-18: no replacement by upload once the term sheet is public; only the operator-approved
+            // amendment (step-up + second approver) may supersede it.
+            throw new AccessDeniedException("The term sheet of an issued asset cannot be replaced by upload; "
+                    + "an operator-approved amendment is required");
+        }
+        return store(assetId, content, fileName, mimeType, type, uploadedBy);
+    }
+
+    /**
+     * Operator-approved term sheet amendment of an issued asset (6-34): stores the new version and marks every
+     * current term sheet as superseded (kept, never deleted). Only valid after issuance; before issuance the
+     * ordinary upload applies.
+     */
+    public AssetDocument amendTermSheet(UUID assetId, byte[] content, String fileName, String mimeType,
+                                        UUID actorId, UUID approverId) {
+        Asset asset = assetRepository.findById(assetId)
+                .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
+        if (!POST_ISSUANCE.contains(asset.getStatus())) {
+            throw new IllegalArgumentException("Amendments apply only to issued assets (status="
+                    + asset.getStatus() + "); upload the term sheet normally");
+        }
+        if (approverId == null) {
+            throw new AccessDeniedException("A term sheet amendment requires a second approver");
+        }
+        List<AssetDocument> current = assetDocumentRepository
+                .findByAssetIdAndDocumentTypeAndDeletedAtIsNull(assetId, AssetDocumentType.TERM_SHEET).stream()
+                .filter(d -> d.getSupersededBy() == null).toList();
+        AssetDocument saved = store(assetId, content, fileName, mimeType, AssetDocumentType.TERM_SHEET, actorId);
+        List<String> supersededIds = new java.util.ArrayList<>();
+        for (AssetDocument old : current) {
+            old.setSupersededBy(saved.getId());
+            assetDocumentRepository.save(old);
+            supersededIds.add(old.getId().toString());
+        }
+        eventPublisher.publishEvent(new TermSheetSupersededEvent(saved.getId(), actorId, "REGISTRY_ADMIN", approverId,
+                java.util.Map.of("assetId", assetId, "contentHash", String.valueOf(saved.getContentHash()),
+                        "supersedes", supersededIds)));
+        return saved;
+    }
+
+    /** The term sheet shown publicly for an ISIN together with its version number (order of upload, 1-based). */
+    public record PublicTermSheet(AssetDocument document, int version) {}
+
+    /**
+     * Deterministic public term sheet (6-34): only for ISSUED / SUSPENDED / REDEEMED assets. A non-superseded
+     * document whose hash equals the on-chain-anchored hash wins; otherwise the earliest uploaded current
+     * document (the one reviewed at approval). Never depends on repository row order.
+     */
+    @Transactional(readOnly = true)
+    public Optional<PublicTermSheet> publicTermSheet(Asset asset) {
+        if (!PUBLIC_STATUSES.contains(asset.getStatus())) {
+            return Optional.empty();
+        }
+        Comparator<AssetDocument> byUpload = Comparator.comparing(AssetDocument::getUploadedAt)
+                .thenComparing(d -> d.getId().toString());
+        List<AssetDocument> all = assetDocumentRepository
+                .findByAssetIdAndDocumentTypeAndDeletedAtIsNull(asset.getId(), AssetDocumentType.TERM_SHEET).stream()
+                .sorted(byUpload).toList();
+        List<AssetDocument> current = all.stream().filter(d -> d.getSupersededBy() == null).toList();
+        Optional<AssetDocument> anchored = current.stream()
+                .filter(d -> d.getSource() != AssetDocumentSource.UPLOAD && d.getContentHash() != null)
+                .max(byUpload);
+        AssetDocument chosen = null;
+        if (anchored.isPresent()) {
+            String hash = normalizeHash(anchored.get().getContentHash());
+            chosen = current.stream()
+                    .filter(d -> d.getSource() == AssetDocumentSource.UPLOAD && hash.equals(normalizeHash(d.getContentHash())))
+                    .findFirst()
+                    .orElse(anchored.get().hasContent() ? anchored.get() : null);
+        }
+        if (chosen == null) {
+            chosen = current.stream().filter(d -> d.getSource() == AssetDocumentSource.UPLOAD).findFirst()
+                    .orElse(current.isEmpty() ? null : current.get(0));
+        }
+        if (chosen == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new PublicTermSheet(chosen, all.indexOf(chosen) + 1));
+    }
+
+    private static String normalizeHash(String h) {
+        if (h == null) return "";
+        String t = h.trim().toLowerCase(java.util.Locale.ROOT);
+        return t.startsWith("0x") ? t.substring(2) : t;
+    }
+
+    private AssetDocument store(UUID assetId, byte[] content, String fileName, String mimeType,
+                                AssetDocumentType type, UUID uploadedBy) {
         if (content == null || content.length == 0) {
             throw new IllegalArgumentException("Document content must not be empty");
         }

@@ -21,7 +21,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -52,14 +56,20 @@ public class CaspRegisterController {
         return service.findAll().stream().map(CaspAuthorizationResponse::from).toList();
     }
 
-    /** Idempotent upsert keyed by {@code vaspDid}. */
+    /**
+     * Idempotent upsert keyed by {@code vaspDid}. Step-up plus a second approver (6-28): a register edit can
+     * unblock a counterparty, so it is a four-eyes action; lifting a blocking status needs an admin approver.
+     */
     @PutMapping
-    public CaspAuthorizationResponse upsert(@RequestBody @Valid CaspAuthorizationRequest request, Authentication auth) {
+    @RequiresStepUp(requireSecondApprover = true, reason = "CASP_REGISTER_EDIT")
+    public CaspAuthorizationResponse upsert(@RequestBody @Valid CaspAuthorizationRequest request, Authentication auth,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         CaspAuthorization entry = new CaspAuthorization();
         entry.setVaspDid(request.vaspDid().trim());
         entry.setLegalName(request.legalName().trim());
         entry.setLei(trimToNull(request.lei()));
         entry.setHomeMemberState(trimToNull(request.homeMemberState()));
+        entry.setCountry(trimToNull(request.homeMemberState()));
         entry.setStatus(request.status());
         entry.setAuthorizationId(trimToNull(request.authorizationId()));
         entry.setValidFrom(request.validFrom());
@@ -67,24 +77,35 @@ public class CaspRegisterController {
         entry.setSource(trimToNull(request.source()));
         entry.setNotes(trimToNull(request.notes()));
         return CaspAuthorizationResponse.from(service.upsert(entry,
-                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN")));
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"), approverId));
     }
 
     /**
-     * Bulk CSV import (canonical columns documented in {@link CaspRegisterImportService};
-     * typically a transformed ESMA MiCA register export). Body: raw CSV text.
-     * Best-effort: valid rows are upserted, bad rows are reported per line.
+     * Step 1 of a bulk import (typically a transformed ESMA MiCA register export, columns in
+     * {@link CaspRegisterImportService}): returns the diff (created / updated / status changes) and a
+     * {@code diffDigest}; nothing is written.
      */
+    @PostMapping(value = "/import/preview", consumes = {"text/csv", "text/plain"})
+    public CaspRegisterImportService.ImportResult previewImport(@RequestBody @Size(max = 5_000_000) String csv) {
+        return importService.previewCsv(csv, "CSV import " + LocalDate.now());
+    }
+
+    /** Step 2: commits the previewed CSV; requires the preview's {@code diffDigest} and step-up + second approver. */
     @PostMapping(value = "/import", consumes = {"text/csv", "text/plain"})
+    @RequiresStepUp(requireSecondApprover = true, reason = "CASP_REGISTER_IMPORT")
     public CaspRegisterImportService.ImportResult importCsv(
-            @RequestBody @Size(max = 5_000_000) String csv, Authentication auth) {
+            @RequestBody @Size(max = 5_000_000) String csv, @RequestParam String diffDigest, Authentication auth,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         return importService.importCsv(csv, "CSV import " + LocalDate.now(),
-                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"),
+                approverId, true, diffDigest);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication auth) {
-        service.delete(id, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+    @RequiresStepUp(requireSecondApprover = true, reason = "CASP_REGISTER_DELETE")
+    public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication auth,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
+        service.delete(id, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"), approverId);
         return ResponseEntity.noContent().build();
     }
 

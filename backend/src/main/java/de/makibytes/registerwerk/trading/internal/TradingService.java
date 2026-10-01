@@ -409,6 +409,9 @@ public class TradingService {
         execution.setPaymentOption(paymentOption);
         applyPricing(execution, listing, quantity, paymentOption);
         execution.setCreatedByActorId(actorId);
+        if (relatedPartyCheck.sameActor(actorId, listing.getCreatedByActorId())) {
+            throw new ComplianceGateException("The same user cannot act for both the buyer and the seller of a trade.");
+        }
         execution.setVenueClassification(tradingProperties.getVenueClassification().name());
         execution.setWalletPreferenceMode(resolvedWallet.preferenceMode());
         execution.setWalletEndpointId(resolvedWallet.endpointId());
@@ -595,6 +598,9 @@ public class TradingService {
         }
         if (execution.getSettlementStatus() == SettlementStatus.SETTLED) {
             return toTradeExecutionResponse(entityId, execution);
+        }
+        if (relatedPartyCheck.sameActor(execution.getCreatedByActorId(), actorId)) {
+            throw new ComplianceGateException("The same user cannot act for both the buyer and the seller of a trade.");
         }
         if (execution.getSettlementStatus() != SettlementStatus.AWAITING_SELLER_CONFIRMATION) {
             throw new IllegalStateException("Trade " + executionId + " is not awaiting seller confirmation (status="

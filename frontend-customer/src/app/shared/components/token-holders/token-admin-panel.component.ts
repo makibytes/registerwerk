@@ -70,6 +70,12 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <input matInput [(ngModel)]="mintForm.approvalToken" required class="address-input">
               <mat-hint>A mint needs a second approver, and the recipient must be a registered, KYC-approved holder.</mat-hint>
             </mat-form-field>
+            <div class="preview-box">
+              <div class="preview-label">
+                Give your approver exactly this request. Their approval token is bound to it and works once:
+                <pre class="approval-request">{{ approvalRequest('mint') }}</pre>
+              </div>
+            </div>
 
             <div class="preview-box">
               <span class="preview-label">Preview:</span>
@@ -136,6 +142,12 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <mat-label>Operator approval token</mat-label>
               <input matInput [(ngModel)]="burnForm.approvalToken" required class="address-input">
             </mat-form-field>
+            <div class="preview-box">
+              <div class="preview-label">
+                Give your approver exactly this request. Their approval token is bound to it and works once:
+                <pre class="approval-request">{{ approvalRequest('burn') }}</pre>
+              </div>
+            </div>
 
             @if (!burnForm.approvalToken.trim()) {
               <div class="preview-box">
@@ -213,6 +225,12 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <input matInput [(ngModel)]="forceTransferForm.approvalToken" required class="address-input">
               <mat-hint>A registry administrator issues this second-approver token; it is scoped to ISSUER_FORCED_TRANSFER_EWG24.</mat-hint>
             </mat-form-field>
+            <div class="preview-box">
+              <div class="preview-label">
+                Give your approver exactly this request. Their approval token is bound to it and works once:
+                <pre class="approval-request">{{ approvalRequest('forceTransfer') }}</pre>
+              </div>
+            </div>
 
             <div class="preview-box">
               <span class="preview-label">Preview:</span>
@@ -291,6 +309,12 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <input matInput [(ngModel)]="forceApproveForm.approvalToken" required class="address-input">
               <mat-hint>A registry administrator issues this second-approver token; it is scoped to ISSUER_FORCED_APPROVE_OVERRIDE.</mat-hint>
             </mat-form-field>
+            <div class="preview-box">
+              <div class="preview-label">
+                Give your approver exactly this request. Their approval token is bound to it and works once:
+                <pre class="approval-request">{{ approvalRequest('forceApprove') }}</pre>
+              </div>
+            </div>
 
             <div class="preview-box">
               <span class="preview-label">Preview:</span>
@@ -317,6 +341,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
     </div>
   `,
   styles: [`
+    .approval-request { margin: 6px 0 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; color: var(--rw-text-primary); }
     .admin-panel {
       border: 1px solid var(--rw-border);
       border-radius: 8px;
@@ -571,6 +596,25 @@ export class TokenAdminPanelComponent {
       totpCode: this.forceApproveForm.totpCode.trim() || undefined,
       approvalToken: this.forceApproveForm.approvalToken.trim(),
     });
+  }
+
+  /** The exact call the approver's token must be bound to: `METHOD /path` plus the JSON body (sorted keys are applied server-side). */
+  approvalRequest(kind: 'mint' | 'burn' | 'forceTransfer' | 'forceApprove'): string {
+    const base = `/api/v1/assets/${this.assetId}/deployments/${this.deploymentId}/issuer`;
+    switch (kind) {
+      case 'mint':
+        return `POST ${base}/mint\n` + JSON.stringify({ toAddress: this.mintForm.recipient.trim(), amount: this.mintForm.amount.trim() });
+      case 'burn':
+        return `POST ${base}/burn\n` + JSON.stringify({ fromAddress: this.burnForm.fromWallet.trim(), amount: this.burnForm.amount.trim() });
+      case 'forceTransfer':
+        return `POST ${base}/forced-transfer\n` + JSON.stringify({
+          from: this.forceTransferForm.fromWallet.trim(), to: this.forceTransferForm.toWallet.trim(),
+          value: this.forceTransferForm.amount.trim(), legalBasis: this.forceTransferForm.legalBasis.trim() });
+      case 'forceApprove':
+        return `POST ${base}/forced-approve\n` + JSON.stringify({
+          owner: this.forceApproveForm.ownerWallet, spender: this.forceApproveForm.spenderWallet,
+          value: this.forceApproveForm.amount.trim(), legalBasis: this.forceApproveForm.legalBasis.trim() });
+    }
   }
 
   shortenAddress(address: string): string {

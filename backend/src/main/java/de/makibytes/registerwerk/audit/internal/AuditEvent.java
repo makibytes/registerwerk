@@ -35,7 +35,7 @@ public class AuditEvent {
     @Column(name = "actor_id")
     private UUID actorId;
 
-    @Column(name = "actor_role", length = 30)
+    @Column(name = "actor_role", length = 64)
     private String actorRole;
 
     @JdbcTypeCode(SqlTypes.JSON)
@@ -43,7 +43,7 @@ public class AuditEvent {
     private Map<String, Object> payload;
 
     @Column(name = "occurred_at", nullable = false, updatable = false)
-    private Instant occurredAt = Instant.now();
+    private Instant occurredAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
 
     /**
      * audit_event.id of the entry this one reverses or corrects. Null for
@@ -55,6 +55,14 @@ public class AuditEvent {
     /** Free-form grouping id for audit entries belonging to one logical operation. */
     @Column(name = "correlation_id", updatable = false)
     private UUID correlationId;
+
+    /** Canonical envelope version used for entry_hash (1 legacy, 2 covers actor/role/time/correlation/reversal). */
+    @Column(name = "canon_version", nullable = false, updatable = false)
+    private short canonVersion = 1;
+
+    /** Insert time (operational); the event time is {@link #occurredAt}. */
+    @Column(name = "recorded_at", updatable = false)
+    private Instant recordedAt;
 
     // ── Hash chain fields ────────────────────────────────────────────────────
     /**
@@ -101,6 +109,15 @@ public class AuditEvent {
     public void setPayload(Map<String, Object> payload) { this.payload = payload; }
 
     public Instant getOccurredAt() { return occurredAt; }
+    public void setOccurredAt(Instant occurredAt) {
+        this.occurredAt = occurredAt.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    }
+
+    public short getCanonVersion() { return canonVersion; }
+    public void setCanonVersion(short canonVersion) { this.canonVersion = canonVersion; }
+
+    public Instant getRecordedAt() { return recordedAt; }
+    public void setRecordedAt(Instant recordedAt) { this.recordedAt = recordedAt; }
 
     public UUID getReversesEventId() { return reversesEventId; }
     public void setReversesEventId(UUID reversesEventId) { this.reversesEventId = reversesEventId; }
@@ -119,6 +136,23 @@ public class AuditEvent {
 
     public byte[] getEntrySig() { return entrySig; }
     public void setEntrySig(byte[] entrySig) { this.entrySig = entrySig; }
+
+    /** Builds the row for a captured record (event time + context fixed at publish), canonical v2. */
+    static AuditEvent fromRecord(AuditRecord r) {
+        AuditEvent ae = new AuditEvent();
+        ae.setEventType(r.eventType());
+        ae.setSubjectType(r.subjectType());
+        ae.setSubjectId(r.subjectId());
+        ae.setActorId(r.actorId());
+        ae.setActorRole(r.actorRole());
+        ae.setPayload(r.payload());
+        ae.setOccurredAt(r.occurredAt());
+        ae.setReversesEventId(r.reversesEventId());
+        ae.setCorrelationId(r.correlationId());
+        ae.setCanonVersion((short) 2);
+        ae.setRecordedAt(Instant.now());
+        return ae;
+    }
 
     public static AuditEvent from(AuditableEvent e) {
         AuditEvent ae = new AuditEvent();
@@ -139,7 +173,7 @@ public class AuditEvent {
      * regardless of which module published it, instead of each call site inventing its own
      * ad-hoc map key.
      */
-    private static Map<String, Object> withDualControlApprover(Map<String, Object> payload, UUID approverId) {
+    static Map<String, Object> withDualControlApprover(Map<String, Object> payload, UUID approverId) {
         if (approverId == null) {
             return payload;
         }

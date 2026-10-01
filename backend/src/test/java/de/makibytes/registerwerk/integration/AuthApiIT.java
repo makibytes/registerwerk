@@ -209,23 +209,16 @@ class AuthApiIT {
         );
         String adminToken = extractSessionToken(loginResponse);
 
-        HttpHeaders adminHeaders = new HttpHeaders();
-        adminHeaders.setBearerAuth(adminToken);
-        ResponseEntity<ImpersonateResponse> mintResponse = restTemplate.exchange(
-            url("/api/v1/impersonation"),
-            HttpMethod.POST,
-            new HttpEntity<>(java.util.Map.of("entityId", target.getId()), adminHeaders),
-            ImpersonateResponse.class
-        );
-        assertThat(mintResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(mintResponse.getBody()).isNotNull();
+        ImpersonateResponse started = startImpersonation(adminToken, target.getId());
+        assertThat(started.mode()).isEqualTo("READ_ONLY");
+        assertThat(started.handoffUrl()).contains("#code=").doesNotContain("token=");
 
         HttpHeaders exchangeHeaders = new HttpHeaders();
         exchangeHeaders.add(HttpHeaders.COOKIE, "rw_session=" + adminToken);
         ResponseEntity<LoginResponse> exchangeResponse = restTemplate.exchange(
             url("/api/v1/public/auth/impersonate"),
             HttpMethod.POST,
-            new HttpEntity<>(java.util.Map.of("token", mintResponse.getBody().token()), exchangeHeaders),
+            new HttpEntity<>(java.util.Map.of("code", handoffCode(started)), exchangeHeaders),
             LoginResponse.class
         );
         String impersonationToken = extractSessionToken(exchangeResponse);
@@ -249,10 +242,19 @@ class AuthApiIT {
         assertThat(setCookies(invalidExit)).anyMatch(cookie -> cookie.startsWith("rw_session=;") && cookie.contains("Max-Age=0"));
         assertThat(setCookies(invalidExit)).anyMatch(cookie -> cookie.startsWith("rw_admin_session=;") && cookie.contains("Max-Age=0"));
 
+        // Exiting ends (and revokes) the first impersonation session, so start a fresh one.
+        ImpersonateResponse second = startImpersonation(adminToken, target.getId());
+        HttpHeaders secondExchangeHeaders = new HttpHeaders();
+        secondExchangeHeaders.add(HttpHeaders.COOKIE, "rw_session=" + adminToken);
+        String secondToken = extractSessionToken(restTemplate.exchange(
+            url("/api/v1/public/auth/impersonate"), HttpMethod.POST,
+            new HttpEntity<>(java.util.Map.of("code", handoffCode(second)), secondExchangeHeaders),
+            LoginResponse.class));
+
         HttpHeaders exitHeaders = new HttpHeaders();
-        exitHeaders.setBearerAuth(impersonationToken);
+        exitHeaders.setBearerAuth(secondToken);
         exitHeaders.add(HttpHeaders.COOKIE,
-            "rw_session=" + impersonationToken + "; rw_admin_session=" + adminToken);
+            "rw_session=" + secondToken + "; rw_admin_session=" + adminToken);
         ResponseEntity<Void> exitResponse = restTemplate.exchange(
             url("/api/v1/auth/exit-impersonation"),
             HttpMethod.POST,
@@ -317,11 +319,11 @@ class AuthApiIT {
             LoginResponse.class
         );
         HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(extractSessionToken(loginResponse));
+        headers.setBearerAuth(stepUpToken(extractSessionToken(loginResponse)));
         ResponseEntity<String> response = restTemplate.exchange(
             url("/api/v1/impersonation"),
             HttpMethod.POST,
-            new HttpEntity<>(java.util.Map.of("entityId", suspended.getId()), headers),
+            new HttpEntity<>(java.util.Map.of("entityId", suspended.getId(), "reason", REASON), headers),
             String.class
         );
 
@@ -347,25 +349,30 @@ class AuthApiIT {
         assertThat(loginResponse.getBody()).isNotNull();
         AppUser admin = appUserRepository.findById(UUID.fromString(loginResponse.getBody().userId()))
             .orElseThrow();
+        String stepUp = stepUpToken(extractSessionToken(loginResponse));
         admin.setEnabled(false);
         appUserRepository.saveAndFlush(admin);
 
         try {
             HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(extractSessionToken(loginResponse));
+            headers.setBearerAuth(stepUp);
             ResponseEntity<String> response = restTemplate.exchange(
                 url("/api/v1/impersonation"),
                 HttpMethod.POST,
-                new HttpEntity<>(java.util.Map.of("entityId", target.getId()), headers),
+                new HttpEntity<>(java.util.Map.of("entityId", target.getId(), "reason", REASON), headers),
                 String.class
             );
 
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            // The session guard now rejects the disabled account's token before the service runs.
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         } finally {
             // The seeded administrator is shared by this integration-test class; always restore
             // it so method ordering cannot turn this into a source of unrelated failures.
             admin.setEnabled(true);
             appUserRepository.saveAndFlush(admin);
+            // Re-enabling revokes tokens issued up to the next full second; let it pass so the
+            // next test's fresh login is not caught by the cut-off.
+            sleepPastRevocationBoundary();
         }
     }
 
@@ -504,6 +511,44 @@ class AuthApiIT {
         // Boot's default error handling, orthogonal to what this test asserts. Either status
         // proves the request was rejected outright, which is what matters here.
         assertThat(apiResponse.getStatusCode()).isIn(HttpStatus.FORBIDDEN, HttpStatus.UNAUTHORIZED);
+    }
+
+    private static final String REASON = "support case 4711: customer reported a booking issue";
+
+    static void sleepPastRevocationBoundary() {
+        try {
+            Thread.sleep(1100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** Local-TOTP step-up token (the test profile allows unenrolled step-up). */
+    private String stepUpToken(String sessionToken) {
+        HttpHeaders h = new HttpHeaders();
+        h.setBearerAuth(sessionToken);
+        ResponseEntity<de.makibytes.registerwerk.stepup.web.dto.StepUpResponse> r = restTemplate.exchange(
+            url("/api/v1/auth/step-up"), HttpMethod.POST,
+            new HttpEntity<>(java.util.Map.of("code", "123456"), h),
+            de.makibytes.registerwerk.stepup.web.dto.StepUpResponse.class);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return r.getBody().stepUpToken();
+    }
+
+    private ImpersonateResponse startImpersonation(String adminToken, UUID entityId) {
+        HttpHeaders h = new HttpHeaders();
+        h.setBearerAuth(stepUpToken(adminToken));
+        ResponseEntity<ImpersonateResponse> r = restTemplate.exchange(
+            url("/api/v1/impersonation"), HttpMethod.POST,
+            new HttpEntity<>(java.util.Map.of("entityId", entityId, "reason", REASON), h),
+            ImpersonateResponse.class);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return r.getBody();
+    }
+
+    private static String handoffCode(ImpersonateResponse r) {
+        String frag = r.handoffUrl().substring(r.handoffUrl().indexOf("#code=") + 6);
+        return frag.split("&", 2)[0];
     }
 
     /** Set-Cookie header carries the bearer token now — see LoginResponse's Javadoc. */

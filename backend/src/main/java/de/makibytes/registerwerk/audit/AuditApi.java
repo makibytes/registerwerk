@@ -36,7 +36,10 @@ public interface AuditApi {
      */
     List<AuditEventView> findForExport(
             String subjectType, UUID subjectId, String eventType, UUID actorId,
-            Instant from, Instant to, Pageable pageable);
+            Instant from, Instant to, Long afterSequenceNo, Pageable pageable);
+
+    /** Current chain tip (sequence + hash) for export completeness proofs. */
+    de.makibytes.registerwerk.audit.api.ChainTipView chainTip();
 
     /** Most recently computed hash-chain verification result, without triggering a new scan. */
     ChainVerificationView chainVerificationStatus();

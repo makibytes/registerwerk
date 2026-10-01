@@ -119,3 +119,11 @@ Se si verifica una violazione dei dati personali:
 - Art. 34: informare gli **interessati** senza ingiustificato ritardo se la violazione presenta un rischio elevato
 
 Non è implementato alcun flusso di lavoro automatico di notifica di violazione dell'autorità GDPR o dell'interessato. Gli operatori devono stabilire, testare e provare un processo specifico per la distribuzione.
+
+## Ciclo di vita dell'entità e ambito DSAR {#entity-lifecycle}
+
+- **Macchina a stati:** PENDING_ONBOARDING -> ACTIVE solo tramite onboarding; ACTIVE <-> SUSPENDED (sospensione e riattivazione richiedono step-up, un secondo approvatore e un motivo); CLOSED (cessazione) e DISSOLVED (fusione) sono definitivi. La riattivazione è rifiutata finché il KYC è scaduto/rifiutato, un riscontro di screening è irrisolto o uno Sperrvermerk è attivo.
+- **La cessazione** è rifiutata finché ci sono obbligazioni aperte (titoli emessi, operazioni non regolate, posizioni repo/lending, corporate action e trasferimenti di registro in corso, posizioni con Sperrvermerk), salvo conferma di ciascuna con un motivo. Le obbligazioni confermate diventano attività di follow-up (`/api/v1/entity-tasks`, gauge `registerwerk_offboarding_open_tasks`) aperte finché un operatore non le chiude. Gli utenti sono disabilitati, sessioni e token di azione inutilizzati revocati.
+- **On-chain:** la sospensione sospende l'org su ogni chain; cessazione e fusione revocano inoltre i claim KYC/AML. Una riattivazione non ripristina nulla on-chain automaticamente; crea l'attività `CHAIN_REINSTATEMENT_REQUIRED` per il ripristino a doppio controllo.
+- **Modifiche ai dati:** la modifica di nome, LEI o paese rilancia lo screening e crea un'attività `KYC_REVIEW_REQUIRED` per le entità APPROVED (lo stato KYC non cambia automaticamente). L'abbassamento della categoria cliente e le fusioni richiedono un secondo approvatore e un motivo; l'evento di audit riporta prima e dopo.
+- **DSAR:** l'esportazione copre solo i dati anagrafici dell'entità e indica cosa non include. Una cancellazione termina come `COMPLETED_PARTIAL` con elenchi di cancellato, conservato (base giuridica) e non coperto. L'applicazione dei termini di conservazione è manuale; nulla viene eliminato automaticamente (termini = decisione giuridica aperta).

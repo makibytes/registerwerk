@@ -83,6 +83,7 @@ public class Erc3643LifecycleService {
     private final HolderBlockGate holderBlockGate;
     private final AssetLookupPort assetLookupPort;
     private final de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate;
+    private final de.makibytes.registerwerk.travelrule.api.TravelRuleGate travelRuleGate;
 
     public Erc3643LifecycleService(
             Erc3643SuiteRepository suiteRepository,
@@ -98,8 +99,10 @@ public class Erc3643LifecycleService {
             BlockchainTransactionService txService,
             HolderBlockGate holderBlockGate,
             AssetLookupPort assetLookupPort,
-            de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate) {
+            de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate,
+            de.makibytes.registerwerk.travelrule.api.TravelRuleGate travelRuleGate) {
         this.destinationGate = destinationGate;
+        this.travelRuleGate = travelRuleGate;
         this.assetLookupPort = assetLookupPort;
         this.suiteRepository = suiteRepository;
         this.complianceModuleRepository = complianceModuleRepository;
@@ -121,6 +124,14 @@ public class Erc3643LifecycleService {
                 .orElseThrow(() -> new de.makibytes.registerwerk.shared.EntityNotFoundException(
                         "AssetDeployment", suite.getAssetDeploymentId()))
                 .getAssetId();
+    }
+
+    private de.makibytes.registerwerk.travelrule.api.TravelRuleGate.TransferContext travelRuleContext(
+            UUID assetId, Erc3643Suite suite, String from, String to, BigDecimal amount) {
+        String symbol = assetLookupPort.findById(assetId)
+                .map(de.makibytes.registerwerk.blockchain.api.EvmUtils::tokenSymbol).orElse("TOKEN");
+        return new de.makibytes.registerwerk.travelrule.api.TravelRuleGate.TransferContext(
+                assetId, from, to, amount, symbol, suite.getTokenAddress());
     }
 
     // ── Shared on-chain helpers ────────────────────────────────────────────────
@@ -531,7 +542,10 @@ public class Erc3643LifecycleService {
         requireNotBlocked(to);
         Erc3643Suite suite = requireSuite(suiteId);
         requireRegisterOpen(suite, "forcedTransfer");
-        destinationGate.require(assetIdOf(suite), to, "forcedTransfer");
+        UUID transferAssetId = assetIdOf(suite);
+        destinationGate.require(transferAssetId, to, "forcedTransfer");
+        // Same Travel Rule gate as the ERC-20/721/1155 path (6-27): the two paths must not drift.
+        travelRuleGate.enforceOutbound(travelRuleContext(transferAssetId, suite, from, to, amount));
         Function fn = new Function(forcedTransferMethodName(),
                 List.of(new Address(from), new Address(to), new Uint256(amount.toBigIntegerExact())),
                 List.of());
@@ -671,6 +685,9 @@ public class Erc3643LifecycleService {
         requireRegisterOpen(suite, "batchForcedTransfer");
         UUID gateAssetId = assetIdOf(suite);
         tos.forEach(to -> destinationGate.require(gateAssetId, to, "batchForcedTransfer"));
+        for (int i = 0; i < froms.size(); i++) {
+            travelRuleGate.enforceOutbound(travelRuleContext(gateAssetId, suite, froms.get(i), tos.get(i), amounts.get(i)));
+        }
         Function fn = new Function("batchForcedTransfer",
                 List.of(
                         new DynamicArray<>(Address.class, froms.stream().map(Address::new).toList()),

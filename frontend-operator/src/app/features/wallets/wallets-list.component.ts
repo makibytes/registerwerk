@@ -194,7 +194,7 @@ export class WalletsListComponent implements OnInit {
       this.withDualControl('WALLET_GENERATE', `Generate signing wallet "${r.name}"`, tokens => this.walletService.generate(r.name, r.type, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('Wallet generated', 'OK', { duration: 3000 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'Failed to generate wallet', 'OK', { duration: 4000 }),
-      }));
+      }), `POST /api/v1/admin/wallets/generate`);
     });
   }
 
@@ -204,7 +204,7 @@ export class WalletsListComponent implements OnInit {
       this.withDualControl('WALLET_IMPORT_RAW', `Import signing key "${r.name}"`, tokens => this.walletService.importRaw(r.name, r.type, r.privateKey, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('Wallet imported', 'OK', { duration: 3000 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'Import failed', 'OK', { duration: 4000 }),
-      }));
+      }), `POST /api/v1/admin/wallets/import-raw`);
     });
   }
 
@@ -214,7 +214,7 @@ export class WalletsListComponent implements OnInit {
       this.withDualControl('WALLET_IMPORT_KEYSTORE', `Import keystore "${r.name}"`, tokens => this.walletService.importKeystore(r.name, r.password, r.file, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('Keystore imported', 'OK', { duration: 3000 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'Import failed — check your password', 'OK', { duration: 4000 }),
-      }));
+      }), `POST /api/v1/admin/wallets/import-keystore`);
     });
   }
 
@@ -224,7 +224,7 @@ export class WalletsListComponent implements OnInit {
       this.withDualControl('WALLET_ATTACH_HSM', `Attach HSM key "${r.name}"`, tokens => this.walletService.attachHsm(r.name, r.keyAlias, r.address, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('HSM key verified and attached', 'OK', { duration: 3500 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'HSM key verification failed', 'OK', { duration: 5000 }),
-      }));
+      }), `POST /api/v1/admin/wallets/attach-hsm`);
     });
   }
 
@@ -246,14 +246,20 @@ export class WalletsListComponent implements OnInit {
   openSetDefault(wallet: OperatorWallet) {
     this.dialog.open(SetDefaultDialogComponent, { width: '460px', data: { wallet } }).afterClosed().subscribe(chainIds => {
       if (!chainIds || (chainIds as string[]).length === 0) return;
-      this.withDualControl('WALLET_DEFAULT_CHANGED', `Set "${wallet.name}" as chain default signer`, tokens => {
-        const calls = (chainIds as string[]).map(cid => this.walletService.setDefault(cid, wallet.id, tokens));
-        forkJoin(calls).subscribe({
-          next: () => { this.load(); this.snackBar.open('Defaults updated', 'OK', { duration: 2500 }); },
-          error: e => this.snackBar.open(e.error?.message ?? 'Failed to update some defaults', 'OK', { duration: 3000 }),
-        });
-      });
+      // An approval is single-use and bound to one request, so every chain needs its own approval.
+      this.setDefaultFor(wallet, [...(chainIds as string[])]);
     });
+  }
+
+  private setDefaultFor(wallet: OperatorWallet, chainIds: string[]): void {
+    const cid = chainIds.shift();
+    if (!cid) { this.load(); this.snackBar.open('Defaults updated', 'OK', { duration: 2500 }); return; }
+    this.withDualControl('WALLET_DEFAULT_CHANGED', `Set "${wallet.name}" as chain default signer`, tokens => {
+      this.walletService.setDefault(cid, wallet.id, tokens).subscribe({
+        next: () => this.setDefaultFor(wallet, chainIds),
+        error: e => this.snackBar.open(e.error?.message ?? 'Failed to update the default', 'OK', { duration: 3000 }),
+      });
+    }, `PUT /api/v1/admin/wallet-defaults/${cid}`);
   }
 
   rename(wallet: OperatorWallet) {
@@ -272,13 +278,13 @@ export class WalletsListComponent implements OnInit {
       this.walletService.delete(wallet.id, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('Wallet deleted (retained for recovery)', 'OK', { duration: 3000 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'Delete failed', 'OK', { duration: 6000 }),
-      }));
+      }), `DELETE /api/v1/admin/wallets/${wallet.id}`);
   }
 
   /** Step-up + second approver (4-eyes) for the signer-lifecycle actions (P4C-5). */
-  private withDualControl(action: string, reason: string, run: (tokens: DualControlTokens) => void): void {
+  private withDualControl(action: string, reason: string, run: (tokens: DualControlTokens) => void, target?: string): void {
     this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: true, reason, action },
+      data: { requireDualControl: true, reason, action, target },
       width: '500px',
       disableClose: true,
     }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {

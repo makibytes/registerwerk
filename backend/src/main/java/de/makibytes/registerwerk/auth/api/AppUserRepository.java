@@ -68,4 +68,23 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID>, JpaSpec
           and :role member of u.roles
         """)
     long countEnabledTotpEnrolledUsersWithRole(@Param("role") AppUserRole role);
+
+    /**
+     * Enabled accounts created or role-changed after {@code since} — the access-review close check
+     * uses it to find accounts a campaign started at {@code since} could not have covered.
+     */
+    @Query("""
+        select u from AppUser u
+        where u.enabled = true
+          and (u.createdAt > :since or u.rolesChangedAt > :since)
+        order by u.email
+        """)
+    List<AppUser> findEnabledCreatedOrRoleChangedSince(@Param("since") java.time.Instant since);
+
+    /** True when at least one account holds {@code role}, enabled or not (bootstrap decision of the default admin seeder). */
+    @Query("select count(u) from AppUser u where :role member of u.roles")
+    long countWithRole(@Param("role") AppUserRole role);
+
+    @Query("select u from AppUser u where u.enabled = true and :role member of u.roles order by u.email")
+    List<AppUser> findEnabledWithRole(@Param("role") AppUserRole role);
 }

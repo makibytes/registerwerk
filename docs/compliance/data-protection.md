@@ -122,3 +122,11 @@ If a personal data breach occurs:
 - Art. 34: Notify **affected data subjects** without undue delay if the breach is high-risk
 
 No automatic GDPR authority or data-subject breach-notification workflow is implemented. Operators must establish, test, and evidence a deployment-specific process.
+
+## Entity lifecycle and DSAR scope {#entity-lifecycle}
+
+- **State machine:** PENDING_ONBOARDING -> ACTIVE only through onboarding; ACTIVE <-> SUSPENDED (suspend and reactivate need step-up, a second approver and a reason); CLOSED (termination) and DISSOLVED (merger) are terminal. Reactivation is refused while KYC is expired/rejected, a screening hit is unresolved or a Sperrvermerk is active.
+- **Termination** is refused while obligations are open (issued securities, unsettled trades, repo/lending positions, pending corporate actions and register transfers, Sperrvermerk holdings) unless each is acknowledged with a reason. Acknowledged obligations become follow-up tasks (`/api/v1/entity-tasks`, gauge `registerwerk_offboarding_open_tasks`) that stay open until an operator marks them done. Users are disabled, their sessions and unused action tokens revoked.
+- **On-chain:** suspension suspends the org on every chain; termination and merger additionally revoke the KYC/AML claims. A reactivation does not reinstate on chain; it raises a `CHAIN_REINSTATEMENT_REQUIRED` task for the 4-eyes reinstatement.
+- **Data changes:** a change of name, LEI or country re-screens the entity and raises a `KYC_REVIEW_REQUIRED` task for APPROVED entities (the KYC status is not changed automatically). Lowering the client category and mergers need a second approver and a reason; the audit event records before and after.
+- **DSAR:** the export covers entity master data only and lists what it does not include. An erasure ends as `COMPLETED_PARTIAL` with lists of what was erased, retained (legal basis) and not covered. Retention enforcement is manual; nothing is purged automatically (retention periods are an open legal decision).

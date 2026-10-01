@@ -29,12 +29,16 @@ export class KycService {
     entityId: string,
     file: File,
     documentType: string,
-    jurisdiction?: Jurisdiction
+    jurisdiction?: Jurisdiction,
+    dates?: { issueDate?: string; expiresAt?: string },
   ): Observable<KycDocument> {
     const formData = new FormData();
     formData.append('file', file, file.name);
     formData.append('documentType', documentType);
     if (jurisdiction) formData.append('jurisdiction', jurisdiction);
+    // `expiresAt` is mandatory for passport / identity / register-extract documents (400 otherwise).
+    if (dates?.issueDate) formData.append('issueDate', dates.issueDate);
+    if (dates?.expiresAt) formData.append('expiresAt', dates.expiresAt);
     return this.http.post<KycDocument>(`${this.base}/${entityId}/kyc/documents`, formData);
   }
 
@@ -49,11 +53,24 @@ export class KycService {
     return this.http.delete<void>(`${this.base}/${entityId}/kyc/documents/${docId}`);
   }
 
-  /** Needs step-up and a second approver (`KYC_APPROVE`). */
-  approveKyc(entityId: string, expiryDate: string, tokens?: DualControlTokens): Observable<unknown> {
+  /**
+   * Needs step-up and a second approver (`KYC_APPROVE`). The server refuses (409) without a beneficial-owner
+   * register, with < 75 % identified, or for a PEP without an EDD approval; `overrideNote` is the documented
+   * administrator override (403 for non-administrators). Read `kycExpiryDate` back: the server may shorten it.
+   */
+  approveKyc(
+    entityId: string,
+    body: { expiryDate?: string; jurisdiction?: Jurisdiction; overrideNote?: string },
+    tokens?: DualControlTokens,
+  ): Observable<unknown> {
     return this.http.post(
-      `${this.base}/${entityId}/kyc/approve`, { expiryDate }, tokens ? { headers: dualControlHeaders(tokens) } : {},
+      `${this.base}/${entityId}/kyc/approve`, body, tokens ? { headers: dualControlHeaders(tokens) } : {},
     );
+  }
+
+  /** Entities whose KYC evidence is incomplete or stale (operator work queue). */
+  listEvidenceGaps(): Observable<unknown[]> {
+    return this.http.get<unknown[]>(`${environment.apiUrl}/kyc/evidence-gaps`);
   }
 
   /**

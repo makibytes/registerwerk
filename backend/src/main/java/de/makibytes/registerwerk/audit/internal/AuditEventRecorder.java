@@ -3,9 +3,19 @@ package de.makibytes.registerwerk.audit.internal;
 import de.makibytes.registerwerk.audit.api.AuditableEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * Persists audit entries. {@code @ApplicationModuleListener} = async + after-commit + REQUIRES_NEW;
+ * a failure leaves the event publication incomplete, which {@code AuditResubmissionJob} retries
+ * periodically (and dead-letters after repeated failures). Time and security context come from
+ * {@link AuditRecord}, fixed at publish by {@link AuditEventCapture}.
+ */
 @Component
 class AuditEventRecorder {
 
@@ -13,40 +23,51 @@ class AuditEventRecorder {
 
     private final AuditEventRepository repository;
     private final AuditChainAppender chainAppender;
+    private final AuditEventCapture capture;
 
-    AuditEventRecorder(AuditEventRepository repository, AuditChainAppender chainAppender) {
+    /** Cut-over switch (6-12): drains publications created before the capture listener existed. */
+    @Value("${registerwerk.audit.legacy-listener:true}")
+    private boolean legacyListener;
+
+    AuditEventRecorder(AuditEventRepository repository, AuditChainAppender chainAppender, AuditEventCapture capture) {
         this.repository = repository;
         this.chainAppender = chainAppender;
+        this.capture = capture;
     }
 
-    /**
-     * {@code @ApplicationModuleListener} = {@code @Async} + {@code @TransactionalEventListener}
-     * (default phase {@code AFTER_COMMIT}) + {@code @Transactional(propagation = REQUIRES_NEW)}.
-     * By the time this method runs, the originating business transaction has ALREADY
-     * committed — a failed audit write here cannot roll back an action that already
-     * happened. What "no try/catch" buys instead: an exception here fails this
-     * listener's own REQUIRES_NEW transaction, which Spring Modulith's JDBC event
-     * publication registry (the {@code event_publication} outbox table) records as
-     * incomplete; {@code republish-outstanding-events-on-restart=true} (application.yml)
-     * retries it at least once more. Regulator-grade actions therefore get an
-     * at-least-once, eventually-consistent audit trail rather than a synchronous
-     * audit-or-rollback guarantee — silently swallowing the exception here would drop
-     * that retry and the eWpRV §6 record with it.
-     *
-     * <p>Previously also read {@code SecurityContextHolder} here to enrich the payload with a
-     * human-readable {@code actorName} — removed: this listener runs on a
-     * separate thread after the originating request thread returns ({@code @Async}, no
-     * security-context-propagating executor is configured anywhere in this codebase), so
-     * {@code SecurityContextHolder.getContext().getAuthentication()} was always null here in
-     * production; {@code actorId}/{@code actorRole} are captured synchronously by the caller
-     * at event-construction time and are unaffected.
-     */
     @ApplicationModuleListener
-    void on(AuditableEvent event) {
-        AuditEvent ae = AuditEvent.from(event);
+    void on(AuditRecord record) {
+        AuditEvent ae = AuditEvent.fromRecord(record);
         chainAppender.append(ae);
         repository.save(ae);
         log.debug("Recorded audit event: type={}, subject={}/{}, seq={}",
-                event.eventType(), event.subjectType(), event.subjectId(), ae.getSequenceNo());
+                ae.getEventType(), ae.getSubjectType(), ae.getSubjectId(), ae.getSequenceNo());
+    }
+
+    /**
+     * Legacy listener signature, retained ONLY so publications written before the cut-over (their
+     * listener id is this method) still drain. Events captured in this JVM are skipped (recorded via
+     * {@link #on(AuditRecord)}); a replayed legacy event has no event time, so its processing time
+     * is used and flagged in the payload. With {@code registerwerk.audit.legacy-listener=false}
+     * a replayed legacy event is refused (stays incomplete and visible) instead of recorded.
+     */
+    @ApplicationModuleListener
+    void on(AuditableEvent event) {
+        if (capture.wasCaptured(event)) {
+            return;
+        }
+        if (!legacyListener) {
+            throw new IllegalStateException("Legacy audit listener disabled; refusing replayed event "
+                    + event.eventType());
+        }
+        AuditEvent ae = AuditEvent.from(event);
+        Map<String, Object> payload = ae.getPayload() != null ? new LinkedHashMap<>(ae.getPayload()) : new LinkedHashMap<>();
+        payload.put("_occurredAtSource", "PROCESSING_TIME");
+        ae.setPayload(payload);
+        ae.setCanonVersion((short) 2);
+        ae.setRecordedAt(ae.getOccurredAt());
+        chainAppender.append(ae);
+        repository.save(ae);
+        log.warn("Recorded legacy-replayed audit event type={} seq={}", ae.getEventType(), ae.getSequenceNo());
     }
 }

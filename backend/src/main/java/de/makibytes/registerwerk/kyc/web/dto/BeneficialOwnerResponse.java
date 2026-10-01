@@ -17,12 +17,16 @@ public record BeneficialOwnerResponse(
         BigDecimal ownershipPct,
         BeneficialOwner.ControlType controlType,
         Instant registeredAt,
-        Instant ceasedAt
+        Instant ceasedAt,
+        Instant verifiedAt,
+        UUID verificationDocumentId,
+        String fallbackReason
 ) {
     public static BeneficialOwnerResponse from(BeneficialOwner bo, NaturalPerson person) {
         return new BeneficialOwnerResponse(
                 bo.getId(), bo.getEntityId(), bo.getNaturalPersonId(),
                 person.getGivenName(), person.getFamilyName(), person.getCountry(), person.getPepStatus(),
-                bo.getOwnershipPct(), bo.getControlType(), bo.getRegisteredAt(), bo.getCeasedAt());
+                bo.getOwnershipPct(), bo.getControlType(), bo.getRegisteredAt(), bo.getCeasedAt(),
+                bo.getVerifiedAt(), bo.getVerificationDocumentId(), bo.getFallbackReason());
     }
 }

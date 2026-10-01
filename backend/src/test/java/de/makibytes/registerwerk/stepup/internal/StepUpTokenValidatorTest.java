@@ -44,7 +44,7 @@ class StepUpTokenValidatorTest {
 
     @BeforeEach
     void setUp() {
-        validator = new StepUpTokenValidator(jwtDecoder, appUserRepository);
+        validator = new StepUpTokenValidator(jwtDecoder, appUserRepository, new DualControlProperties());
     }
 
     private Jwt approverJwt() {
@@ -79,7 +79,7 @@ class StepUpTokenValidatorTest {
         when(jwtDecoder.decode("raw-token")).thenReturn(approverJwt());
         when(appUserRepository.findById(approverId)).thenReturn(Optional.of(enabledAdmin()));
 
-        assertThatCode(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
+        assertThatCode(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
                 .doesNotThrowAnyException();
     }
 
@@ -91,7 +91,7 @@ class StepUpTokenValidatorTest {
         disabled.setEnabled(false);
         when(appUserRepository.findById(approverId)).thenReturn(Optional.of(disabled));
 
-        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining("no longer an enabled REGISTRY_ADMIN");
     }
@@ -104,7 +104,7 @@ class StepUpTokenValidatorTest {
         demoted.setRoles(Set.of(AppUserRole.INVESTOR));
         when(appUserRepository.findById(approverId)).thenReturn(Optional.of(demoted));
 
-        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining("no longer an enabled REGISTRY_ADMIN");
     }
@@ -126,7 +126,7 @@ class StepUpTokenValidatorTest {
         complianceOfficer.setRoles(Set.of(AppUserRole.COMPLIANCE_OFFICER));
         when(appUserRepository.findById(approverId)).thenReturn(Optional.of(complianceOfficer));
 
-        assertThatCode(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
+        assertThatCode(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
                 .doesNotThrowAnyException();
     }
 
@@ -136,7 +136,7 @@ class StepUpTokenValidatorTest {
         when(jwtDecoder.decode("raw-token")).thenReturn(approverJwt());
         when(appUserRepository.findById(approverId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining("no longer an enabled REGISTRY_ADMIN");
     }
@@ -146,7 +146,7 @@ class StepUpTokenValidatorTest {
     void rejects_selfApproval() {
         when(jwtDecoder.decode("raw-token")).thenReturn(approverJwt());
 
-        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", approverId.toString(), "FORCE_BURN"))
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", approverId.toString(), "FORCE_BURN", null))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining("different user");
     }
@@ -158,7 +158,7 @@ class StepUpTokenValidatorTest {
     void rejects_scopeMismatch() {
         when(jwtDecoder.decode("raw-token")).thenReturn(approverJwt("WALLET_DELETE"));
 
-        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining("not scoped to this action");
     }
@@ -168,7 +168,7 @@ class StepUpTokenValidatorTest {
     void rejects_missingScope() {
         when(jwtDecoder.decode("raw-token")).thenReturn(approverJwt(null));
 
-        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining("not scoped to this action");
     }
@@ -178,9 +178,94 @@ class StepUpTokenValidatorTest {
     void scopeMismatch_rejectedBeforeDbLookup() {
         when(jwtDecoder.decode("raw-token")).thenReturn(approverJwt("WALLET_DELETE"));
 
-        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN"))
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
                 .isInstanceOf(AccessDeniedException.class);
 
         org.mockito.Mockito.verifyNoInteractions(appUserRepository);
+    }
+
+    // ── Target binding and single-use handle (K3, 6-08) ──────────────────────────
+
+    private Jwt boundJwt(String targetDigest, String jti) {
+        var builder = Jwt.withTokenValue("raw-token")
+                .header("alg", "HS256")
+                .subject(approverId.toString())
+                .claim("roles", List.of("REGISTRY_ADMIN"))
+                .claim("acr", "stepup")
+                .claim("stepup_scope", "FORCE_BURN")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(300));
+        if (targetDigest != null) {
+            builder.claim("stepup_target", targetDigest);
+        }
+        if (jti != null) {
+            builder.claim("jti", jti);
+        }
+        return builder.build();
+    }
+
+    @Test
+    @DisplayName("accepts a token bound to exactly this request and returns its single-use handle")
+    void accepts_boundToken() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(boundJwt("digest-A", "jti-1"));
+        when(appUserRepository.findById(approverId)).thenReturn(Optional.of(enabledAdmin()));
+
+        StepUpTokenValidator.Approval approval =
+                validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", "digest-A");
+
+        org.assertj.core.api.Assertions.assertThat(approval.approverId()).isEqualTo(approverId);
+        org.assertj.core.api.Assertions.assertThat(approval.jti()).isEqualTo("jti-1");
+        org.assertj.core.api.Assertions.assertThat(approval.targetDigest()).isEqualTo("digest-A");
+    }
+
+    @Test
+    @DisplayName("rejects a token bound to a different request (same action, other target)")
+    void rejects_targetMismatch() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(boundJwt("digest-A", "jti-1"));
+
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", "digest-B"))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("different request");
+    }
+
+    @Test
+    @DisplayName("rejects an unbound token (fail closed) when binding is on")
+    void rejects_unboundToken() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(boundJwt(null, "jti-1"));
+
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", "digest-A"))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("not bound to a request");
+    }
+
+    @Test
+    @DisplayName("rejects a bound token without a jti (it could never be single-use)")
+    void rejects_missingJti() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(boundJwt("digest-A", null));
+
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", "digest-A"))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("no id");
+    }
+
+    @Test
+    @DisplayName("the acceptance window is the dual-control window (default 300 s), not the 10-minute step-up age")
+    void rejects_tokenOlderThanWindow() {
+        Jwt old = Jwt.withTokenValue("raw-token")
+                .header("alg", "HS256")
+                .subject(approverId.toString())
+                .claim("roles", List.of("REGISTRY_ADMIN"))
+                .claim("acr", "stepup")
+                .claim("stepup_scope", "FORCE_BURN")
+                .claim("stepup_target", "digest-A")
+                .claim("jti", "jti-1")
+                .issuedAt(Instant.now().minusSeconds(400))
+                .expiresAt(Instant.now().plusSeconds(200))
+                .build();
+        when(jwtDecoder.decode("raw-token")).thenReturn(old);
+
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", "digest-A"))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("expired");
     }
 }

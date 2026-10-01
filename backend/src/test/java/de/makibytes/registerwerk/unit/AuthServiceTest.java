@@ -49,6 +49,8 @@ class AuthServiceTest {
         props = new RegisterwerkAuthProperties();
         props.setEntraEnabled(false);
         service = new AuthService(users, encoder, minter, props, attemptLimiter);
+        org.mockito.Mockito.lenient().when(attemptLimiter.check(anyString(), anyString()))
+                .thenReturn(LoginAttemptLimiter.Decision.OPEN);
     }
 
     @Test
@@ -60,7 +62,7 @@ class AuthServiceTest {
         when(minter.mint(user)).thenReturn("jwt-token");
         when(users.save(any())).thenReturn(user);
 
-        LoginResult result = service.login("admin@local", "secret");
+        LoginResult result = service.login("admin@local", "secret", "10.0.0.1");
 
         assertThat(result.token()).isEqualTo("jwt-token");
         assertThat(result.roles()).containsExactly("REGISTRY_ADMIN");
@@ -76,7 +78,7 @@ class AuthServiceTest {
         when(minter.mint(any())).thenReturn("token");
         when(users.save(any())).thenReturn(user);
 
-        service.login("admin@local", "secret");
+        service.login("admin@local", "secret", "10.0.0.1");
 
         assertThat(user.getLastLoginAt()).isNotNull();
         verify(users).save(user);
@@ -87,7 +89,7 @@ class AuthServiceTest {
     void unknownEmail_throwsInvalidCredentials() {
         when(users.findByEmailIgnoreCase(anyString())).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.login("nobody@local", "x"))
+        assertThatThrownBy(() -> service.login("nobody@local", "x", "10.0.0.1"))
             .isInstanceOf(InvalidCredentialsException.class);
     }
 
@@ -98,7 +100,7 @@ class AuthServiceTest {
         when(users.findByEmailIgnoreCase(anyString())).thenReturn(Optional.of(user));
         when(encoder.matches(anyString(), anyString())).thenReturn(false);
 
-        assertThatThrownBy(() -> service.login("admin@local", "wrong"))
+        assertThatThrownBy(() -> service.login("admin@local", "wrong", "10.0.0.1"))
             .isInstanceOf(InvalidCredentialsException.class);
     }
 
@@ -109,7 +111,7 @@ class AuthServiceTest {
         user.setEnabled(false);
         when(users.findByEmailIgnoreCase(anyString())).thenReturn(Optional.of(user));
 
-        assertThatThrownBy(() -> service.login("admin@local", "secret"))
+        assertThatThrownBy(() -> service.login("admin@local", "secret", "10.0.0.1"))
             .isInstanceOf(InvalidCredentialsException.class);
     }
 
@@ -118,7 +120,7 @@ class AuthServiceTest {
     void entraEnabled_throwsLoginDisabled() {
         props.setEntraEnabled(true);
 
-        assertThatThrownBy(() -> service.login("admin@local", "secret"))
+        assertThatThrownBy(() -> service.login("admin@local", "secret", "10.0.0.1"))
             .isInstanceOf(LoginDisabledException.class);
     }
 
@@ -139,7 +141,7 @@ class AuthServiceTest {
     void unknownEmail_burnsDummyComparison() {
         when(users.findByEmailIgnoreCase("ghost@local")).thenReturn(Optional.empty());
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("ghost@local", "whatever"))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("ghost@local", "whatever", "10.0.0.1"))
                 .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
 
         // The encoder must still be exercised so timing does not reveal account existence.
@@ -154,12 +156,12 @@ class AuthServiceTest {
         when(encoder.matches("wrong", "hash")).thenReturn(false);
 
         for (int i = 0; i < 5; i++) {
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong"))
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong", "10.0.0.1"))
                     .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
         }
 
         // Locked: correct password is rejected without touching the encoder again.
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "secret"))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "secret", "10.0.0.1"))
                 .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
     }
 
@@ -174,14 +176,52 @@ class AuthServiceTest {
         when(users.save(any())).thenReturn(user);
 
         for (int i = 0; i < 4; i++) {
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong"))
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong", "10.0.0.1"))
                     .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
         }
-        LoginResult result = service.login("admin@local", "secret");
+        LoginResult result = service.login("admin@local", "secret", "10.0.0.1");
         assertThat(result.token()).isEqualTo("jwt-token");
 
         // Counter cleared: more failures allowed before lockout kicks in again.
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong"))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong", "10.0.0.1"))
                 .isInstanceOf(de.makibytes.registerwerk.shared.InvalidCredentialsException.class);
+    }
+
+    @Test
+    @DisplayName("K3 6-10: a blocked (account, source) pair is refused before any password work")
+    void blockedPair_refusedWithoutPasswordWork() {
+        when(attemptLimiter.check("admin@local", "10.0.0.1")).thenReturn(new LoginAttemptLimiter.Decision(true, 0));
+
+        assertThatThrownBy(() -> service.login("admin@local", "secret", "10.0.0.1"))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        org.mockito.Mockito.verifyNoInteractions(encoder, users);
+    }
+
+    @Test
+    @DisplayName("K3 6-10: progressive delay applies to known and unknown e-mails alike")
+    void progressiveDelay_isUniform() {
+        java.util.List<Long> delays = new java.util.ArrayList<>();
+        service.setDelayer(delays::add);
+        when(attemptLimiter.check(anyString(), anyString())).thenReturn(new LoginAttemptLimiter.Decision(false, 2000));
+        when(users.findByEmailIgnoreCase("ghost@local")).thenReturn(Optional.empty());
+        AppUser user = buildUser();
+        when(users.findByEmailIgnoreCase("admin@local")).thenReturn(Optional.of(user));
+        when(encoder.matches(anyString(), anyString())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.login("ghost@local", "x", "10.0.0.1")).isInstanceOf(InvalidCredentialsException.class);
+        assertThatThrownBy(() -> service.login("admin@local", "x", "10.0.0.1")).isInstanceOf(InvalidCredentialsException.class);
+
+        assertThat(delays).containsExactly(2000L, 2000L);
+    }
+
+    @Test
+    @DisplayName("K3 6-10: failures are recorded with the source address")
+    void failure_recordedWithSource() {
+        when(users.findByEmailIgnoreCase("ghost@local")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.login("ghost@local", "x", "203.0.113.9")).isInstanceOf(InvalidCredentialsException.class);
+
+        verify(attemptLimiter).recordFailure("ghost@local", "203.0.113.9");
     }
 }

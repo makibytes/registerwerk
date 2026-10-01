@@ -40,7 +40,7 @@ describe('HandoffComponent', () => {
     });
 
     it('shows the unsupported notice and strips the fragment when Entra mode does not support impersonation', () => {
-        window.location.hash = '#token=abc&entityId=ent-1&entityName=Acme';
+        window.location.hash = '#code=abc&entityId=ent-1&entityName=Acme';
         authService.supportsImpersonation.mockReturnValue(false);
         const replaceStateSpy = vi.spyOn(history, 'replaceState');
 
@@ -52,7 +52,7 @@ describe('HandoffComponent', () => {
     });
 
     it('exchanges the token via AuthService and navigates to /dashboard on success', () => {
-        window.location.hash = '#token=impersonation-tok&entityId=ent-1&entityName=Acme%20GmbH';
+        window.location.hash = '#code=impersonation-tok&entityId=ent-1&entityName=Acme%20GmbH';
         authService.supportsImpersonation.mockReturnValue(true);
         authService.enterImpersonation.mockReturnValue(of(void 0));
 
@@ -64,7 +64,7 @@ describe('HandoffComponent', () => {
     });
 
     it('shows a recoverable failure notice when the token exchange fails', () => {
-        window.location.hash = '#token=bad-tok&entityId=ent-1&entityName=Acme';
+        window.location.hash = '#code=bad-tok&entityId=ent-1&entityName=Acme';
         authService.supportsImpersonation.mockReturnValue(true);
         authService.enterImpersonation.mockReturnValue(throwError(() => new Error('exchange failed')));
 

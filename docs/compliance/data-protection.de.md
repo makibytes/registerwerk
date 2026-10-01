@@ -125,3 +125,11 @@ Kommt es zu einer Verletzung des Schutzes personenbezogener Daten:
 - Art. 34: Benachrichtigen Sie **betroffene Personen** unverzüglich, wenn der Verstoß ein hohes Risiko darstellt
 
 Es ist kein automatisierter Workflow zur DSGVO-Meldung von Verstößen an Behörden oder betroffene Personen implementiert. Betreiber müssen einen einsatzspezifischen Prozess einrichten, testen und nachweisen.
+
+## Entity-Lebenszyklus und DSAR-Umfang {#entity-lifecycle}
+
+- **Zustandsautomat:** PENDING_ONBOARDING -> ACTIVE nur durch das Onboarding; ACTIVE <-> SUSPENDED (Sperren und Reaktivieren erfordern Step-up, einen zweiten Freigeber und eine Begründung); CLOSED (Kündigung) und DISSOLVED (Verschmelzung) sind endgültig. Die Reaktivierung wird abgelehnt, solange KYC abgelaufen/abgelehnt ist, ein Screening-Treffer offen ist oder ein Sperrvermerk aktiv ist.
+- **Kündigung** wird abgelehnt, solange Verpflichtungen offen sind (begebene Wertpapiere, nicht abgewickelte Trades, Repo-/Lending-Positionen, offene Corporate Actions und Registerübertragungen, Sperrvermerk-Bestände), außer jede wird mit Begründung bestätigt. Bestätigte Verpflichtungen werden zu Folgeaufgaben (`/api/v1/entity-tasks`, Gauge `registerwerk_offboarding_open_tasks`), die offen bleiben, bis ein Operator sie erledigt. Nutzer werden deaktiviert, Sitzungen und ungenutzte Aktionstoken widerrufen.
+- **On-Chain:** Die Sperre suspendiert die Org auf jeder Chain; Kündigung und Verschmelzung widerrufen zusätzlich die KYC/AML-Claims. Eine Reaktivierung stellt on-chain nichts automatisch wieder her, sondern erzeugt die Aufgabe `CHAIN_REINSTATEMENT_REQUIRED` für die Wiedereinsetzung im Vier-Augen-Prinzip.
+- **Datenänderungen:** Änderung von Name, LEI oder Land löst ein erneutes Screening aus und für APPROVED-Entitäten eine Aufgabe `KYC_REVIEW_REQUIRED` (der KYC-Status ändert sich nicht automatisch). Herabstufung der Kundenkategorie und Verschmelzungen erfordern einen zweiten Freigeber und eine Begründung; das Audit-Ereignis enthält Vorher und Nachher.
+- **DSAR:** Der Export umfasst nur Entity-Stammdaten und nennt, was nicht enthalten ist. Eine Löschung endet als `COMPLETED_PARTIAL` mit Listen zu gelöscht, aufbewahrt (Rechtsgrundlage) und nicht abgedeckt. Die Durchsetzung von Aufbewahrungsfristen erfolgt manuell; nichts wird automatisch gelöscht (Fristen sind eine offene Rechtsentscheidung).

@@ -85,6 +85,7 @@ describe('SidebarComponent', () => {
               'Unresolved Compensation',
               'Finality Policy',
               'Indexers',
+              'Entity Tasks',
               'Support Tickets',
               'Audit Log',
             ]);

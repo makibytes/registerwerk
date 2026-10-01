@@ -53,6 +53,15 @@ class RelatedPartyCheck {
     }
 
     /**
+     * 6-31: the same acting user on both legs of one trade (directly, or one operator impersonating
+     * both entities in two sessions - the session's {@code sub} is the operator) is self-dealing.
+     * Null ids (system actors) never match.
+     */
+    boolean sameActor(UUID buyerActorId, UUID sellerActorId) {
+        return buyerActorId != null && buyerActorId.equals(sellerActorId);
+    }
+
+    /**
      * @param buyerWallet  the wallet the buyer will receive on (may be null)
      * @param sellerWallet the seller's register wallet (may be null)
      * @return reason codes; empty = unrelated

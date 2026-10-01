@@ -13,6 +13,10 @@ import { submitTotpForStepUpToken } from './step-up-totp-submit';
 export interface ApprovalTokenGeneratorDialogData {
   /** The exact `@RequiresStepUp(reason=...)` value the minted token must be scoped to. */
   action: string;
+  /** `"METHOD /api/v1/path[?query]"` of the request being approved; editable when the initiator did not supply it. */
+  target?: string;
+  /** JSON body of that request (body-bound reasons only). */
+  targetBody?: unknown;
 }
 
 /**
@@ -86,6 +90,15 @@ export interface ApprovalTokenGeneratorDialogData {
 
       @if (!issuedToken) {
         <mat-form-field class="full-width" appearance="outline">
+          <mat-label>Request to approve (METHOD /api/v1/path)</mat-label>
+          <input matInput [(ngModel)]="target" placeholder="POST /api/v1/admin/users/…/disable" />
+          <mat-hint>Ask the initiator for the exact method and path. A token minted for any other request is refused.</mat-hint>
+        </mat-form-field>
+        <mat-form-field class="full-width" appearance="outline">
+          <mat-label>Request body (JSON, only for mint / burn / forced transfer)</mat-label>
+          <textarea matInput rows="3" [(ngModel)]="bodyText" placeholder='{"toAddress":"0x…","amount":"1000"}'></textarea>
+        </mat-form-field>
+        <mat-form-field class="full-width" appearance="outline">
           <mat-label>Your TOTP code (6 digits)</mat-label>
           <mat-icon matPrefix>smartphone</mat-icon>
           <input matInput
@@ -142,6 +155,8 @@ export class ApprovalTokenGeneratorDialogComponent {
   private readonly cdr = inject(ChangeDetectorRef);
 
   totpCode = '';
+  target = this.data.target ?? '';
+  bodyText = this.data.targetBody === undefined ? '' : JSON.stringify(this.data.targetBody);
   issuedToken: string | null = null;
   loading = false;
   errorMessage: string | null = null;
@@ -149,8 +164,24 @@ export class ApprovalTokenGeneratorDialogComponent {
   generate(): void {
     if (!this.totpCode || this.totpCode.length < 6) return;
 
+    let targetBody: unknown;
+    if (this.bodyText.trim()) {
+      try {
+        targetBody = JSON.parse(this.bodyText);
+      } catch {
+        this.errorMessage = 'The request body is not valid JSON.';
+        this.cdr.markForCheck();
+        return;
+      }
+    }
+    if (!this.target.trim()) {
+      this.errorMessage = 'Enter the request you are approving (METHOD /api/v1/path).';
+      this.cdr.markForCheck();
+      return;
+    }
     submitTotpForStepUpToken(
-      this.stepUpService, this.cdr, this, this.totpCode, this.data.action,
+      this.stepUpService, this.cdr, this, this.totpCode,
+      { action: this.data.action, target: this.target.trim(), targetBody },
       (res) => { this.issuedToken = res.stepUpToken; },
     );
   }

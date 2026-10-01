@@ -50,6 +50,42 @@ public class ScreeningHit {
     @Column(name = "dual_control_approved_at")
     private Instant dualControlApprovedAt;
 
+    @Column(name = "external_id")
+    private String externalId;
+
+    /** sha256 over provider, list, provider record id and normalised matched value; see {@link HitFingerprint}. */
+    @Column(name = "fingerprint", length = 64)
+    private String fingerprint;
+
+    /** The original (non-carried) hit whose decision this hit inherited, if any. */
+    @Column(name = "carried_from_hit_id")
+    private UUID carriedFromHitId;
+
+    @Column(name = "carried_at")
+    private Instant carriedAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "resolution", length = 20)
+    private HitResolution resolution;
+
+    @Column(name = "pep_confirmed_by")
+    private UUID pepConfirmedBy;
+
+    @Column(name = "pep_confirmed_at")
+    private Instant pepConfirmedAt;
+
+    @Column(name = "pep_confirm_note")
+    private String pepConfirmNote;
+
+    @Column(name = "edd_approval_id")
+    private UUID eddApprovalId;
+
+    @Column(name = "edd_approved_at")
+    private Instant eddApprovedAt;
+
+    @Column(name = "edd_review_due")
+    private Instant eddReviewDue;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -79,4 +115,37 @@ public class ScreeningHit {
     public Instant getDualControlApprovedAt() { return dualControlApprovedAt; }
     public void setDualControlApprovedAt(Instant t) { this.dualControlApprovedAt = t; }
     public Instant getCreatedAt() { return createdAt; }
+    public String getExternalId() { return externalId; }
+    public void setExternalId(String externalId) { this.externalId = externalId; }
+    public String getFingerprint() { return fingerprint; }
+    public void setFingerprint(String fingerprint) { this.fingerprint = fingerprint; }
+    public UUID getCarriedFromHitId() { return carriedFromHitId; }
+    public void setCarriedFromHitId(UUID id) { this.carriedFromHitId = id; }
+    public Instant getCarriedAt() { return carriedAt; }
+    public void setCarriedAt(Instant t) { this.carriedAt = t; }
+    public HitResolution getResolution() { return resolution; }
+    public void setResolution(HitResolution resolution) { this.resolution = resolution; }
+    public UUID getPepConfirmedBy() { return pepConfirmedBy; }
+    public void setPepConfirmedBy(UUID id) { this.pepConfirmedBy = id; }
+    public Instant getPepConfirmedAt() { return pepConfirmedAt; }
+    public void setPepConfirmedAt(Instant t) { this.pepConfirmedAt = t; }
+    public String getPepConfirmNote() { return pepConfirmNote; }
+    public void setPepConfirmNote(String note) { this.pepConfirmNote = note; }
+    public UUID getEddApprovalId() { return eddApprovalId; }
+    public void setEddApprovalId(UUID id) { this.eddApprovalId = id; }
+    public Instant getEddApprovedAt() { return eddApprovedAt; }
+    public void setEddApprovedAt(Instant t) { this.eddApprovedAt = t; }
+    public Instant getEddReviewDue() { return eddReviewDue; }
+    public void setEddReviewDue(Instant t) { this.eddReviewDue = t; }
+
+    /** A confirmed PEP whose enhanced due diligence was approved and whose review is not yet due. */
+    public boolean eddInForce(Instant now) {
+        return resolution == HitResolution.CONFIRMED_PEP && eddApprovedAt != null
+                && (eddReviewDue == null || eddReviewDue.isAfter(now));
+    }
+
+    /** Whether this hit keeps the gate closed: not accepted as a false positive and no valid EDD cover. */
+    public boolean blocksGate(Instant now) {
+        return !Boolean.TRUE.equals(accepted) && !eddInForce(now);
+    }
 }

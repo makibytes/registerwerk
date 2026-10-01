@@ -122,3 +122,11 @@ Si se produce una violación de datos personales:
 - Art. 34: Notificar a los **interesados afectados** sin demora indebida si la violación es de alto riesgo
 
 No se implementa ninguna autoridad automática GDPR ni un flujo de trabajo de notificación de incumplimiento del sujeto de datos. Los operadores deben establecer, probar y evidenciar un proceso específico de implementación.
+
+## Ciclo de vida de la entidad y alcance DSAR {#entity-lifecycle}
+
+- **Máquina de estados:** PENDING_ONBOARDING -> ACTIVE solo mediante el onboarding; ACTIVE <-> SUSPENDED (suspender y reactivar exigen step-up, un segundo aprobador y un motivo); CLOSED (baja) y DISSOLVED (fusión) son definitivos. La reactivación se rechaza mientras el KYC esté caducado/rechazado, haya una coincidencia de cribado sin resolver o un Sperrvermerk activo.
+- **La baja** se rechaza mientras haya obligaciones abiertas (valores emitidos, operaciones sin liquidar, posiciones de repo/lending, acciones corporativas y traspasos de registro pendientes, posiciones con Sperrvermerk), salvo que cada una se confirme con un motivo. Las obligaciones confirmadas pasan a ser tareas de seguimiento (`/api/v1/entity-tasks`, indicador `registerwerk_offboarding_open_tasks`) abiertas hasta que un operador las cierre. Se desactivan los usuarios y se revocan sus sesiones y tokens de acción sin usar.
+- **On-chain:** la suspensión suspende la org en cada cadena; la baja y la fusión revocan además los claims KYC/AML. Una reactivación no restablece nada on-chain automáticamente; crea la tarea `CHAIN_REINSTATEMENT_REQUIRED` para el restablecimiento con doble control.
+- **Cambios de datos:** un cambio de nombre, LEI o país vuelve a cribar la entidad y crea una tarea `KYC_REVIEW_REQUIRED` para entidades APPROVED (el estado KYC no cambia automáticamente). Rebajar la categoría de cliente y las fusiones exigen un segundo aprobador y un motivo; el evento de auditoría contiene el antes y el después.
+- **DSAR:** la exportación cubre solo los datos maestros de la entidad e indica lo que no incluye. Una supresión termina como `COMPLETED_PARTIAL` con listas de lo suprimido, conservado (base jurídica) y no cubierto. La aplicación de plazos de conservación es manual; nada se purga automáticamente (plazos = decisión jurídica abierta).

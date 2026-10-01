@@ -105,7 +105,8 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
               and (cast(:actorId as uuid) is null or e.actor_id = :actorId)
               and (cast(:fromTs as timestamptz) is null or e.occurred_at >= cast(:fromTs as timestamptz))
               and (cast(:toTs as timestamptz) is null or e.occurred_at <= cast(:toTs as timestamptz))
-            order by e.occurred_at asc
+              and e.sequence_no > :afterSeq
+            order by e.sequence_no asc
             """,
         nativeQuery = true
     )
@@ -116,5 +117,6 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
         @Param("actorId") UUID actorId,
         @Param("fromTs") Instant fromTs,
         @Param("toTs") Instant toTs,
+        @Param("afterSeq") long afterSeq,
         Pageable pageable);
 }

@@ -2,7 +2,16 @@ package de.makibytes.registerwerk.admin.internal;
 
 import de.makibytes.registerwerk.admin.events.AdminImpersonationStartedEvent;
 import org.springframework.context.ApplicationEventPublisher;
-import de.makibytes.registerwerk.auth.api.JwtMintingService;
+import de.makibytes.registerwerk.auth.api.ImpersonationMode;
+import de.makibytes.registerwerk.auth.api.ImpersonationSession;
+import de.makibytes.registerwerk.auth.api.ImpersonationSessionRepository;
+import de.makibytes.registerwerk.admin.web.dto.ImpersonateRequest;
+import de.makibytes.registerwerk.admin.web.dto.ImpersonationSessionView;
+import org.springframework.data.domain.PageRequest;
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.List;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.auth.api.AppUser;
@@ -28,7 +37,9 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class AdminImpersonationService {
 
-    private final JwtMintingService jwtMintingService;
+    private static final SecureRandom RANDOM = new SecureRandom();
+
+    private final ImpersonationSessionRepository sessions;
     private final AppUserRepository appUserRepository;
     private final LegalEntityRepository legalEntityRepository;
     private final ApplicationEventPublisher eventPublisher;
@@ -36,13 +47,13 @@ public class AdminImpersonationService {
     private final String customerFrontendUrl;
 
     public AdminImpersonationService(
-            JwtMintingService jwtMintingService,
+            ImpersonationSessionRepository sessions,
             AppUserRepository appUserRepository,
             LegalEntityRepository legalEntityRepository,
             ApplicationEventPublisher eventPublisher,
             RegisterwerkAuthProperties authProperties,
             @Value("${registerwerk.onboarding.frontend-url}") String customerFrontendUrl) {
-        this.jwtMintingService = jwtMintingService;
+        this.sessions = sessions;
         this.appUserRepository = appUserRepository;
         this.legalEntityRepository = legalEntityRepository;
         this.eventPublisher = eventPublisher;
@@ -50,7 +61,9 @@ public class AdminImpersonationService {
         this.customerFrontendUrl = customerFrontendUrl;
     }
 
-    public ImpersonateResponse impersonate(Authentication caller, UUID targetEntityId) {
+    @Transactional
+    public ImpersonateResponse impersonate(Authentication caller, ImpersonateRequest request,
+                                           ImpersonationMode mode, UUID approverId) {
         if (authProperties.isEntraEnabled()) {
             throw new UnsupportedOperationException(
                 "Impersonation is only available in local-auth mode (ENTRA_ENABLED=false)"
@@ -72,23 +85,54 @@ public class AdminImpersonationService {
         if (!actor.isEnabled()) {
             throw new AccessDeniedException("Disabled users may not impersonate");
         }
+        if (mode == ImpersonationMode.ACT_ON_BEHALF && (approverId == null || approverId.equals(actorId))) {
+            throw new AccessDeniedException("Acting on behalf of a customer requires a second approver");
+        }
 
+        UUID targetEntityId = request.entityId();
         LegalEntity target = legalEntityRepository.findById(targetEntityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", targetEntityId));
         if (target.getStatus() != EntityStatus.ACTIVE) {
             throw new AccessDeniedException("Only active legal entities may be impersonated");
         }
 
-        String token = jwtMintingService.mintImpersonationToken(actor, target.getId());
-        OffsetDateTime expiresAt = OffsetDateTime.now().plusSeconds(jwtMintingService.getTokenTtlSeconds());
+        byte[] raw = new byte[32];
+        RANDOM.nextBytes(raw);
+        String code = Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+        Instant now = Instant.now();
+        Instant expires = now.plusSeconds(authProperties.getImpersonationTtlSeconds());
+        ImpersonationSession session = sessions.save(new ImpersonationSession(
+            UUID.randomUUID(), actorId, targetEntityId, mode, request.reason().trim(),
+            request.ticket() == null || request.ticket().isBlank() ? null : request.ticket().trim(),
+            approverId, expires, ImpersonationSession.hashHandoffCode(code),
+            now.plusSeconds(authProperties.getImpersonationHandoffTtlSeconds())));
 
-        eventPublisher.publishEvent(new AdminImpersonationStartedEvent(actorId, actorId, "REGISTRY_ADMIN", java.util.Map.of("targetEntityId", targetEntityId.toString(), "targetEntityName", target.getCurrentName())));
+        Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("sessionId", session.getId().toString());
+        details.put("mode", mode.name());
+        details.put("targetEntityId", targetEntityId.toString());
+        details.put("targetEntityName", target.getCurrentName());
+        details.put("reason", session.getReason());
+        details.put("ticket", session.getTicketRef());
+        details.put("expiresAt", expires.toString());
+        eventPublisher.publishEvent(new AdminImpersonationStartedEvent(
+                actorId, actorId, "REGISTRY_ADMIN", details, approverId));
 
         String encodedName = URLEncoder.encode(target.getCurrentName(), StandardCharsets.UTF_8);
-        String handoffUrl = customerFrontendUrl + "/admin/handoff#token=" + token
+        String handoffUrl = customerFrontendUrl + "/admin/handoff#code=" + code
                 + "&entityId=" + target.getId()
                 + "&entityName=" + encodedName;
 
-        return new ImpersonateResponse(token, "Bearer", expiresAt, target.getId(), target.getCurrentName(), handoffUrl);
+        return new ImpersonateResponse(session.getId(), mode.name(), expires.atOffset(java.time.ZoneOffset.UTC),
+                target.getId(), target.getCurrentName(), handoffUrl);
+    }
+
+    /** Sessions on one entity, newest first — shown to that entity's admins. */
+    @Transactional(readOnly = true)
+    public List<ImpersonationSessionView> sessionsFor(UUID entityId) {
+        return sessions.findByTargetEntityIdOrderByStartedAtDesc(entityId, PageRequest.of(0, 100)).stream()
+            .map(s -> new ImpersonationSessionView(s.getId(), s.getMode().name(), s.getReason(), s.getTicketRef(),
+                s.getActorId(), s.getApproverId(), s.getStartedAt(), s.getExpiresAt(), s.getEndedAt(), s.getEndReason()))
+            .toList();
     }
 }

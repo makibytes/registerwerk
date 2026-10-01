@@ -9,6 +9,7 @@ class TravelRuleProductionReadinessCheckTest {
     @Test
     void productionRejectsNoopTransport() {
         TravelRuleProperties properties = new TravelRuleProperties();
+        withOwnVasp(properties);
 
         TravelRuleProductionReadinessCheck check =
                 new TravelRuleProductionReadinessCheck(properties, "inbox-secret", true);
@@ -21,6 +22,7 @@ class TravelRuleProductionReadinessCheckTest {
     @Test
     void productionRejectsTrpWithoutMutualTls() {
         TravelRuleProperties properties = new TravelRuleProperties();
+        withOwnVasp(properties);
         properties.setProtocol("TRP");
         properties.getTrp().setEndpoint("https://trp.example");
 
@@ -33,7 +35,7 @@ class TravelRuleProductionReadinessCheckTest {
     }
 
     @Test
-    void productionRejectsDisabledInbox() {
+    void productionRejectsMissingOwnVaspIdentity() {
         TravelRuleProperties properties = new TravelRuleProperties();
         properties.setProtocol("NOTABENE");
         properties.getNotabene().setApiKey("outbound-secret");
@@ -44,6 +46,22 @@ class TravelRuleProductionReadinessCheckTest {
 
         assertThatThrownBy(check::check)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("INBOX_API_KEY");
+                .hasMessageContaining("OWN_VASP");
+    }
+
+    @Test
+    void productionRejectsLegacySharedKey() {
+        TravelRuleProperties properties = new TravelRuleProperties();
+        withOwnVasp(properties);
+        properties.setLegacySharedKey(true);
+
+        assertThatThrownBy(new TravelRuleProductionReadinessCheck(properties, "", true)::check)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("LEGACY_SHARED_KEY");
+    }
+
+    private static void withOwnVasp(TravelRuleProperties p) {
+        p.getOwnVasp().setDid("did:example:registerwerk");
+        p.getOwnVasp().setLegalName("Registerwerk Operator GmbH");
     }
 }

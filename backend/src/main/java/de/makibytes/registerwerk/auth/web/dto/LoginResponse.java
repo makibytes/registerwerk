@@ -18,5 +18,7 @@ public record LoginResponse(
     String entityName,
     /** True when this session is a REGISTRY_ADMIN impersonating {@code entityId} (JWT {@code imp} claim). */
     boolean impersonating,
-    long expiresAt
+    long expiresAt,
+    /** READ_ONLY or ACT_ON_BEHALF while {@code impersonating}, else null. The customer app shows a banner and disables writes in READ_ONLY. */
+    String impersonationMode
 ) {}

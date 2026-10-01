@@ -1,7 +1,10 @@
 package de.makibytes.registerwerk.dora.api;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -9,8 +12,8 @@ import java.util.UUID;
  * Major incidents must be reported to the competent authority within:
  *   - 4 hours of classification as major
  *   - 24 hours initial report (Art. 19 para. 4a)
- *   - 72 hours detailed report (Art. 19 para. 4b)
- *   - 1 month final report (Art. 19 para. 4c)
+ *   - 72 hours after the initial notification: intermediate report (Art. 19 para. 4b)
+ *   - 1 month: final report (Art. 19 para. 4c)
  */
 @Entity
 @Table(name = "ict_incident")
@@ -51,12 +54,49 @@ public class IctIncident {
     @Column(name = "source_event_ref")
     private UUID sourceEventRef;
 
+    /** When the incident was entered into the register (record time). */
     @Column(name = "detected_at", nullable = false)
     private Instant detectedAt = Instant.now();
 
     /**
-     * When this incident was classified as MAJOR (DORA Art. 19(4)) — in the current model
-     * this happens at report time, since there is no separate reclassification workflow yet.
+     * When the operator became aware of the incident: the anchor of the 24 h and 1 month clocks.
+     * Operator-entered at creation, never later than the entry time, immutable afterwards
+     * (also enforced by a database trigger).
+     */
+    @Column(name = "awareness_at", nullable = false, updatable = false)
+    private Instant awarenessAt = Instant.now();
+
+    @Column(name = "classification_reason", columnDefinition = "TEXT")
+    private String classificationReason;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "classification_criteria", columnDefinition = "jsonb")
+    private Map<String, Object> classificationCriteria;
+
+    @Column(name = "classified_by")
+    private UUID classifiedBy;
+
+    /** True for automatically opened drafts until a person has classified them. */
+    @Column(name = "classification_pending", nullable = false)
+    private boolean classificationPending;
+
+    /** 72 h after the initial notification (DORA Art. 19(4)); null until an initial report exists. */
+    @Column(name = "intermediate_report_deadline")
+    private Instant intermediateReportDeadline;
+
+    @Column(name = "intermediate_reported_at")
+    private Instant intermediateReportedAt;
+
+    /** Set when a MAJOR classification was withdrawn (four-eyes); takes the incident out of breach monitoring. */
+    @Column(name = "downgraded_at")
+    private Instant downgradedAt;
+
+    @Column(name = "downgrade_reason", columnDefinition = "TEXT")
+    private String downgradeReason;
+
+    /**
+     * When this incident was (last) classified as MAJOR (DORA Art. 19(4)): at entry, or by the
+     * classify endpoint. Anchor of the 4 h initial-notification clock.
      */
     @Column(name = "classified_at")
     private Instant classifiedAt;
@@ -66,11 +106,11 @@ public class IctIncident {
     @Column(name = "classification_deadline")
     private Instant classificationDeadline;
 
-    /** 24-hour initial notification deadline (DORA Art. 19 para. 4a). */
+    /** 24-hour-from-awareness initial notification deadline (DORA Art. 19 para. 4a). */
     @Column(name = "initial_report_deadline")
     private Instant initialReportDeadline;
 
-    /** 72-hour detailed report deadline (DORA Art. 19 para. 4b). */
+    /** Final report deadline: one month (30 days) from awareness, conservative (DORA Art. 19 para. 4c). */
     @Column(name = "final_report_deadline")
     private Instant finalReportDeadline;
 
@@ -131,6 +171,24 @@ public class IctIncident {
     public void setSourceEventRef(UUID r) { this.sourceEventRef = r; }
     public Instant getDetectedAt() { return detectedAt; }
     public void setDetectedAt(Instant t) { this.detectedAt = t; }
+    public Instant getAwarenessAt() { return awarenessAt; }
+    public void setAwarenessAt(Instant t) { this.awarenessAt = t; }
+    public String getClassificationReason() { return classificationReason; }
+    public void setClassificationReason(String s) { this.classificationReason = s; }
+    public Map<String, Object> getClassificationCriteria() { return classificationCriteria; }
+    public void setClassificationCriteria(Map<String, Object> m) { this.classificationCriteria = m; }
+    public UUID getClassifiedBy() { return classifiedBy; }
+    public void setClassifiedBy(UUID u) { this.classifiedBy = u; }
+    public boolean isClassificationPending() { return classificationPending; }
+    public void setClassificationPending(boolean b) { this.classificationPending = b; }
+    public Instant getIntermediateReportDeadline() { return intermediateReportDeadline; }
+    public void setIntermediateReportDeadline(Instant t) { this.intermediateReportDeadline = t; }
+    public Instant getIntermediateReportedAt() { return intermediateReportedAt; }
+    public void setIntermediateReportedAt(Instant t) { this.intermediateReportedAt = t; }
+    public Instant getDowngradedAt() { return downgradedAt; }
+    public void setDowngradedAt(Instant t) { this.downgradedAt = t; }
+    public String getDowngradeReason() { return downgradeReason; }
+    public void setDowngradeReason(String s) { this.downgradeReason = s; }
     public Instant getClassifiedAt() { return classifiedAt; }
     public void setClassifiedAt(Instant t) { this.classifiedAt = t; }
     public Instant getClassificationDeadline() { return classificationDeadline; }

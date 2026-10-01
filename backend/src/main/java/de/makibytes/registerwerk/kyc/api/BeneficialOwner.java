@@ -19,7 +19,10 @@ public class BeneficialOwner {
         OTHER_CONTROL,
         LEGAL_REPRESENTATIVE,
         TRUSTEE,
-        NOMINEE
+        NOMINEE,
+        /** Documented fallback when no natural person can be identified as owner (AMLR Art. 63): the
+         *  senior managing official; needs a recorded reason (parked decision T6-01). */
+        SENIOR_MANAGING_OFFICIAL
     }
 
     @Id
@@ -57,6 +60,21 @@ public class BeneficialOwner {
     @Column(name = "notes")
     private String notes;
 
+    @Column(name = "verification_document_id")
+    private UUID verificationDocumentId;
+
+    @Column(name = "fallback_reason")
+    private String fallbackReason;
+
+    @Column(name = "ceased_by")
+    private UUID ceasedBy;
+
+    @Column(name = "cease_reason")
+    private String ceaseReason;
+
+    @Column(name = "cease_document_id")
+    private UUID ceaseDocumentId;
+
     // ── Getters & Setters ─────────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -80,4 +98,14 @@ public class BeneficialOwner {
     public void setVerifiedAt(Instant v) { this.verifiedAt = v; }
     public String getNotes() { return notes; }
     public void setNotes(String v) { this.notes = v; }
+    public UUID getVerificationDocumentId() { return verificationDocumentId; }
+    public void setVerificationDocumentId(UUID v) { this.verificationDocumentId = v; }
+    public String getFallbackReason() { return fallbackReason; }
+    public void setFallbackReason(String v) { this.fallbackReason = v; }
+    public UUID getCeasedBy() { return ceasedBy; }
+    public void setCeasedBy(UUID v) { this.ceasedBy = v; }
+    public String getCeaseReason() { return ceaseReason; }
+    public void setCeaseReason(String v) { this.ceaseReason = v; }
+    public UUID getCeaseDocumentId() { return ceaseDocumentId; }
+    public void setCeaseDocumentId(UUID v) { this.ceaseDocumentId = v; }
 }

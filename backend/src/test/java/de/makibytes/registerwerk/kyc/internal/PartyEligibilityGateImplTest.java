@@ -93,4 +93,12 @@ class PartyEligibilityGateImplTest {
     void unknownEntity() {
         assertThat(gate.check(UUID.randomUUID(), WALLET)).containsExactly("is unknown");
     }
+
+    @Test
+    @DisplayName("6-25: entity-only callers (repo desk) see a wallet-only Sperrvermerk on the entity's holder wallets")
+    void entityOnlyCheckSeesWalletOnlyBlock() {
+        when(blocks.isEntityBlocked(entityId)).thenReturn(true);
+        assertThat(gate.check(entityId, null)).hasSize(1);
+        assertThatThrownBy(() -> gate.require(entityId, null, "repo desk")).isInstanceOf(RuntimeException.class);
+    }
 }

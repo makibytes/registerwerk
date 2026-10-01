@@ -40,7 +40,7 @@ class HolderIdentityResolver {
             return Optional.empty();
         }
         List<Map<String, Object>> rows = jdbc.queryForList("""
-            SELECT le.current_name, le.registration_country, le.lei_code, le.entity_number
+            SELECT le.current_name, le.registration_country, le.lei_code, le.entity_number, le.registration_number
             FROM asset_holder ah
             JOIN legal_entity le ON le.id = ah.investor_id
             WHERE ah.asset_id = ? AND LOWER(ah.wallet_address) = LOWER(?)
@@ -59,10 +59,15 @@ class HolderIdentityResolver {
                 List.of(new Ivms101.LegalPersonNameId(name, Ivms101.LegalPersonNameTypeCode.LEGL)),
                 entityNumber);
 
-        Ivms101.NationalIdentification nationalId = lei == null || lei.isBlank()
-                ? null
-                : new Ivms101.NationalIdentification(
-                        lei, Ivms101.NationalIdentifierTypeCode.LEIX, country, null);
+        String registrationNumber = (String) row.get("registration_number");
+        // LEI preferred; otherwise the commercial-register number (RAID) so the originator carries an
+        // official identifier even for entities without an LEI.
+        Ivms101.NationalIdentification nationalId = lei != null && !lei.isBlank()
+                ? new Ivms101.NationalIdentification(lei, Ivms101.NationalIdentifierTypeCode.LEIX, country, null)
+                : registrationNumber != null && !registrationNumber.isBlank()
+                ? new Ivms101.NationalIdentification(
+                        registrationNumber, Ivms101.NationalIdentifierTypeCode.RAID, country, null)
+                : null;
 
         return Optional.of(new Ivms101.IdentityPayload(
                 new Ivms101.Person(null, legalPerson),

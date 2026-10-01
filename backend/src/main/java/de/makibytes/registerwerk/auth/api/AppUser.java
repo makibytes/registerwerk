@@ -10,6 +10,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "app_user")
+@EntityListeners(AppUserSessionStateListener.class)
 public class AppUser {
 
     @Id
@@ -61,6 +62,10 @@ public class AppUser {
     @Column(name = "totp_secret")
     private String totpSecret;
 
+    /** Name of the KEK provider that wrapped {@link #totpSecret}'s data key (K3, 6-09). */
+    @Column(name = "totp_secret_kid", length = 200)
+    private String totpSecretKid;
+
     @Column(name = "totp_enabled", nullable = false)
     private boolean totpEnabled = false;
 
@@ -103,6 +108,54 @@ public class AppUser {
     @Column(name = "external_subject")
     private String externalSubject;
 
+    /**
+     * Session tokens issued before this instant are rejected by {@code UserSessionGuardFilter}
+     * ({@code iat < tokensValidAfter}). Bumped whenever the account's access changes
+     * (disable/enable, roles, entity, password) so every lifecycle lever revokes live sessions.
+     */
+    @Column(name = "tokens_valid_after")
+    private Instant tokensValidAfter;
+
+    /**
+     * Revokes every session token issued so far. JWT {@code iat} has whole-second resolution, so the
+     * boundary is the next full second: tokens minted in the same second are rejected too (fail
+     * closed; a re-login one second later works).
+     */
+    public void revokeSessions() {
+        this.tokensValidAfter = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).plusSeconds(1);
+    }
+
+    /** Bump only for persisted accounts: creating or initialising a new row must not revoke its first login. */
+    private void bumpIfPersisted() {
+        if (this.id != null) {
+            revokeSessions();
+        }
+    }
+
+    public Instant getTokensValidAfter() { return tokensValidAfter; }
+
+    /** Last actor who changed this account's roles (null: never changed since creation). */
+    @Column(name = "roles_changed_by")
+    private UUID rolesChangedBy;
+
+    @Column(name = "roles_changed_at")
+    private Instant rolesChangedAt;
+
+    /** True for a bootstrap-seeded account whose env-supplied password has not been replaced yet. */
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword = false;
+
+    /** Records who changed the roles, for access-review reviewer independence. */
+    public void markRolesChanged(UUID actorId) {
+        this.rolesChangedBy = actorId;
+        this.rolesChangedAt = Instant.now();
+    }
+
+    public UUID getRolesChangedBy() { return rolesChangedBy; }
+    public Instant getRolesChangedAt() { return rolesChangedAt; }
+    public boolean isMustChangePassword() { return mustChangePassword; }
+    public void setMustChangePassword(boolean mustChangePassword) { this.mustChangePassword = mustChangePassword; }
+
     @PreUpdate
     void onUpdate() {
         this.updatedAt = Instant.now();
@@ -120,10 +173,19 @@ public class AppUser {
     public void setFullName(String fullName) { this.fullName = fullName; }
 
     public String getPasswordHash() { return passwordHash; }
-    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
+    public void setPasswordHash(String passwordHash) {
+        if (this.passwordHash != null && !java.util.Objects.equals(this.passwordHash, passwordHash)) {
+            bumpIfPersisted();
+        }
+        this.passwordHash = passwordHash;
+    }
 
     public AppUserRole getRole() { return role; }
     public void setRole(AppUserRole role) {
+        Set<AppUserRole> next = role == null ? Set.of() : Set.of(role);
+        if (!next.equals(this.roles)) {
+            bumpIfPersisted();
+        }
         this.role = role;
         this.roles = new LinkedHashSet<>();
         if (role != null) {
@@ -133,18 +195,32 @@ public class AppUser {
 
     public Set<AppUserRole> getRoles() { return roles; }
     public void setRoles(Set<AppUserRole> roles) {
+        Set<AppUserRole> next = roles == null ? Set.of() : roles;
+        if (!next.equals(this.roles)) {
+            bumpIfPersisted();
+        }
         this.roles = new LinkedHashSet<>(roles == null ? Set.of() : roles);
         this.role = this.roles.stream().findFirst().orElse(null);
     }
 
     public UUID getLegalEntityId() { return legalEntityId; }
-    public void setLegalEntityId(UUID legalEntityId) { this.legalEntityId = legalEntityId; }
+    public void setLegalEntityId(UUID legalEntityId) {
+        if (!java.util.Objects.equals(this.legalEntityId, legalEntityId)) {
+            bumpIfPersisted();
+        }
+        this.legalEntityId = legalEntityId;
+    }
 
     public UserAuthProvider getAuthProvider() { return authProvider; }
     public void setAuthProvider(UserAuthProvider authProvider) { this.authProvider = authProvider; }
 
     public boolean isEnabled() { return enabled; }
-    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public void setEnabled(boolean enabled) {
+        if (this.enabled != enabled) {
+            bumpIfPersisted();
+        }
+        this.enabled = enabled;
+    }
 
     public UUID getCreatedBy() { return createdBy; }
     public void setCreatedBy(UUID createdBy) { this.createdBy = createdBy; }
@@ -159,6 +235,8 @@ public class AppUser {
 
     public String getTotpSecret() { return totpSecret; }
     public void setTotpSecret(String totpSecret) { this.totpSecret = totpSecret; }
+    public String getTotpSecretKid() { return totpSecretKid; }
+    public void setTotpSecretKid(String totpSecretKid) { this.totpSecretKid = totpSecretKid; }
     public boolean isTotpEnabled() { return totpEnabled; }
     public void setTotpEnabled(boolean totpEnabled) { this.totpEnabled = totpEnabled; }
     public Instant getTotpEnrolledAt() { return totpEnrolledAt; }

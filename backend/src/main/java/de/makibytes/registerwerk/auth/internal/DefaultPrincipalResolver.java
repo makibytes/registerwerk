@@ -8,6 +8,16 @@ import java.util.function.Consumer;
 
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
+import de.makibytes.registerwerk.auth.api.EntityActivityPort;
+import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
+import de.makibytes.registerwerk.auth.events.IdentityBoundEvent;
+import de.makibytes.registerwerk.auth.events.IdentityRebindRefusedEvent;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.auth.api.PrincipalResolver;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;
@@ -47,10 +57,28 @@ class DefaultPrincipalResolver implements PrincipalResolver {
 
     private final AppUserRepository appUserRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final RegisterwerkAuthProperties authProperties;
+    private final EntityActivityPort entityPort;
+    private final UUID configuredTenantId;
+    private final TransactionTemplate newTx;
 
-    DefaultPrincipalResolver(AppUserRepository appUserRepository, ApplicationEventPublisher eventPublisher) {
+    /** One refusal event per (account, presented identity) per hour; the filter resolves on every request. */
+    private final Cache<String, Boolean> refusalsAnnounced =
+            Caffeine.newBuilder().expireAfterWrite(java.time.Duration.ofHours(1)).maximumSize(10_000).build();
+
+    DefaultPrincipalResolver(AppUserRepository appUserRepository, ApplicationEventPublisher eventPublisher,
+                             RegisterwerkAuthProperties authProperties, EntityActivityPort entityPort,
+                             @Value("${registerwerk.entra.tenant-id:}") String entraTenantId,
+                             PlatformTransactionManager txManager) {
         this.appUserRepository = appUserRepository;
         this.eventPublisher = eventPublisher;
+        this.authProperties = authProperties;
+        this.entityPort = entityPort;
+        this.configuredTenantId = parseUuid(entraTenantId == null ? null : entraTenantId.trim());
+        // The refusal is followed by an AccessDeniedException that rolls the caller's transaction
+        // back; the audit event must survive that.
+        this.newTx = new TransactionTemplate(txManager);
+        this.newTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     @Override
@@ -72,6 +100,7 @@ class DefaultPrincipalResolver implements PrincipalResolver {
     }
 
     @Override
+    @Transactional
     public AppUser requireUser(Authentication authentication) {
         return resolve(authentication).orElseThrow(() -> new AccessDeniedException(
                 "No Registerwerk account could be resolved for the authenticated principal."));
@@ -107,11 +136,8 @@ class DefaultPrincipalResolver implements PrincipalResolver {
         if (email != null) {
             Optional<AppUser> byEmail = appUserRepository.findByEmailIgnoreCase(email);
             if (byEmail.isPresent()) {
-                AppUser user = byEmail.get();
-                if (objectId != null && user.getEntraObjectId() == null) {
-                    log.info("Binding Entra oid to existing account: email={} oid={}", email, objectId);
-                }
-                return Optional.of(touch(user, jwt, objectId));
+                // Never "adopts" a row silently: see linkEntra for the conditions (6-05).
+                return linkEntra(byEmail.get(), jwt, objectId, email);
             }
         }
 
@@ -121,13 +147,102 @@ class DefaultPrincipalResolver implements PrincipalResolver {
         }));
     }
 
+
+    /**
+     * Binds a first-seen Entra identity to an account that matches by e-mail, or refuses.
+     * Linking by e-mail requires ALL of: the row is not bound to an Entra object id yet; the token
+     * carries an {@code oid}; its {@code tid} is the configured tenant (or the account's entity
+     * federates from that tenant) and matches any tenant already recorded on the row; the token
+     * asserts a verified address ({@code xms_edov} / {@code email_verified}) or
+     * {@code registerwerk.auth.link-by-email-without-verification} allows linking without one.
+     * Otherwise the token resolves to no account and {@link IdentityRebindRefusedEvent} is
+     * published; the sanctioned path is an operator's four-eyes identity reset.
+     */
+    private Optional<AppUser> linkEntra(AppUser user, Jwt jwt, UUID objectId, String email) {
+        UUID tenantId = parseUuid(jwt.getClaimAsString("tid"));
+        String presented = objectId == null ? null : objectId.toString();
+        if (user.getEntraObjectId() != null) {
+            return refuse(user, "ENTRA", user.getEntraObjectId().toString(), presented, "BOUND_TO_OTHER_IDENTITY");
+        }
+        if (objectId == null) {
+            return refuse(user, "ENTRA", null, presented, "NO_OBJECT_ID");
+        }
+        java.util.Set<UUID> allowedTenants = new java.util.HashSet<>();
+        if (configuredTenantId != null) {
+            allowedTenants.add(configuredTenantId);
+        }
+        if (user.getLegalEntityId() != null) {
+            entityPort.idpTenantOf(user.getLegalEntityId()).ifPresent(allowedTenants::add);
+        }
+        boolean lenient = authProperties.linkByEmailWithoutVerificationAllowed();
+        if (allowedTenants.isEmpty() ? !lenient : (tenantId == null || !allowedTenants.contains(tenantId))) {
+            return refuse(user, "ENTRA", null, presented, "TENANT_NOT_ALLOWED");
+        }
+        if (user.getEntraTenantId() != null && tenantId != null && !user.getEntraTenantId().equals(tenantId)) {
+            return refuse(user, "ENTRA", null, presented, "TENANT_MISMATCH");
+        }
+        Boolean verified = assertedVerified(jwt, "xms_edov", "email_verified");
+        if (Boolean.FALSE.equals(verified) || (verified == null && !lenient)) {
+            return refuse(user, "ENTRA", null, presented, verified == null ? "EMAIL_NOT_VERIFIED" : "EMAIL_UNVERIFIED");
+        }
+        user.setEntraObjectId(objectId);
+        user.setEntraTenantId(tenantId);
+        user.setAuthProvider(UserAuthProvider.ENTRA);
+        AppUser saved = appUserRepository.save(user);
+        log.info("Bound Entra oid to existing account: email={} oid={}", email, objectId);
+        eventPublisher.publishEvent(new IdentityBoundEvent(saved.getId(), "ENTRA", null, presented,
+                tenantId == null ? null : tenantId.toString(), "EMAIL"));
+        return Optional.of(saved);
+    }
+
+    private Optional<AppUser> linkOidc(AppUser user, String subject, Jwt jwt) {
+        if (user.getExternalSubject() != null) {
+            return refuse(user, "OIDC", user.getExternalSubject(), subject, "BOUND_TO_OTHER_IDENTITY");
+        }
+        if (subject == null) {
+            return refuse(user, "OIDC", null, null, "NO_SUBJECT");
+        }
+        Boolean verified = assertedVerified(jwt, "email_verified");
+        if (Boolean.FALSE.equals(verified)
+                || (verified == null && !authProperties.linkByEmailWithoutVerificationAllowed())) {
+            return refuse(user, "OIDC", null, subject, verified == null ? "EMAIL_NOT_VERIFIED" : "EMAIL_UNVERIFIED");
+        }
+        user.setExternalSubject(subject);
+        user.setAuthProvider(UserAuthProvider.OIDC);
+        AppUser saved = appUserRepository.save(user);
+        eventPublisher.publishEvent(new IdentityBoundEvent(saved.getId(), "OIDC", null, subject, null, "EMAIL"));
+        return Optional.of(saved);
+    }
+
+    private Optional<AppUser> refuse(AppUser user, String provider, String boundId, String presentedId, String reason) {
+        String key = user.getId() + "|" + presentedId + "|" + reason;
+        if (refusalsAnnounced.asMap().putIfAbsent(key, Boolean.TRUE) == null) {
+            log.warn("Identity link refused for account {} ({}): {} bound={} presented={}",
+                    user.getId(), provider, reason, boundId, presentedId);
+            IdentityRebindRefusedEvent event = new IdentityRebindRefusedEvent(user.getId(), provider, boundId, presentedId, reason);
+            newTx.executeWithoutResult(status -> eventPublisher.publishEvent(event));
+        }
+        return Optional.empty();
+    }
+
+    /** TRUE/FALSE when one of the claims asserts it, null when none is present. Accepts boolean, "true"/"false", "1"/"0". */
+    private static Boolean assertedVerified(Jwt jwt, String... claimNames) {
+        for (String name : claimNames) {
+            Object v = jwt.getClaim(name);
+            if (v == null) continue;
+            if (v instanceof Boolean b) return b;
+            String t = v.toString().trim();
+            if (t.equals("1") || t.equalsIgnoreCase("true")) return Boolean.TRUE;
+            return Boolean.FALSE;
+        }
+        return null;
+    }
+
     /** Keeps the mirrored identity columns current without touching roles or enabled state. */
     private AppUser touch(AppUser user, Jwt jwt, UUID objectId) {
         boolean dirty = false;
-        if (objectId != null && !objectId.equals(user.getEntraObjectId())) {
-            user.setEntraObjectId(objectId);
-            dirty = true;
-        }
+        // entra_object_id is never overwritten here: the row was found BY this oid, or it was bound
+        // through linkEntra (6-05).
         UUID tenantId = parseUuid(jwt.getClaimAsString("tid"));
         if (tenantId != null && !tenantId.equals(user.getEntraTenantId())) {
             user.setEntraTenantId(tenantId);
@@ -175,7 +290,7 @@ class DefaultPrincipalResolver implements PrincipalResolver {
         if (email != null) {
             Optional<AppUser> byEmail = appUserRepository.findByEmailIgnoreCase(email);
             if (byEmail.isPresent()) {
-                return Optional.of(touchOidc(byEmail.get(), subject));
+                return linkOidc(byEmail.get(), subject, jwt);
             }
         }
 
@@ -192,10 +307,6 @@ class DefaultPrincipalResolver implements PrincipalResolver {
     /** Keeps the mirrored identity column current without touching roles or enabled state. */
     private AppUser touchOidc(AppUser user, String subject) {
         boolean dirty = false;
-        if (subject != null && !subject.equals(user.getExternalSubject())) {
-            user.setExternalSubject(subject);
-            dirty = true;
-        }
         if (user.getAuthProvider() != UserAuthProvider.OIDC) {
             user.setAuthProvider(UserAuthProvider.OIDC);
             dirty = true;

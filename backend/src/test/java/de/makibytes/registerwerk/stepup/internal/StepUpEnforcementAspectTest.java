@@ -40,6 +40,7 @@ class StepUpEnforcementAspectTest {
     private StepUpTokenValidator validator;
     private StepUpEnforcementAspect aspect;
     private org.springframework.context.ApplicationEventPublisher publisher;
+    private DualControlTokenUseRepository tokenUse;
 
     @BeforeEach
     void setUp() {
@@ -48,8 +49,15 @@ class StepUpEnforcementAspectTest {
         entraProperties.setAuthContextId("c1");
         validator = mock(StepUpTokenValidator.class);
         publisher = mock(org.springframework.context.ApplicationEventPublisher.class);
-        aspect = new StepUpEnforcementAspect(validator, new StepUpPolicy(authProperties, entraProperties),
-                publisher, mock(org.springframework.transaction.PlatformTransactionManager.class));
+        tokenUse = mock(DualControlTokenUseRepository.class);
+        when(tokenUse.tryConsume(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        StepUpEnforcer enforcer = new StepUpEnforcer(new StepUpPolicy(authProperties, entraProperties));
+        DualControlService dualControl = new DualControlService(validator, enforcer, new DualControlProperties(),
+                tokenUse, mock(de.makibytes.registerwerk.auth.api.AppUserRepository.class), publisher,
+                mock(org.springframework.transaction.PlatformTransactionManager.class));
+        aspect = new StepUpEnforcementAspect(enforcer, dualControl);
     }
 
     @AfterEach
@@ -224,7 +232,8 @@ class StepUpEnforcementAspectTest {
         authenticate(jwt(Map.of("acr", "stepup"), Instant.now()));
         UUID approver = UUID.randomUUID();
         when(validator.validateDualControlToken(org.mockito.ArgumentMatchers.eq("dc-token"),
-                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(ACTION))).thenReturn(approver);
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(ACTION),
+                org.mockito.ArgumentMatchers.any())).thenReturn(approval(approver));
         bindRequest();
 
         ProceedingJoinPoint pjp = dualControlJoinPoint();
@@ -247,8 +256,9 @@ class StepUpEnforcementAspectTest {
         authProperties.setEntraEnabled(false);
         authenticate(jwt(Map.of("acr", "stepup"), Instant.now()));
         when(validator.validateDualControlToken(org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
-                .thenReturn(UUID.randomUUID());
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(approval(UUID.randomUUID()));
         bindRequest();
         org.mockito.Mockito.doThrow(new IllegalStateException("audit down")).when(publisher)
                 .publishEvent(org.mockito.ArgumentMatchers.any(Object.class));
@@ -256,6 +266,31 @@ class StepUpEnforcementAspectTest {
         ProceedingJoinPoint pjp = dualControlJoinPoint();
         assertThatThrownBy(() -> aspect.enforce(pjp)).isInstanceOf(IllegalStateException.class);
         org.mockito.Mockito.verify(pjp, org.mockito.Mockito.never()).proceed();
+    }
+
+    private static StepUpTokenValidator.Approval approval(UUID approver) {
+        return new StepUpTokenValidator.Approval(approver, "jti-1", Instant.now().plusSeconds(300), "digest");
+    }
+
+    @Test
+    @DisplayName("K3 6-08: an approval that was already consumed (replay, possibly on another replica) is refused and the action does not run")
+    void dualControl_replayedApprovalIsRefused() throws Throwable {
+        authProperties.setEntraEnabled(false);
+        authenticate(jwt(Map.of("acr", "stepup"), Instant.now()));
+        when(validator.validateDualControlToken(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any())).thenReturn(approval(UUID.randomUUID()));
+        when(tokenUse.tryConsume(org.mockito.ArgumentMatchers.eq("jti-1"), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(false);
+        bindRequest();
+
+        ProceedingJoinPoint pjp = dualControlJoinPoint();
+        assertThatThrownBy(() -> aspect.enforce(pjp))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("already used");
+        org.mockito.Mockito.verify(pjp, org.mockito.Mockito.never()).proceed();
+        org.mockito.Mockito.verify(publisher, org.mockito.Mockito.never()).publishEvent(org.mockito.ArgumentMatchers.any(Object.class));
     }
 
     private static void bindRequest() {

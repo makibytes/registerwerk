@@ -31,8 +31,9 @@ import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.erc3643.api.Erc3643MintPort;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
-import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
+import de.makibytes.registerwerk.orgidentity.api.OrgMemberWallet;
+import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
 import de.makibytes.registerwerk.shared.RegisterClock;
 import org.mockito.ArgumentCaptor;
@@ -69,8 +70,8 @@ class SubscriptionOrderServiceTest {
     @Mock private ApplicationEventPublisher events;
     @Mock private AssetDeploymentRepository deploymentRepository;
     @Mock private AssetBondTermsRepository bondTermsRepository;
-    @Mock private HolderBlockGate holderBlockGate;
-    @Mock private ScreeningGate screeningGate;
+    @Mock private PartyEligibilityGate partyGate;
+    @Mock private OrgMemberWalletRepository memberWallets;
     @Mock private FinalityGate finalityGate;
     @Mock private TokenAdminPort tokenAdminPort;
     @Mock private Erc3643MintPort erc3643MintPort;
@@ -87,9 +88,12 @@ class SubscriptionOrderServiceTest {
                 repository, assetRepository, holderService, legalEntityRepository, suitabilityAssessmentRepository,
                 assetHolderRepository, investorLimitService, events,
                 new RegisterClock(Clock.fixed(Instant.parse("2026-03-02T10:00:00Z"), ZoneOffset.UTC), ZoneId.of("Europe/Berlin")),
-                deploymentRepository, bondTermsRepository, holderBlockGate, screeningGate, finalityGate,
+                deploymentRepository, bondTermsRepository, partyGate, memberWallets, finalityGate,
                 tokenAdminPort, erc3643MintPort);
         org.mockito.Mockito.lenient().when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        OrgMemberWallet bound = new OrgMemberWallet();
+        bound.setWalletAddress("0xabc");
+        org.mockito.Mockito.lenient().when(memberWallets.findActiveByLegalEntityId(investorId)).thenReturn(List.of(bound));
         // Target-market gate (Track 5-1): an unclassified investor against an unrestricted test
         // asset (no target market configured) so the gate is a no-op unless a test overrides it.
         org.mockito.Mockito.lenient().when(legalEntityRepository.findById(investorId))
@@ -499,28 +503,67 @@ class SubscriptionOrderServiceTest {
     }
 
     @Test
-    @DisplayName("settleRequiresPaymentAndCompliance: KYC, screening and Sperrvermerk each block settlement before any write")
-    void settle_complianceGates() {
+    @DisplayName("6-33: a party the PartyEligibilityGate refuses (suspended, BO hit, expired KYC, Sperrvermerk) cannot be settled; nothing is written")
+    void settle_partyGateRefusal() {
         UUID orderId = UUID.randomUUID();
         paidOrder(orderId);
         stubAsset(approvedAsset());
-        LegalEntity e = investorWithKyc(KycStatus.IN_PROGRESS);
+        investorWithKyc(KycStatus.APPROVED);
+        org.mockito.Mockito.doThrow(new ComplianceGateException("Entity is not eligible for subscription settlement: is not ACTIVE"))
+                .when(partyGate).require(eq(investorId), any(), eq("subscription settlement"));
 
         assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
-                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("KYC");
-
-        e.setKycStatus(KycStatus.APPROVED);
-        when(screeningGate.hasUnresolvedHit(investorId)).thenReturn(true);
-        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
-                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("screening");
-
-        when(screeningGate.hasUnresolvedHit(investorId)).thenReturn(false);
-        when(holderBlockGate.isBlocked(eq(investorId), any())).thenReturn(true);
-        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
-                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("Sperrvermerk");
+                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("not eligible");
 
         verify(holderService, never()).creditPosition(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any());
         verify(tokenAdminPort, never()).mint(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("6-33: a settlement wallet that is neither bound to the entity nor an existing holder wallet is refused")
+    void settle_unboundWalletRefused() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId);
+        order.setWalletAddress("0xthirdparty");
+        stubAsset(approvedAsset());
+        investorWithKyc(KycStatus.APPROVED);
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("bind the wallet first");
+
+        verify(holderService, never()).creditPosition(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("6-33: an existing active holder wallet of the entity for this asset is accepted even without a member binding")
+    void settle_existingHolderWalletAccepted() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId);
+        order.setWalletAddress("0xheld");
+        stubAsset(approvedAsset());
+        investorWithKyc(KycStatus.APPROVED);
+        AssetHolder existing = new AssetHolder();
+        existing.setAssetId(assetId);
+        existing.setWalletAddress("0xheld");
+        when(assetHolderRepository.findActiveByInvestorId(investorId)).thenReturn(List.of(existing));
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of());
+        AssetHolder credited = new AssetHolder();
+        credited.setId(UUID.randomUUID());
+        when(holderService.creditPosition(eq(assetId), eq(investorId), any(), any(),
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any())).thenReturn(credited);
+
+        assertThat(service.settle(orderId, actorId, "REGISTRY_ADMIN").getStatus())
+                .isEqualTo(SubscriptionOrder.Status.SETTLED);
+    }
+
+    @Test
+    @DisplayName("6-33: submit refuses an unbound wallet and consults the party gate")
+    void submit_unboundWalletRefused() {
+        stubAsset(approvedAsset());
+
+        assertThatThrownBy(() -> service.submit(assetId, investorId, "0xnotmine", new BigDecimal("1000"), actorId, "INVESTOR"))
+                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("bind the wallet first");
+        verify(partyGate).require(eq(investorId), any(), eq("subscription"));
     }
 
     @Test

@@ -41,7 +41,6 @@ flowchart LR
 
     subgraph Adapters
         A1[OpenSanctionsAdapter — default]
-        A2[RefinitivWorldCheckAdapter — commercial]
     end
 
     subgraph Results
@@ -53,8 +52,7 @@ flowchart LR
     T2 & T3 & T5 --> SBO
     SS & SBO --> P
     P --> A1
-    P --> A2
-    A1 & A2 --> SR
+    A1 --> SR
     SR --> SH
     SH -->|Unresolved| KG[KycService — blocks approval]
 ```
@@ -75,9 +73,11 @@ Der `OpenSanctionsAdapter` prüft standardmäßig gegen die folgenden Listen:
 | BaFin / EU-Sperrliste | BaFin über OpenSanctions | Deutsche innerstaatliche Einfrierungs-Zusätze |
 | EU-PEP-Liste | OpenSanctions-Aggregation | Politisch exponierte Personen |
 
-OpenSanctions stellt eine einheitliche REST-API bereit, die alle diese Listen abdeckt. Der Adapter cacht den vollständigen Datensatz lokal (alle 24 Stunden aktualisiert) und führt einen Fuzzy-Abgleich gegen Entitätsnamen, Aliasnamen, Geburtsdaten und Passnummern durch.
+OpenSanctions stellt eine einheitliche REST-API bereit, die alle diese Listen abdeckt. Jedes Screening ist ein API-Aufruf (kein lokaler Datensatz). Der Adapter sendet bei Unternehmen Name, Land, LEI und Registernummer, bei natürlichen Personen Name, Land, Geburtsdatum und Staatsangehörigkeit; Reisepassnummern werden nicht abgeglichen. Der Schwellenwert ist `registerwerk.screening.match-threshold` (Standard 0,85) und wird bei jedem Lauf gespeichert, zusammen mit der Datensatzversion, sofern die API sie meldet. Die kostenlose öffentliche API ist ratenbegrenzt und ohne SLA; für einen lizenzierten Anbieter ist ein weiterer Adapter für `SanctionsScreeningPort` nötig (keiner ist enthalten). Gescreent werden nur die Einheit und ihre erfassten wirtschaftlich Berechtigten, nicht Geschäftsführer, Zeichnungsberechtigte, Konzernketten oder Wallet-Adressen.
 
-Für Einsätze, die eine höhere Zuverlässigkeit erfordern, kann der `RefinitivWorldCheckAdapter` (kommerziell) konfiguriert werden, indem `REFINITIV_WORLDCHECK_API_KEY` in der Umgebung gesetzt wird.
+**Erneute Screenings und Ausfälle.** Ein erneut gefundener Treffer, den ein Prüfer und ein zweiter Freigebender bereits als Fehlalarm akzeptiert haben, wird 90 Tage übernommen (gleicher Anbieter-Datensatz, gleiche Kategorie, Score höchstens 0,05 höher), mit einem Audit-Eintrag je Übernahme; alles andere wird wieder geöffnet. Fällt der Anbieter aus, gilt das letzte gute Ergebnis höchstens 24 Stunden nach dem ersten fehlgeschlagenen Lauf (nie, wenn es älter als 72 Stunden ist). Der Degraded-Zustand ist sichtbar (Metriken `registerwerk_screening_degraded_subjects` und `registerwerk_screening_stale_results`, auditierter Alarm), fehlgeschlagene Subjekte werden alle 30 Minuten wiederholt, nie gescreente Subjekte bleiben gesperrt, und nach Ablauf der Karenzzeit sperrt der Fehler wieder.
+
+**Kategorien.** Ein Treffer mit Sanktions- und PEP-Tag ist ein Sanktionstreffer. Ein PEP-Treffer bei einer natürlichen Person ist kein Fehlalarm: Er wird bestätigt (`CONFIRM_PEP`, Step-up plus zweiter Freigebender) und hält das Gate geschlossen, bis eine Freigabe der verstärkten Sorgfaltspflichten (EDD) erfasst ist.
 
 ---
 
@@ -154,13 +154,13 @@ Alle Auflösungen werden zusammen mit der Identität des annehmenden Beamten im 
 Wurde ein Treffer festgestellt und kann nicht sofort aufgelöst werden, hat jede Gerichtsbarkeit spezifische Eskalationspflichten:
 
 === "Deutschland (DE_EWPG)"
-    Reichen Sie eine Verdachtsmeldung (SAR) bei der **BaFin** ein und, bei Verdacht auf Geldwäsche, bei der **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. Das Modul `screening` speichert die SAR-Referenz in `ScreeningHit.regulatoryRef`.
+    Reichen Sie eine Verdachtsmeldung (SAR) bei der **BaFin** ein und, bei Verdacht auf Geldwäsche, bei der **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. Die Meldung erfolgt außerhalb der Plattform; Registerwerk speichert keine Meldereferenz.
 
 === "Luxemburg (LU_CSSF)"
     Reichen Sie einen Bericht bei der **CSSF Cellule Juridique de Prévention (JFP)** ein. In schwerwiegenden Fällen eskalieren Sie an die **CRF (Cellule de Renseignement Financier)**.
 
 === "Frankreich (FR_AMF)"
-    Reichen Sie über den Meldemechanismus von AMF/ACPR einen Bericht bei **TRACFIN** ein. Der `ScreeningService` protokolliert die TRACFIN-Referenz, sobald sie eingereicht wurde.
+    Reichen Sie über den Meldemechanismus von AMF/ACPR einen Bericht bei **TRACFIN** ein. Die Meldung erfolgt außerhalb der Plattform; Registerwerk speichert keine Meldereferenz.
 
 === "Liechtenstein (LI_TVTG)"
     Benachrichtigen Sie die **FMA** (Sanktions-Compliance) und reichen Sie in schwerwiegenden Fällen bei der **FIU Liechtenstein** ein.

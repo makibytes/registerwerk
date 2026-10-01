@@ -35,7 +35,7 @@ class CaspRegisterImportServiceTest {
     @Test
     @DisplayName("imports a semicolon CSV with ESMA-style 'Authorised' spelling")
     void importsEsmaStyleCsv() {
-        when(writer.upsert(any(), any(), anyString())).thenReturn(false);
+        when(writer.upsert(any(), any(), anyString(), any())).thenReturn(new CaspRegisterImportWriter.Outcome(false, false));
         String csv = """
             legal_name;vasp_did;lei;home_member_state;status;valid_from
             Beispiel CASP GmbH;did:example:casp1;529900T8BM49AURSDO55;de;Authorised;2026-01-15
@@ -46,7 +46,7 @@ class CaspRegisterImportServiceTest {
         assertThat(result.created()).isEqualTo(1);
         assertThat(result.failed()).isZero();
         ArgumentCaptor<CaspAuthorization> captor = ArgumentCaptor.forClass(CaspAuthorization.class);
-        verify(writer).upsert(captor.capture(), any(), anyString());
+        verify(writer).upsert(captor.capture(), any(), anyString(), any());
         CaspAuthorization entry = captor.getValue();
         assertThat(entry.getStatus()).isEqualTo(CaspAuthorizationStatus.AUTHORIZED);
         assertThat(entry.getHomeMemberState()).isEqualTo("DE");
@@ -56,7 +56,7 @@ class CaspRegisterImportServiceTest {
     @Test
     @DisplayName("synthesizes lei:<LEI> identifier when vasp_did is missing")
     void synthesizesLeiIdentifier() {
-        when(writer.upsert(any(), any(), anyString())).thenReturn(false);
+        when(writer.upsert(any(), any(), anyString(), any())).thenReturn(new CaspRegisterImportWriter.Outcome(false, false));
         String csv = """
             legal_name,lei,status
             Other CASP S.A.,724500A4FBF8B1FE7G53,Withdrawn
@@ -66,7 +66,7 @@ class CaspRegisterImportServiceTest {
 
         assertThat(result.created()).isEqualTo(1);
         ArgumentCaptor<CaspAuthorization> captor = ArgumentCaptor.forClass(CaspAuthorization.class);
-        verify(writer).upsert(captor.capture(), any(), anyString());
+        verify(writer).upsert(captor.capture(), any(), anyString(), any());
         assertThat(captor.getValue().getVaspDid()).isEqualTo("lei:724500A4FBF8B1FE7G53");
         assertThat(captor.getValue().getStatus()).isEqualTo(CaspAuthorizationStatus.REVOKED);
     }
@@ -74,7 +74,7 @@ class CaspRegisterImportServiceTest {
     @Test
     @DisplayName("bad rows are reported per line and do not block good rows")
     void badRowsReportedGoodRowsProceed() {
-        when(writer.upsert(any(), any(), anyString())).thenReturn(false);
+        when(writer.upsert(any(), any(), anyString(), any())).thenReturn(new CaspRegisterImportWriter.Outcome(false, false));
         String csv = """
             legal_name;vasp_did;status
             Good CASP;did:example:good;Transitional
@@ -94,9 +94,9 @@ class CaspRegisterImportServiceTest {
     @Test
     @DisplayName("a failed database row is isolated and later rows still commit")
     void failedWrite_doesNotBlockLaterRows() {
-        when(writer.upsert(any(), any(), anyString()))
+        when(writer.upsert(any(), any(), anyString(), any()))
                 .thenThrow(new RuntimeException("constraint violation"))
-                .thenReturn(false);
+                .thenReturn(new CaspRegisterImportWriter.Outcome(false, false));
         String csv = """
             legal_name;vasp_did;status
             Broken CASP;did:example:broken;Authorised
@@ -113,7 +113,7 @@ class CaspRegisterImportServiceTest {
     @Test
     @DisplayName("existing vaspDid counts as updated, not created")
     void existingEntry_countsAsUpdated() {
-        when(writer.upsert(any(), any(), anyString())).thenReturn(true);
+        when(writer.upsert(any(), any(), anyString(), any())).thenReturn(new CaspRegisterImportWriter.Outcome(true, false));
         String csv = """
             legal_name;vasp_did;status
             Beispiel CASP GmbH;did:example:casp1;Authorised
@@ -131,7 +131,28 @@ class CaspRegisterImportServiceTest {
         var result = importService.importCsv("name;state\nFoo;DE\n", "test", UUID.randomUUID(), "REGISTRY_ADMIN");
         assertThat(result.created()).isZero();
         assertThat(result.errors().get(0)).contains("Missing required columns");
-        verify(writer, never()).upsert(any(), any(), anyString());
+        verify(writer, never()).upsert(any(), any(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("preview classifies rows and writes nothing; commit needs the previewed digest (6-28)")
+    void previewWritesNothing_commitNeedsDigest() {
+        when(writer.classify(any())).thenReturn(new CaspRegisterImportWriter.Outcome(true, true));
+        String csv = """
+            legal_name;vasp_did;status
+            Revoked CASP;did:example:r;Withdrawn
+            """;
+
+        var preview = importService.previewCsv(csv, "test");
+
+        assertThat(preview.committed()).isFalse();
+        assertThat(preview.updated()).isEqualTo(1);
+        assertThat(preview.statusChanged()).isEqualTo(1);
+        verify(writer, never()).upsert(any(), any(), anyString(), any());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> importService.importCsv(csv, "test",
+                UUID.randomUUID(), "REGISTRY_ADMIN", UUID.randomUUID(), true, "deadbeef"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("digest");
+        verify(writer, never()).upsert(any(), any(), anyString(), any());
     }
 
     @Test

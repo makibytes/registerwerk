@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -46,6 +47,14 @@ public class ScreeningRun {
     @Column(name = "error_message")
     private String errorMessage;
 
+    /** Effective provider match threshold of this run (6-19); null for runs recorded before V39. */
+    @Column(name = "threshold_used", precision = 4, scale = 3)
+    private BigDecimal thresholdUsed;
+
+    /** Dataset/index version reported by the provider, when it reports one. */
+    @Column(name = "data_version")
+    private String dataVersion;
+
     @Column(name = "initiated_by")
     private UUID initiatedBy;
 
@@ -68,6 +77,10 @@ public class ScreeningRun {
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+    public BigDecimal getThresholdUsed() { return thresholdUsed; }
+    public void setThresholdUsed(BigDecimal thresholdUsed) { this.thresholdUsed = thresholdUsed; }
+    public String getDataVersion() { return dataVersion; }
+    public void setDataVersion(String dataVersion) { this.dataVersion = dataVersion; }
     public UUID getInitiatedBy() { return initiatedBy; }
     public void setInitiatedBy(UUID initiatedBy) { this.initiatedBy = initiatedBy; }
 }

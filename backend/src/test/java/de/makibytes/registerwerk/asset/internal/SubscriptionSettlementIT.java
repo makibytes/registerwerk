@@ -87,13 +87,17 @@ class SubscriptionSettlementIT {
     @Test
     @DisplayName("settle refuses an investor whose KYC is not approved; nothing enters the register")
     void settleRefusedWithoutKyc() {
-        LegalEntity investor = entity("INV", KycStatus.EXPIRED);
+        LegalEntity investor = entity("INV", KycStatus.APPROVED);
         Asset asset = asset();
         SubscriptionOrder order = paid(asset, investor, "10");
+        // KYC lapses between payment and settlement (the party gate also runs at submit, so it is flipped afterwards).
+        investor.setKycStatus(KycStatus.EXPIRED);
+        entities.saveAndFlush(investor);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.settle(order.getId(), null, "REGISTRY_ADMIN"))
                 .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class);
-        assertThat(holders.findActiveByAssetId(asset.getId())).isEmpty();
+        assertThat(holders.findActiveByAssetId(asset.getId()))
+                .allSatisfy(h -> assertThat(h.getNominalAmount()).isEqualByComparingTo("0"));
         assertThat(orders.findById(order.getId()).orElseThrow().getStatus())
                 .isEqualTo(SubscriptionOrder.Status.PAYMENT_CONFIRMED);
     }
@@ -103,6 +107,7 @@ class SubscriptionSettlementIT {
     void allocationLapsesAndReleasesCapacity() {
         LegalEntity investor = entity("INV", KycStatus.APPROVED);
         Asset asset = asset();
+        existingHolderWallet(asset, investor);
         SubscriptionOrder order = service.submit(asset.getId(), investor.getId(), WALLET, new BigDecimal("40"), null, "INVESTOR");
         service.allocate(order.getId(), new BigDecimal("40"), null, "REGISTRY_ADMIN");
         assertThat(orders.sumAllocated(asset.getId())).isEqualByComparingTo("40");
@@ -116,7 +121,20 @@ class SubscriptionSettlementIT {
         assertThat(orders.sumAllocated(asset.getId())).isEqualByComparingTo("0");
     }
 
+    /** 6-33: the settlement wallet must be bound to the entity or already held on this asset; seed the latter. */
+    private void existingHolderWallet(Asset asset, LegalEntity investor) {
+        if (holders.findActiveByInvestorIdAndAssetId(investor.getId(), asset.getId()).isPresent()) {
+            return;
+        }
+        AssetHolder h = new AssetHolder();
+        h.setAssetId(asset.getId());
+        h.setInvestorId(investor.getId());
+        h.setWalletAddress(WALLET);
+        holders.saveAndFlush(h);
+    }
+
     private SubscriptionOrder paid(Asset asset, LegalEntity investor, String amount) {
+        existingHolderWallet(asset, investor);
         SubscriptionOrder o = service.submit(asset.getId(), investor.getId(), WALLET, new BigDecimal(amount), null, "INVESTOR");
         service.allocate(o.getId(), new BigDecimal(amount), null, "REGISTRY_ADMIN");
         service.accept(o.getId(), null, "INVESTOR");

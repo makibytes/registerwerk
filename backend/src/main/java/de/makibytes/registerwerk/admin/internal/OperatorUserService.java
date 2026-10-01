@@ -5,8 +5,13 @@ import de.makibytes.registerwerk.admin.events.OperatorUserRolesUpdatedEvent;
 import de.makibytes.registerwerk.admin.events.OperatorUserDisabledEvent;
 import de.makibytes.registerwerk.admin.events.OperatorUserPasswordResetSentEvent;
 import de.makibytes.registerwerk.admin.events.OperatorUserDeletedEvent;
+import de.makibytes.registerwerk.admin.events.OperatorUserIdentityResetEvent;
+import de.makibytes.registerwerk.accessreview.api.AccessReviewDecision;
+import de.makibytes.registerwerk.accessreview.api.AccessReviewItemRepository;
+import de.makibytes.registerwerk.auth.events.PrivilegedAccountChangedEvent;
 import de.makibytes.registerwerk.admin.events.OperatorUserInvitedNotificationEvent;
 import de.makibytes.registerwerk.admin.events.OperatorUserPasswordResetNotificationEvent;
+import de.makibytes.registerwerk.stepup.api.DualControlGate;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
@@ -44,6 +49,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.TreeSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -64,6 +71,9 @@ public class OperatorUserService {
     private final PasswordEncoder passwordEncoder;
     private final ApplicationEventPublisher eventPublisher;
     private final RegisterwerkAuthProperties authProperties;
+    private final AccessReviewItemRepository accessReviewItems;
+    private final DualControlGate dualControlGate;
+    private final List<String> operatorEmailDomains;
     private final String customerFrontendUrl;
     private final long userActionTokenTtlHours;
 
@@ -74,6 +84,9 @@ public class OperatorUserService {
             PasswordEncoder passwordEncoder,
             ApplicationEventPublisher eventPublisher,
             RegisterwerkAuthProperties authProperties,
+            AccessReviewItemRepository accessReviewItems,
+            DualControlGate dualControlGate,
+            @Value("${registerwerk.admin.operator-email-domains:}") List<String> operatorEmailDomains,
             @Value("${registerwerk.onboarding.frontend-url:http://localhost:44201}") String customerFrontendUrl,
             @Value("${registerwerk.onboarding.user-action-ttl-hours:48}") long userActionTokenTtlHours) {
         this.appUserRepository = appUserRepository;
@@ -82,6 +95,10 @@ public class OperatorUserService {
         this.passwordEncoder = passwordEncoder;
         this.eventPublisher = eventPublisher;
         this.authProperties = authProperties;
+        this.accessReviewItems = accessReviewItems;
+        this.dualControlGate = dualControlGate;
+        this.operatorEmailDomains = operatorEmailDomains.stream()
+            .map(d -> d.trim().toLowerCase()).filter(d -> !d.isEmpty()).toList();
         this.customerFrontendUrl = customerFrontendUrl;
         this.userActionTokenTtlHours = userActionTokenTtlHours;
     }
@@ -105,10 +122,15 @@ public class OperatorUserService {
         UUID actorId = SecurityUtils.extractUserId(authentication);
         ensureLocalLifecycleEnabled();
         validateRolesForContext(request.legalEntityId(), request.roles());
-
+        validateOperatorEmailDomain(request.legalEntityId(), request.email());
         if (appUserRepository.findByEmailIgnoreCase(request.email()).isPresent()) {
             throw new IllegalArgumentException("A user with this email already exists");
         }
+        // 6-06: an operator account (no legal entity) or any gated role needs step-up + second approver
+        // (bootstrap exception while fewer than two TOTP-enrolled REGISTRY_ADMINs exist).
+        boolean bootstrap = request.legalEntityId() == null
+            || request.roles().stream().anyMatch(GATED_ROLES::contains)
+            ? requirePrivilegedApproval("OPERATOR_USER_INVITE") : false;
 
         String entityName = "Registerwerk Operator Portal";
         if (request.legalEntityId() != null) {
@@ -123,6 +145,7 @@ public class OperatorUserService {
         user.setEnabled(true);
         user.setCreatedBy(actorId);
         user.setRoles(request.roles());
+        user.markRolesChanged(actorId);
         AppUser saved = appUserRepository.save(user);
 
         String registrationToken = createActionToken(saved, AppUserActionTokenType.REGISTRATION, actorId);
@@ -130,7 +153,9 @@ public class OperatorUserService {
             saved.getId(), saved.getEmail(), saved.getFullName(),
             customerFrontendUrl + "/register/" + registrationToken));
 
-        eventPublisher.publishEvent(new OperatorUserInvitedEvent(saved.getId(), actorId, null, java.util.Map.of("email", saved.getEmail())));
+        Map<String, Object> details = details(saved, Set.of(), bootstrap);
+        eventPublisher.publishEvent(new OperatorUserInvitedEvent(saved.getId(), actorId, actorRole(authentication), details));
+        announcePrivileged(saved, actorId, authentication, "INVITED", bootstrap);
         return toResponse(saved);
     }
 
@@ -142,27 +167,74 @@ public class OperatorUserService {
         AppUser user = requireUser(userId);
         validateRolesForContext(user.getLegalEntityId(), request.roles());
         ensureNotLastRegistryAdmin(user, request.roles(), user.isEnabled());
+        // 6-06: role changes touching REGISTRY_ADMIN / COMPLIANCE_OFFICER / AUDIT need step-up + second approver
+        // (single step-up for other operator roles, already enforced on the controller).
+        boolean bootstrap = touchesGatedRole(user.getRoles(), request.roles())
+                && requirePrivilegedApproval("OPERATOR_USER_ROLES");
 
+        Set<AppUserRole> previousRoles = new java.util.LinkedHashSet<>(user.getRoles());
         user.setRoles(request.roles());
+        user.markRolesChanged(actorId);
         AppUser saved = appUserRepository.save(user);
 
-        eventPublisher.publishEvent(new OperatorUserRolesUpdatedEvent(saved.getId(), actorId, null, java.util.Map.of("email", saved.getEmail())));
+        eventPublisher.publishEvent(new OperatorUserRolesUpdatedEvent(saved.getId(), actorId, actorRole(authentication),
+            details(saved, previousRoles, bootstrap)));
+        if (!previousRoles.containsAll(privilegedRolesOf(saved.getRoles()))) {
+            announcePrivileged(saved, actorId, authentication, "ROLE_GRANTED", bootstrap);
+        }
         return toResponse(saved);
     }
 
-    public OperatorUserResponse setEnabled(Authentication authentication, UUID userId, boolean newEnabled) {
+    public OperatorUserResponse setEnabled(Authentication authentication, UUID userId, boolean newEnabled, String reason) {
         UUID actorId = SecurityUtils.extractUserId(authentication);
-        ensureLocalLifecycleEnabled();
+        // Entra mode: the IdP owns provisioning, but disabling the local row is the deprovision lever
+        // (session guard makes it effective, 6-01). Re-enabling stays an IdP-side decision.
+        if (newEnabled || !authProperties.isEntraEnabled()) {
+            ensureLocalLifecycleEnabled();
+        } else if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("A reason is required to disable an account in Entra mode");
+        }
         if (!newEnabled) {
             ensureNotSelf(actorId, userId, "Cannot disable your own account");
         }
 
         AppUser user = requireUser(userId);
         ensureNotLastRegistryAdmin(user, user.getRoles(), newEnabled);
+        boolean bootstrap = false;
+        String reinstatementReason = null;
+        if (newEnabled && !user.isEnabled()) {
+            boolean revokedByReview = accessReviewItems
+                .findFirstByAppUserIdAndDecisionNotOrderByReviewedAtDesc(userId, AccessReviewDecision.PENDING)
+                .map(i -> i.getDecision() == AccessReviewDecision.REVOKED).orElse(false);
+            if (revokedByReview) {
+                reinstatementReason = reason == null ? null : reason.trim();
+                if (reinstatementReason == null || reinstatementReason.length() < 10) {
+                    throw new IllegalArgumentException(
+                        "This account was revoked by an access review: a reinstatementReason of at least 10 characters is required");
+                }
+            }
+            // 6-06: enabling a disabled operator/privileged account needs step-up + second approver; the
+            // reinstatement of an access-review REVOKED account needs the approver even in bootstrap mode.
+            if (revokedByReview) {
+                dualControlGate.require("OPERATOR_USER_REINSTATE");
+            } else if (isPrivilegedAccount(user)) {
+                bootstrap = requirePrivilegedApproval("OPERATOR_USER_ENABLE");
+            }
+            user.markRolesChanged(actorId);
+        }
         user.setEnabled(newEnabled);
         AppUser saved = appUserRepository.save(user);
+        if (!newEnabled) {
+            actionTokenRepository.invalidateAllForUser(userId);
+        }
 
-        eventPublisher.publishEvent(new OperatorUserDisabledEvent(saved.getId(), actorId, null, java.util.Map.of("email", saved.getEmail(), "enabled", newEnabled)));
+        Map<String, Object> details = details(saved, saved.getRoles(), bootstrap);
+        if (reason != null && !reason.isBlank()) details.put("reason", reason.trim());
+        if (reinstatementReason != null) details.put("reinstatementReason", reinstatementReason);
+        eventPublisher.publishEvent(new OperatorUserDisabledEvent(saved.getId(), actorId, actorRole(authentication), details));
+        if (newEnabled) {
+            announcePrivileged(saved, actorId, authentication, "ENABLED", bootstrap);
+        }
         return toResponse(saved);
     }
 
@@ -186,9 +258,113 @@ public class OperatorUserService {
 
         AppUser user = requireUser(userId);
         ensureNotLastRegistryAdmin(user, Set.of(), false);
+        boolean bootstrap = isPrivilegedAccount(user) && requirePrivilegedApproval("OPERATOR_USER_DELETE");
         appUserRepository.delete(user);
 
-        eventPublisher.publishEvent(new OperatorUserDeletedEvent(userId, actorId, null, java.util.Map.of("email", user.getEmail())));
+        eventPublisher.publishEvent(new OperatorUserDeletedEvent(userId, actorId, actorRole(authentication),
+            details(user, user.getRoles(), bootstrap)));
+    }
+
+    /**
+     * Clears the IdP identity binding (Entra oid / tenant, OIDC subject) after a refused rebind.
+     * The next sign-in matching this account's e-mail binds afresh. The controller requires step-up
+     * and a second approver. Sessions of the account end immediately.
+     */
+    public OperatorUserResponse resetIdentityBinding(Authentication authentication, UUID userId, String reason) {
+        UUID actorId = SecurityUtils.extractUserId(authentication);
+        AppUser user = requireUser(userId);
+        Map<String, Object> details = details(user, user.getRoles(), false);
+        details.put("previousEntraObjectId", user.getEntraObjectId() == null ? "" : user.getEntraObjectId().toString());
+        details.put("previousEntraTenantId", user.getEntraTenantId() == null ? "" : user.getEntraTenantId().toString());
+        details.put("previousExternalSubject", user.getExternalSubject() == null ? "" : user.getExternalSubject());
+        details.put("reason", reason);
+        user.setEntraObjectId(null);
+        user.setEntraTenantId(null);
+        user.setExternalSubject(null);
+        user.revokeSessions();
+        AppUser saved = appUserRepository.save(user);
+        eventPublisher.publishEvent(new OperatorUserIdentityResetEvent(saved.getId(), actorId, actorRole(authentication), details));
+        return toResponse(saved);
+    }
+
+    // ── Privileged-role administration (6-06) ────────────────────────────────
+
+    private static final Set<AppUserRole> GATED_ROLES = Set.of(
+        AppUserRole.REGISTRY_ADMIN, AppUserRole.COMPLIANCE_OFFICER, AppUserRole.AUDIT);
+    private static final Set<AppUserRole> ANNOUNCED_ROLES = Set.of(
+        AppUserRole.REGISTRY_ADMIN, AppUserRole.COMPLIANCE_OFFICER);
+
+    private static boolean touchesGatedRole(Set<AppUserRole> before, Set<AppUserRole> after) {
+        for (AppUserRole r : GATED_ROLES) {
+            if (before.contains(r) != after.contains(r)) return true;
+        }
+        return false;
+    }
+
+    private static Set<AppUserRole> privilegedRolesOf(Set<AppUserRole> roles) {
+        Set<AppUserRole> out = new java.util.LinkedHashSet<>();
+        for (AppUserRole r : roles) {
+            if (ANNOUNCED_ROLES.contains(r)) out.add(r);
+        }
+        return out;
+    }
+
+    /**
+     * Bootstrap exception of the four-eyes rule: with fewer than two enabled, TOTP-enrolled
+     * REGISTRY_ADMINs there is nobody who could approve, so a fresh install could never create its
+     * second administrator. In that state the single step-up on the controller suffices and the
+     * audit event is flagged {@code bootstrap=true}.
+     *
+     * <p>Outside bootstrap the caller must present a second approver's dual-control token (bound to
+     * {@code reason} and this request) via {@link DualControlGate}; the controller handler carries
+     * {@code @RequiresStepUp} so the caller's step-up token is accepted as bearer.
+     *
+     * @return true when the bootstrap exception applies
+     */
+    private boolean requirePrivilegedApproval(String reason) {
+        return dualControlGate.requireIfNotBootstrap(reason).bootstrap();
+    }
+
+    private static boolean isPrivilegedAccount(AppUser user) {
+        return user.getLegalEntityId() == null || user.getRoles().stream().anyMatch(GATED_ROLES::contains);
+    }
+
+    private void announcePrivileged(AppUser user, UUID actorId, Authentication authentication, String change, boolean bootstrap) {
+        Set<AppUserRole> privileged = privilegedRolesOf(user.getRoles());
+        if (privileged.isEmpty() || !user.isEnabled()) return;
+        eventPublisher.publishEvent(new PrivilegedAccountChangedEvent(user.getId(), actorId, actorRole(authentication),
+            user.getEmail(), change, names(user.getRoles()), bootstrap));
+    }
+
+    private void validateOperatorEmailDomain(UUID legalEntityId, String email) {
+        if (legalEntityId != null || operatorEmailDomains.isEmpty()) return;
+        String domain = email.substring(email.lastIndexOf('@') + 1).trim().toLowerCase();
+        if (!operatorEmailDomains.contains(domain)) {
+            throw new IllegalArgumentException("Operator accounts can only be invited for the e-mail domains: "
+                + String.join(", ", operatorEmailDomains));
+        }
+    }
+
+    /** Audit payload of every operator user-lifecycle event: roles, previous roles, entity, enabled. */
+    private static Map<String, Object> details(AppUser user, Set<AppUserRole> previousRoles, boolean bootstrap) {
+        Map<String, Object> d = new LinkedHashMap<>();
+        d.put("email", user.getEmail());
+        d.put("roles", List.copyOf(names(user.getRoles())));
+        d.put("previousRoles", List.copyOf(names(previousRoles)));
+        d.put("legalEntityId", user.getLegalEntityId() == null ? "" : user.getLegalEntityId().toString());
+        d.put("enabled", user.isEnabled());
+        d.put("bootstrap", bootstrap);
+        return d;
+    }
+
+    private static Set<String> names(Set<AppUserRole> roles) {
+        Set<String> out = new TreeSet<>();
+        for (AppUserRole r : roles) out.add(r.name());
+        return out;
+    }
+
+    private static String actorRole(Authentication authentication) {
+        return SecurityUtils.primaryRole(authentication, "REGISTRY_ADMIN");
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
@@ -294,7 +470,8 @@ public class OperatorUserService {
             user.getLastLoginAt(),
             user.getAuthProvider(),
             user.getAuthProvider() == UserAuthProvider.LOCAL
-                && (user.getPasswordHash() == null || user.getPasswordHash().isBlank())
+                && (user.getPasswordHash() == null || user.getPasswordHash().isBlank()),
+            user.isMustChangePassword()
         );
     }
 

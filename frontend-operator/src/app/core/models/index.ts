@@ -434,11 +434,15 @@ export interface BeneficialOwner {
   givenName: string;
   familyName: string;
   country?: string;
-  pepStatus: 'UNKNOWN' | 'NOT_PEP' | 'DOMESTIC_PEP' | 'FOREIGN_PEP' | 'INTERNATIONAL_PEP' | 'PEP_FAMILY' | 'PEP_ASSOCIATE';
+  pepStatus: 'UNKNOWN' | 'NOT_PEP' | 'DOMESTIC_PEP' | 'FOREIGN_PEP' | 'INTERNATIONAL_PEP' | 'PEP_FAMILY' | 'PEP_ASSOCIATE' | 'CONFIRMED_PEP';
   ownershipPct?: number;
-  controlType: 'DIRECT_OWNERSHIP' | 'INDIRECT_OWNERSHIP' | 'OTHER_CONTROL' | 'LEGAL_REPRESENTATIVE' | 'TRUSTEE';
+  controlType: 'DIRECT_OWNERSHIP' | 'INDIRECT_OWNERSHIP' | 'OTHER_CONTROL' | 'LEGAL_REPRESENTATIVE' | 'TRUSTEE' | 'SENIOR_MANAGING_OFFICIAL';
   registeredAt: string;
   ceasedAt?: string;
+  /** Set once verified against a stored KYC document; only verified owners count towards the identified share. */
+  verifiedAt?: string;
+  verificationDocumentId?: string;
+  fallbackReason?: string;
 }
 
 export interface BeneficialOwnerRequest {
@@ -459,6 +463,17 @@ export interface BeneficialOwnerRequest {
   ownershipPct?: number;
   controlType: BeneficialOwner['controlType'];
   source?: string;
+  /** Mandatory for SENIOR_MANAGING_OFFICIAL (then without ownershipPct): why no beneficial owner could be identified. */
+  fallbackReason?: string;
+}
+
+export interface OwnershipSummary {
+  activeCount: number;
+  identifiedPct: number;
+  unexplainedPct: number;
+  smoFallback: boolean;
+  coverageSufficient: boolean;
+  requiredIdentifiedPct: number;
 }
 
 export interface KycComplianceResponse {
@@ -645,6 +660,9 @@ export interface KycDocument {
   sizeBytes: number;
   uploadedAt: string;
   uploadedBy?: string;
+  issueDate?: string;
+  /** Mandatory on upload for passport / identity / register-extract documents. */
+  expiresAt?: string;
 }
 
 export interface AuditEvent {
@@ -1020,6 +1038,11 @@ export interface ScreeningHit {
   accepted: boolean | null;
   acceptReason: string | null;
   acceptedAt: string | null;
+  /** FALSE_POSITIVE | CONFIRMED_PEP | null (still unresolved). */
+  resolution?: 'FALSE_POSITIVE' | 'CONFIRMED_PEP' | null;
+  carriedFromHitId?: string | null;
+  /** A confirmed PEP whose enhanced due diligence review is due. */
+  eddReviewDue?: string | null;
 }
 
 // ─── Holder Blocks (§16 eWpG Sperrvermerk) ───────────────────────────────────
@@ -1028,7 +1051,8 @@ export type BlockType =
   | 'PFANDRECHT' | 'PFAENDUNG' | 'GERICHTSBESCHLUSS' | 'NACHLASSSPERRE'
   | 'VERFUGUNGSVERBOT' | 'INSOLVENZ' | 'TOD' | 'REGULATORISCH';
 
-export type BlockStatus = 'ACTIVE' | 'LIFTED' | 'EXPIRED' | 'SUPERSEDED';
+/** EXPIRY_REVIEW: the stated expiry passed but the block keeps blocking until a confirmed lift (4-eyes). */
+export type BlockStatus = 'ACTIVE' | 'EXPIRY_REVIEW' | 'LIFTED' | 'EXPIRED' | 'SUPERSEDED';
 
 export interface HolderBlock {
   id: string;
@@ -1048,6 +1072,8 @@ export interface HolderBlock {
   onChainFreezeTxHash: string | null;
   createdBy: string;
   dualControlApproverId: string | null;
+  expiryConfirmedByApprover?: boolean;
+  expiryReviewAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1123,6 +1149,18 @@ export interface IctIncident {
   rootCause: string | null;
   remediationSteps: string | null;
   resolvedAt: string | null;
+  awarenessAt?: string | null;
+  classifiedAt?: string | null;
+  classificationReason?: string | null;
+  /** Reclassification to MAJOR is pending a reason/criteria; the clocks run from awareness. */
+  classificationPending?: boolean;
+  classificationDeadline?: string | null;
+  intermediateReportDeadline?: string | null;
+  intermediateReportedAt?: string | null;
+  downgradedAt?: string | null;
+  downgradeReason?: string | null;
+  /** What still blocks closing: CLASSIFICATION_PENDING | INITIAL_REPORT_MISSING | FINAL_REPORT_MISSING. */
+  closeBlockers?: string[];
 }
 
 export type ProviderCriticality = 'STANDARD' | 'IMPORTANT' | 'CRITICAL';

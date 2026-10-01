@@ -26,10 +26,10 @@ class OpenSanctionsAdapterCategoryTest {
     }
 
     @Test
-    @DisplayName("PEP takes priority over a co-occurring sanction topic")
-    void pepAndSanction_pepTakesPriority() {
-        Map<String, Object> entry = Map.of("topics", List.of("sanction", "role.pep"));
-        assertThat(OpenSanctionsAdapter.categoryOf(entry)).isEqualTo(HitCategory.PEP.name());
+    @DisplayName("a co-occurring sanction topic wins over PEP (6-17)")
+    void pepAndSanction_sanctionTakesPriority() {
+        Map<String, Object> entry = Map.of("topics", List.of("role.pep", "sanction"));
+        assertThat(OpenSanctionsAdapter.categoryOf(entry)).isEqualTo(HitCategory.SANCTIONS.name());
     }
 
     @Test

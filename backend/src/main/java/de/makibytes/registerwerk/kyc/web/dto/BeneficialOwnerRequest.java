@@ -2,8 +2,11 @@ package de.makibytes.registerwerk.kyc.web.dto;
 
 import de.makibytes.registerwerk.kyc.api.BeneficialOwner;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -14,9 +17,11 @@ import java.time.LocalDate;
  */
 public record BeneficialOwnerRequest(
         @Valid @NotNull NaturalPersonInput person,
-        BigDecimal ownershipPct,
+        @DecimalMin(value = "0", inclusive = false) @DecimalMax("100") BigDecimal ownershipPct,
         @NotNull BeneficialOwner.ControlType controlType,
-        String source
+        String source,
+        /** Mandatory for controlType SENIOR_MANAGING_OFFICIAL: why no beneficial owner could be identified. */
+        @Size(max = 2000) String fallbackReason
 ) {
     public record NaturalPersonInput(
             @NotBlank String givenName,

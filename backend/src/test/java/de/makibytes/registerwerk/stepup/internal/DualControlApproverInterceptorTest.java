@@ -36,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class DualControlApproverInterceptorTest {
 
-    private final StepUpTokenValidator validator = mock(StepUpTokenValidator.class);
+    private final DualControlService validator = mock(DualControlService.class);
     private final UUID approver = UUID.randomUUID();
     private final MockMvc withInterceptor = MockMvcBuilders.standaloneSetup(new Ctl())
             .addInterceptors(new DualControlApproverInterceptor(validator)).build();
@@ -71,7 +71,7 @@ class DualControlApproverInterceptorTest {
     @Test
     void controllerReceivesTheValidatedApprover() throws Exception {
         authenticate();
-        when(validator.validateDualControlToken(eq("tok"), eq("initiator"), eq("TEST_ACTION"))).thenReturn(approver);
+        when(validator.peekApprover(any(), any(), eq("TEST_ACTION"))).thenReturn(approver);
 
         withInterceptor.perform(post("/api/v1/dual").header("X-Dual-Control-Token", "tok")
                         .contentType(MediaType.APPLICATION_JSON))
@@ -90,7 +90,7 @@ class DualControlApproverInterceptorTest {
     @Test
     void invalidTokenIsLeftToTheAspectAndNeverSetsTheAttribute() throws Exception {
         authenticate();
-        when(validator.validateDualControlToken(any(), any(), any()))
+        when(validator.peekApprover(any(), any(), any()))
                 .thenThrow(new org.springframework.security.access.AccessDeniedException("bad"));
 
         withInterceptor.perform(post("/api/v1/dual").header("X-Dual-Control-Token", "bad"))
@@ -103,6 +103,6 @@ class DualControlApproverInterceptorTest {
         authenticate();
         withInterceptor.perform(post("/api/v1/single").header("X-Dual-Control-Token", "tok"))
                 .andExpect(content().string("null"));
-        verify(validator, never()).validateDualControlToken(any(), any(), any());
+        verify(validator, never()).peekApprover(any(), any(), any());
     }
 }

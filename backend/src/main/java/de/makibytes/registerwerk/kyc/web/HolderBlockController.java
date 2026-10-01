@@ -38,7 +38,7 @@ public class HolderBlockController {
     /** Global view: all active blocks — used by the compliance work-queue. */
     @GetMapping("/active")
     public ResponseEntity<List<HolderBlock>> listAllActive() {
-        return ResponseEntity.ok(repository.findByStatusOrderByCreatedAtDesc(HolderBlock.Status.ACTIVE));
+        return ResponseEntity.ok(repository.findByStatusInOrderByCreatedAtDesc(HolderBlock.BLOCKING));
     }
 
     @GetMapping

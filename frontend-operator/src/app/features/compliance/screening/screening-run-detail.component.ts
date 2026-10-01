@@ -205,6 +205,13 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             <mat-icon>gavel</mat-icon>
             Accept (False Positive)
           </button>
+          @if (hit.category === 'PEP' && run?.naturalPersonId) {
+            <button type="button" mat-stroked-button (click)="confirmPep(hit)"
+                    matTooltip="Confirm this person as a PEP (not a false positive) — step-up + second approver">
+              <mat-icon>policy</mat-icon>
+              Confirm PEP
+            </button>
+          }
         }
       </ng-template>
     }
@@ -297,6 +304,7 @@ export class ScreeningRunDetailComponent implements OnInit {
         requireDualControl: true,
         reason: `Accept false-positive screening hit (${hit.listSource} / ${hit.matchedValue})`,
         action: 'SCREENING_HIT_ACCEPT',
+        target: `POST /api/v1/compliance/screening/hits/${hit.id}/accept`,
       },
       width: '500px',
       disableClose: true,
@@ -329,6 +337,30 @@ export class ScreeningRunDetailComponent implements OnInit {
             { duration: 8000 },
           );
         },
+      });
+    });
+  }
+
+  confirmPep(hit: ScreeningHit): void {
+    this.dialog.open(StepUpDialogComponent, {
+      data: {
+        requireDualControl: true,
+        reason: `Confirm PEP status (${hit.listSource} / ${hit.matchedValue})`,
+        action: 'SCREENING_PEP_CONFIRM',
+        target: `POST /api/v1/compliance/screening/hits/${hit.id}/confirm-pep`,
+      },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result) => {
+      if (!result?.stepUpToken || !result.dualControlToken) return;
+      const note = prompt('Confirmation note (required for audit trail):');
+      if (!note || !note.trim()) return;
+      this.screeningService.confirmPep(hit.id, note.trim(), result.stepUpToken, result.dualControlToken).subscribe({
+        next: () => {
+          this.snackBar.open('PEP confirmed. The hit stays open until an EDD approval is recorded.', 'Dismiss', { duration: 7000 });
+          this.loadRun();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to confirm PEP.', 'Dismiss', { duration: 8000 }),
       });
     });
   }

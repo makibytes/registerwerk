@@ -96,18 +96,20 @@ Registerwerk riceve anche messaggi Travel Rule da altri VASP quando trasferiscon
 POST /api/v1/public/travel-rule/inbox
 ```
 
-Questo endpoint non richiede un JWT Registerwerk, ma non è anonimo. Configurare
-`REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY`; la controparte deve inviarlo in
-`X-Travel-Rule-Api-Key`. Una configurazione vuota disabilita la casella in ingresso. Inoltre,
-`X-Vasp-Id` deve corrispondere a `originatingVasp.vaspId` nel payload. In produzione è consigliato
-mTLS come secondo livello; la configurazione Kong inclusa non configura certificati client. Al ricevimento:
+Ogni VASP peer è registrato da un `REGISTRY_ADMIN` (`POST /api/v1/compliance/travel-rule/peers`, step-up e secondo approvatore) e riceve una propria chiave HMAC, mostrata una sola volta. Una richiesta è accettata solo se valgono tutte le condizioni seguenti:
 
-1. Vengono convalidati la credenziale, la corrispondenza dell'identità VASP, i numeri di conto e il riferimento del trasferimento.
-2. Il payload `Ivms101` viene archiviato una sola volta come `TravelRuleMessage` con stato `RECEIVED`; i riferimenti ripetuti dello stesso VASP vengono ignorati.
-3. I payload non validi vengono respinti con HTTP 400 e non sono archiviati come messaggi Travel Rule attendibili.
+- `X-Vasp-Id`, `X-Registerwerk-Timestamp` (secondi epoch, entro 5 minuti) e `X-Registerwerk-Peer-Signature` = HMAC-SHA256 esadecimale su `timestamp|vaspId|sha256(body)` si verificano con la chiave di quel peer registrato, e la firma non è già stata usata (cache anti-replay);
+- `originatingVasp.vaspId` nel payload coincide con il peer autenticato;
+- il mittente non è bloccato né revocato nel registro CASP (una consegna rifiutata è archiviata come `REJECTED_CASP` e sottoposta ad audit).
 
-La chiave API condivisa autentica l'accesso alla casella in ingresso, non l'identità di un singolo
-VASP. In produzione utilizzare mTLS per controparte o controlli gateway equivalenti basati sull'identità.
+Al ricevimento:
+
+1. Vengono convalidati i numeri di conto e il riferimento del trasferimento; il corpo è limitato a 256 KiB.
+2. Il messaggio è archiviato sotto il **peer autenticato** con l'hash del payload e `transferDetails`. Una nuova consegna dello stesso payload è idempotente; un payload diverso con lo stesso riferimento viene archiviato a sua volta, entrambe le righe ricevono lo stato `CONFLICT` e un evento di audit: un peer non può più sopprimere il messaggio di un altro rivendicando prima il riferimento.
+3. I messaggi incompleti (mancano nome, indirizzo o identificazione di ordinante/beneficiario, TFR art. 16, par. 1) ricevono lo stato `INCOMPLETE`. Un job in background collega ogni messaggio al `token_transfer` indicizzato (`matched_transfer_id`). `GET /api/v1/compliance/travel-rule/open` elenca tutto ciò che richiede un operatore.
+
+!!! warning "Chiave condivisa"
+    La vecchia chiave condivisa `X-Travel-Rule-Api-Key` è obsoleta: funziona solo con `registerwerk.travel-rule.legacy-shared-key=true` fuori dalla modalità di produzione, e `X-Vasp-Id` allora **non** è autenticato. Registerwerk non blocca i token accreditati; stabilire se il CASP ricevente di riferimento sia l'operatore o il custode del titolare è una questione giuridica aperta (parcheggiata T6-08).
 
 ---
 
@@ -133,7 +135,7 @@ Le ricerche VASP vengono memorizzate nella cache per 30 secondi utilizzando la c
 | Autocustodia della stessa entità | Qualsiasi importo | Al di fuori dell'obbligo di trasmissione da CASP a CASP — registrato |
 | Controparte CASP ma nessun adattatore di protocollo configurato | Qualsiasi importo | **Il trasferimento è rifiutato (fail closed)** — eseguirlo senza le informazioni richieste violerebbe l'Art. 14 |
 
-L'equivalente in EUR è calcolato dal prezzo unitario del token a `TradeExecution.executedAt`, oppure dallo strike NAV per i token dei vault, ed è utilizzato **solo** come trigger di verifica self-hosted ai sensi dell'Art. 14(5) — mai per saltare la messaggistica da CASP a CASP.
+Attualmente nessun chiamante fornisce una valutazione in EUR: un valore sconosciuto è trattato come superiore a 1.000 € (fail closed; fonte di valutazione parcheggiata T6-06), quindi è una prova di controllo del wallet (vedi sotto) a rilasciare un trasferimento verso un wallet self-hosted registrato di un titolare. La valutazione serve **solo** da trigger dell'art. 14, par. 5, mai per omettere il messaggio CASP-a-CASP.
 
 
 ---
@@ -149,7 +151,7 @@ Registerwerk lo applica attraverso il **Registro di autorizzazione CASP** (`/api
 | `AUTHORIZED` | Consentito (bloccato se `validUntil` è superato) | Consentito (bloccato se `validUntil` è superato) |
 | `TRANSITIONAL` | Consentito | **Bloccato** — nessuna tutela |
 | `NOT_AUTHORIZED` / `REVOKED` | **Bloccato** | **Bloccato** |
-| Nessuna voce di registro | Consentito con avvertimento (i VASP non UE non rientrano nell'ambito di applicazione del MiCA) | Consentito con avviso |
+| Nessuna voce di registro | Consentito con avvertimento | **Bloccato** (fail closed); i VASP non UE richiedono una voce esaminata `THIRD_COUNTRY_REVIEWED` |
 
 I tentativi bloccati vengono registrati in `travel_rule_message` con lo stato `BLOCKED_MICA` prima che il trasferimento venga rifiutato, quindi l'audit trail mostra il tentativo di trasferimento e il motivo normativo. La data limite è configurabile tramite `registerwerk.travel-rule.mica-enforcement-date`.
 
@@ -161,3 +163,18 @@ I payload in uscita vengono arricchiti a partire dal registro dei titolari dell'
 ## Importazione massiva del registro CASP { #bulk-import-of-the-casp-register }
 
 `POST /api/v1/compliance/casp-register/import` (UI operatore: *Compliance → CASP Register → Import CSV*) accetta un CSV con le colonne canoniche `legal_name`, `vasp_did` (o `lei`, da cui viene sintetizzato `lei:<LEI>`), `status` e, facoltativamente, `home_member_state`, `authorization_id`, `valid_from`, `valid_until`, `notes`. La mappatura dello stato tollera l'ortografia britannica di ESMA ("Authorised") e mappa "Withdrawn" su `REVOKED`. L'importazione è best-effort per riga: le righe valide vengono upsertate usando `vaspDid` come chiave, gli errori vengono segnalati riga per riga.
+
+
+## Consegna, prove e controlli del registro { #delivery-proofs-register-controls }
+
+!!! note "La consegna in uscita viene attesa"
+    Per un beneficiario CASP la riga `PENDING_SEND` viene prima confermata, il messaggio inviato e atteso (`registerwerk.travel-rule.send-timeout-seconds`, predefinito 15); solo un `SENT` confermato consente di inviare il trasferimento forzato on-chain. Un errore o un timeout memorizza `FAILED`, rifiuta l'operazione, che può semplicemente essere ripetuta; non esiste alcuna deroga (parcheggiato T6-06). Le righe rimaste oltre 5 minuti in `PENDING_SEND` sono marcate `FAILED` da uno sweeper con allarme. Lo stesso gate si applica ai trasferimenti forzati ERC-20/721/1155 e ERC-3643.
+
+Il messaggio contiene il VASP proprio dell'operatore (`registerwerk.travel-rule.own-vasp.did`/`lei`/`legal-name`, obbligatorio in produzione), il VASP beneficiario risolto dalla directory (si usa il suo endpoint: solo https, nessun indirizzo privato, `trp.allowed-hosts` opzionale) e `transferDetails` (quantità e simbolo del token, contratto, data di esecuzione). Se mancano dati obbligatori di ordinante o beneficiario, il trasferimento si ferma con lo stato `INCOMPLETE_IVMS` e non viene inviato nulla.
+
+**Prove di controllo del wallet (art. 14, par. 5).** Un trasferimento verso un wallet self-hosted di un titolare è rilasciato quando esiste una prova valida per quella coppia esatta (entità giuridica, wallet): una challenge con messaggio firmato (`POST /api/v1/compliance/travel-rule/wallet-proofs/challenges`, poi `/{id}/signature`) oppure un'attestazione dell'operatore con nota di evidenza obbligatoria (step-up e secondo approvatore). Il messaggio è registrato come `UNHOSTED_VERIFIED` con l'id della prova. Senza prova il trasferimento resta bloccato e l'errore indica l'endpoint. L'esenzione interna al registro (`registerwerk.travel-rule.register-internal-exempt`) è disattivata per impostazione predefinita perché è una posizione giuridica (parcheggiato T6-06).
+
+**Registro CASP.** La ricerca avviene per DID, poi LEI, poi per denominazione univoca. Modifiche, cancellazioni e importazioni richiedono step-up e secondo approvatore; rimuovere uno stato `NOT_AUTHORIZED`/`REVOKED` o cancellare tale riga richiede un `REGISTRY_ADMIN` come approvatore. L'importazione CSV avviene in due passaggi: `POST /casp-register/import/preview` restituisce la differenza e un `diffDigest`, `POST /casp-register/import?diffDigest=...` la conferma. Una voce `THIRD_COUNTRY_REVIEWED` richiede revisore, secondo approvatore e una scadenza.
+
+!!! warning "Presupposti giuridici"
+    L'applicabilità del TFR ai titoli crittografici eWpG, l'esenzione dei trasferimenti disposti dal tribunale o interni al registro, la fonte di valutazione in EUR e il trattamento dei VASP non UE sono decisioni parcheggiate (T6-06, T6-07). Il comportamento descritto è la soluzione provvisoria prudente, non una valutazione giuridica.

@@ -24,6 +24,7 @@ import {
   CaspImportResult,
   CaspRegisterService,
 } from '../../../core/api/casp-register.service';
+import { openStepUp } from '../../../shared/components/step-up/open-step-up';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 
 const MICA_ENFORCEMENT_DATE = new Date('2026-07-01T00:00:00');
@@ -152,11 +153,17 @@ const MICA_ENFORCEMENT_DATE = new Date('2026-07-01T00:00:00');
     </ng-template>
 
     <ng-template #importResultDialog>
-      <h2 mat-dialog-title>CSV Import Result</h2>
+      <h2 mat-dialog-title>{{ importResult?.committed ? 'CSV Import Result' : 'CSV Import Preview' }}</h2>
       <mat-dialog-content>
+        @if (!importResult?.committed) {
+          <p style="color:var(--rw-text-secondary);font-size:13px">
+            Nothing has been written yet. Committing needs step-up and a second approver.
+          </p>
+        }
         <p>
           <strong>{{ importResult?.created ?? 0 }}</strong> created,
-          <strong>{{ importResult?.updated ?? 0 }}</strong> updated,
+          <strong>{{ importResult?.updated ?? 0 }}</strong> updated
+          ({{ importResult?.statusChanged ?? 0 }} with a status change),
           <strong [style.color]="(importResult?.failed ?? 0) > 0 ? 'var(--rw-rejected-fg)' : null">
             {{ importResult?.failed ?? 0 }} failed</strong>.
         </p>
@@ -171,7 +178,11 @@ const MICA_ENFORCEMENT_DATE = new Date('2026-07-01T00:00:00');
         }
       </mat-dialog-content>
       <mat-dialog-actions align="end">
-        <button type="button" mat-raised-button color="primary" mat-dialog-close>Close</button>
+        <button type="button" mat-button mat-dialog-close>{{ importResult?.committed ? 'Close' : 'Cancel' }}</button>
+        @if (importResult && !importResult.committed) {
+          <button type="button" mat-raised-button color="primary" (click)="commitImport()"
+                  [disabled]="importResult.created + importResult.updated === 0">Commit import</button>
+        }
       </mat-dialog-actions>
     </ng-template>
 
@@ -195,6 +206,7 @@ const MICA_ENFORCEMENT_DATE = new Date('2026-07-01T00:00:00');
             <mat-option value="TRANSITIONAL">Transitional (grandfathering)</mat-option>
             <mat-option value="NOT_AUTHORIZED">Not authorized</mat-option>
             <mat-option value="REVOKED">Authorization revoked</mat-option>
+            <mat-option value="THIRD_COUNTRY_REVIEWED">Third country, reviewed (valid-until required)</mat-option>
           </mat-select>
         </mat-form-field>
         <div style="display:flex;gap:12px">
@@ -253,6 +265,7 @@ export class CaspRegisterComponent implements OnInit {
   saving = false;
   importing = false;
   importResult: CaspImportResult | null = null;
+  private importCsvText = '';
   daysUntilCutoff: number | null = null;
   transitionalCount = 0;
 
@@ -306,17 +319,17 @@ export class CaspRegisterComponent implements OnInit {
     this.cdr.markForCheck();
     const reader = new FileReader();
     reader.onload = () => {
-      this.service.importCsv(String(reader.result ?? '')).subscribe({
+      this.importCsvText = String(reader.result ?? '');
+      this.service.previewImport(this.importCsvText).subscribe({
         next: (result) => {
           this.importing = false;
           this.importResult = result;
           this.dialog.open(this.importResultDialogTpl, { width: '480px' });
           this.cdr.markForCheck();
-          this.reload();
         },
         error: (err) => {
           this.importing = false;
-          this.snackBar.open(err?.error?.message ?? 'Import failed.', 'OK', { duration: 5000 });
+          this.snackBar.open(err?.error?.message ?? 'Import preview failed.', 'OK', { duration: 5000 });
           this.cdr.markForCheck();
         },
       });
@@ -329,45 +342,89 @@ export class CaspRegisterComponent implements OnInit {
     reader.readAsText(file);
   }
 
+  /** Commits the previewed import: step-up + second approver bound to the exact URL including the diff digest. */
+  commitImport(): void {
+    const preview = this.importResult;
+    if (!preview || preview.committed) return;
+    this.dialog.closeAll();
+    openStepUp(this.dialog, {
+      requireDualControl: true,
+      reason: 'Import the CASP register CSV',
+      action: 'CASP_REGISTER_IMPORT',
+      target: `POST /api/v1/compliance/casp-register/import?diffDigest=${preview.diffDigest}`,
+    }).subscribe(tokens => {
+      if (!tokens?.dualControlToken) return;
+      this.service.importCsv(this.importCsvText, preview.diffDigest,
+        { stepUpToken: tokens.stepUpToken, dualControlToken: tokens.dualControlToken }).subscribe({
+        next: (result) => {
+          this.importResult = result;
+          this.dialog.open(this.importResultDialogTpl, { width: '480px' });
+          this.cdr.markForCheck();
+          this.reload();
+        },
+        error: (err) => {
+          this.snackBar.open(err?.error?.message ?? 'Import failed.', 'OK', { duration: 6000 });
+          this.cdr.markForCheck();
+        },
+      });
+    });
+  }
+
   openUpsertDialog(entry?: CaspAuthorization): void {
     this.form = entry ? { ...entry } : this.emptyForm();
     this.dialogRef = this.dialog.open(this.upsertDialogTpl, { width: '520px' });
   }
 
   save(): void {
-    this.saving = true;
-    this.service.upsert({
-      ...this.form,
-      homeMemberState: this.form.homeMemberState?.toUpperCase() || null,
-    }).subscribe({
-      next: () => {
-        this.saving = false;
-        this.dialogRef?.close();
-        this.snackBar.open('Counterparty saved.', 'OK', { duration: 3000 });
-        this.reload();
-      },
-      error: (err) => {
-        this.saving = false;
-        this.snackBar.open(err?.error?.message ?? 'Failed to save counterparty.', 'OK', { duration: 5000 });
-        this.cdr.markForCheck();
-      },
+    const entry = { ...this.form, homeMemberState: this.form.homeMemberState?.toUpperCase() || null };
+    openStepUp(this.dialog, {
+      requireDualControl: true,
+      reason: `Save CASP register entry ${entry.legalName}`,
+      action: 'CASP_REGISTER_EDIT',
+      target: 'PUT /api/v1/compliance/casp-register',
+    }).subscribe(tokens => {
+      if (!tokens?.dualControlToken) return;
+      this.saving = true;
+      this.cdr.markForCheck();
+      this.service.upsert(entry, { stepUpToken: tokens.stepUpToken, dualControlToken: tokens.dualControlToken }).subscribe({
+        next: () => {
+          this.saving = false;
+          this.dialogRef?.close();
+          this.snackBar.open('Counterparty saved.', 'OK', { duration: 3000 });
+          this.reload();
+        },
+        error: (err) => {
+          this.saving = false;
+          this.snackBar.open(err?.error?.message ?? 'Failed to save counterparty.', 'OK', { duration: 5000 });
+          this.cdr.markForCheck();
+        },
+      });
     });
   }
 
   remove(entry: CaspAuthorization): void {
-    if (!entry.id) return;
+    const id = entry.id;
+    if (!id) return;
     if (!confirm(`Delete register entry for ${entry.legalName}? Transfers to this counterparty will then pass with a warning only.`)) {
       return;
     }
-    this.service.delete(entry.id).subscribe({
-      next: () => {
-        this.snackBar.open('Entry deleted.', 'OK', { duration: 3000 });
-        this.reload();
-      },
-      error: () => {
-        this.snackBar.open('Failed to delete entry.', 'OK', { duration: 5000 });
-        this.cdr.markForCheck();
-      },
+    openStepUp(this.dialog, {
+      requireDualControl: true,
+      reason: `Delete CASP register entry ${entry.legalName}`,
+      action: 'CASP_REGISTER_DELETE',
+      target: `DELETE /api/v1/compliance/casp-register/${id}`,
+    }).subscribe(tokens => {
+      if (!tokens?.dualControlToken) return;
+      this.service.delete(id, { stepUpToken: tokens.stepUpToken, dualControlToken: tokens.dualControlToken }).subscribe({
+        next: () => {
+          this.snackBar.open('Entry deleted.', 'OK', { duration: 3000 });
+          this.reload();
+        },
+        error: (err) => {
+          this.snackBar.open(err?.error?.message ?? 'Failed to delete entry.', 'OK', { duration: 5000 });
+          this.cdr.markForCheck();
+        },
+      });
     });
   }
 

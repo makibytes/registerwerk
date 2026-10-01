@@ -25,12 +25,16 @@ export class KycService {
     entityId: string,
     file: File,
     documentType: string,
-    jurisdiction?: Jurisdiction
+    jurisdiction?: Jurisdiction,
+    dates?: { issueDate?: string; expiresAt?: string },
   ): Observable<KycDocument> {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('documentType', documentType);
     if (jurisdiction) formData.append('jurisdiction', jurisdiction);
+    // `expiresAt` is mandatory for passport, identity document and register extracts (400 otherwise).
+    if (dates?.issueDate) formData.append('issueDate', dates.issueDate);
+    if (dates?.expiresAt) formData.append('expiresAt', dates.expiresAt);
     return this.http.post<KycDocument>(`${this.base}/${entityId}/kyc/documents`, formData);
   }
 

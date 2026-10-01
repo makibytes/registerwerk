@@ -17,5 +17,6 @@ public record KycDocumentResponse(
     Long sizeBytes,
     String contentHash,
     Instant uploadedAt,
-    LocalDate expiresAt
+    LocalDate expiresAt,
+    LocalDate issueDate
 ) {}

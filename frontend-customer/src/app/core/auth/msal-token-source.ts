@@ -166,13 +166,17 @@ export class MsalTokenSource extends TokenSource {
     this.cachedToken = null;
   }
 
-  enterImpersonation(_token: string, _entityId: string, _entityName: string): Observable<void> {
+  enterImpersonation(_code: string, _entityId: string, _entityName: string): Observable<void> {
     return throwError(() => new Error('Impersonation is unavailable with Microsoft Entra sign-in.'));
   }
 
   exitImpersonation(): Observable<void> {
     // Nothing to restore — impersonation can never have been entered in this mode.
     return of(void 0);
+  }
+
+  getImpersonationMode(): 'READ_ONLY' | 'ACT_ON_BEHALF' | null {
+    return null;
   }
 
   getImpersonationMeta(): { entityId: string; entityName: string } | null {

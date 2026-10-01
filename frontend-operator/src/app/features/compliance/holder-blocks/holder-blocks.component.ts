@@ -112,6 +112,7 @@ import { AuthService } from '../../../core/auth/auth.service';
         <mat-form-field appearance="outline">
           <mat-label>Expires at (optional, ISO-8601)</mat-label>
           <input matInput [(ngModel)]="createForm.expiresAt" placeholder="2025-12-31T00:00:00Z" />
+          <mat-hint>Must be in the future; a legal-order block with an expiry also needs a court reference. The second approver confirms the expiry date. A block never lifts by itself: after the date it stays in expiry review until a confirmed lift.</mat-hint>
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions style="justify-content:flex-end;gap:8px">
@@ -191,6 +192,12 @@ export class HolderBlocksComponent implements OnInit {
       type: 'date',
     },
     {
+      key: 'status',
+      header: 'Status',
+      cell: (b: HolderBlock) => b.status === 'EXPIRY_REVIEW' ? 'Expired - awaiting confirmed lift' : b.status,
+      type: 'badge',
+    },
+    {
       key: 'expiresAt',
       header: 'Expires',
       cell: (b: HolderBlock) => b.expiresAt,
@@ -232,6 +239,7 @@ export class HolderBlocksComponent implements OnInit {
         requireDualControl: true,
         reason: `Create Sperrvermerk on wallet ${this.createForm.walletAddress} (§16 eWpG)`,
         action: 'SPERRVERMERK_CREATE',
+        target: 'POST /api/v1/holder-blocks',
       },
       width: '500px',
       disableClose: true,
@@ -265,6 +273,7 @@ export class HolderBlocksComponent implements OnInit {
         requireDualControl: true,
         reason: `Lift Sperrvermerk on wallet ${block.walletAddress} (§16 eWpG)`,
         action: 'SPERRVERMERK_LIFT',
+        target: `POST /api/v1/holder-blocks/${block.id}/lift`,
       },
       width: '500px',
       disableClose: true,

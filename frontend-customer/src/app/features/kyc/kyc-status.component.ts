@@ -198,6 +198,16 @@ const ALL_DOC_TYPES = [
                       </mat-select>
                     </mat-form-field>
 
+                    <label class="date-label">
+                      Issue date
+                      <input type="date" [(ngModel)]="uploadIssueDate[jur.value]" aria-label="Issue date" />
+                    </label>
+                    <label class="date-label">
+                      Valid until
+                      <input type="date" [(ngModel)]="uploadExpiresAt[jur.value]"
+                             aria-label="Valid until (required for identity and register documents)" />
+                    </label>
+
                     <label class="file-label" [class.has-file]="uploadFiles[jur.value]">
                       <mat-icon>attach_file</mat-icon>
                       {{ uploadFiles[jur.value]?.name ?? 'Choose file…' }}
@@ -345,6 +355,22 @@ const ALL_DOC_TYPES = [
 
     .quick-upload-btn { margin-left: auto; font-size: 11px; height: 24px; line-height: 24px; padding: 0 8px; }
     .upload-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
+    .date-label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 11px;
+      color: var(--rw-text-secondary);
+      input {
+        font: inherit;
+        font-size: 13px;
+        padding: 6px 8px;
+        border: 1px solid var(--rw-border);
+        border-radius: 6px;
+        background: var(--rw-surface);
+        color: var(--rw-text-primary);
+      }
+    }
     .file-label {
       display: flex; align-items: center; gap: 6px;
       padding: 10px 16px; border: 1px dashed var(--rw-border); border-radius: 4px;
@@ -386,6 +412,8 @@ export class KycStatusComponent implements OnInit {
   uploadFiles: Partial<Record<Jurisdiction, File>> = {};
   uploadDocType: Partial<Record<Jurisdiction, string>> = {};
   uploadLoading: Partial<Record<Jurisdiction, boolean>> = {};
+  uploadIssueDate: Partial<Record<Jurisdiction, string>> = {};
+  uploadExpiresAt: Partial<Record<Jurisdiction, string>> = {};
 
   ngOnInit(): void {
     this.entityId = this.authService.getEntityId();
@@ -478,21 +506,26 @@ export class KycStatusComponent implements OnInit {
     if (!this.entityId || !file || !docType) return;
 
     this.uploadLoading = { ...this.uploadLoading, [jur]: true };
-    this.kycService.uploadDocument(this.entityId, file, docType, jur).subscribe({
+    this.kycService.uploadDocument(this.entityId, file, docType, jur, {
+      issueDate: this.uploadIssueDate[jur] || undefined,
+      expiresAt: this.uploadExpiresAt[jur] || undefined,
+    }).subscribe({
       next: (doc) => {
         this.documents = [...this.documents, doc];
         this.uploadFiles = { ...this.uploadFiles, [jur]: undefined };
         this.uploadDocType = { ...this.uploadDocType, [jur]: '' };
+        this.uploadIssueDate = { ...this.uploadIssueDate, [jur]: '' };
+        this.uploadExpiresAt = { ...this.uploadExpiresAt, [jur]: '' };
         this.uploadLoading = { ...this.uploadLoading, [jur]: false };
         this.cdr.markForCheck();
         // Refresh compliance checklist
         this.loadCompliance(jur);
         this.snackBar.open('Document uploaded. Awaiting review.', 'OK', { duration: 4000 });
       },
-      error: () => {
+      error: (err) => {
         this.uploadLoading = { ...this.uploadLoading, [jur]: false };
         this.cdr.markForCheck();
-        this.snackBar.open('Upload failed. Please try again.', 'OK', { duration: 3000 });
+        this.snackBar.open(err?.error?.message ?? 'Upload failed. Please try again.', 'OK', { duration: 6000 });
       },
     });
   }

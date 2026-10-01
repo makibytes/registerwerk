@@ -122,6 +122,18 @@ export class AssetService {
     return this.http.post<AssetDocument>(`${this.base}/${assetId}/documents`, form);
   }
 
+  /**
+   * Replaces the term sheet of an ISSUED/SUSPENDED/REDEEMED asset: step-up + second approver
+   * (`TERM_SHEET_AMENDMENT`). A plain upload of a TERM_SHEET there is refused with 403. The previous
+   * version is kept and marked superseded.
+   */
+  amendTermSheet(assetId: string, file: File, tokens: DualControlTokens): Observable<AssetDocument> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return this.http.post<AssetDocument>(`${this.base}/${assetId}/documents/term-sheet-amendment`, form,
+      { headers: dualControlHeaders(tokens) });
+  }
+
   downloadDocument(assetId: string, docId: string): Observable<Blob> {
     return this.http.get(`${this.base}/${assetId}/documents/${docId}/content`, { responseType: 'blob' });
   }

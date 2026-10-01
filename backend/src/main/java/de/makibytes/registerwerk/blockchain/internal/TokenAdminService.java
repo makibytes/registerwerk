@@ -205,10 +205,10 @@ public class TokenAdminService implements TokenAdminPort {
         requireNotBlocked(from);
         requireNotBlocked(to);
         destinationGate.require(dep.getAssetId(), to, "forcedTransfer");
-        // TFR Reg (EU) 2023/1113: dispatch/record Travel Rule information before
-        // submitting the on-chain transfer. EUR valuation is not available at this
-        // layer — null is treated conservatively by the gate.
-        travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
+        // TFR Reg (EU) 2023/1113: deliver (await) / record Travel Rule information before
+        // submitting the on-chain transfer. No EUR valuation is available at this layer (parked T6-06:
+        // unknown = above the Art. 14(5) threshold); the instructed token amount travels in transferDetails.
+        travelRuleGate.enforceOutbound(travelRuleContext(dep, asset, from, to, value));
         Function fn = new Function(
                 forcedTransferMethodName(asset.tokenStandard()),
                 Arrays.asList(new Address(from), new Address(to), new Uint256(value), new Utf8String(legalBasis)),
@@ -232,7 +232,7 @@ public class TokenAdminService implements TokenAdminPort {
         requireNotBlocked(from);
         requireNotBlocked(to);
         destinationGate.require(dep.getAssetId(), to, "forcedTransferSingle");
-        travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
+        travelRuleGate.enforceOutbound(travelRuleContext(dep, asset, from, to, amount));
         if (asset.tokenStandard() != TokenStandard.ERC1155) {
             throw new IllegalArgumentException("forcedTransferSingle is only available for ERC-1155 tokens");
         }
@@ -518,7 +518,7 @@ public class TokenAdminService implements TokenAdminPort {
         requireNotBlocked(from);
         requireNotBlocked(to);
         destinationGate.require(dep.getAssetId(), to, "confidentialForcedTransfer");
-        travelRuleGate.enforceOutbound(dep.getAssetId(), from, to, null);
+        travelRuleGate.enforceOutbound(travelRuleContext(dep, asset, from, to, amount));
         String operatorAddress = evmContractService.signer(
                 new ChainDescriptor(dep.getChain(), dep.getNetwork())).address();
         ZamaRelayerClient.EncryptedInput encrypted =
@@ -615,6 +615,14 @@ public class TokenAdminService implements TokenAdminPort {
             throw new IllegalArgumentException(
                     "legalBasis is required for forced operations (at least 10 characters: order, authority, reference).");
         }
+    }
+
+    /** Travel Rule context shared by every admin value-moving path (6-26/6-27). */
+    private static TravelRuleGate.TransferContext travelRuleContext(AssetDeployment dep,
+            AssetLookupPort.AssetInfo asset, String from, String to, BigInteger amount) {
+        return new TravelRuleGate.TransferContext(dep.getAssetId(), from, to,
+                new java.math.BigDecimal(amount),
+                de.makibytes.registerwerk.blockchain.api.EvmUtils.tokenSymbol(asset.name()), dep.getContractAddress());
     }
 
     private AssetDeployment requireDeployment(UUID deploymentId) {

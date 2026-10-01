@@ -165,6 +165,43 @@ not *which tenant's data* they may touch. Two patterns enforce the second half:
 
 ---
 
+## Session guard, revocation and operator impersonation { #session-guard }
+
+A valid signature is not enough for a request to be accepted. Every authenticated request (built-in HS256 and Entra/OIDC alike) is re-checked against the account:
+
+- the account must exist and be **enabled**, and its entity must not be CLOSED or DISSOLVED;
+- locally issued tokens must not predate `app_user.tokens_valid_after`, which is advanced whenever an account is disabled or re-enabled, or its roles, entity or password change, and by explicit revocation;
+- the token's `jti` must not have been revoked: `POST /api/v1/public/auth/logout` now revokes the token server-side instead of only clearing cookies.
+
+The lookup is cached for 15 seconds and evicted at once in-process, so on a multi-replica deployment a revocation takes effect within 15 seconds. Tokens issued before this release carry no `jti`; they stay valid until they expire (at most 8 hours) unless the user is revoked. Rejections are counted in `registerwerk_session_rejections_total{reason}`.
+
+A step-up token (`acr=stepup`) is accepted only on `@RequiresStepUp` endpoints; used as an ordinary bearer elsewhere it is refused with 403.
+
+**Operator impersonation.** Starting a session needs a step-up token and a mandatory reason (at least 15 characters, optional ticket reference). The default mode is **READ_ONLY**: only GET/HEAD/OPTIONS are allowed, everything else returns 403 `IMPERSONATION_READ_ONLY`. **ACT_ON_BEHALF** (`POST /api/v1/impersonation/act-on-behalf`) additionally needs a second approver and still cannot call customer attestation or account-administration endpoints (`registerwerk.auth.impersonation-deny-patterns`). Sessions last 30 minutes, are recorded in `impersonation_session`, are visible to the customer's company admins (`GET /api/v1/company/impersonation-sessions`) and end with an audit event. The start response contains no token: the handoff URL carries a one-time code valid for 60 seconds that the customer app exchanges for a session cookie; replaying a code ends the session. A trade cannot be acted on for both buyer and seller by the same user.
+
+## User lifecycle, access review and identity binding { #user-lifecycle }
+
+- **Withdrawn invites stay withdrawn.** Disabling or deleting an account burns its unconsumed registration and password-reset tokens, and completing a token is refused (generic "invalid or expired token") while the account is disabled or its entity is not ACTIVE. Completing a registration never re-enables an account.
+- **Bootstrap admin.** `DefaultAdminSeeder` creates the administrator only when no `REGISTRY_ADMIN` exists and never touches an existing account. The account is flagged `must_change_password`; production refuses to start 24 hours later while the flag is set or the environment password still works. (Restricting the flagged account at login is a follow-up.)
+- **Access review.** A `REVOKED` decision goes through the same guards as user management (not yourself, not the last enabled `REGISTRY_ADMIN`, not the last enabled `COMPANY_ADMIN` of an entity), ends the user's sessions and burns their tokens. Decisions are write-once; a correction is an explicit re-open (`POST /api/v1/access-reviews/{id}/items/{itemId}/reopen`, `REGISTRY_ADMIN`, reason mandatory, account stays disabled). Revoking a privileged account (`REGISTRY_ADMIN`, `COMPLIANCE_OFFICER`, `COMPANY_ADMIN`) is first a `REVOKE_PROPOSED` and takes effect when a second, different reviewer confirms with `REVOKED`. Every decision needs a step-up token. If an account's roles or enabled flag change after the snapshot, the item turns `STALE` and must be re-opened; a campaign cannot be closed while items are `STALE` or accounts created or role-changed since it started are missing from it. The person who last changed an account's roles cannot review it. Role pairs listed in `registerwerk.access-review.sod-conflicts` (default `REGISTRY_ADMIN+COMPLIANCE_OFFICER`) are shown per item as a warning only. Revocation does not cascade to wallets, on-chain roles or pending four-eyes requests; the audit event lists these manual follow-ups.
+- **Operator accounts.** Invite, role change, enable, disable and delete need a step-up token and are audited with roles, previous roles, entity and the real actor role. Creating or granting `REGISTRY_ADMIN`/`COMPLIANCE_OFFICER` alerts every `REGISTRY_ADMIN`. Inviting an operator account or a `REGISTRY_ADMIN`/`COMPLIANCE_OFFICER`/`AUDIT` account, changing those roles, re-enabling or deleting such an account additionally needs a second approver (`X-Dual-Control-Token`, bound to the request, single use). With fewer than two enabled, TOTP-enrolled administrators the single step-up suffices and the event carries `bootstrap=true` (otherwise a fresh install could never create its second administrator). Re-enabling an account revoked by an access review needs a reinstatement reason and always the second approver, even in that bootstrap state. The optional `registerwerk.admin.operator-email-domains` restricts invitee domains. Company administrators can only assign `COMPANY_ADMIN`, `ISSUER`, `INVESTOR` and `TRADER`; onboarding passwords follow the registration policy (8 to 200 characters).
+- **Identity binding.** An Entra/OIDC token is linked to an existing account by e-mail only if the account is not yet bound to an identity, the tenant is the configured one (or the entity's federated tenant), and the token asserts a verified address (`xms_edov`/`email_verified`; `registerwerk.auth.link-by-email-without-verification` allows linking without that assertion outside production mode). A bound account is never re-pointed: the token resolves to no account and `IDENTITY_REBIND_REFUSED` is audited. The sanctioned path is `POST /api/v1/admin/users/{id}/reset-identity` (step-up, second approver, reason), after which the next sign-in binds afresh. In Entra mode an operator can disable (deprovision) a local account with a reason.
+
+## Login throttling
+
+The built-in login (`POST /api/v1/public/auth/login`, used by the operator portal, which bypasses Kong) is throttled in the table `login_attempt`, shared by all replicas:
+
+| Counter | Key | Effect |
+|---|---|---|
+| Pair | e-mail + source address | 5 failures in 15 minutes lock **that account from that address**; the lock doubles for every further episode (15, 30, 60 … up to 240 minutes) and is audited once per episode (`LOGIN_LOCKED`) |
+| Address | source address | 30 failures from one address in the window refuse that address (password spray across many accounts) |
+| Account | e-mail only | **Never a lock.** After 5 failures from anywhere the login is delayed 1, 2, then 4 seconds, for existing and unknown e-mails alike |
+| Global | whole platform | above 600 failures per minute, addresses that already failed are refused; clean addresses keep working |
+
+An attacker can therefore no longer lock a real user out by guessing at their address from elsewhere. Unknown e-mails take the same password-hashing work as known ones and are counted in the same bounded table: `LoginRequest.email` is capped at 254 characters, new account rows stop at `registerwerk.auth.login-max-tracked-keys` (default 200 000), and a job purges expired rows every ten minutes (rows of locked pairs are kept for 24 hours so the backoff is remembered).
+
+The source address is `request.getRemoteAddr()`. Behind a proxy, Tomcat replaces it with the `X-Forwarded-For` client **only when the TCP peer matches `registerwerk.auth.trusted-proxies`** (default: loopback and private ranges, i.e. the bundled nginx, Kong and ingress); a client that reaches the backend directly cannot pick its own bucket. Both bundled nginx configurations now forward `X-Forwarded-For`. Tune with `REGISTERWERK_AUTH_LOGIN_MAX_ATTEMPTS`, `…_LOCKOUT_MINUTES`, `…_MAX_LOCKOUT_MINUTES`, `…_IP_MAX_FAILURES`, `…_GLOBAL_MAX_FAILURES` and `REGISTERWERK_AUTH_TRUSTED_PROXIES`.
+
 ## Production fail-fast guard
 
 !!! danger "Default JWT secret in production"

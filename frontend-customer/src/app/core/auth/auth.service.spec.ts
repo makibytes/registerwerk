@@ -24,6 +24,7 @@ describe('AuthService', () => {
             login: vi.fn().mockName("TokenSource.login"),
             loginWithCredentials: vi.fn().mockName("TokenSource.loginWithCredentials"),
             logout: vi.fn().mockName("TokenSource.logout"),
+            getImpersonationMode: vi.fn().mockName("TokenSource.getImpersonationMode"),
             enterImpersonation: vi.fn().mockName("TokenSource.enterImpersonation"),
             exitImpersonation: vi.fn().mockName("TokenSource.exitImpersonation"),
             getImpersonationMeta: vi.fn().mockName("TokenSource.getImpersonationMeta"),

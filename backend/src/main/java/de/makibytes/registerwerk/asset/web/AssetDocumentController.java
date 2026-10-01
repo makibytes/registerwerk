@@ -5,6 +5,8 @@ import de.makibytes.registerwerk.asset.api.AssetDocument;
 import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import de.makibytes.registerwerk.asset.web.dto.AssetDocumentResponse;
 import de.makibytes.registerwerk.asset.web.dto.TermSheetSyncRequest;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
+import de.makibytes.registerwerk.stepup.api.StepUpAttributes;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -53,6 +55,23 @@ public class AssetDocumentController {
             file.getContentType(),
             documentType,
             extractActorId(auth));
+        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(doc));
+    }
+
+    /**
+     * Operator-approved term sheet amendment for an issued asset (6-34, parked T6-18): step-up + second approver.
+     * The previous version is kept and marked superseded; issuers cannot replace a public term sheet by upload.
+     */
+    @PostMapping(value = "/term-sheet-amendment", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "TERM_SHEET_AMENDMENT")
+    public ResponseEntity<AssetDocumentResponse> amendTermSheet(
+            @PathVariable UUID assetId,
+            @RequestParam("file") MultipartFile file,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId,
+            Authentication auth) throws IOException {
+        AssetDocument doc = termSheetService.amendTermSheet(assetId, file.getBytes(), file.getOriginalFilename(),
+            file.getContentType(), extractActorId(auth), approverId);
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(doc));
     }
 

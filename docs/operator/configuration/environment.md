@@ -22,7 +22,7 @@ All configuration is done via environment variables. Copy `.env.example` to `.en
 |---|---|---|
 | `ENTRA_ENABLED` | `false` | `false` → username/password form in operator FE; `true` → Microsoft button |
 | `DEFAULT_ADMIN_EMAIL` | — | Email of the seeded admin user (built-in mode only) |
-| `DEFAULT_ADMIN_PASSWORD` | — | Plaintext password hashed with BCrypt on startup; rotate by changing and restarting |
+| `DEFAULT_ADMIN_PASSWORD` | — | Plaintext password hashed with BCrypt when the admin is created; used only if no `REGISTRY_ADMIN` exists, never re-applied to an existing account |
 | `JWT_DEV_SECRET` | built-in | HS256 signing key used in dev/demo mode; leave unset for local, override in staging |
 
 ### OAuth2 / OIDC (production)

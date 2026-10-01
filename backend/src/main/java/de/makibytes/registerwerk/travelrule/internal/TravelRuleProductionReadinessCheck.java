@@ -39,9 +39,16 @@ class TravelRuleProductionReadinessCheck {
             return;
         }
 
-        if (inboxApiKey == null || inboxApiKey.isBlank()) {
-            throw new IllegalStateException(
-                    "REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY must be set in production mode");
+        TravelRuleProperties.OwnVasp own = properties.getOwnVasp();
+        if (own.identifier() == null || isBlank(own.getLegalName())) {
+            throw new IllegalStateException("REGISTERWERK_TRAVEL_RULE_OWN_VASP_DID (or _LEI) and "
+                    + "_OWN_VASP_LEGAL_NAME must be set in production mode (originatingVasp of every message)");
+        }
+        if (properties.getTrp().isAllowInsecureEndpoints()) {
+            throw new IllegalStateException("travel-rule.trp.allow-insecure-endpoints must not be set in production");
+        }
+        if (properties.isLegacySharedKey()) {
+            throw new IllegalStateException("REGISTERWERK_TRAVEL_RULE_LEGACY_SHARED_KEY must not be enabled in production");
         }
         switch (protocol) {
             case "NOTABENE" -> {

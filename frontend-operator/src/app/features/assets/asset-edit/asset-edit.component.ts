@@ -332,7 +332,7 @@ export class AssetEditComponent implements OnInit {
     }).afterClosed().subscribe((body: TermsAmendment | undefined) => {
       if (!body) return;
       this.dialog.open(StepUpDialogComponent, {
-        data: { requireDualControl: true, reason: `Amend the terms of ${this.asset?.name ?? 'this asset'}`, action: 'TERMS_AMENDMENT' },
+        data: { requireDualControl: true, reason: `Amend the terms of ${this.asset?.name ?? 'this asset'}`, action: 'TERMS_AMENDMENT', target: `POST /api/v1/assets/${this.id}/terms-amendments` },
         width: '500px',
         disableClose: true,
       }).afterClosed().subscribe((result) => {

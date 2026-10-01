@@ -75,3 +75,12 @@ TLPT ni certifica el resultado.
 El repositorio no implementa el enrutamiento de autoridad DORA específico de la jurisdicción, formularios o esquemas oficiales,
 transmisión autenticada, recibos de entrega, correcciones, gestión de rechazos ni aceptación por parte de la autoridad. Registrar
 que se reportó un incidente no constituye evidencia de presentación.
+
+## Controles de incidentes (fase 6)
+
+- **Momento de conocimiento**: `awarenessAt` se introduce al crear (por defecto ahora, nunca en el futuro) y es inmutable; los plazos de 24 h y un mes corren desde él.
+- **Clasificación**: `POST /api/v1/dora/incidents/{id}/classify` (step-up, motivo obligatorio, criterios opcionales) clasifica o reclasifica; escalar a `MAJOR` inicia el plazo de 4 h y recalcula todos los plazos. Retirar `MAJOR` requiere un segundo aprobador y deja una marca de degradación. Quién clasifica es una decisión abierta del operador.
+- **Plazos**: notificación inicial 4 h tras la clasificación / 24 h desde el conocimiento (el menor), informe intermedio 72 h después de la notificación inicial, informe final 30 días desde el conocimiento (conservador). La supervisión se ejecuta cada 15 minutos hasta el informe final, con independencia del estado; los incumplimientos se avisan por correo a los administradores del registro.
+- **Informes**: filas solo de adición (`INITIAL`, `INTERMEDIATE`, `FINAL`) con referencia de la autoridad; las primeras marcas de tiempo y la referencia no se pueden sobrescribir. `REPORTED_TO_AUTHORITY` solo se establece al registrar el informe final. Cerrar un incidente `MAJOR` exige pruebas de los informes inicial y final y un segundo aprobador.
+- **Borradores automáticos**: una escritura de auditoría fallida de forma permanente abre un borrador sin clasificar que una persona debe clasificar.
+- Las exportaciones CSV etiquetan correctamente los plazos y neutralizan las fórmulas de hoja de cálculo en celdas de texto.

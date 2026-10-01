@@ -1,14 +1,16 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
+/** No bearer token any more: the handoff URL carries a one-time code (`#code=...`) exchanged for a session cookie. */
 export interface ImpersonateResponse {
-  token: string;
-  tokenType: string;
+  sessionId: string;
+  mode: 'READ_ONLY' | 'ACT_ON_BEHALF';
   expiresAt: string;
   entityId: string;
   entityName: string;
+  handoffUrl: string;
 }
 
 export interface EntityListItem {
@@ -47,7 +49,29 @@ export class AdminService {
     return this.http.get<EntityPage>(this.entitiesBase, { params });
   }
 
-  impersonate(entityId: string): Observable<ImpersonateResponse> {
-    return this.http.post<ImpersonateResponse>(this.impersonationUrl, { entityId });
+  /** Starts a READ_ONLY support session: needs a step-up token as bearer and a reason of at least 15 characters. */
+  impersonate(entityId: string, reason: string, stepUpToken: string, ticket?: string): Observable<ImpersonateResponse> {
+    const headers = new HttpHeaders({ Authorization: `Bearer ${stepUpToken}` });
+    return this.http.post<ImpersonateResponse>(this.impersonationUrl,
+      { entityId, reason, ticket: ticket || undefined }, { headers });
   }
+
+  /** Exchanges an authenticator code for a step-up token (built-in sign-in). */
+  stepUp(totpCode: string, action: string): Observable<{ stepUpToken: string }> {
+    return this.http.post<{ stepUpToken: string }>(`${environment.apiUrl}/auth/step-up`,
+      { code: totpCode, method: 'TOTP', action });
+  }
+}
+
+export interface ImpersonationSessionView {
+  id: string;
+  mode: 'READ_ONLY' | 'ACT_ON_BEHALF';
+  reason: string;
+  ticketRef: string | null;
+  actorId: string;
+  approverId: string | null;
+  startedAt: string;
+  expiresAt: string;
+  endedAt: string | null;
+  endReason: string | null;
 }

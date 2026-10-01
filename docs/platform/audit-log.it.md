@@ -130,3 +130,15 @@ Restituisce:
 ```
 
 Se `brokenAt` non è nullo, contiene `sequence_no` della prima voce in cui la catena hash è interrotta. Ciò attiva un `IctIncident` automatico di gravità `MAJOR` e categoria `INTEGRITY`.
+
+---
+
+## Modello di integrità (canonico v2, ancore, ripetizione)
+
+- **Versione canonica.** Ogni riga riporta `canon_version`. La versione 2 copre `eventType`, soggetto, payload, **ID e ruolo dell'attore, ora dell'evento (`occurred_at`, epoca in microsecondi), ID di correlazione e collegamento di storno**: modificarne uno rompe la catena. Le righe di versione 1 (scritte prima di questa modifica) continuano a essere verificate con il formato precedente; una versione sconosciuta fa fallire la verifica.
+- **Ora dell'evento.** `occurred_at` viene acquisita in modo sincrono alla pubblicazione dell'evento, non alla scrittura asincrona; `recorded_at` è l'ora di inserimento. Le azioni eseguite da un operatore che agisce per conto di un cliente (impersonificazione) sono registrate con il ruolo `REGISTRY_ADMIN_IMPERSONATING` e un oggetto `_imp` sottoposto a hash (sessione, operatore, entità, modalità).
+- **La verifica** rileva: una prima riga che non è l'origine della catena (testa troncata, partizione eliminata), un'ultima riga diversa da `audit_chain_tip`, righe rimosse dopo un'ancora giornaliera firmata (`audit_chain_anchor`, pubblicata facoltativamente tramite un `AuditAnchorSink` esterno) e una `entry_sig` mancante dalla soglia di firma in poi (primo numero di sequenza firmato, scrivibile una sola volta). Attivare la firma in seguito non firma retroattivamente le righe precedenti.
+- **Esportazione probatoria.** `/audit/events/export[/signed]` è ordinata per `sequence_no` e inizia con un blocco `# key=value` (`firstSeq`, `lastSeq`, `rowCount`, `truncated`, `nextAfterSeq`, `tipSeq`, `tipEntryHash`); le righe contengono `prevHash` e `entryHash`. La firma copre intestazione e righe. `afterSeq` consente di proseguire un'esportazione troncata.
+- **Le scritture fallite** vengono ritentate ogni minuto (pubblicazioni più vecchie di due minuti) e, dopo `registerwerk.audit.max-attempts` (20) tentativi, spostate in `audit_event_dead_letter`. Impostate allarmi su `registerwerk_audit_oldest_incomplete_seconds` e `registerwerk_audit_dead_letter_count`.
+- **Proprietà della tabella.** `REVOKE UPDATE, DELETE, TRUNCATE` e i trigger WORM non vincolano il proprietario della tabella. Se l'accesso di runtime esegue anche le migrazioni, possiede `audit_event`; in modalità produzione il controllo all'avvio fallisce, salvo che `registerwerk.audit.allow-owner-runtime-role=true` riconosca il rischio provvisorio. Rimedio: accessi separati per migrazione e runtime (decisione aperta T6-17). La modalità produzione richiede inoltre un provider di chiave di firma.
+- **Passaggio.** `registerwerk.audit.legacy-listener=true` (predefinito) smaltisce le pubblicazioni create prima dell'aggiornamento; disattivatelo quando `event_publication` non contiene più righe di audit incomplete.

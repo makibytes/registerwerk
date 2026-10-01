@@ -100,7 +100,7 @@ class DocumentServiceTest {
 
         KycDocument result = documentService.storeDocument(
             entityId, content, "report.pdf", "application/pdf",
-            KycDocument.DocumentType.ANNUAL_REPORT, uploadedBy, "REGISTRY_ADMIN");
+            KycDocument.DocumentType.ANNUAL_REPORT, uploadedBy, "REGISTRY_ADMIN", null, null, null);
 
         assertThat(result.getStorageRef()).isEqualTo("inline");
         verify(kycDocumentContentRepository).save(any(KycDocumentContent.class));
@@ -123,7 +123,8 @@ class DocumentServiceTest {
 
         KycDocument result = documentService.storeDocument(
             entityId, content, "large.pdf", "application/pdf",
-            KycDocument.DocumentType.COMMERCIAL_REGISTER, uploadedBy, "REGISTRY_ADMIN");
+            KycDocument.DocumentType.COMMERCIAL_REGISTER, uploadedBy, "REGISTRY_ADMIN",
+            null, null, java.time.LocalDate.now().plusYears(1));
 
         assertThat(result.getStorageRef()).isNotEqualTo("inline").contains("kyc/");
         verify(s3DocumentStorageAdapter).upload(any(), eq(content), eq("application/pdf"));
@@ -146,7 +147,7 @@ class DocumentServiceTest {
 
         KycDocument result = documentService.storeDocument(
             entityId, content, "small.bin", "application/octet-stream",
-            KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN");
+            KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN", null, null, null);
 
         assertThat(result.getContentHash()).isEqualTo(expectedHash);
     }
@@ -161,7 +162,7 @@ class DocumentServiceTest {
 
         KycDocument result = documentService.storeDocument(
                 UUID.randomUUID(), new byte[] {1}, "../secret\r\n.pdf", "application/pdf",
-                KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN");
+                KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN", null, null, null);
 
         assertThat(result.getFileName()).isEqualTo("secret.pdf");
     }
@@ -170,7 +171,7 @@ class DocumentServiceTest {
     void storeDocument_rejectsMimeTypesForbiddenBySchema() {
         assertThatThrownBy(() -> documentService.storeDocument(
                 UUID.randomUUID(), new byte[] {1}, "payload.html", "text/html",
-                KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN"))
+                KycDocument.DocumentType.OTHER, UUID.randomUUID(), "REGISTRY_ADMIN", null, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported KYC document MIME type");
     }
@@ -262,12 +263,65 @@ class DocumentServiceTest {
         when(kycDocumentContentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         documentService.storeDocument(entityId, "hi".getBytes(StandardCharsets.UTF_8), "a.bin", "application/octet-stream",
-                KycDocument.DocumentType.OTHER, uploadedBy, "COMPANY_ADMIN");
+                KycDocument.DocumentType.OTHER, uploadedBy, "COMPANY_ADMIN", null, null, null);
 
         ArgumentCaptor<DocumentUploadedEvent> captor = ArgumentCaptor.forClass(DocumentUploadedEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().actorId()).isEqualTo(uploadedBy);
         assertThat(captor.getValue().actorRole()).isEqualTo("COMPANY_ADMIN");
+    }
+
+    @Test
+    @DisplayName("6-17: a passport upload without expiresAt is refused (expiry was never captured before)")
+    void storeDocument_passportRequiresExpiry() {
+        assertThatThrownBy(() -> documentService.storeDocument(
+                UUID.randomUUID(), new byte[] {1}, "p.pdf", "application/pdf",
+                KycDocument.DocumentType.PASSPORT, UUID.randomUUID(), "COMPANY_ADMIN", null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("expiresAt is required");
+    }
+
+    @Test
+    @DisplayName("6-17: an already expired document and an issue date after the expiry are refused")
+    void storeDocument_rejectsExpiredAndInconsistentDates() {
+        java.time.LocalDate today = java.time.LocalDate.now();
+        assertThatThrownBy(() -> documentService.storeDocument(
+                UUID.randomUUID(), new byte[] {1}, "p.pdf", "application/pdf",
+                KycDocument.DocumentType.PASSPORT, UUID.randomUUID(), "COMPANY_ADMIN", null, null, today.minusDays(1)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("in the past");
+        assertThatThrownBy(() -> documentService.storeDocument(
+                UUID.randomUUID(), new byte[] {1}, "p.pdf", "application/pdf",
+                KycDocument.DocumentType.OTHER, UUID.randomUUID(), "COMPANY_ADMIN", null, today.plusDays(1), null))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("issueDate");
+        assertThatThrownBy(() -> documentService.storeDocument(
+                UUID.randomUUID(), new byte[] {1}, "p.pdf", "application/pdf",
+                KycDocument.DocumentType.OTHER, UUID.randomUUID(), "COMPANY_ADMIN", null,
+                today.minusDays(1), today.minusDays(2)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("6-17: issue date, expiry and jurisdiction are persisted and audited")
+    void storeDocument_persistsValidityDates() {
+        java.time.LocalDate today = java.time.LocalDate.now();
+        when(kycDocumentRepository.save(any())).thenAnswer(inv -> {
+            KycDocument d = inv.getArgument(0);
+            d.setId(UUID.randomUUID());
+            return d;
+        });
+        when(kycDocumentContentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        KycDocument saved = documentService.storeDocument(
+                UUID.randomUUID(), new byte[] {1}, "p.pdf", "application/pdf",
+                KycDocument.DocumentType.PASSPORT, UUID.randomUUID(), "COMPANY_ADMIN",
+                de.makibytes.registerwerk.customer.api.Jurisdiction.LU_CSSF, today.minusYears(1), today.plusYears(2));
+
+        assertThat(saved.getIssueDate()).isEqualTo(today.minusYears(1));
+        assertThat(saved.getExpiresAt()).isEqualTo(today.plusYears(2));
+        assertThat(saved.getJurisdiction()).isEqualTo(de.makibytes.registerwerk.customer.api.Jurisdiction.LU_CSSF);
+        ArgumentCaptor<DocumentUploadedEvent> captor = ArgumentCaptor.forClass(DocumentUploadedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().payload()).containsEntry("expiresAt", today.plusYears(2).toString());
     }
 
     @Test

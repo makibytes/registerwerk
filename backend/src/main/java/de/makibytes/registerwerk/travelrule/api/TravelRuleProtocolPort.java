@@ -13,10 +13,11 @@ public interface TravelRuleProtocolPort {
     String protocolName();
 
     /**
-     * Send an outbound IVMS-101 payload to the beneficiary VASP.
-     * Returns the protocol-assigned message ID.
+     * Send an outbound IVMS-101 payload to the resolved beneficiary VASP (its directory endpoint is
+     * carried in {@code beneficiary}, not re-derived from the payload). Returns the protocol-assigned
+     * message ID.
      */
-    CompletableFuture<String> send(UUID transferId, Ivms101.TravelRuleMessage payload);
+    CompletableFuture<String> send(UUID transferId, Ivms101.TravelRuleMessage payload, VaspInfo beneficiary);
 
     /**
      * Look up a VASP by wallet address.
@@ -24,5 +25,9 @@ public interface TravelRuleProtocolPort {
      */
     java.util.Optional<VaspInfo> lookupVasp(String walletAddress);
 
-    record VaspInfo(String vaspId, String legalName, String country, String endpoint) {}
+    record VaspInfo(String vaspId, String legalName, String country, String endpoint, String lei) {
+        public VaspInfo(String vaspId, String legalName, String country, String endpoint) {
+            this(vaspId, legalName, country, endpoint, null);
+        }
+    }
 }

@@ -38,17 +38,28 @@ class TravelRuleGateImpl implements TravelRuleGate {
     @Override
     public void enforceOutbound(UUID assetId, String fromWallet, String toWallet, BigDecimal amountEur,
                                 BigDecimal nativeAmount, String nativeSymbol) {
+        enforceOutbound(new TransferContext(assetId, fromWallet, toWallet, amountEur, null, null,
+                nativeAmount, nativeSymbol, null));
+    }
+
+    /**
+     * The originating/beneficiary VASP blocks and the transfer details are attached by
+     * {@link TravelRuleService} once the beneficiary VASP is resolved; this method supplies the
+     * originator and (for intra-register wallets) beneficiary identity.
+     */
+    @Override
+    public void enforceOutbound(TransferContext ctx) {
         Ivms101.IdentityPayload originatorIdentity =
-                identityResolver.resolve(assetId, fromWallet).orElse(null);
+                identityResolver.resolve(ctx.assetId(), ctx.fromWallet()).orElse(null);
         Ivms101.IdentityPayload beneficiaryIdentity =
-                identityResolver.resolve(assetId, toWallet).orElse(null);
+                identityResolver.resolve(ctx.assetId(), ctx.toWallet()).orElse(null);
 
         Ivms101.TravelRuleMessage payload = new Ivms101.TravelRuleMessage(
                 null,
-                List.of(new Ivms101.Originator(originatorIdentity, fromWallet)),
+                List.of(new Ivms101.Originator(originatorIdentity, ctx.fromWallet())),
                 null,
-                List.of(new Ivms101.Beneficiary(beneficiaryIdentity, toWallet)),
+                List.of(new Ivms101.Beneficiary(beneficiaryIdentity, ctx.toWallet())),
                 null);
-        service.checkAndSend(assetId, fromWallet, toWallet, amountEur, nativeAmount, nativeSymbol, payload);
+        service.checkAndSend(ctx, payload);
     }
 }

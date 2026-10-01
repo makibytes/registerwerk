@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.kyc.internal;
 
+import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import de.makibytes.registerwerk.kyc.events.DocumentDeletedEvent;
 import de.makibytes.registerwerk.kyc.events.DocumentUploadedEvent;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -20,6 +21,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Set;
@@ -41,6 +43,13 @@ public class DocumentService {
     private static final Set<String> SUPPORTED_MIME_TYPES = Set.of(
             "application/pdf", "image/jpeg", "image/png", "image/tiff",
             "application/xml", "text/xml", "application/octet-stream");
+    /** Evidence types whose validity is the point of the document: expiry must be captured (6-17). */
+    static final Set<KycDocument.DocumentType> EXPIRY_REQUIRED = Set.of(
+            KycDocument.DocumentType.PASSPORT,
+            KycDocument.DocumentType.IDENTITY_DOCUMENT,
+            KycDocument.DocumentType.COMMERCIAL_REGISTER,
+            KycDocument.DocumentType.COMMERCIAL_REGISTER_EXTRACT,
+            KycDocument.DocumentType.BENEFICIAL_OWNER_REGISTER_EXTRACT);
 
     private final KycDocumentRepository kycDocumentRepository;
     private final KycDocumentContentRepository kycDocumentContentRepository;
@@ -68,6 +77,9 @@ public class DocumentService {
      * @param docType    document classification
      * @param uploadedBy ID of the uploading user
      * @param actorRole  role of the uploading user (for audit)
+     * @param jurisdiction optional jurisdiction scope (null = universal)
+     * @param issueDate  optional issue date of the document (not in the future)
+     * @param expiresAt  expiry date; mandatory for {@link #EXPIRY_REQUIRED} types, must not be in the past
      * @return saved {@link KycDocument} metadata record
      */
     public KycDocument storeDocument(
@@ -77,8 +89,25 @@ public class DocumentService {
             String mimeType,
             KycDocument.DocumentType docType,
             UUID uploadedBy,
-            String actorRole) {
+            String actorRole,
+            Jurisdiction jurisdiction,
+            LocalDate issueDate,
+            LocalDate expiresAt) {
 
+        LocalDate today = LocalDate.now();
+        if (docType != null && EXPIRY_REQUIRED.contains(docType) && expiresAt == null) {
+            throw new IllegalArgumentException("expiresAt is required for document type " + docType
+                    + " (identity and register evidence must carry its validity date)");
+        }
+        if (issueDate != null && issueDate.isAfter(today)) {
+            throw new IllegalArgumentException("issueDate must not be in the future");
+        }
+        if (expiresAt != null && expiresAt.isBefore(today)) {
+            throw new IllegalArgumentException("expiresAt is in the past: an expired document is not valid KYC evidence");
+        }
+        if (issueDate != null && expiresAt != null && !expiresAt.isAfter(issueDate)) {
+            throw new IllegalArgumentException("expiresAt must be after issueDate");
+        }
         if (content == null || content.length == 0) {
             throw new IllegalArgumentException("Document content must not be empty");
         }
@@ -97,6 +126,9 @@ public class DocumentService {
         doc.setContentHash(contentHash);
         doc.setSizeBytes((long) content.length);
         doc.setUploadedBy(uploadedBy);
+        doc.setJurisdiction(jurisdiction);
+        doc.setIssueDate(issueDate);
+        doc.setExpiresAt(expiresAt);
 
         KycDocument saved;
         if (content.length <= MAX_INLINE_BYTES) {
@@ -121,7 +153,7 @@ public class DocumentService {
         }
 
         eventPublisher.publishEvent(new DocumentUploadedEvent(saved.getId(), uploadedBy, actorRole,
-                Map.of("entityId", entityId.toString(), "documentType", docType.name(), "fileName", safeFileName)));
+                documentUploadedDetails(entityId, docType, safeFileName, jurisdiction, issueDate, expiresAt)));
         return saved;
     }
 
@@ -164,6 +196,18 @@ public class DocumentService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static Map<String, Object> documentUploadedDetails(UUID entityId, KycDocument.DocumentType docType,
+            String fileName, Jurisdiction jurisdiction, LocalDate issueDate, LocalDate expiresAt) {
+        Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("entityId", entityId.toString());
+        details.put("documentType", docType.name());
+        details.put("fileName", fileName);
+        if (jurisdiction != null) details.put("jurisdiction", jurisdiction.name());
+        if (issueDate != null) details.put("issueDate", issueDate.toString());
+        if (expiresAt != null) details.put("expiresAt", expiresAt.toString());
+        return details;
+    }
 
     private static String sha256Hex(byte[] input) {
         try {

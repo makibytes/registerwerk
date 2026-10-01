@@ -102,4 +102,49 @@ class DoraControllerTest {
 
         assertThat(response.getBody()).contains("name,category,criticality");
     }
+
+    @Test
+    @DisplayName("export labels the 30-day deadline as one month (not 72h) and lists 4h / 24h / 72h-intermediate separately")
+    void export_deadlineLabels() {
+        UUID incidentId = UUID.randomUUID();
+        IctIncident incident = new IctIncident();
+        ReflectionTestUtils.setField(incident, "id", incidentId);
+        incident.setCategory(IctIncident.Category.OTHER);
+        incident.setSeverity(IctIncident.Severity.MAJOR);
+        incident.setStatus(IctIncident.Status.INVESTIGATING);
+        incident.setTitle("t");
+        incident.setFinalReportDeadline(Instant.parse("2026-08-31T10:00:00Z"));
+        when(doraService.getIncident(incidentId)).thenReturn(incident);
+
+        String csv = controller().exportIncidentAuthorityReport(incidentId).getBody();
+
+        assertThat(csv).contains("Final report deadline (1 month from awareness),2026-08-31T10:00:00Z")
+                .contains("4h from classification", "24h from awareness", "Intermediate report deadline (72h after initial notification)")
+                .doesNotContain("Final report deadline (72h)");
+    }
+
+    @Test
+    @DisplayName("export neutralises formula-looking issuer/user text but keeps numbers and ISO dates")
+    void export_csvFormulaInjectionSafe() {
+        UUID incidentId = UUID.randomUUID();
+        IctIncident incident = new IctIncident();
+        ReflectionTestUtils.setField(incident, "id", incidentId);
+        incident.setCategory(IctIncident.Category.OTHER);
+        incident.setSeverity(IctIncident.Severity.LOW);
+        incident.setStatus(IctIncident.Status.DETECTED);
+        incident.setTitle("=HYPERLINK(\"http://evil\",\"x\")");
+        incident.setDescription("@SUM(1+1)");
+        incident.setRootCause("-2+3");
+        incident.setRemediationSteps("+1234");
+        when(doraService.getIncident(incidentId)).thenReturn(incident);
+
+        String csv = controller().exportIncidentAuthorityReport(incidentId).getBody();
+
+        assertThat(csv).contains("'=HYPERLINK").contains("'@SUM(1+1)").contains("'-2+3")
+                .contains("Remediation actions taken,+1234");
+        assertThat(DoraController.csvSafe("2026-08-01T10:00:00Z")).isEqualTo("2026-08-01T10:00:00Z");
+        assertThat(DoraController.csvSafe("-12.5")).isEqualTo("-12.5");
+        assertThat(DoraController.csvSafe("\tcmd")).isEqualTo("'\tcmd");
+        assertThat(DoraController.csvSafe(42)).isEqualTo(42);
+    }
 }

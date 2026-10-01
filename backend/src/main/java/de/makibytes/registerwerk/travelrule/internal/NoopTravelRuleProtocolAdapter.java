@@ -26,7 +26,7 @@ class NoopTravelRuleProtocolAdapter implements TravelRuleProtocolPort {
     public String protocolName() { return "NOOP"; }
 
     @Override
-    public CompletableFuture<String> send(UUID transferId, Ivms101.TravelRuleMessage payload) {
+    public CompletableFuture<String> send(UUID transferId, Ivms101.TravelRuleMessage payload, VaspInfo beneficiary) {
         log.warn("Travel Rule: no protocol adapter configured — message NOT sent for transferId={}. " +
                  "Configure registerwerk.travel-rule.protocol.", transferId);
         return CompletableFuture.completedFuture("noop-" + transferId);

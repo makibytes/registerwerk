@@ -17,7 +17,9 @@ public class NaturalPerson {
 
     public enum PepStatus {
         UNKNOWN, NOT_PEP, DOMESTIC_PEP, FOREIGN_PEP,
-        INTERNATIONAL_PEP, PEP_FAMILY, PEP_ASSOCIATE
+        INTERNATIONAL_PEP, PEP_FAMILY, PEP_ASSOCIATE,
+        /** A compliance officer confirmed a screening PEP hit (four-eyes); EDD approval governs the gate. */
+        CONFIRMED_PEP
     }
 
     @Id

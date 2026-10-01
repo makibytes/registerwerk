@@ -54,8 +54,12 @@ public class ScreeningRefreshJob {
         int failed = 0;
         for (UUID entityId : entityIds) {
             try {
-                screeningService.screenRegisteredEntity(entityId, ScreeningTrigger.PERIODIC_REFRESH);
-                succeeded++;
+                ScreeningRun run = screeningService.screenRegisteredEntity(entityId, ScreeningTrigger.PERIODIC_REFRESH);
+                if (run != null && run.getStatus() == ScreeningStatus.ERROR) {
+                    failed++; // provider errors are recorded as ERROR runs, not thrown
+                } else {
+                    succeeded++;
+                }
             } catch (EntityNotFoundException deleted) {
                 log.warn("Periodic screening: entity {} no longer exists, skipping.", entityId);
             } catch (Exception failure) {
@@ -65,6 +69,8 @@ public class ScreeningRefreshJob {
         }
         lastFailures.set(failed);
         if (failed > 0) {
+            screeningService.reportDegraded("PERIODIC_REFRESH_FAILURES",
+                    java.util.Map.of("failed", failed, "attempted", entityIds.size()));
             log.warn("Periodic screening complete: {} succeeded, {} FAILED of {} attempted.",
                     succeeded, failed, entityIds.size());
         } else {

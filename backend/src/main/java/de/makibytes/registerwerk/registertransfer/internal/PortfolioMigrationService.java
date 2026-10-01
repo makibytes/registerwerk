@@ -396,7 +396,7 @@ public class PortfolioMigrationService {
     /** ACTIVE HolderBlocks that apply to this entry: on the investor (entity-wide or this asset) or its wallet. */
     private List<Map<String, Object>> activeBlocks(AssetHolder holder) {
         Map<UUID, HolderBlock> blocks = new LinkedHashMap<>();
-        holderBlockRepository.findByEntityIdAndStatus(holder.getInvestorId(), HolderBlock.Status.ACTIVE).stream()
+        holderBlockRepository.findByEntityIdAndStatusIn(holder.getInvestorId(), HolderBlock.BLOCKING).stream()
                 .filter(b -> b.getAssetId() == null || b.getAssetId().equals(holder.getAssetId()))
                 .forEach(b -> blocks.putIfAbsent(b.getId(), b));
         if (holder.getWalletAddress() != null) {
@@ -406,7 +406,7 @@ public class PortfolioMigrationService {
                 spellings.add(normalized);
             }
             for (String wallet : spellings) {
-                holderBlockRepository.findByWalletAddressAndStatus(wallet, HolderBlock.Status.ACTIVE).stream()
+                holderBlockRepository.findByWalletAddressAndStatusIn(wallet, HolderBlock.BLOCKING).stream()
                         .filter(b -> b.getAssetId() == null || b.getAssetId().equals(holder.getAssetId()))
                         .forEach(b -> blocks.putIfAbsent(b.getId(), b));
             }

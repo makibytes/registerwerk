@@ -145,3 +145,15 @@ Liefert:
 Ist `brokenAt` nicht null, enthält es die `sequence_no` des ersten Eintrags, an dem die Hash-Kette
 unterbrochen ist. Das löst automatisch einen `IctIncident` mit Schweregrad `MAJOR` und Kategorie
 `INTEGRITY` aus.
+
+---
+
+## Integritätsmodell (Kanonisierung v2, Anker, Wiederholung)
+
+- **Kanonische Version.** Jede Zeile trägt `canon_version`. Version 2 umfasst `eventType`, Subjekt, Payload, **Akteur-ID, Akteursrolle, Ereigniszeit (`occurred_at`, Epoche in Mikrosekunden), Korrelations-ID und den Korrekturverweis**; wer eines davon ändert, bricht die Kette. Zeilen der Version 1 (vor dieser Änderung geschrieben) werden weiterhin nach dem alten Format geprüft; eine unbekannte Version lässt die Prüfung fehlschlagen.
+- **Ereigniszeit.** `occurred_at` wird synchron bei der Veröffentlichung des Ereignisses erfasst, nicht beim asynchronen Schreiben; `recorded_at` ist der Einfügezeitpunkt. Handlungen, die ein Operator im Namen eines Kunden ausführt (Impersonation), werden mit der Rolle `REGISTRY_ADMIN_IMPERSONATING` und einem gehashten `_imp`-Objekt (Sitzung, Operator, Entität, Modus) festgehalten.
+- **Die Prüfung** erkennt: eine erste Zeile, die nicht der Anfang der Kette ist (abgeschnittener Kopf, entfernte Partition), eine letzte Zeile, die von `audit_chain_tip` abweicht, nach einem signierten Tagesanker (`audit_chain_anchor`, optional über eine externe `AuditAnchorSink` veröffentlicht) entfernte Zeilen sowie eine fehlende `entry_sig` ab der Signatur-Wasserlinie (erste signierte Sequenznummer, nur einmal beschreibbar). Eine später aktivierte Signierung signiert frühere Zeilen nicht nachträglich.
+- **Nachweis-Export.** `/audit/events/export[/signed]` ist nach `sequence_no` sortiert und beginnt mit einem `# key=value`-Block (`firstSeq`, `lastSeq`, `rowCount`, `truncated`, `nextAfterSeq`, `tipSeq`, `tipEntryHash`); die Zeilen enthalten `prevHash` und `entryHash`. Die Signatur deckt Kopfblock und Zeilen ab. Mit `afterSeq` wird ein abgeschnittener Export fortgesetzt.
+- **Fehlgeschlagene Schreibvorgänge** werden jede Minute wiederholt (Veröffentlichungen älter als zwei Minuten) und nach `registerwerk.audit.max-attempts` (20) Versuchen in `audit_event_dead_letter` verschoben. Alarmieren Sie auf `registerwerk_audit_oldest_incomplete_seconds` und `registerwerk_audit_dead_letter_count`.
+- **Tabelleneigentümer.** `REVOKE UPDATE, DELETE, TRUNCATE` und die WORM-Trigger binden den Tabelleneigentümer nicht. Führt das Laufzeit-Login auch die Migrationen aus, besitzt es `audit_event`; im Produktionsmodus scheitert dann die Startprüfung, sofern nicht `registerwerk.audit.allow-owner-runtime-role=true` das Restrisiko vorübergehend bestätigt. Abhilfe: getrennte Logins für Migration und Laufzeit (offene Entscheidung T6-17). Der Produktionsmodus verlangt außerdem einen Signaturschlüssel-Provider.
+- **Umstellung.** `registerwerk.audit.legacy-listener=true` (Standard) arbeitet vor dem Upgrade erzeugte Veröffentlichungen ab; abschalten, sobald `event_publication` keine unvollständigen Audit-Zeilen mehr enthält.

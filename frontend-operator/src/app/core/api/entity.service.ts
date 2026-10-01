@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 import { environment } from '../../../environments/environment';
 import {
   LegalEntity,
@@ -13,6 +14,26 @@ import {
   RiskTolerance,
   SuitabilityAssessment,
 } from '../models';
+
+export interface OffboardingObligation {
+  obligationId: string;
+  kind: string;
+  refId: string;
+  description: string;
+}
+
+export interface EntityTask {
+  id: string;
+  entityId: string;
+  kind: string;
+  refId: string | null;
+  detail: string | null;
+  status: 'OPEN' | 'DONE' | string;
+  createdAt: string;
+  doneAt: string | null;
+  doneBy: string | null;
+  doneNote: string | null;
+}
 
 @Injectable({ providedIn: 'root' })
 export class EntityService {
@@ -53,53 +74,78 @@ export class EntityService {
     return this.http.put<LegalEntity>(`${this.base}/${id}`, body);
   }
 
-  suspendEntity(id: string): Observable<LegalEntity> {
-    return this.http.post<LegalEntity>(`${this.base}/${id}/suspend`, {});
+  /** Step-up + second approver (`ENTITY_SUSPEND`); a reason is mandatory. ACTIVE -> SUSPENDED only. */
+  suspendEntity(id: string, reason: string, tokens: DualControlTokens): Observable<LegalEntity> {
+    return this.http.post<LegalEntity>(`${this.base}/${id}/suspend`, { reason }, { headers: dualControlHeaders(tokens) });
   }
 
-  dissolveEntity(id: string): Observable<LegalEntity> {
-    return this.http.post<LegalEntity>(`${this.base}/${id}/dissolve`, {});
-  }
-
-  reactivateEntity(id: string): Observable<LegalEntity> {
-    return this.http.post<LegalEntity>(`${this.base}/${id}/reactivate`, {});
+  /**
+   * Step-up + second approver (`ENTITY_REACTIVATE`). The server refuses (409) while KYC is expired or
+   * rejected, a screening hit is unresolved or a Sperrvermerk is active; show its message.
+   */
+  reactivateEntity(id: string, reason: string, tokens: DualControlTokens): Observable<LegalEntity> {
+    return this.http.post<LegalEntity>(`${this.base}/${id}/reactivate`, { reason }, { headers: dualControlHeaders(tokens) });
   }
 
   getEntityHistory(id: string): Observable<{ nameHistory: LegalEntityNameHistory[]; mergeRecords: EntityMergeRecordView[] }> {
     return this.http.get<{ nameHistory: LegalEntityNameHistory[]; mergeRecords: EntityMergeRecordView[] }>(`${this.base}/${id}/history`);
   }
 
+  /** Step-up + second approver (`ENTITY_MERGE`); `reason` is mandatory. */
   mergeEntity(sourceId: string, body: {
     targetEntityId: string;
     mergeType: 'ABSORPTION' | 'CONSOLIDATION';
     effectiveDate: string;
     notes?: string;
-  }): Observable<EntityMergeRecordView> {
-    return this.http.post<EntityMergeRecordView>(`${this.base}/${sourceId}/merge`, body);
+    reason: string;
+    evidenceDocumentId?: string;
+  }, tokens: DualControlTokens): Observable<EntityMergeRecordView> {
+    return this.http.post<EntityMergeRecordView>(`${this.base}/${sourceId}/merge`, body, { headers: dualControlHeaders(tokens) });
+  }
+
+  /** Open obligations that `terminateEntity` needs an acknowledgement for. */
+  getOffboardingObligations(id: string): Observable<OffboardingObligation[]> {
+    return this.http.get<OffboardingObligation[]>(`${this.base}/${id}/offboarding-obligations`);
   }
 
   /**
-   * Wraps `CustomerController.terminateEntity` (`POST /entities/{id}/terminate`), which had
-   * no frontend caller: the customer off-ramp — disabling users, cancelling listings, revoking
-   * admin grants, and moving the entity to CLOSED — was previously curl-only despite carrying
-   * the same step-up + dual-control bar as a forced transfer.
+   * `POST /entities/{id}/terminate`: the off-ramp (disables users, cancels listings, moves to CLOSED).
+   * Open obligations must each be acknowledged by id, otherwise the server answers 409 listing them.
    */
   terminateEntity(
     id: string,
     reason: string,
-    stepUpToken: string,
-    dualControlToken: string,
+    acknowledgedObligations: { obligationId: string; reason: string }[],
+    tokens: DualControlTokens,
   ): Observable<LegalEntity> {
-    const headers = new HttpHeaders({
-      Authorization: `Bearer ${stepUpToken}`,
-      'X-Dual-Control-Token': dualControlToken,
-    });
-    return this.http.post<LegalEntity>(`${this.base}/${id}/terminate`, { reason }, { headers });
+    return this.http.post<LegalEntity>(
+      `${this.base}/${id}/terminate`, { reason, acknowledgedObligations }, { headers: dualControlHeaders(tokens) });
   }
 
   /** Sets the entity's MiFID II client category — the firm classifies the client. */
-  classifyClient(id: string, clientCategory: ClientCategory): Observable<LegalEntity> {
-    return this.http.post<LegalEntity>(`${this.base}/${id}/classification`, { clientCategory });
+  classifyClient(
+    id: string,
+    body: { clientCategory: ClientCategory; reason?: string; evidenceDocumentId?: string },
+    stepUpToken: string,
+    dualControlToken?: string,
+  ): Observable<LegalEntity> {
+    let headers = new HttpHeaders({ Authorization: `Bearer ${stepUpToken}` });
+    // Lowering the category is a 4-eyes action (`CLIENT_CLASSIFICATION_DOWNGRADE`) and needs a reason.
+    if (dualControlToken) headers = headers.set('X-Dual-Control-Token', dualControlToken);
+    return this.http.post<LegalEntity>(`${this.base}/${id}/classification`, body, { headers });
+  }
+
+  listEntityTasks(entityId: string): Observable<EntityTask[]> {
+    return this.http.get<EntityTask[]>(`${this.base}/${entityId}/tasks`);
+  }
+
+  /** Open operator follow-up tasks over all entities (offboarding, KYC review, chain reinstatement, Sperrvermerk expiry). */
+  listOpenTasks(): Observable<EntityTask[]> {
+    return this.http.get<EntityTask[]>(`${environment.apiUrl}/entity-tasks`);
+  }
+
+  completeTask(taskId: string, note: string): Observable<EntityTask> {
+    return this.http.post<EntityTask>(`${environment.apiUrl}/entity-tasks/${taskId}/done`, { note });
   }
 
   listSuitabilityAssessments(id: string): Observable<SuitabilityAssessment[]> {

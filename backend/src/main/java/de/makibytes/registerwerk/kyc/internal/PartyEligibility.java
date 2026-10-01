@@ -39,7 +39,9 @@ final class PartyEligibility {
         if (screeningGate.hasUnresolvedHit(entity.getId()) || screeningGate.hasUnresolvedBeneficialOwnerHit(entity.getId())) {
             reasons.add("has an unresolved sanctions-screening result");
         }
-        if (holderBlockGate.isBlocked(entity.getId(), normalizedWallet)) {
+        // Entity-only callers (repo desk, lending) must also see wallet-only blocks on the entity's holder wallets (6-25).
+        if (holderBlockGate.isBlocked(entity.getId(), normalizedWallet)
+                || (normalizedWallet == null && holderBlockGate.isEntityBlocked(entity.getId()))) {
             reasons.add("(or its wallet) is subject to an active §16 eWpG Sperrvermerk (legal block)");
         }
         return reasons;

@@ -9,7 +9,11 @@ import java.util.UUID;
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
+import de.makibytes.registerwerk.auth.api.EntityActivityPort;
 import de.makibytes.registerwerk.auth.api.JwtMintingService;
+import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
+import de.makibytes.registerwerk.auth.events.IdentityBoundEvent;
+import de.makibytes.registerwerk.auth.events.IdentityRebindRefusedEvent;
 import de.makibytes.registerwerk.auth.api.UserAuthProvider;
 import de.makibytes.registerwerk.auth.events.OidcUserProvisionedEvent;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +44,7 @@ class DefaultPrincipalResolverTest {
     @Mock private ApplicationEventPublisher eventPublisher;
 
     private DefaultPrincipalResolver resolver;
+    private RegisterwerkAuthProperties authProps;
 
     private final UUID appUserId = UUID.randomUUID();
     private final UUID entraOid = UUID.randomUUID();
@@ -47,7 +52,16 @@ class DefaultPrincipalResolverTest {
 
     @BeforeEach
     void setUp() {
-        resolver = new DefaultPrincipalResolver(repository, eventPublisher);
+        authProps = new RegisterwerkAuthProperties();
+        authProps.setLinkByEmailWithoutVerification(true);
+        resolver = new DefaultPrincipalResolver(repository, eventPublisher, authProps, new EntityActivityPort() {
+            @Override public boolean isTerminated(UUID entityId) { return false; }
+        }, tenantId.toString(), new org.springframework.transaction.support.AbstractPlatformTransactionManager() {
+            @Override protected Object doGetTransaction() { return new Object(); }
+            @Override protected void doBegin(Object t, org.springframework.transaction.TransactionDefinition d) { }
+            @Override protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus s) { }
+            @Override protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus s) { }
+        });
     }
 
     @Test
@@ -239,6 +253,107 @@ class DefaultPrincipalResolverTest {
         u.setEnabled(true);
         u.setRoles(Set.of(AppUserRole.INVESTOR));
         return u;
+    }
+
+    private Jwt entraJwtFor(UUID oid, UUID tid, Object verified) {
+        Jwt.Builder b = Jwt.withTokenValue("t")
+                .header("alg", "RS256")
+                .claim("iss", "https://login.microsoftonline.com/" + tid + "/v2.0")
+                .claim("sub", "entra-subject-not-a-uuid")
+                .claim("oid", oid.toString())
+                .claim("tid", tid.toString())
+                .claim("preferred_username", "customer@test.local")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60));
+        if (verified != null) {
+            b.claim("xms_edov", verified);
+        }
+        return b.build();
+    }
+
+    @Test
+    @DisplayName("6-05: a row already bound to another oid is NOT re-pointed; the token resolves to nothing and the refusal is audited")
+    void entraToken_boundRow_isNeverRebound() {
+        UUID otherOid = UUID.randomUUID();
+        AppUser bound = account();
+        bound.setEntraObjectId(otherOid);
+        when(repository.findByEntraObjectId(entraOid)).thenReturn(Optional.empty());
+        when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.of(bound));
+
+        assertThat(resolver.resolve(auth(entraJwtFor(entraOid, tenantId, true)))).isEmpty();
+
+        assertThat(bound.getEntraObjectId()).isEqualTo(otherOid);
+        verify(repository, never()).save(any());
+        ArgumentCaptor<IdentityRebindRefusedEvent> ev = ArgumentCaptor.forClass(IdentityRebindRefusedEvent.class);
+        verify(eventPublisher).publishEvent(ev.capture());
+        assertThat(ev.getValue().payload()).containsEntry("reason", "BOUND_TO_OTHER_IDENTITY");
+    }
+
+    @Test
+    @DisplayName("6-05: without a verified-address assertion linking by e-mail is refused when the lenient flag is off")
+    void entraToken_unverifiedEmail_isNotLinked() {
+        authProps.setLinkByEmailWithoutVerification(false);
+        AppUser legacy = account();
+        legacy.setEntraObjectId(null);
+        when(repository.findByEntraObjectId(entraOid)).thenReturn(Optional.empty());
+        when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.of(legacy));
+
+        assertThat(resolver.resolve(auth(entraJwtFor(entraOid, tenantId, null)))).isEmpty();
+        assertThat(legacy.getEntraObjectId()).isNull();
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("6-05: a token asserting xms_edov=false is refused even in lenient mode")
+    void entraToken_explicitlyUnverified_isNotLinked() {
+        AppUser legacy = account();
+        legacy.setEntraObjectId(null);
+        when(repository.findByEntraObjectId(entraOid)).thenReturn(Optional.empty());
+        when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.of(legacy));
+
+        assertThat(resolver.resolve(auth(entraJwtFor(entraOid, tenantId, false)))).isEmpty();
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("6-05: a verified token from the configured tenant binds an unbound row and publishes IdentityBoundEvent")
+    void entraToken_verified_bindsAndAudits() {
+        authProps.setLinkByEmailWithoutVerification(false);
+        AppUser legacy = account();
+        legacy.setEntraObjectId(null);
+        when(repository.findByEntraObjectId(entraOid)).thenReturn(Optional.empty());
+        when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.of(legacy));
+        when(repository.save(any(AppUser.class))).thenAnswer(i -> i.getArgument(0));
+
+        assertThat(resolver.resolve(auth(entraJwtFor(entraOid, tenantId, true)))).isPresent();
+        assertThat(legacy.getEntraObjectId()).isEqualTo(entraOid);
+        verify(eventPublisher).publishEvent(any(IdentityBoundEvent.class));
+    }
+
+    @Test
+    @DisplayName("6-05: a token from a foreign tenant is not linked by e-mail")
+    void entraToken_foreignTenant_isNotLinked() {
+        AppUser legacy = account();
+        legacy.setEntraObjectId(null);
+        UUID foreign = UUID.randomUUID();
+        when(repository.findByEntraObjectId(entraOid)).thenReturn(Optional.empty());
+        when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.of(legacy));
+
+        assertThat(resolver.resolve(auth(entraJwtFor(entraOid, foreign, true)))).isEmpty();
+        assertThat(legacy.getEntraObjectId()).isNull();
+    }
+
+    @Test
+    @DisplayName("6-05: an OIDC subject bound to another sub is not overwritten")
+    void oidcToken_boundRow_isNeverRebound() {
+        AppUser bound = account();
+        bound.setExternalSubject("someone-else");
+        when(repository.findByExternalSubject("okta-user-42")).thenReturn(Optional.empty());
+        when(repository.findByEmailIgnoreCase("customer@test.local")).thenReturn(Optional.of(bound));
+
+        assertThat(resolver.resolve(auth(oidcJwt()))).isEmpty();
+        assertThat(bound.getExternalSubject()).isEqualTo("someone-else");
+        verify(repository, never()).save(any());
     }
 
     private Jwt entraJwt() {

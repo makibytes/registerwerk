@@ -14,6 +14,8 @@ interface SessionProfile {
   entityId: string | null;
   entityName: string | null;
   impersonating: boolean;
+  /** Set while impersonating: READ_ONLY blocks every write server-side (403 IMPERSONATION_READ_ONLY). */
+  impersonationMode?: 'READ_ONLY' | 'ACT_ON_BEHALF' | null;
   expiresAt: number;
   /** Lets this satisfy `Record<string, unknown>` for `getProfile()` — not otherwise used. */
   [key: string]: unknown;
@@ -106,9 +108,9 @@ export class CookieTokenSource extends TokenSource {
     this.router.navigate(['/login']);
   }
 
-  enterImpersonation(token: string, _entityId: string, _entityName: string): Observable<void> {
+  enterImpersonation(code: string, _entityId: string, _entityName: string): Observable<void> {
     return this.http
-      .post<SessionProfile>(`${environment.apiUrl}/public/auth/impersonate`, { token })
+      .post<SessionProfile>(`${environment.apiUrl}/public/auth/impersonate`, { code })
       .pipe(
         tap(profile => { this.profile = profile; }),
         map(() => void 0)
@@ -134,6 +136,10 @@ export class CookieTokenSource extends TokenSource {
   getImpersonationMeta(): { entityId: string; entityName: string } | null {
     if (!this.profile?.impersonating || !this.profile.entityId) return null;
     return { entityId: this.profile.entityId, entityName: this.profile.entityName ?? '' };
+  }
+
+  getImpersonationMode(): 'READ_ONLY' | 'ACT_ON_BEHALF' | null {
+    return this.profile?.impersonating ? (this.profile.impersonationMode ?? null) : null;
   }
 
   supportsImpersonation(): boolean {

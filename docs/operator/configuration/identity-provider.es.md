@@ -19,9 +19,12 @@ DEFAULT_ADMIN_PASSWORD=changeme-please
 JWT_DEV_SECRET=change-me-for-staging
 ```
 
-Al iniciar, el backend genera (o actualiza) una fila en la tabla `app_user` con el correo electrónico
-configurado y un hash BCrypt de la contraseña. Rotar la contraseña es tan simple como cambiar
-`DEFAULT_ADMIN_PASSWORD` y reiniciar el servicio: el hash se actualiza en cada arranque.
+Al iniciar, el backend crea el administrador a partir del correo electrónico configurado y un hash BCrypt de la contraseña,
+**solo si ningún usuario tiene el rol `REGISTRY_ADMIN`**. Una cuenta existente nunca se modifica: cambiar después
+`DEFAULT_ADMIN_PASSWORD` no restablece la contraseña, no reactiva una cuenta desactivada ni vuelve a añadir el rol. La cuenta
+creada lleva el indicador `must_change_password`; defina su propia contraseña mediante un restablecimiento emitido por un
+administrador. Un arranque en producción falla si, 24 horas después de su creación, la cuenta aún lleva el indicador o aún
+acepta `DEFAULT_ADMIN_PASSWORD`.
 
 !!! warning "No para producción"
     El secreto de desarrollo HS256 y el administrador integrado están destinados únicamente a entornos de desarrollo local y demostración.

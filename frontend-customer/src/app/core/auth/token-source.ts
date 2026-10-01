@@ -69,11 +69,14 @@ export abstract class TokenSource {
   abstract clearToken(): void;
 
   /**
-   * Observable now (was synchronous): entering impersonation means exchanging the token for a
+   * Observable now (was synchronous): entering impersonation means exchanging the one-time handoff code for a
    * session cookie via `POST /api/v1/public/auth/impersonate` — a network round-trip — rather
    * than just writing to localStorage. Callers must subscribe before navigating.
    */
-  abstract enterImpersonation(token: string, entityId: string, entityName: string): Observable<void>;
+  abstract enterImpersonation(code: string, entityId: string, entityName: string): Observable<void>;
+
+  /** `READ_ONLY` | `ACT_ON_BEHALF` while impersonating, otherwise null. */
+  abstract getImpersonationMode(): 'READ_ONLY' | 'ACT_ON_BEHALF' | null;
 
   /**
    * Observable now, for the same reason: restoring (or clearing) the session is a

@@ -95,7 +95,8 @@ class Erc3643LifecycleServiceComplianceModuleTest {
                 deploymentRepository, eventPublisher, evmContractService, evmTransactions,
                 blockchainClientRegistry, txService, holderBlockGate,
                 org.mockito.Mockito.mock(de.makibytes.registerwerk.deployment.api.AssetLookupPort.class),
-                org.mockito.Mockito.mock(de.makibytes.registerwerk.kyc.api.OutboundDestinationGate.class));
+                org.mockito.Mockito.mock(de.makibytes.registerwerk.kyc.api.OutboundDestinationGate.class),
+                org.mockito.Mockito.mock(de.makibytes.registerwerk.travelrule.api.TravelRuleGate.class));
 
         Erc3643Suite suite = new Erc3643Suite();
         suite.setId(suiteId);

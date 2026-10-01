@@ -21,6 +21,8 @@ class KycNaturalPersonScreeningSubjectResolver implements NaturalPersonScreening
         return naturalPersonRepository.findById(naturalPersonId).map(person ->
                 new NaturalPersonScreeningSubject(
                         (person.getGivenName() + " " + person.getFamilyName()).trim(),
-                        person.getCountry()));
+                        person.getCountry(),
+                        person.getDateOfBirth(),
+                        person.getNationality()));
     }
 }

@@ -17,5 +17,6 @@ public record OperatorUserResponse(
     boolean enabled,
     Instant lastLoginAt,
     UserAuthProvider authProvider,
-    boolean passwordSetupRequired
+    boolean passwordSetupRequired,
+    boolean mustChangePassword
 ) {}

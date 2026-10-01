@@ -45,6 +45,42 @@ class AuditCanonicalJson {
         }
     }
 
+    /**
+     * Canonical JSON for a stored row, selected by its {@code canon_version} column. Version 1 is
+     * the legacy envelope (identity + payload only); version 2 additionally covers actor id/role,
+     * event time (epoch micros as a decimal string), correlation id, reversal link and the version
+     * itself. An unknown version is an error (the verifier reports it as a broken chain).
+     */
+    String canonicalize(AuditEvent e) {
+        int version = e.getCanonVersion();
+        if (version == 1) {
+            return canonicalize(e.getEventType(), e.getSubjectType(), e.getSubjectId(), e.getPayload());
+        }
+        if (version != 2) {
+            throw new IllegalArgumentException("Unknown audit canon_version " + version);
+        }
+        Map<String, Object> envelope = new TreeMap<>();
+        envelope.put("canonVersion", 2);
+        envelope.put("eventType", e.getEventType());
+        envelope.put("subjectType", e.getSubjectType());
+        envelope.put("subjectId", e.getSubjectId() != null ? e.getSubjectId().toString() : null);
+        envelope.put("actorId", e.getActorId() != null ? e.getActorId().toString() : null);
+        envelope.put("actorRole", e.getActorRole());
+        envelope.put("occurredAtMicros", Long.toString(epochMicros(e.getOccurredAt())));
+        envelope.put("correlationId", e.getCorrelationId() != null ? e.getCorrelationId().toString() : null);
+        envelope.put("reversesEventId", e.getReversesEventId() != null ? e.getReversesEventId().toString() : null);
+        envelope.put("payload", sortKeys(e.getPayload() != null ? e.getPayload() : Map.of()));
+        try {
+            return mapper.writeValueAsString(envelope);
+        } catch (RuntimeException ex) {
+            throw new IllegalStateException("Failed to canonicalize audit event payload for hashing", ex);
+        }
+    }
+
+    static long epochMicros(java.time.Instant t) {
+        return java.time.temporal.ChronoUnit.MICROS.between(java.time.Instant.EPOCH, t);
+    }
+
     private static Object sortKeys(Object value) {
         if (value instanceof Map<?, ?> map) {
             TreeMap<String, Object> sorted = new TreeMap<>();

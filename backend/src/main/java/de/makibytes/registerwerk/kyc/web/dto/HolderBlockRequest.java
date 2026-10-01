@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.kyc.web.dto;
 
 import de.makibytes.registerwerk.kyc.api.HolderBlock;
 import de.makibytes.registerwerk.shared.AddressNormalizer;
+import jakarta.validation.constraints.Future;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
@@ -15,7 +16,7 @@ public record HolderBlockRequest(
         @NotBlank String legalBasis,
         String courtRef,
         UUID documentId,
-        Instant expiresAt
+        @Future Instant expiresAt
 ) {
     public HolderBlock toEntity() {
         HolderBlock b = new HolderBlock();

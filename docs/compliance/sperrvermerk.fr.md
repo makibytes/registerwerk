@@ -60,7 +60,9 @@ L'entité `HolderBlock` dans le module `kyc` stocke tous les blocs actifs et his
 stateDiagram-v2
     [*] --> ACTIVE : create (REGISTRY_ADMIN + step-up + 4-eyes)
     ACTIVE --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
-    ACTIVE --> EXPIRED : expiresAt reached (scheduler)
+    ACTIVE --> EXPIRY_REVIEW : expiresAt reached (scheduler, still blocking)
+    EXPIRY_REVIEW --> LIFTED : lift (REGISTRY_ADMIN + step-up + 4-eyes)
+    ACTIVE --> EXPIRED : expiresAt reached, type in auto-expire-types
     LIFTED --> [*]
     EXPIRED --> [*]
 ```
@@ -77,7 +79,10 @@ stateDiagram-v2
 Le même circuit d'authentification renforcée (step-up) + quatre yeux s'applique. La levée appelle le `unfreezeAddress()` en chaîne correspondant et efface le champ `HolderBlock.liftedAt`.
 
 **Expiration automatique :**
-Un job `@Scheduled` s'exécute chaque nuit, trouve tous les enregistrements `HolderBlock` où `expiresAt < NOW()` et `liftedAt IS NULL`, les fait passer à `EXPIRED` et appelle le dégel en chaîne.
+Un job `@Scheduled` s'exécute chaque nuit et trouve tous les blocs ACTIVE avec `expiresAt < NOW()`. Par défaut, **aucun type de blocage n'expire automatiquement** : le bloc passe à `EXPIRY_REVIEW`, continue de bloquer (contrôles du registre et gel en chaîne), et une tâche opérateur ainsi qu'un e-mail à la conformité sont déclenchés. Il n'est levé que par la levée normale (step-up + second approbateur). Les types listés dans `registerwerk.sperrvermerk.auto-expire-types` (vide par défaut) restent levés automatiquement vers `EXPIRED`.
+
+!!! note "Dates d'expiration (6-25)"
+    `expiresAt` doit être dans le futur. Pour les types judiciaires et d'autorité (`GERICHTSBESCHLUSS`, `PFAENDUNG`, `INSOLVENZ`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `REGULATORISCH`), une date d'expiration exige en plus un `courtRef` ou `documentId`, et le second approbateur la confirme par rapport à l'ordonnance. Lorsque le dernier bloc est levé, tous les gels qu'aucun bloc restant ne couvre sont libérés sur l'ensemble des actifs du portefeuille ; les blocs portant sur une entité couvrent tous ses portefeuilles de détenteur. Les blocs limités à un portefeuille sont aussi visibles pour les contrôles du repo desk et du prêt. La question de savoir si un type peut expirer automatiquement est une décision juridique en suspens (T6-11).
 
 ---
 

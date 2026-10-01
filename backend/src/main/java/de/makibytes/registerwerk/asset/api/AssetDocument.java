@@ -70,6 +70,10 @@ public class AssetDocument {
     @Column(name = "fetched_at")
     private Instant fetchedAt;
 
+    /** Successor document of an operator-approved amendment (6-34); null while this is current. */
+    @Column(name = "superseded_by")
+    private UUID supersededBy;
+
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
@@ -126,4 +130,7 @@ public class AssetDocument {
 
     public boolean isDeleted() { return deletedAt != null; }
     public boolean hasContent() { return storageRef != null; }
+
+    public UUID getSupersededBy() { return supersededBy; }
+    public void setSupersededBy(UUID supersededBy) { this.supersededBy = supersededBy; }
 }

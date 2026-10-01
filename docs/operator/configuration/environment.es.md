@@ -22,7 +22,7 @@ Toda la configuración se realiza a través de variables de entorno. Copie `.env
 |---|---|---|
 | `ENTRA_ENABLED` | `false` | `false` → formulario de nombre de usuario/contraseña en el operador FE; `true` → Botón Microsoft |
 | `DEFAULT_ADMIN_EMAIL` | — | Correo electrónico del usuario administrador inicializado (solo modo integrado) |
-| `DEFAULT_ADMIN_PASSWORD` | — | Contraseña de texto sin formato codificada con BCrypt al inicio; rotar cambiando y reiniciando |
+| `DEFAULT_ADMIN_PASSWORD` | — | Contraseña en texto sin formato codificada con BCrypt al crear el administrador; solo se usa si no existe ningún `REGISTRY_ADMIN`, nunca se vuelve a aplicar a una cuenta existente |
 | `JWT_DEV_SECRET` | incorporado | Clave de firma HS256 utilizada en modo de desarrollo/demo; dejar sin configurar para local, anular en preparación |
 
 ### OAuth2 / OIDC (producción) { #oauth2-oidc-production }

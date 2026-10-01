@@ -117,6 +117,13 @@ spring:
 
 server:
   port: 8080
+  # Client address for the login throttle (K3, 6-10): Tomcat's RemoteIpValve replaces getRemoteAddr()
+  # with the X-Forwarded-For client ONLY when the TCP peer matches registerwerk.auth.trusted-proxies.
+  # A client that reaches the backend directly can therefore not pick its own throttle bucket.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: ${registerwerk.auth.trusted-proxies}
   compression:
     enabled: true
   error:
@@ -192,6 +199,11 @@ springdoc:
     enabled: ${SWAGGER_ENABLED:false}
 
 registerwerk:
+  sperrvermerk:
+    # 6-25 / parked T6-11: block types (comma-separated BlockType names) that the daily job may lift
+    # automatically after expires_at. Default empty = none: every expired block moves to EXPIRY_REVIEW,
+    # keeps blocking, and needs a step-up + second-approver lift.
+    auto-expire-types: ${SPERRVERMERK_AUTO_EXPIRE_TYPES:}
   chain:
     # P4C-2: whitelist / mint / forced transfer / forced approve destinations must be an ACTIVE,
     # KYC-approved, screened holder of the asset. Disable ONLY in a demo profile that mints to
@@ -509,10 +521,32 @@ registerwerk:
     frontend-url: ${CUSTOMER_FRONTEND_URL:http://localhost:44201}
   mail:
     from: ${MAIL_USERNAME:noreply@registerwerk.example.com}
+  admin:
+    # Optional allow-list of e-mail domains for invited OPERATOR accounts (comma separated); empty = off.
+    operator-email-domains: ${OPERATOR_EMAIL_DOMAINS:}
+  access-review:
+    # Role pairs (A+B, comma separated) that should not be held together. Shown per item as a
+    # warning only; enforcement at role assignment is parked (T6-15).
+    sod-conflicts: ${ACCESS_REVIEW_SOD_CONFLICTS:REGISTRY_ADMIN+COMPLIANCE_OFFICER}
   auth:
+    # Link an IdP identity to an existing account by e-mail even when the token does not assert a
+    # verified address (xms_edov / email_verified). Blank = allowed unless REGISTERWERK_PRODUCTION_MODE=true.
+    link-by-email-without-verification: ${LINK_BY_EMAIL_WITHOUT_VERIFICATION:}
     # Built-in login brute-force throttle (operator path bypasses Kong rate limiting)
     login-max-attempts: ${REGISTERWERK_AUTH_LOGIN_MAX_ATTEMPTS:5}
     login-lockout-minutes: ${REGISTERWERK_AUTH_LOGIN_LOCKOUT_MINUTES:15}
+    # K3 (6-10): lock key is (e-mail, source address); doubling per episode up to this cap.
+    login-max-lockout-minutes: ${REGISTERWERK_AUTH_LOGIN_MAX_LOCKOUT_MINUTES:240}
+    # Failures from ONE address inside the window before that address is refused (password spray).
+    login-ip-max-failures: ${REGISTERWERK_AUTH_LOGIN_IP_MAX_FAILURES:30}
+    # Platform-wide failures per minute above which addresses that already failed are refused.
+    login-global-max-failures-per-minute: ${REGISTERWERK_AUTH_LOGIN_GLOBAL_MAX_FAILURES:600}
+    # Bound on login_attempt rows (unknown e-mails create rows); new account rows stop above this.
+    login-max-tracked-keys: ${REGISTERWERK_AUTH_LOGIN_MAX_TRACKED_KEYS:200000}
+    login-max-delay-millis: 4000
+    # Peers whose X-Forwarded-For is believed (regex, Tomcat internal-proxies syntax). Default: the
+    # private/loopback ranges, i.e. the operator nginx / Kong / ingress in front of the backend.
+    trusted-proxies: ${REGISTERWERK_AUTH_TRUSTED_PROXIES:10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|127\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+|0:0:0:0:0:0:0:1|::1}
     entra-enabled: ${ENTRA_ENABLED:false}
     dev-secret: ${JWT_DEV_SECRET:registerwerk-dev-jwt-secret-change-in-production!!}
     token-ttl-seconds: 28800
@@ -523,6 +557,16 @@ registerwerk:
     # other app in the same tenant validates against this API.
     audience: ${JWT_AUDIENCE:}
     step-up:
+      # K3 (6-08): dual-control approver tokens are bound to action + target and single use; this is
+      # the window in which an approver token is accepted after it was minted.
+      dual-control:
+        window-seconds: 300
+        # Reasons whose target binding is enforced; "*" = all. Exists only to roll back a bad deploy.
+        bind-target-reasons: "*"
+        # Reasons whose approval additionally binds the canonical JSON request body (amounts and
+        # destinations are part of what the approver reviewed).
+        bind-body-reasons: ISSUER_MINT,ISSUER_BURN_EWG26,ISSUER_FORCED_TRANSFER_EWG24,ISSUER_FORCED_APPROVE_OVERRIDE,FORCED_TRANSFER_EWG24,FORCE_BURN_EWG26,FORCED_APPROVE_OVERRIDE,ERC3525_FORCED_VALUE_TRANSFER_EWG24
+        max-body-bytes: 1048576
       entra:
         # Conditional Access authentication context (c1–c99) required for step-up-protected
         # actions when ENTRA_ENABLED=true. No default on purpose: guessing "c1" could mean
@@ -548,6 +592,14 @@ registerwerk:
     support-enabled: ${ENTRA_SUPPORT_ENABLED:false}
     mfa-setup-url: ${ENTRA_MFA_SETUP_URL:https://mysignins.microsoft.com/security-info}
     require-two-factor-enrolment: ${ENTRA_REQUIRE_2FA_ENROLMENT:false}
+  # Screening controls (Phase 6 / K7; interim values for parked T6-03/T6-04)
+  screening:
+    match-threshold: 0.85            # recorded on every run as threshold_used
+    accept-validity-days: 90         # accepted false positive may be carried forward this long
+    carry-forward-score-tolerance: 0.05
+    stale-clear-grace-hours: 24      # grace after the FIRST failed run of an outage
+    stale-clear-max-age-hours: 72    # the relied-on good result may never be older than this
+    retry-max-attempts: 6
   seed-demo-data: ${SEED_DEMO_DATA:false}
   # Durable EVM outbox recovery (P4B-4; parked T4-03 interim). See OutboxProperties.
   outbox:
@@ -700,7 +752,20 @@ registerwerk:
   travel-rule:
     protocol: ${REGISTERWERK_TRAVEL_RULE_PROTOCOL:NOOP}
     # Credential for inbound IVMS-101 delivery. Blank disables the public inbox (fail closed).
+    # DEPRECATED (6-29): per-peer HMAC credentials (travel_rule_peer) replace the shared key. The key is only
+    # honoured with legacy-shared-key=true and never in production mode.
     inbox-api-key: ${REGISTERWERK_TRAVEL_RULE_INBOX_API_KEY:}
+    legacy-shared-key: ${REGISTERWERK_TRAVEL_RULE_LEGACY_SHARED_KEY:false}
+    # The operator's own VASP identity: originatingVasp of every outbound message (6-26). Required in production.
+    own-vasp:
+      did: ${REGISTERWERK_TRAVEL_RULE_OWN_VASP_DID:}
+      lei: ${REGISTERWERK_TRAVEL_RULE_OWN_VASP_LEI:}
+      legal-name: ${REGISTERWERK_TRAVEL_RULE_OWN_VASP_LEGAL_NAME:}
+    # A gated operation waits at most this long for the protocol to accept the message (then it is refused).
+    send-timeout-seconds: ${REGISTERWERK_TRAVEL_RULE_SEND_TIMEOUT_SECONDS:15}
+    # Legal position (parked T6-06): off until signed off.
+    register-internal-exempt: ${REGISTERWERK_TRAVEL_RULE_REGISTER_INTERNAL_EXEMPT:false}
+    wallet-proof-validity-days: ${REGISTERWERK_TRAVEL_RULE_WALLET_PROOF_VALIDITY_DAYS:365}
     # Art. 14(5) TFR: ownership verification threshold for self-hosted addresses.
     # NOTE: this is NOT a messaging threshold — TFR has no de minimis for CASP-to-CASP transfers.
     self-hosted-verification-threshold-eur: ${REGISTERWERK_TRAVEL_RULE_SELF_HOSTED_VERIFICATION_THRESHOLD_EUR:1000}
@@ -716,6 +781,8 @@ registerwerk:
       mtls-cert-path: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_CERT:}
       mtls-key-path: ${REGISTERWERK_TRAVEL_RULE_TRP_MTLS_KEY:}
       directory-url: ${REGISTERWERK_TRAVEL_RULE_TRP_DIRECTORY_URL:https://trp.notabene.id/directory}
+      # Optional allow-list of delivery hosts (empty = any public https host).
+      allowed-hosts: []
   reporting:
     # Non-production prototype only. Outputs are DRAFT_UNVALIDATED; SFTP proves transport,
     # not filing or authority acceptance. Production readiness guard rejects enabling this.
@@ -759,6 +826,14 @@ registerwerk:
     # registers the pool address manually (asset detail -> "Register pool address").
     nominee-pool-entity-id: ${SYNC_NOMINEE_POOL_ENTITY_ID:}
   audit:
+    # Phase 6 / K4: capture + resubmission. legacy-listener drains event publications created before
+    # the capture listener existed (switch off once event_publication has no incomplete audit rows);
+    # allow-owner-runtime-role acknowledges the interim "runtime login owns audit_event" risk in
+    # production mode (T6-17: split migrator/runtime roles); max-attempts = dead-letter threshold.
+    legacy-listener: ${REGISTERWERK_AUDIT_LEGACY_LISTENER:true}
+    allow-owner-runtime-role: ${REGISTERWERK_AUDIT_ALLOW_OWNER_RUNTIME_ROLE:false}
+    max-attempts: 20
+    resubmit-older-than-seconds: 120
     signing:
       # Blank (default) = no signing provider active; the audit_event hash chain is still
       # WORM-protected and verified, just without a signature anchored outside the database.

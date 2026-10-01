@@ -40,7 +40,6 @@ flowchart LR
 
     subgraph Adapters
         A1[OpenSanctionsAdapter — default]
-        A2[RefinitivWorldCheckAdapter — commercial]
     end
 
     subgraph Results
@@ -52,8 +51,7 @@ flowchart LR
     T2 & T3 & T5 --> SBO
     SS & SBO --> P
     P --> A1
-    P --> A2
-    A1 & A2 --> SR
+    A1 --> SR
     SR --> SH
     SH -->|Unresolved| KG[KycService — blocks approval]
 ```
@@ -74,9 +72,11 @@ The `OpenSanctionsAdapter` checks against the following lists by default:
 | BaFin / EU Freeze list | BaFin via OpenSanctions | German domestic freeze additions |
 | EU PEP list | OpenSanctions aggregation | Politically Exposed Persons |
 
-OpenSanctions provides a unified REST API covering all these lists. The adapter caches the full dataset locally (refreshed every 24 hours) and performs fuzzy matching against entity names, aliases, dates of birth, and passport numbers.
+OpenSanctions provides a unified REST API covering all these lists. Each screening is one API call (no local dataset). The adapter sends name, country, LEI and registration number for companies, and name, country, date of birth and nationality for natural persons; passport numbers are not matched. The match threshold is `registerwerk.screening.match-threshold` (default 0.85); it is stored on every run, together with the dataset version when the API reports one. The free public API is rate-limited and has no SLA; a licensed provider needs a second adapter for `SanctionsScreeningPort` (none is shipped). Only the entity and its recorded beneficial owners are screened, not directors, signatories, parent chains or wallet addresses.
 
-For deployments requiring higher confidence, the `RefinitivWorldCheckAdapter` (commercial) can be configured by setting `REFINITIV_WORLDCHECK_API_KEY` in the environment.
+**Re-screens and outages.** A re-found match that an officer and a second approver already accepted as a false positive is carried forward for 90 days (same provider record, same category, score at most 0.05 higher), with one audit entry per carry-forward; anything else re-opens. If the provider fails, the last good result is relied on for at most 24 hours after the first failed run (never if it is older than 72 hours). The degraded state is visible (metrics `registerwerk_screening_degraded_subjects` and `registerwerk_screening_stale_results`, audited alert), failed subjects are retried every 30 minutes, never-screened subjects stay blocked, and after the grace window the error blocks again.
+
+**Categories.** A match tagged both sanction and PEP is a sanctions hit. A PEP hit on a natural person is not a false positive: it is confirmed (`CONFIRM_PEP`, step-up plus second approver) and keeps the gate closed until an enhanced-due-diligence approval is recorded.
 
 ---
 
@@ -153,13 +153,13 @@ All resolutions are written to the audit log with the accepting officer's identi
 After a hit is found and cannot be immediately resolved, each jurisdiction has specific escalation obligations:
 
 === "Germany (DE_EWPG)"
-    Submit a suspicious activity report (SAR) to **BaFin** and, if money laundering is suspected, to the **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. The `screening` module stores the SAR reference in `ScreeningHit.regulatoryRef`.
+    Submit a suspicious activity report (SAR) to **BaFin** and, if money laundering is suspected, to the **FIU (Zentralstelle für Finanztransaktionsuntersuchungen)**. Filing happens outside the platform; Registerwerk stores no filing reference.
 
 === "Luxembourg (LU_CSSF)"
     Submit a report to the **CSSF Cellule Juridique de Prévention (JFP)**. For severe cases, escalate to **CRF (Cellule de Renseignement Financier)**.
 
 === "France (FR_AMF)"
-    Submit a report to **TRACFIN** via the AMF/ACPR notification mechanism. The `ScreeningService` logs the TRACFIN reference once filed.
+    Submit a report to **TRACFIN** via the AMF/ACPR notification mechanism. Filing happens outside the platform; Registerwerk stores no filing reference.
 
 === "Liechtenstein (LI_TVTG)"
     Notify the **FMA** (sanctions compliance) and submit to the **FIU Liechtenstein** for severe cases.

@@ -19,9 +19,11 @@ DEFAULT_ADMIN_PASSWORD=changeme-please
 JWT_DEV_SECRET=change-me-for-staging
 ```
 
-On startup the backend seeds (or refreshes) a row in the `app_user` table with the configured
-email and a BCrypt hash of the password. Rotating the password is as simple as changing
-`DEFAULT_ADMIN_PASSWORD` and restarting the service — the hash is updated on every boot.
+On startup the backend creates the administrator from the configured email and a BCrypt hash of the password **only when no
+user holds the `REGISTRY_ADMIN` role**. An existing account is never modified: changing `DEFAULT_ADMIN_PASSWORD` later does
+not reset the password, re-enable a disabled account or re-add the role. The seeded account is flagged
+`must_change_password`; set your own password through an administrator-issued password reset. A production start fails
+when the seeded account still has the flag, or still accepts `DEFAULT_ADMIN_PASSWORD`, 24 hours after it was created.
 
 !!! warning "Not for production"
     The HS256 dev secret and the built-in admin are intended for local development and demo

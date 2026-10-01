@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.asset.api.AssetTokenAdminGrant;
 import de.makibytes.registerwerk.asset.api.AssetTokenAdminGrantRepository;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
 import de.makibytes.registerwerk.customer.events.CustomerOffboardedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,10 +31,13 @@ class CustomerOffboardingAssetListener {
 
     private final AssetTokenAdminGrantRepository grantRepository;
     private final AssetRepository assetRepository;
+    private final EntityTaskPort taskPort;
 
-    CustomerOffboardingAssetListener(AssetTokenAdminGrantRepository grantRepository, AssetRepository assetRepository) {
+    CustomerOffboardingAssetListener(AssetTokenAdminGrantRepository grantRepository, AssetRepository assetRepository,
+                                     EntityTaskPort taskPort) {
         this.grantRepository = grantRepository;
         this.assetRepository = assetRepository;
+        this.taskPort = taskPort;
     }
 
     @ApplicationModuleListener
@@ -59,6 +63,13 @@ class CustomerOffboardingAssetListener {
             log.warn("Entity {} offboarded while still issuer of {} live asset(s) — operator must "
                             + "decide register-transfer-to-successor vs. redemption for each: {}",
                     event.entityId(), issuedAssets.size(), issuedAssets.stream().map(Asset::getId).toList());
+            // A persisted, alerting work item instead of only a log line (6-23); idempotent with the
+            // task terminate() already opened for the acknowledged obligation.
+            for (Asset asset : issuedAssets) {
+                taskPort.open(event.entityId(), AssetOffboardingObligationSource.KIND, asset.getId().toString(),
+                        "Issuer of " + asset.getStatus() + " asset " + asset.getId()
+                                + ": decide register transfer to a successor vs. redemption", event.actorId());
+            }
         }
     }
 }
