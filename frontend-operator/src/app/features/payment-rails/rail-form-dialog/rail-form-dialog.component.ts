@@ -98,6 +98,11 @@ interface ChainAddressRow {
 
       @if (railType === 'STABLECOIN') {
         <p class="section-label">MiCAR issuer information</p>
+        <p class="hint-text">
+          These are claims you enter; Registerwerk does not verify them. Changing the token address, issuer, LEI,
+          currency, decimals, EMT flag, white paper or par flag clears an existing attestation and switches an
+          enabled EMT rail off until it is attested again by another operator.
+        </p>
         <div class="row-2">
           <mat-form-field appearance="outline">
             <mat-label>Issuer name</mat-label>

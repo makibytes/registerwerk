@@ -257,6 +257,67 @@ class RepoMarketOnchainReader {
 
     record PriceMark(BigInteger pricePerUnit, BigInteger updatedAt) {}
 
+    /** {@code EwpgRepoMarketFactory.isMarket(address) returns (bool)}. */
+    boolean isFactoryMarket(String chainIdentifier, String factoryAddress, String marketAddress) {
+        Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainIdentifier);
+        Function fn = new Function("isMarket", List.of(new Address(marketAddress)),
+                List.of(new TypeReference<Bool>() {}));
+        List<Type> decoded = call(web3j, factoryAddress, fn);
+        return !decoded.isEmpty() && (Boolean) decoded.get(0).getValue();
+    }
+
+    /** {@code EwpgRepoMarket.totalCollateral() returns (uint256)}. */
+    BigInteger totalCollateral(String chainIdentifier, String marketAddress) {
+        return callUint256(chainIdentifier, marketAddress, "totalCollateral", Collections.emptyList());
+    }
+
+    /** ERC-20 {@code balanceOf(holder)} of an arbitrary token. */
+    BigInteger tokenBalanceOf(String chainIdentifier, String tokenAddress, String holder) {
+        return callUint256(chainIdentifier, tokenAddress, "balanceOf", List.of(new Address(holder)));
+    }
+
+    /** ERC-20 {@code decimals()} of an arbitrary token. */
+    int tokenDecimals(String chainIdentifier, String tokenAddress) {
+        return callUint256(chainIdentifier, tokenAddress, "decimals", Collections.emptyList()).intValueExact();
+    }
+
+    /** True when the address holds contract code (fails with an exception on transport errors). */
+    boolean hasCode(String chainIdentifier, String address) {
+        return hasContractCode(chainIdentifier, address);
+    }
+
+    /** keccak256 of the runtime code at {@code address} ({@code EXTCODEHASH}), or null if none. */
+    String codeHash(String chainIdentifier, String address) {
+        try {
+            String code = clientRegistry.getEvmClientByIdentifier(chainIdentifier)
+                    .ethGetCode(address, DefaultBlockParameterName.LATEST).send().getCode();
+            if (code == null || code.equals("0x") || code.equals("0x0")) return null;
+            return org.web3j.crypto.Hash.sha3(code);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read bytecode at " + address, e);
+        }
+    }
+
+    /**
+     * Whether the deployed market exposes {@code surplusOf(address)}: a clean read (any value)
+     * means supported; a revert or empty return means the function is absent (legacy market).
+     * Transport errors propagate so registration fails closed instead of guessing.
+     */
+    boolean surplusSupported(String chainIdentifier, String marketAddress) {
+        Web3j web3j = clientRegistry.getEvmClientByIdentifier(chainIdentifier);
+        Function fn = new Function("surplusOf", List.of(new Address("0x0000000000000000000000000000000000000000")),
+                List.of(new TypeReference<Uint256>() {}));
+        try {
+            EthCall response = web3j.ethCall(
+                    Transaction.createEthCallTransaction(null, marketAddress, FunctionEncoder.encode(fn)),
+                    readBlock()).send();
+            if (response.isReverted() || response.hasError()) return false;
+            return !FunctionReturnDecoder.decode(response.getValue(), fn.getOutputParameters()).isEmpty();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to probe surplusOf on " + marketAddress, e);
+        }
+    }
+
     private boolean hasContractCode(String chainIdentifier, String contractAddress) {
         try {
             var response = clientRegistry.getEvmClientByIdentifier(chainIdentifier)

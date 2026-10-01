@@ -14,6 +14,10 @@ class LendingReleaseGate {
         this.properties = properties;
     }
 
+    boolean isReleased() {
+        return properties.isReleased();
+    }
+
     void requireReleased() {
         if (!properties.isReleased()) {
             throw new UnsupportedOperationException(DISABLED_MESSAGE);

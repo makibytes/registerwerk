@@ -56,7 +56,7 @@ final class Iso20022SettlementConfirmationRenderer {
                 w.writeEndElement();
             }
             w.writeStartElement("DealPric");
-            amount(w, "Amt", execution.getUnitPrice());
+            amount(w, "Amt", execution.getUnitPrice(), execution.getCurrency());
             w.writeEndElement();
             w.writeEndElement(); // TradDtls
 
@@ -72,7 +72,7 @@ final class Iso20022SettlementConfirmationRenderer {
             w.writeEndElement(); // QtyAndAcctDtls
 
             w.writeStartElement("SttlmAmt");
-            amount(w, "Amt", execution.getTotalPrice());
+            amount(w, "Amt", execution.getTotalPrice(), execution.getCurrency());
             w.writeEndElement();
 
             w.writeStartElement("DlvrgSttlmPties");
@@ -83,6 +83,21 @@ final class Iso20022SettlementConfirmationRenderer {
             party(w, buyer, execution.getBuyerEntityId().toString());
             w.writeEndElement();
 
+            if (execution.getCurrency() == null) {
+                // Legacy trade: never guess a currency (5A-02).
+                text(w, "AddtlInf", "Currency not recorded for this trade");
+            } else if (!isIso4217Shape(execution.getCurrency())) {
+                // e.g. a stablecoin rail currency such as "USDC": not an ISO 4217 code, so no Ccy attribute (XSD-valid)
+                text(w, "AddtlInf", "Settlement currency " + execution.getCurrency()
+                        + " (not an ISO 4217 code)"
+                        + (execution.getPaymentRailCode() != null ? "; payment rail " + execution.getPaymentRailCode() : ""));
+            } else if (execution.getPaymentRailCode() != null) {
+                text(w, "AddtlInf", "Settled via payment rail " + execution.getPaymentRailCode());
+            }
+            if (execution.isInstantSettlement()) {
+                // 5A-01: demo instant path - the register moved with no cash leg at all.
+                text(w, "AddtlInf", "SIMULATED - no cash leg (demonstration only, not a settlement confirmation)");
+            }
             w.writeEndElement(); // TxDtls
             w.writeEndElement(); // SctiesSttlmTxConf
             w.writeEndElement(); // Document
@@ -95,15 +110,22 @@ final class Iso20022SettlementConfirmationRenderer {
         }
     }
 
+    static boolean isIso4217Shape(String currency) {
+        return currency != null && currency.matches("[A-Z]{3}");
+    }
+
     private static void party(XMLStreamWriter w, LegalEntity entity, String fallbackId) throws XMLStreamException {
         w.writeStartElement("PtyId");
         text(w, "Id", entity != null ? entity.getEntityNumber() : fallbackId);
         w.writeEndElement();
     }
 
-    private static void amount(XMLStreamWriter w, String tag, java.math.BigDecimal value) throws XMLStreamException {
+    private static void amount(XMLStreamWriter w, String tag, java.math.BigDecimal value, String currency)
+            throws XMLStreamException {
         w.writeStartElement(tag);
-        w.writeAttribute("Ccy", "EUR");
+        if (isIso4217Shape(currency)) {
+            w.writeAttribute("Ccy", currency);
+        }
         w.writeCharacters(value != null ? value.toPlainString() : "0");
         w.writeEndElement();
     }

@@ -44,7 +44,14 @@ final class TradeConfirmationPdfRenderer {
             write(c, MARGIN, y, fontBold, 18, "Wertpapierabrechnung / Trade Confirmation");
             y -= 18;
             write(c, MARGIN, y, fontRegular, 9, "Handels-ID / Trade ID: " + execution.getId());
-            y -= 28;
+            y -= 14;
+            if (execution.isInstantSettlement()) {
+                // 5A-01: the demo instant path has NO cash leg - a demo trade must never be mistaken for a real confirmation.
+                write(c, MARGIN, y, fontBold, 11,
+                        "SIMULIERT - keine Zahlungsseite / SIMULATED - no cash leg (demonstration only)");
+                y -= 14;
+            }
+            y -= 14;
 
             write(c, MARGIN, y, fontRegular, 10, "Abgerechnet am / Settled: " + instant(execution.getSettledAt()));
             y -= 14;
@@ -81,9 +88,9 @@ final class TradeConfirmationPdfRenderer {
             write(c, MARGIN, y, fontRegular, 10,
                     "Menge / Quantity: " + execution.getExecutedQuantity().toPlainString());
             y -= 13;
-            write(c, MARGIN, y, fontRegular, 10, "Preis je Einheit / Unit price: " + execution.getUnitPrice().toPlainString());
+            write(c, MARGIN, y, fontRegular, 10, "Preis je Einheit / Unit price: " + execution.getUnitPrice().toPlainString() + " " + ccy(execution));
             y -= 13;
-            write(c, MARGIN, y, fontBold, 11, "Gesamtbetrag / Total: " + execution.getTotalPrice().toPlainString());
+            write(c, MARGIN, y, fontBold, 11, "Gesamtbetrag / Total: " + execution.getTotalPrice().toPlainString() + " " + ccy(execution));
             y -= 13;
             write(c, MARGIN, y, fontRegular, 10, "Zahlungsart / Payment option: " + execution.getPaymentOption());
             y -= 13;
@@ -130,5 +137,10 @@ final class TradeConfirmationPdfRenderer {
 
     private static String safe(String s) {
         return s != null && !s.isBlank() ? s : "—";
+    }
+
+    /** The stored settlement currency; legacy trades never guess one (5A-02). */
+    private static String ccy(TradeExecution execution) {
+        return execution.getCurrency() != null ? execution.getCurrency() : "(Währung nicht erfasst / currency not recorded)";
     }
 }

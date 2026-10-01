@@ -10,6 +10,7 @@ import de.makibytes.registerwerk.trading.api.TradeExecution;
 import de.makibytes.registerwerk.trading.api.TradeExecutionRepository;
 import de.makibytes.registerwerk.trading.events.TradeExecutedEvent;
 import de.makibytes.registerwerk.trading.events.TradePaymentDisputedEvent;
+import de.makibytes.registerwerk.trading.events.TradePaymentUnresolvedEvent;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
@@ -63,6 +64,25 @@ class TradingNotificationListener {
         String assetName = asset != null ? asset.getName() : "the asset";
         notifyCompanyAdmins(execution.getBuyerEntityId(), "Registerwerk: trade payment disputed", "trade-payment-disputed", Map.of(
                 "assetName", assetName, "reason", event.reason() != null ? event.reason() : ""));
+    }
+
+    /**
+     * A declared-payment trade went to the operator queue (5A-03). Both parties are told the units stay
+     * reserved and nothing was cancelled; no internal reason or counterparty detail is included. A seller dispute is skipped: the seller started it and the buyer
+     * already receives the dispute mail.
+     */
+    @ApplicationModuleListener
+    void on(TradePaymentUnresolvedEvent event) {
+        if ("SELLER_DISPUTE".equals(event.source())) {
+            return;
+        }
+        TradeExecution execution = tradeExecutionRepository.findById(event.executionId()).orElse(null);
+        if (execution == null) return;
+        Asset asset = assetRepository.findById(execution.getAssetId()).orElse(null);
+        String assetName = asset != null ? asset.getName() : "the asset";
+        Map<String, Object> vars = Map.of("assetName", assetName);
+        notifyCompanyAdmins(event.buyerEntityId(), "Registerwerk: trade payment under review", "trade-payment-unresolved", vars);
+        notifyCompanyAdmins(event.sellerEntityId(), "Registerwerk: trade payment under review", "trade-payment-unresolved", vars);
     }
 
     private void notifyCompanyAdmins(UUID entityId, String subject, String template, Map<String, Object> baseVars) {

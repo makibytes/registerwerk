@@ -38,7 +38,7 @@ public class PaymentRailCatalogController {
     @GetMapping
     public ResponseEntity<List<PaymentRailResponse>> listEnabledRails() {
         List<PaymentRailResponse> rails = railRepository.findByEnabledTrueOrderByCodeAsc().stream()
-                .map(rail -> PaymentRailResponse.from(rail,
+                .map(rail -> PaymentRailResponse.forCatalog(rail,
                         chainAddressRepository.findByPaymentRailId(rail.getId()).stream()
                                 .map(address -> new ChainAddressResponse(
                                         address.getChainConfigId(),

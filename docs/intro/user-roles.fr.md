@@ -109,7 +109,7 @@ Un utilisateur, machine ou humain, habilité à interagir avec les intégrations
 
 - Soumettre et gérer des offres de vente
 - Consulter les rapports d'exécution
-- Ces actions sont déclarées aux régulateurs via [MiFIR RTS 22](../compliance/mifir.md)
+- La plateforme conserve un registre des ordres et exécutions (export opérateur sous `/api/v1/admin/trading/order-history`) ; elle ne transmet **pas** de déclarations MiFIR RTS 22 — voir [MiFIR](../compliance/mifir.md) (brouillon, non validé)
 
 ---
 

@@ -11,8 +11,12 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { of } from 'rxjs';
+import { map, switchMap } from 'rxjs/operators';
+import { environment } from '../../../environments/environment';
+import { AuthService } from '../../core/auth/auth.service';
 import { WebhookService } from '../../core/api/webhook.service';
-import { WebhookDelivery, WebhookEventType, WebhookSubscription } from '../../core/models';
+import { WebhookDelivery, WebhookDeliveryOutcome, WebhookEventType, WebhookSubscription } from '../../core/models';
 
 const EVENT_TYPES: WebhookEventType[] = [
   'KYC_APPROVED', 'KYC_REJECTED', 'ASSET_APPROVED', 'ASSET_REJECTED',
@@ -36,7 +40,16 @@ const EVENT_TYPES: WebhookEventType[] = [
   template: `
     <div class="page-container">
       <div class="page-header">
-        <h1>Webhooks</h1>
+        <div>
+          <h1>Webhooks</h1>
+          <p class="dimmed small" style="margin:4px 0 0">
+            HTTPS endpoints only (port 443 or 8443, public addresses). Verify every delivery with its signature and
+            dedupe on the event id.
+            @if (docsLink) {
+              <a [href]="docsLink" target="_blank" rel="noopener noreferrer">Signature verification and retry behaviour</a>
+            }
+          </p>
+        </div>
         <button type="button" mat-flat-button color="primary" (click)="openCreateDialog()">
           <mat-icon>add</mat-icon>
           New Webhook
@@ -46,7 +59,7 @@ const EVENT_TYPES: WebhookEventType[] = [
       @if (newSecret) {
         <mat-card class="secret-card">
           <mat-card-content>
-            <strong>Signing secret (shown once — store it now):</strong>
+            <strong>Signing secret (shown once, store it now):</strong>
             <code class="secret-value">{{ newSecret }}</code>
             <button mat-stroked-button type="button" (click)="copySecret()" matTooltip="Copy signing secret">
               <mat-icon>content_copy</mat-icon>Copy
@@ -75,6 +88,15 @@ const EVENT_TYPES: WebhookEventType[] = [
               <div class="sub-row">
                 <div class="sub-main">
                   <code class="sub-url">{{ sub.url }}</code>
+                  @if (sub.disabledReason) {
+                    <p class="disabled-note" role="status">
+                      <mat-icon>block</mat-icon>
+                      {{ disabledText(sub.disabledReason) }}
+                    </p>
+                  }
+                  @if (sub.secretRotatedAt) {
+                    <span class="dimmed small">Secret rotated {{ sub.secretRotatedAt | date:'medium' }}. The previous secret also signs for 24 hours.</span>
+                  }
                   <div class="sub-types">
                     @for (type of sub.eventTypes.length ? sub.eventTypes : allEventTypes; track type) {
                       <span class="type-chip">{{ type }}</span>
@@ -85,6 +107,10 @@ const EVENT_TYPES: WebhookEventType[] = [
                   <mat-slide-toggle [checked]="sub.enabled" [disabled]="busyIds.has(sub.id)" (change)="toggleEnabled(sub, $event.checked)">
                     {{ sub.enabled ? 'Enabled' : 'Disabled' }}
                   </mat-slide-toggle>
+                  <button mat-stroked-button type="button" [disabled]="busyIds.has(sub.id)" (click)="openRotateDialog(sub)">
+                    <mat-icon>key</mat-icon>
+                    Rotate secret
+                  </button>
                   <button mat-stroked-button type="button" [disabled]="busyIds.has(sub.id)" (click)="viewDeliveries(sub)">
                     <mat-icon>history</mat-icon>
                     Deliveries
@@ -106,6 +132,7 @@ const EVENT_TYPES: WebhookEventType[] = [
         <mat-form-field appearance="outline">
           <mat-label>Endpoint URL</mat-label>
           <input matInput [(ngModel)]="createForm.url" placeholder="https://your-system.example.com/webhooks/registerwerk">
+          <mat-hint>https only, no credentials in the URL, port 443 or 8443, publicly resolvable host.</mat-hint>
         </mat-form-field>
         <p class="dimmed small" style="margin:0">Leave all event types unchecked to subscribe to every curated event.</p>
         <div class="type-checkboxes">
@@ -124,6 +151,30 @@ const EVENT_TYPES: WebhookEventType[] = [
       </mat-dialog-actions>
     </ng-template>
 
+    <ng-template #rotateDialogTpl>
+      <h2 mat-dialog-title>Rotate signing secret</h2>
+      <mat-dialog-content class="create-dialog-content">
+        <p class="dimmed small" style="margin:0">
+          A new secret is issued and shown once. The previous secret keeps signing for 24 hours so you can
+          switch your receiver without losing events. Rotation needs a step-up confirmation.
+        </p>
+        @if (!entraMode) {
+          <mat-form-field appearance="outline">
+            <mat-label>Authenticator code</mat-label>
+            <input matInput inputmode="numeric" maxlength="6" autocomplete="one-time-code" [(ngModel)]="rotateTotp">
+          </mat-form-field>
+        }
+        @if (rotateError) { <p class="error-text" role="alert">{{ rotateError }}</p> }
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button type="button" mat-dialog-close [disabled]="rotating">Cancel</button>
+        <button mat-raised-button color="primary" type="button"
+                [disabled]="rotating || (!entraMode && rotateTotp.trim().length < 6)" (click)="submitRotate()">
+          {{ rotating ? 'Rotating…' : 'Rotate secret' }}
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
+
     <ng-template #deliveriesDialogTpl>
       <h2 mat-dialog-title>Recent Deliveries</h2>
       <mat-dialog-content class="deliveries-dialog-content">
@@ -132,16 +183,18 @@ const EVENT_TYPES: WebhookEventType[] = [
         } @else {
           <table class="deliveries-table">
             <thead>
-              <tr><th>Event</th><th>Status</th><th>Response</th><th>Attempts</th><th>Last attempt</th></tr>
+              <tr><th>Event</th><th>Event id</th><th>Status</th><th>Outcome</th><th>Attempts</th><th>Last attempt</th><th>Next attempt</th></tr>
             </thead>
             <tbody>
               @for (d of activeDeliveries; track d.id) {
                 <tr>
                   <td>{{ d.eventType }}</td>
+                  <td class="mono" [matTooltip]="'Delivery id ' + d.id">{{ d.eventId.slice(0, 8) }}…</td>
                   <td class="status-{{ d.status.toLowerCase() }}">{{ d.status }}</td>
-                  <td>{{ d.responseCode ?? '—' }}</td>
+                  <td>{{ outcomeLabel(d.outcome) }}</td>
                   <td>{{ d.attemptCount }}</td>
                   <td>{{ d.lastAttemptedAt ? (d.lastAttemptedAt | date:'short') : '—' }}</td>
+                  <td>{{ d.nextAttemptAt ? (d.nextAttemptAt | date:'short') : '—' }}</td>
                 </tr>
               }
             </tbody>
@@ -164,6 +217,10 @@ const EVENT_TYPES: WebhookEventType[] = [
     .sub-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
     .sub-main { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 240px; }
     .sub-url { font-size: 13px; word-break: break-all; }
+    .disabled-note { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--rw-text-warning); }
+    .disabled-note mat-icon { font-size: 16px; width: 16px; height: 16px; }
+    .mono { font-family: 'IBM Plex Mono', monospace; }
+    .error-text { color: var(--rw-text-danger); font-size: 12px; }
     .sub-types { display: flex; gap: 6px; flex-wrap: wrap; }
     .type-chip { font-size: 10px; background: var(--rw-surface-soft); border: 1px solid var(--rw-border); border-radius: 10px; padding: 2px 8px; color: var(--rw-text-secondary); }
     .sub-actions { display: flex; align-items: center; gap: 8px; }
@@ -187,6 +244,15 @@ export class WebhooksComponent implements OnInit {
   private readonly webhookService = inject(WebhookService);
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly auth = inject(AuthService);
+
+  readonly entraMode = this.auth.isEntraMode();
+  readonly docsLink = environment.docsUrl ? `${environment.docsUrl}/platform/webhooks/` : '';
+  @ViewChild('rotateDialogTpl') rotateDialogTpl!: TemplateRef<unknown>;
+  rotateTarget: WebhookSubscription | null = null;
+  rotateTotp = '';
+  rotateError = '';
+  rotating = false;
 
   @ViewChild('createDialogTpl') createDialogTpl!: TemplateRef<unknown>;
   @ViewChild('deliveriesDialogTpl') deliveriesDialogTpl!: TemplateRef<unknown>;
@@ -240,7 +306,7 @@ export class WebhooksComponent implements OnInit {
     if (this.creating) return;
     const url = this.normalizeUrl(this.createForm.url);
     if (!url) {
-      this.snackBar.open('Enter a valid HTTP(S) webhook URL.', 'Dismiss', { duration: 5000 });
+      this.snackBar.open('Enter a valid https:// webhook URL without credentials in it.', 'Dismiss', { duration: 6000 });
       return;
     }
     this.creating = true;
@@ -307,6 +373,58 @@ export class WebhooksComponent implements OnInit {
     });
   }
 
+  disabledText(reason: string): string {
+    switch (reason) {
+      case 'URL_POLICY':
+        return 'Disabled by the platform: the endpoint URL does not meet the outbound URL policy (https, public address, port 443 or 8443). Correct it by creating a new webhook.';
+      case 'CIRCUIT_BREAKER':
+        return 'Disabled by the platform after repeated failed deliveries. Fix your receiver, then enable the webhook again.';
+      default:
+        return 'Disabled by the platform.';
+    }
+  }
+
+  outcomeLabel(outcome: WebhookDeliveryOutcome | null): string {
+    switch (outcome) {
+      case 'OK': return 'Delivered';
+      case 'RECEIVER_ERROR': return 'Receiver rejected it';
+      case 'UNREACHABLE': return 'Receiver unreachable';
+      case 'BLOCKED': return 'Blocked by URL policy';
+      default: return '—';
+    }
+  }
+
+  openRotateDialog(sub: WebhookSubscription): void {
+    this.rotateTarget = sub;
+    this.rotateTotp = '';
+    this.rotateError = '';
+    this.dialog.open(this.rotateDialogTpl, { width: '480px', maxWidth: '95vw' });
+  }
+
+  submitRotate(): void {
+    const sub = this.rotateTarget;
+    if (!sub || this.rotating) return;
+    this.rotating = true;
+    this.rotateError = '';
+    const stepUp$ = this.entraMode
+      ? of<string | undefined>(undefined)
+      : this.webhookService.stepUp(this.rotateTotp.trim(), 'WEBHOOK_SECRET_ROTATE').pipe(map((r) => r.stepUpToken));
+    stepUp$.pipe(switchMap((token) => this.webhookService.rotateSecret(sub.id, token))).subscribe({
+      next: (rotated) => {
+        this.rotating = false;
+        this.dialog.closeAll();
+        this.newSecret = rotated.secret;
+        this.snackBar.open('Secret rotated. Copy the new secret now; it is not shown again.', 'Dismiss', { duration: 6000 });
+        this.load();
+      },
+      error: (err) => {
+        this.rotating = false;
+        this.rotateError = err?.error?.message ?? 'Secret rotation failed.';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
   copySecret(): void {
     if (!this.newSecret) return;
     navigator.clipboard.writeText(this.newSecret).then(
@@ -318,6 +436,9 @@ export class WebhooksComponent implements OnInit {
   private normalizeUrl(value: string): string | null {
     try {
       const url = new URL(value.trim());
+      // The backend enforces the real policy (https, public addresses, port 443/8443) and answers with its
+      // own message; plain http is only accepted by the demo stack, so it is not rejected here.
+      if (url.username || url.password) return null;
       return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
     } catch {
       return null;

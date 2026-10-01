@@ -111,7 +111,7 @@ This exists because without it an investor's only exit from a registry is to sel
 When an organisation stops using the registry:
 
 1. **Check for open positions.** Holdings, listings, loans, pending trades. Anything open needs resolving or migrating first.
-2. **Withdraw trading listings.** Handled automatically — an offboarding customer's listings are cancelled rather than left orphaned for someone to hit.
+2. **Withdraw trading listings.** Handled automatically — an offboarding customer's listings are cancelled rather than left orphaned for someone to hit. Trades in progress are handled too: an unpaid trade is cancelled, a trade with a declared payment moves to the unresolved-payment queue (`GET /api/v1/admin/trading/unresolved`) for a four-eyes decision — it is never failed automatically.
 3. **Deactivate users.** Immediate, reversible, deletes nothing.
 4. **Set the entity's status.** Suspended or dissolved as appropriate.
 5. **Record why**, with a date and a reference.

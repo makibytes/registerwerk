@@ -6,9 +6,8 @@ import de.makibytes.registerwerk.trading.events.TradeListingCancelledEvent;
 import de.makibytes.registerwerk.trading.events.TradePaymentConfirmedEvent;
 import de.makibytes.registerwerk.trading.events.TradePaymentDeclaredEvent;
 import de.makibytes.registerwerk.trading.events.TradePaymentDisputedEvent;
-import de.makibytes.registerwerk.trading.events.TradePendingCancelledEvent;
-import de.makibytes.registerwerk.trading.events.TradePendingTimedOutEvent;
 import de.makibytes.registerwerk.trading.events.TradeRefundedEvent;
+import de.makibytes.registerwerk.trading.events.TradeUnresolvedResolvedEvent;
 import de.makibytes.registerwerk.trading.events.TraderSettingsUpdatedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
@@ -20,7 +19,6 @@ import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.customer.api.KycStatus;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.customer.api.SuitabilityAssessment;
@@ -30,8 +28,13 @@ import de.makibytes.registerwerk.endpoint.api.AddressEndpointRepository;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.finality.api.GatedOperation;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
-import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
+import de.makibytes.registerwerk.orgidentity.api.OrgMemberWallet;
+import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.shared.AddressNormalizer;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
+import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.trading.api.*;
 import de.makibytes.registerwerk.trading.web.dto.*;
 import org.slf4j.Logger;
@@ -66,9 +69,14 @@ public class TradingService {
     private final LegalEntityRepository legalEntityRepository;
     private final SuitabilityAssessmentRepository suitabilityAssessmentRepository;
     private final InvestorLimitGate investorLimitGate;
-    private final ScreeningGate screeningGate;
-    private final HolderBlockGate holderBlockGate;
+    private final PartyEligibilityGate partyEligibilityGate;
     private final FinalityGate finalityGate;
+    private final HolderEncumbranceRegistry encumbrance;
+    private final TradeTransitions transitions;
+    private final OrgMemberWalletRepository orgMemberWalletRepository;
+    private final TradeCurrencyPolicy currencyPolicy;
+    private final RelatedPartyCheck relatedPartyCheck;
+    private final RelatedPartyAlerts relatedPartyAlerts;
 
     public TradingService(
             TradingProperties tradingProperties,
@@ -86,9 +94,14 @@ public class TradingService {
             LegalEntityRepository legalEntityRepository,
             SuitabilityAssessmentRepository suitabilityAssessmentRepository,
             InvestorLimitGate investorLimitGate,
-            ScreeningGate screeningGate,
-            HolderBlockGate holderBlockGate,
-            FinalityGate finalityGate) {
+            PartyEligibilityGate partyEligibilityGate,
+            FinalityGate finalityGate,
+            HolderEncumbranceRegistry encumbrance,
+            TradeTransitions transitions,
+            OrgMemberWalletRepository orgMemberWalletRepository,
+            TradeCurrencyPolicy currencyPolicy,
+            RelatedPartyCheck relatedPartyCheck,
+            RelatedPartyAlerts relatedPartyAlerts) {
         this.tradingProperties = tradingProperties;
         this.settingsRepository = settingsRepository;
         this.walletDefaultRepository = walletDefaultRepository;
@@ -104,9 +117,14 @@ public class TradingService {
         this.legalEntityRepository = legalEntityRepository;
         this.suitabilityAssessmentRepository = suitabilityAssessmentRepository;
         this.investorLimitGate = investorLimitGate;
-        this.screeningGate = screeningGate;
-        this.holderBlockGate = holderBlockGate;
+        this.partyEligibilityGate = partyEligibilityGate;
         this.finalityGate = finalityGate;
+        this.encumbrance = encumbrance;
+        this.transitions = transitions;
+        this.orgMemberWalletRepository = orgMemberWalletRepository;
+        this.currencyPolicy = currencyPolicy;
+        this.relatedPartyCheck = relatedPartyCheck;
+        this.relatedPartyAlerts = relatedPartyAlerts;
     }
 
     @Transactional(readOnly = true)
@@ -136,7 +154,8 @@ public class TradingService {
                 .toList();
         return new CompanyTraderSettingsResponse(
                 settings.getDefaultPaymentOption(),
-                settings.isImmediateSettlementEnabled(),
+                // 5A-01: the buyer-owned instant-settlement flag is retired; always reported as off.
+                false,
                 walletDefaults
         );
     }
@@ -145,7 +164,11 @@ public class TradingService {
         ensureTradingEnabled();
         CompanyTraderSettings settings = settingsRepository.findById(entityId).orElseGet(() -> defaultSettings(entityId));
         settings.setDefaultPaymentOption(request.defaultPaymentOption());
-        settings.setImmediateSettlementEnabled(request.immediateSettlementEnabled());
+        if (request.immediateSettlementEnabled()) {
+            log.warn("Deprecated: 'immediateSettlementEnabled' in trader settings is ignored (entity={}); the seller "
+                    + "chooses per listing (allowInstantSettlement, demo only).", entityId);
+        }
+        settings.setImmediateSettlementEnabled(false);
         settings.setUpdatedBy(actorId);
         settingsRepository.save(settings);
 
@@ -173,14 +196,17 @@ public class TradingService {
                     validateEndpointOwnership(entityId, endpointId);
                     entity.setEndpointId(endpointId);
                 } else {
-                    entity.setWalletAddress(requireNotBlank(walletDefault.walletAddress(), "Wallet address is required"));
+                    String address = requireNotBlank(walletDefault.walletAddress(), "Wallet address is required");
+                    // 5C-03: no free-text address can become a register wallet.
+                    requireEntityBoundAddress(entityId, address);
+                    entity.setWalletAddress(address);
                 }
                 walletDefaultRepository.save(entity);
             }
         }
 
         eventPublisher.publishEvent(new TraderSettingsUpdatedEvent(
-                entityId, actorId, "TRADER", settings.getDefaultPaymentOption(), settings.isImmediateSettlementEnabled()));
+                entityId, actorId, "TRADER", settings.getDefaultPaymentOption(), false));
         return getSettings(entityId);
     }
 
@@ -205,7 +231,10 @@ public class TradingService {
 
     public TradeListingResponse createListing(UUID entityId, UUID actorId, CreateTradeListingRequest request) {
         ensureTradingEnabled();
-        AssetHolder holder = assetHolderRepository.findById(request.holderId())
+        requireVenueClassified();
+        // Active-only and row-locked (5A-04): a removed register entry cannot be listed, and two
+        // concurrent listings of one holding cannot both pass the availability check.
+        AssetHolder holder = assetHolderRepository.findActiveByIdForUpdate(request.holderId())
                 .orElseThrow(() -> new EntityNotFoundException("AssetHolder", request.holderId()));
         if (!entityId.equals(holder.getInvestorId())) {
             throw new AccessDeniedException("This holding does not belong to your company");
@@ -213,18 +242,29 @@ public class TradingService {
         Asset asset = assetRepository.findById(holder.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", holder.getAssetId()));
         de.makibytes.registerwerk.asset.api.RegisterFreezeGuard.requireOpen(asset, "Listing creation");
+        requireIssued(asset, "Listing creation");
         requireOffchainSettlementAllowed(asset.getId());
         if (investorLimitGate.isLockedUp(asset.getId(), entityId)) {
             throw new de.makibytes.registerwerk.shared.ComplianceGateException(
                     "Entity " + entityId + "'s holding in this asset is under a lockup — cannot list for sale.");
         }
-        BigDecimal available = computeAvailableQuantity(holder.getId(), holder.getNominalAmount());
+        BigDecimal available = computeAvailableQuantity(holder, asset.getId());
         BigDecimal quantity = positive(request.quantity(), "Quantity must be greater than zero");
         if (quantity.compareTo(available) > 0) {
             throw new IllegalArgumentException("Only " + available + " units are available for listing");
         }
+        requireWholeDenomination(asset, quantity);
+        if (request.allowInstantSettlement() && !tradingProperties.isDemoInstantSettlement()) {
+            throw new IllegalArgumentException("Instant settlement is only available in demonstration mode and is not "
+                    + "enabled here - the trade settles when you confirm receipt of the buyer's payment.");
+        }
 
         Set<PaymentOption> paymentOptions = resolveListingPaymentOptions(entityId, request);
+        TradeCurrencyPolicy.Resolved settlement = currencyPolicy.resolve(
+                asset, request.currency(), request.paymentRailCode(), paymentOptions);
+        UUID targetEntityId = resolveTarget(entityId, request.targetEntityId());
+        BigDecimal pricePerUnit = positive(request.pricePerUnit(), "Price must be greater than zero");
+        requireWithinPriceCollar(asset.getId(), pricePerUnit, settlement.currency());
         TradeListing listing = new TradeListing();
         listing.setVenueCode(TradingVenueCode.SIMULATED);
         listing.setSellerEntityId(entityId);
@@ -238,8 +278,14 @@ public class TradingService {
         listing.setChain(resolvePrimaryChain(asset.getId()));
         listing.setQuantityTotal(quantity);
         listing.setQuantityAvailable(quantity);
-        listing.setPricePerUnit(positive(request.pricePerUnit(), "Price must be greater than zero"));
+        listing.setPricePerUnit(pricePerUnit);
+        listing.setCurrency(settlement.currency());
+        listing.setPaymentRailCode(settlement.paymentRailCode());
+        listing.setTargetEntityId(targetEntityId);
+        listing.setCreatedByActorId(actorId);
+        listing.setVenueClassification(tradingProperties.getVenueClassification().name());
         listing.setAllowedPaymentOptions(paymentOptions);
+        listing.setAllowInstantSettlement(request.allowInstantSettlement());
         TradeListing saved = tradeListingRepository.save(listing);
 
         eventPublisher.publishEvent(new TradeListingCreatedEvent(
@@ -281,15 +327,26 @@ public class TradingService {
                 offers.addAll(adapter.searchOffers(filter));
             }
         }
-        return offers.stream()
-                .filter(offer -> offer.listingId() == null
-                        || !entityId.equals(findListing(offer.listingId()).getSellerEntityId()))
-                .map(this::toOfferResponse)
-                .toList();
+        List<TradingVenueOfferResponse> visible = new ArrayList<>();
+        for (TradingVenueOffer offer : offers) {
+            TradeListing listing = offer.listingId() == null ? null : findListing(offer.listingId());
+            if (listing != null) {
+                if (entityId.equals(listing.getSellerEntityId())) {
+                    continue;
+                }
+                // Bilateral listings are visible to the addressed counterparty only (5C-06).
+                if (listing.getTargetEntityId() != null && !listing.getTargetEntityId().equals(entityId)) {
+                    continue;
+                }
+            }
+            visible.add(toOfferResponse(offer, listing, entityId));
+        }
+        return visible;
     }
 
     public TradeExecutionResponse buy(UUID entityId, UUID actorId, UUID listingId, BuyTradingOfferRequest request) {
         ensureTradingEnabled();
+        requireVenueClassified();
         // Row-level lock: the availability check and the quantity decrement must be
         // atomic, or two concurrent buyers of the same units would both be filled.
         TradeListing listing = tradeListingRepository.findByIdForUpdate(listingId)
@@ -297,6 +354,10 @@ public class TradingService {
         de.makibytes.registerwerk.asset.api.RegisterFreezeGuard.requireOpen(assetRepository, listing.getAssetId(), "Trade");
         if (entityId.equals(listing.getSellerEntityId())) {
             throw new IllegalArgumentException("A company cannot buy its own listing");
+        }
+        if (listing.getTargetEntityId() != null && !listing.getTargetEntityId().equals(entityId)) {
+            // Bilateral listing (5C-06): indistinguishable from an unknown listing for everyone else.
+            throw unknownListingException(listingId);
         }
         if (listing.getStatus() == ListingStatus.CANCELLED || listing.getStatus() == ListingStatus.FILLED) {
             throw new IllegalArgumentException("This offer is no longer available");
@@ -326,7 +387,6 @@ public class TradingService {
             throw new IllegalArgumentException("Selected payment option is not accepted by the seller");
         }
 
-        CompanyTraderSettings settings = settingsRepository.findById(entityId).orElseGet(() -> defaultSettings(entityId));
         ResolvedWallet resolvedWallet = resolveWallet(entityId, listing.getAssetType(), request.walletPreferenceMode(), request.endpointId(), request.walletAddress());
 
         TradeExecution execution = new TradeExecution();
@@ -346,21 +406,41 @@ public class TradingService {
         execution.setRequestedQuantity(quantity);
         execution.setExecutedQuantity(quantity);
         execution.setUnitPrice(listing.getPricePerUnit());
-        execution.setTotalPrice(listing.getPricePerUnit().multiply(quantity));
         execution.setPaymentOption(paymentOption);
+        applyPricing(execution, listing, quantity, paymentOption);
+        execution.setCreatedByActorId(actorId);
+        execution.setVenueClassification(tradingProperties.getVenueClassification().name());
         execution.setWalletPreferenceMode(resolvedWallet.preferenceMode());
         execution.setWalletEndpointId(resolvedWallet.endpointId());
         // Normalized here (not just in HolderService) so a settlement-created AssetHolder row
         // matches an existing one for the same wallet regardless of checksummed/lowercase input.
         execution.setWalletAddress(de.makibytes.registerwerk.blockchain.api.EvmUtils.normalizeAddress(resolvedWallet.address()));
 
+        requireWithinPriceCollar(listing.getAssetId(), listing.getPricePerUnit(), listing.getCurrency());
+
         boolean rejected = false;
         if (listing.getVenueCode() == TradingVenueCode.SIMULATED) {
-            if (settings.isImmediateSettlementEnabled()) {
+            markRelatedParty(execution, listing, actorId); // peer trades only: external venues' counterparties are unknown
+            // 5A-03/5A-06: every gate runs BEFORE any unit is reserved, so an ineligible buyer or
+            // seller, a suspended asset or a removed register entry can no longer park a listing
+            // for 72h - and a paid trade can no longer discover at confirm time that it never
+            // could have settled.
+            requireWholeDenomination(assetRepository.findById(listing.getAssetId())
+                    .orElseThrow(() -> new EntityNotFoundException("Asset", listing.getAssetId())), quantity);
+            assertTradable(execution, TradeCheck.RESERVE, entityId);
+            enforceReservationLimits(entityId, listing);
+            // 5A-01: the SELLER's per-listing opt-in (plus the demo property, never for chain-deployed
+            // assets) is the only way the register moves inside this request. The buyer's company
+            // setting is no longer read - it let the wrong party decide about the seller's register.
+            boolean instant = listing.isAllowInstantSettlement()
+                    && tradingProperties.isDemoInstantSettlement()
+                    && !hasConfirmedDeployment(listing.getAssetId());
+            if (instant) {
                 AssetHolder buyerHolder = settleExecution(execution, actorId);
                 execution.setBuyerHolderId(buyerHolder.getId());
                 execution.setSettlementStatus(SettlementStatus.SETTLED);
                 execution.setSettledAt(Instant.now());
+                execution.setInstantSettlement(true);
             } else {
                 execution.setSettlementStatus(SettlementStatus.PENDING);
             }
@@ -400,30 +480,26 @@ public class TradingService {
         return toTradeExecutionResponse(entityId, saved);
     }
 
-    /** Cancels a still-PENDING trade — nothing has settled on-chain yet, so cancelling is just a
-     *  status flip plus restoring the listing's available quantity. Settled trades are NOT
-     *  reversible through this method (see {@link #refundSettledTrade}); once the buyer has
-     *  declared payment (AWAITING_SELLER_CONFIRMATION), the trade can only be resolved by the
-     *  seller via {@link #confirmPaymentReceived} or {@link #disputePayment}. */
+    /** Cancels a still-PENDING trade - nothing has been paid or settled yet, so cancelling is a
+     *  status flip plus restoring the listing's available quantity. Only the BUYER may cancel
+     *  (5A-03): a seller who cancels after the buyer already sent money (declaration not yet
+     *  recorded) would hide a paid trade; the seller's tools are the timeout and, once payment is
+     *  declared, confirm / dispute. A buyer cancel starts the re-reservation cool-down (5A-06).
+     *  Settled trades are NOT reversible here (see {@link #refundSettledTrade}). */
     public TradeExecutionResponse cancelPendingTrade(UUID entityId, UUID actorId, UUID executionId, String reason) {
         ensureTradingEnabled();
         TradeExecution execution = tradeExecutionRepository.findByIdForUpdate(executionId)
                 .orElseThrow(() -> new EntityNotFoundException("TradeExecution", executionId));
-        if (!entityId.equals(execution.getBuyerEntityId()) && !entityId.equals(execution.getSellerEntityId())) {
-            throw new AccessDeniedException("Only the buyer or seller of this trade may cancel it");
+        if (!entityId.equals(execution.getBuyerEntityId())) {
+            throw new AccessDeniedException("Only the buyer of this trade may cancel it before payment is declared");
         }
         if (execution.getSettlementStatus() != SettlementStatus.PENDING) {
             throw new IllegalStateException(
                     "Trade " + executionId + " is not PENDING (status=" + execution.getSettlementStatus() + ") — cannot cancel");
         }
-        execution.setSettlementStatus(SettlementStatus.CANCELLED);
-        execution.setFailureReason(reason);
-        TradeExecution saved = tradeExecutionRepository.save(execution);
-        restoreListingAvailability(execution);
-
-        eventPublisher.publishEvent(new TradePendingCancelledEvent(executionId, actorId, "TRADER", reason));
+        transitions.cancelPending(execution, reason, actorId, "TRADER", true);
         log.info("Trade execution cancelled: id={} by={} reason={}", executionId, actorId, reason);
-        return toTradeExecutionResponse(entityId, saved);
+        return toTradeExecutionResponse(entityId, execution);
     }
 
     /**
@@ -448,50 +524,6 @@ public class TradingService {
         eventPublisher.publishEvent(new TradeRefundedEvent(executionId, actorId, "REGISTRY_ADMIN", reason, dualControlApproverId));
         log.warn("Trade execution refunded/reversed: id={} by={} reason={}", executionId, actorId, reason);
         return toTradeExecutionResponse(execution.getBuyerEntityId(), saved);
-    }
-
-    /** Daily job: a PENDING trade that never gets a payment declaration, or an
-     *  AWAITING_SELLER_CONFIRMATION trade the seller never confirms/disputes, within the
-     *  configured timeout is marked FAILED and its reserved quantity is released back to the
-     *  listing — previously this left the units permanently stranded (unavailable to sell)
-     *  because only status was flipped, never {@link #restoreListingAvailability}. */
-    @org.springframework.scheduling.annotation.Scheduled(cron = "0 15 6 * * *")
-    @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(name = "tradePendingTimeout", lockAtMostFor = "PT30M")
-    @Transactional
-    public void timeoutStuckPendingTrades() {
-        Instant cutoff = Instant.now().minus(tradingProperties.getPendingTimeoutHours(), java.time.temporal.ChronoUnit.HOURS);
-
-        List<TradeExecution> stuckPending = tradeExecutionRepository.findBySettlementStatusAndCreatedAtBefore(
-                SettlementStatus.PENDING, cutoff);
-        for (TradeExecution execution : stuckPending) {
-            execution.setSettlementStatus(SettlementStatus.FAILED);
-            execution.setFailureReason("Timed out awaiting payment declaration after "
-                    + tradingProperties.getPendingTimeoutHours() + "h");
-            tradeExecutionRepository.save(execution);
-            restoreListingAvailability(execution);
-            eventPublisher.publishEvent(new TradePendingTimedOutEvent(
-                    execution.getId(), "SYSTEM", tradingProperties.getPendingTimeoutHours()));
-            log.warn("Trade execution timed out awaiting payment declaration: id={}", execution.getId());
-        }
-
-        List<TradeExecution> stuckAwaitingConfirmation = tradeExecutionRepository
-                .findBySettlementStatusAndPaymentDeclaredAtBefore(SettlementStatus.AWAITING_SELLER_CONFIRMATION, cutoff);
-        for (TradeExecution execution : stuckAwaitingConfirmation) {
-            execution.setSettlementStatus(SettlementStatus.FAILED);
-            execution.setFailureReason("Timed out awaiting seller confirmation of payment after "
-                    + tradingProperties.getPendingTimeoutHours() + "h");
-            tradeExecutionRepository.save(execution);
-            restoreListingAvailability(execution);
-            eventPublisher.publishEvent(new TradePendingTimedOutEvent(
-                    execution.getId(), "SYSTEM", tradingProperties.getPendingTimeoutHours()));
-            log.warn("Trade execution timed out awaiting seller confirmation: id={}", execution.getId());
-        }
-
-        int total = stuckPending.size() + stuckAwaitingConfirmation.size();
-        if (total > 0) {
-            log.info("Timed out {} stuck trade execution(s) ({} awaiting payment, {} awaiting seller confirmation).",
-                    total, stuckPending.size(), stuckAwaitingConfirmation.size());
-        }
     }
 
     /**
@@ -525,7 +557,8 @@ public class TradingService {
             throw new AccessDeniedException("Only the buying company can declare payment on this trade");
         }
         if (execution.getSettlementStatus() == SettlementStatus.SETTLED
-                || execution.getSettlementStatus() == SettlementStatus.AWAITING_SELLER_CONFIRMATION) {
+                || execution.getSettlementStatus() == SettlementStatus.AWAITING_SELLER_CONFIRMATION
+                || execution.getSettlementStatus() == SettlementStatus.PAYMENT_UNRESOLVED) {
             return toTradeExecutionResponse(entityId, execution);
         }
         if (execution.getSettlementStatus() != SettlementStatus.PENDING) {
@@ -535,6 +568,9 @@ public class TradingService {
         if (paymentReference == null || paymentReference.isBlank()) {
             throw new IllegalArgumentException("A payment reference is required to declare payment");
         }
+        // 5A-03: a payment declaration is only accepted for a trade that could still settle, so the
+        // buyer is not invited to pay for something the gates would refuse at confirm time.
+        assertTradable(execution, TradeCheck.SETTLE, entityId);
         execution.setPaymentReference(paymentReference);
         execution.setPaymentDeclaredAt(Instant.now());
         execution.setSettlementStatus(SettlementStatus.AWAITING_SELLER_CONFIRMATION);
@@ -564,6 +600,17 @@ public class TradingService {
             throw new IllegalStateException("Trade " + executionId + " is not awaiting seller confirmation (status="
                     + execution.getSettlementStatus() + ")");
         }
+        try {
+            assertTradable(execution, TradeCheck.SETTLE, entityId);
+        } catch (IllegalStateException | IllegalArgumentException | InvalidStateTransitionException
+                 | EntityNotFoundException e) {
+            // The seller says the money arrived but a gate now refuses the transfer. Throwing would
+            // leave a paid trade as an HTTP error nobody owns; hand it to the operator queue instead
+            // (reservation kept). The gates run before any register row is touched, so nothing to undo.
+            String detail = e.getCause() instanceof ComplianceGateException c ? c.getMessage() : e.getMessage();
+            transitions.markUnresolved(execution, "GATE_FAILED_AT_CONFIRM", detail, actorId, "TRADER");
+            return toTradeExecutionResponse(entityId, execution);
+        }
         AssetHolder buyerHolder = settleExecution(execution, actorId);
         execution.setBuyerHolderId(buyerHolder.getId());
         execution.setSettlementStatus(SettlementStatus.SETTLED);
@@ -576,9 +623,10 @@ public class TradingService {
 
     /**
      * Selling company disputes a buyer's declared payment (asserts it was never received). The
-     * trade fails and its reserved quantity is released back to the listing — the register is
-     * never touched, since {@link #settleExecution} is only ever reachable from
-     * {@link #confirmPaymentReceived}.
+     * trade does NOT fail (5A-03): the buyer may have paid, and re-offering the units while the
+     * money is in flight would let the seller sell twice. It moves to PAYMENT_UNRESOLVED with the
+     * reservation kept; an operator resolves it (release, return of funds, or force-settle).
+     * The register is never touched here.
      */
     public TradeExecutionResponse disputePayment(UUID entityId, UUID actorId, UUID executionId, String reason) {
         ensureTradingEnabled();
@@ -594,13 +642,77 @@ public class TradingService {
         if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("A reason is required to dispute payment");
         }
-        execution.setSettlementStatus(SettlementStatus.FAILED);
-        execution.setFailureReason("Seller disputed payment: " + reason);
-        TradeExecution saved = tradeExecutionRepository.save(execution);
-        restoreListingAvailability(execution);
+        execution.setDisputeReason(reason);
+        transitions.markUnresolved(execution, "SELLER_DISPUTE", "Seller disputed payment: " + reason, actorId, "TRADER");
         eventPublisher.publishEvent(new TradePaymentDisputedEvent(executionId, actorId, "TRADER", reason));
         log.warn("Trade payment disputed by seller: id={} by={} reason={}", executionId, actorId, reason);
-        return toTradeExecutionResponse(entityId, saved);
+        return toTradeExecutionResponse(entityId, execution);
+    }
+
+    // ── Operator resolution of PAYMENT_UNRESOLVED (5A-03) ───────────────────────────────────────
+
+    /**
+     * FORCE_SETTLE: the operator (4-eyes, legal basis) decides the payment did arrive. Every gate
+     * re-runs first; a failing gate throws to the operator and changes nothing.
+     */
+    public TradeExecutionResponse forceSettleUnresolved(UUID actorId, UUID executionId, String legalBasis, String note,
+                                                        UUID dualControlApproverId) {
+        TradeExecution execution = lockUnresolved(executionId);
+        assertTradable(execution, TradeCheck.SETTLE, null);
+        AssetHolder buyerHolder = settleExecution(execution, actorId);
+        execution.setBuyerHolderId(buyerHolder.getId());
+        execution.setSettlementStatus(SettlementStatus.SETTLED);
+        execution.setSettledAt(Instant.now());
+        TradeExecution saved = tradeExecutionRepository.save(execution);
+        eventPublisher.publishEvent(new TradeUnresolvedResolvedEvent(
+                executionId, actorId, "REGISTRY_ADMIN", "FORCE_SETTLE", legalBasis, note, dualControlApproverId));
+        eventPublisher.publishEvent(new TradePaymentConfirmedEvent(executionId, actorId, "REGISTRY_ADMIN"));
+        log.warn("Unresolved trade force-settled: id={} by={} basis={}", executionId, actorId, legalBasis);
+        return toTradeExecutionResponse(null, saved);
+    }
+
+    /** RECORD_RETURN_OF_FUNDS: the buyer's money was returned (evidenced); FAILED, quantity restored. */
+    public TradeExecutionResponse recordReturnOfFunds(UUID actorId, UUID executionId, String legalBasis, String note,
+                                                      UUID dualControlApproverId) {
+        return closeUnresolved(actorId, executionId, "RECORD_RETURN_OF_FUNDS", "Return of funds recorded by operator",
+                legalBasis, note, dualControlApproverId);
+    }
+
+    /** RELEASE: the seller proved non-receipt; FAILED, quantity restored. */
+    public TradeExecutionResponse releaseUnresolved(UUID actorId, UUID executionId, String legalBasis, String note,
+                                                    UUID dualControlApproverId) {
+        return closeUnresolved(actorId, executionId, "RELEASE", "Released by operator: non-receipt of payment established",
+                legalBasis, note, dualControlApproverId);
+    }
+
+    private TradeExecutionResponse closeUnresolved(UUID actorId, UUID executionId, String action, String failureReason,
+                                                   String legalBasis, String note, UUID dualControlApproverId) {
+        TradeExecution execution = lockUnresolved(executionId);
+        transitions.failAndRestore(execution, failureReason + (note == null || note.isBlank() ? "" : ": " + note));
+        eventPublisher.publishEvent(new TradeUnresolvedResolvedEvent(
+                executionId, actorId, "REGISTRY_ADMIN", action, legalBasis, note, dualControlApproverId));
+        log.warn("Unresolved trade closed: id={} action={} by={} basis={}", executionId, action, actorId, legalBasis);
+        return toTradeExecutionResponse(null, execution);
+    }
+
+    private TradeExecution lockUnresolved(UUID executionId) {
+        ensureTradingEnabled();
+        TradeExecution execution = tradeExecutionRepository.findByIdForUpdate(executionId)
+                .orElseThrow(() -> new EntityNotFoundException("TradeExecution", executionId));
+        if (execution.getSettlementStatus() != SettlementStatus.PAYMENT_UNRESOLVED) {
+            throw new InvalidStateTransitionException("Trade " + executionId + " is not PAYMENT_UNRESOLVED (status="
+                    + execution.getSettlementStatus() + ")");
+        }
+        return execution;
+    }
+
+    @Transactional(readOnly = true)
+    public TradeConfigResponse config() {
+        return new TradeConfigResponse(
+                tradingProperties.isDemoInstantSettlement(),
+                tradingProperties.getMaxOpenReservationsPerBuyer(),
+                tradingProperties.getReservationCooldownHours(),
+                tradingProperties.getPendingTimeoutHours());
     }
 
     @Transactional(readOnly = true)
@@ -651,6 +763,92 @@ public class TradingService {
         return java.util.Optional.of(Iso20022SettlementConfirmationRenderer.render(executionId, execution, buyer, seller));
     }
 
+    /** 5C-06: production needs an explicit venue classification backed by a legal opinion. */
+    private void requireVenueClassified() {
+        if (tradingProperties.isProductionMode()
+                && tradingProperties.getVenueClassification() == TradingProperties.VenueClassification.DEMO_ONLY) {
+            throw new ComplianceGateException("Peer listings are a demonstration secondary-market workflow, not an "
+                    + "authorised trading venue. They are disabled in production until the operator sets "
+                    + "registerwerk.trading.venue-classification (BILATERAL_ONLY or LICENSED_VENUE) with a legal-opinion-ref.");
+        }
+    }
+
+    private UUID resolveTarget(UUID sellerEntityId, UUID targetEntityId) {
+        if (targetEntityId == null) {
+            if (tradingProperties.getVenueClassification() == TradingProperties.VenueClassification.BILATERAL_ONLY) {
+                throw new IllegalArgumentException("Listings must be addressed to one named counterparty "
+                        + "(targetEntityId) under the BILATERAL_ONLY venue classification");
+            }
+            return null;
+        }
+        if (targetEntityId.equals(sellerEntityId)) {
+            throw new IllegalArgumentException("A listing cannot be addressed to your own company");
+        }
+        if (!legalEntityRepository.existsById(targetEntityId)) {
+            throw new EntityNotFoundException("LegalEntity", targetEntityId);
+        }
+        return targetEntityId;
+    }
+
+    /** Copies currency / rail and sets the rounded total with the stored rounding (5A-02). */
+    private void applyPricing(TradeExecution execution, TradeListing listing, BigDecimal quantity, PaymentOption option) {
+        BigDecimal exact = listing.getPricePerUnit().multiply(quantity);
+        execution.setCurrency(listing.getCurrency());
+        if (listing.getCurrency() == null) {
+            // Legacy listing without a recorded currency: the minor unit is unknown, keep the exact product.
+            execution.setTotalPrice(exact);
+            return;
+        }
+        String railCode = option == PaymentOption.STABLECOIN ? listing.getPaymentRailCode() : null;
+        int scale = currencyPolicy.scaleFor(option, listing.getCurrency(), railCode);
+        execution.setPaymentRailCode(railCode);
+        execution.setTotalPriceUnrounded(exact);
+        execution.setPriceRoundingScale((short) scale);
+        execution.setPriceRoundingMode(Money.MODE.name());
+        execution.setTotalPrice(Money.round(exact, scale));
+    }
+
+    /** 5A-06: wash-trade / self-dealing hook - refuse linked parties unless explicitly allowed, and flag them. */
+    private void markRelatedParty(TradeExecution execution, TradeListing listing, UUID actorId) {
+        String sellerWallet = assetHolderRepository.findById(listing.getSellerHolderId())
+                .map(AssetHolder::getWalletAddress).orElse(null);
+        List<String> reasons = relatedPartyCheck.check(
+                execution.getBuyerEntityId(), execution.getSellerEntityId(), execution.getWalletAddress(), sellerWallet);
+        if (reasons.isEmpty()) {
+            return;
+        }
+        if (!tradingProperties.isAllowRelatedPartyTrades()) {
+            relatedPartyAlerts.blocked(listing.getId(), actorId, execution.getBuyerEntityId(),
+                    execution.getSellerEntityId(), reasons);
+            throw new ComplianceGateException("This trade is between related parties (" + String.join(", ", reasons)
+                    + ") and is not permitted. Contact your registry operator.");
+        }
+        execution.setRelatedParty(true);
+        execution.setRelatedPartyReasons(String.join(",", reasons));
+    }
+
+    /** T5-04 price collar (off by default): reject prices far from the last unrelated settled price. */
+    private void requireWithinPriceCollar(UUID assetId, BigDecimal price, String currency) {
+        int bps = tradingProperties.getMaxPriceDeviationBps();
+        if (bps <= 0) {
+            return;
+        }
+        TradeExecution last = tradeExecutionRepository
+                .findFirstByAssetIdAndSettlementStatusAndRelatedPartyFalseOrderBySettledAtDesc(assetId, SettlementStatus.SETTLED)
+                .orElse(null);
+        if (last == null || last.getUnitPrice().signum() <= 0
+                || (last.getCurrency() != null && currency != null && !last.getCurrency().equals(currency))) {
+            return; // nothing comparable to measure against
+        }
+        BigDecimal reference = last.getUnitPrice();
+        BigDecimal deviationBps = price.subtract(reference).abs()
+                .multiply(BigDecimal.valueOf(10_000)).divide(reference, 4, java.math.RoundingMode.HALF_EVEN);
+        if (deviationBps.compareTo(BigDecimal.valueOf(bps)) > 0) {
+            throw new IllegalArgumentException("Price " + price.toPlainString() + " deviates more than "
+                    + bps + " bps from the last unrelated trade price " + reference.toPlainString());
+        }
+    }
+
     private Set<PaymentOption> resolveListingPaymentOptions(UUID entityId, CreateTradeListingRequest request) {
         if (request.useCompanyDefaultPaymentOption()) {
             return EnumSet.of(settingsRepository.findById(entityId).orElseGet(() -> defaultSettings(entityId)).getDefaultPaymentOption());
@@ -664,7 +862,7 @@ public class TradingService {
     private SellableHoldingResponse toSellableHolding(UUID entityId, AssetHolder holder) {
         Asset asset = assetRepository.findById(holder.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", holder.getAssetId()));
-        BigDecimal available = computeAvailableQuantity(holder.getId(), holder.getNominalAmount());
+        BigDecimal available = computeAvailableQuantity(holder, holder.getAssetId());
         return new SellableHoldingResponse(
                 holder.getId(),
                 holder.getAssetId(),
@@ -683,14 +881,17 @@ public class TradingService {
         );
     }
 
-    private BigDecimal computeAvailableQuantity(UUID holderId, BigDecimal nominalAmount) {
+    private BigDecimal computeAvailableQuantity(AssetHolder holder, UUID assetId) {
         BigDecimal openListed = tradeListingRepository.sumQuantityAvailableBySellerHolderIdAndStatusIn(
-                holderId, List.of(ListingStatus.OPEN, ListingStatus.PARTIALLY_FILLED));
-        // Units reserved by trades still in flight — PENDING (payment not yet declared) and
-        // AWAITING_SELLER_CONFIRMATION (payment declared, not yet confirmed) — are not available.
+                holder.getId(), List.of(ListingStatus.OPEN, ListingStatus.PARTIALLY_FILLED));
+        // Units reserved by trades still in flight - PENDING, AWAITING_SELLER_CONFIRMATION and
+        // PAYMENT_UNRESOLVED (the money may have moved, the units stay put until an operator decides).
         BigDecimal reservedByTrades = tradeExecutionRepository.sumExecutedQuantityBySellerHolderIdAndSettlementStatusIn(
-                holderId, List.of(SettlementStatus.PENDING, SettlementStatus.AWAITING_SELLER_CONFIRMATION));
-        return nominalAmount.subtract(openListed).subtract(reservedByTrades).max(BigDecimal.ZERO);
+                holder.getId(), SettlementStatus.RESERVING);
+        // Units pledged elsewhere (repo desk) are not sellable (5A-09 SPI; nothing until it is implemented).
+        BigDecimal pledged = encumbrance.encumbered(holder.getInvestorId(), assetId);
+        return holder.getNominalAmount().subtract(openListed).subtract(reservedByTrades).subtract(pledged)
+                .max(BigDecimal.ZERO);
     }
 
     /**
@@ -775,8 +976,12 @@ public class TradingService {
      * can be traced back to the trade that produced them.
      */
     private AssetHolder settleExecution(TradeExecution execution, UUID actorId) {
-        AssetHolder sellerHolder = assetHolderRepository.findById(execution.getSellerHolderId())
-                .orElseThrow(() -> new EntityNotFoundException("AssetHolder", execution.getSellerHolderId()));
+        // Active-only + locked (5A-04): a removed / handed-over register entry keeps its nominal as
+        // retained evidence but must never be debited (that inflated the supply) and cannot be
+        // settled against.
+        AssetHolder sellerHolder = assetHolderRepository.findActiveByIdForUpdate(execution.getSellerHolderId())
+                .orElseThrow(() -> new InvalidStateTransitionException("The seller's register entry "
+                        + execution.getSellerHolderId() + " was removed - the trade cannot settle."));
         Asset settlementAsset = assetRepository.findById(execution.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", execution.getAssetId()));
         // T3-07: the register is frozen from export until completion (and closed afterwards).
@@ -791,10 +996,8 @@ public class TradingService {
         // settlement is a real transfer of registered securities and must be subject to
         // exactly the same KYC/sanctions/Sperrvermerk controls as an operator-initiated
         // forcedTransfer; nothing about "the two parties agreed on a price" exempts it.
-        requireCompliant(execution.getBuyerEntityId(), execution.getWalletAddress());
-        requireCompliant(execution.getSellerEntityId(), sellerHolder.getWalletAddress());
-        requireBuyerWithinTargetMarket(execution);
-        requireBuyerWithinHoldingLimit(execution);
+        // (The party / target-market / holding-limit / status gates ran in assertTradable() before
+        // this point; the caller is responsible for that, see confirm / force-settle / buy.)
         if (sellerHolder.getNominalAmount().compareTo(execution.getExecutedQuantity()) < 0) {
             throw new IllegalArgumentException("Seller no longer holds enough units to settle this trade");
         }
@@ -846,9 +1049,7 @@ public class TradingService {
      * "being sold the product." An asset with no target market configured is unrestricted (see
      * {@link Asset#isEligibleForTargetMarket}), so this never blocks legacy/demo assets.
      */
-    private void requireBuyerWithinTargetMarket(TradeExecution execution) {
-        Asset asset = assetRepository.findById(execution.getAssetId())
-                .orElseThrow(() -> new EntityNotFoundException("Asset", execution.getAssetId()));
+    private void requireBuyerWithinTargetMarket(TradeExecution execution, Asset asset) {
         LegalEntity buyer = legalEntityRepository.findById(execution.getBuyerEntityId())
                 .orElseThrow(() -> new EntityNotFoundException("LegalEntity", execution.getBuyerEntityId()));
         SuitabilityAssessment latest = suitabilityAssessmentRepository
@@ -869,9 +1070,7 @@ public class TradingService {
      * settlement wallet — the same row {@link #settleExecution} is about to credit — so this
      * check and the actual credit always agree on which position it's evaluating.
      */
-    private void requireBuyerWithinHoldingLimit(TradeExecution execution) {
-        Asset asset = assetRepository.findById(execution.getAssetId())
-                .orElseThrow(() -> new EntityNotFoundException("Asset", execution.getAssetId()));
+    private void requireBuyerWithinHoldingLimit(TradeExecution execution, Asset asset) {
         BigDecimal maxHolding = investorLimitGate.effectiveMaxHolding(asset, execution.getBuyerEntityId());
         if (maxHolding == null) {
             return;
@@ -888,22 +1087,130 @@ public class TradingService {
         }
     }
 
-    private void requireCompliant(UUID entityId, String walletAddress) {
-        LegalEntity entity = legalEntityRepository.findById(entityId)
-                .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
-        if (entity.getKycStatus() != KycStatus.APPROVED) {
-            throw new de.makibytes.registerwerk.shared.ComplianceGateException(
-                    "Entity " + entityId + " does not have an approved KYC status (current: "
-                    + entity.getKycStatus() + ") — trade cannot settle.");
+    /** When the shared gate runs: at reservation time (the units are still in the listing) or once the trade is reserved. */
+    private enum TradeCheck { RESERVE, SETTLE }
+
+    /**
+     * The single "may this trade exist / settle" test (Phase 5, 5A-03 step 3), run at {@code buy}
+     * (before anything is reserved), at payment declaration, again at confirm, and by the
+     * operator's force-settle. Order matters and is fail-closed: asset ISSUED and register open,
+     * off-chain settlement allowed, seller's register entry active (row-locked) and covering the
+     * units after pledges, both parties through the shared {@link PartyEligibilityGate}, then the
+     * buyer's target market and holding limit. Nothing here mutates the register.
+     */
+    private void assertTradable(TradeExecution execution, TradeCheck phase, UUID actingEntityId) {
+        Asset asset = assetRepository.findById(execution.getAssetId())
+                .orElseThrow(() -> new EntityNotFoundException("Asset", execution.getAssetId()));
+        requireIssued(asset, "Trade");
+        // T3-07: the register is frozen from export until completion (and closed afterwards).
+        de.makibytes.registerwerk.asset.api.RegisterFreezeGuard.requireOpen(asset, "Trade");
+        requireOffchainSettlementAllowed(execution.getAssetId());
+        AssetHolder sellerHolder = assetHolderRepository.findActiveByIdForUpdate(execution.getSellerHolderId())
+                .orElseThrow(() -> new InvalidStateTransitionException("The seller's register entry "
+                        + execution.getSellerHolderId() + " was removed - the trade cannot proceed."));
+        requirePartyEligible(execution, execution.getBuyerEntityId(), execution.getWalletAddress(), actingEntityId);
+        requirePartyEligible(execution, execution.getSellerEntityId(), sellerHolder.getWalletAddress(), actingEntityId);
+        requireBuyerWithinTargetMarket(execution, asset);
+        requireBuyerWithinHoldingLimit(execution, asset);
+
+        BigDecimal free = sellerHolder.getNominalAmount()
+                .subtract(encumbrance.encumbered(execution.getSellerEntityId(), execution.getAssetId()));
+        BigDecimal needed;
+        if (phase == TradeCheck.RESERVE) {
+            // The units being bought are still counted in the listing; the seller's whole commitment
+            // (all open listings + all reserved trades) must fit the current nominal.
+            needed = tradeListingRepository.sumQuantityAvailableBySellerHolderIdAndStatusIn(
+                            sellerHolder.getId(), List.of(ListingStatus.OPEN, ListingStatus.PARTIALLY_FILLED))
+                    .add(tradeExecutionRepository.sumExecutedQuantityBySellerHolderIdAndSettlementStatusIn(
+                            sellerHolder.getId(), SettlementStatus.RESERVING));
+        } else {
+            needed = execution.getExecutedQuantity();
         }
-        if (screeningGate.hasUnresolvedHit(entityId)) {
-            throw new de.makibytes.registerwerk.shared.ComplianceGateException(
-                    "Entity " + entityId + " has an unresolved sanctions screening hit — trade cannot settle.");
+        if (free.compareTo(needed) < 0) {
+            throw new IllegalArgumentException("Seller no longer holds enough unencumbered units for this trade");
         }
-        if (holderBlockGate.isBlocked(entityId, walletAddress)) {
-            throw new de.makibytes.registerwerk.shared.ComplianceGateException(
-                    "Entity " + entityId + " (or its settlement wallet) is subject to an active "
-                    + "§16 eWpG Sperrvermerk (legal block) — trade cannot settle.");
+    }
+
+    /**
+     * Eligibility of one trade party. The detailed refusal (sanctions / KYC / Sperrvermerk state) is only
+     * shown to that party itself or to the operator ({@code actingEntityId == null}); the other side gets a
+     * generic message so a trader cannot probe a counterparty's compliance status (tipping-off). The detail
+     * is kept in the server log and, for an unresolved trade, in the audit event.
+     */
+    private void requirePartyEligible(TradeExecution execution, UUID partyEntityId, String walletAddress, UUID actingEntityId) {
+        try {
+            partyEligibilityGate.require(partyEntityId, walletAddress, "trade settlement");
+        } catch (ComplianceGateException e) {
+            if (actingEntityId == null || actingEntityId.equals(partyEntityId)) {
+                throw e;
+            }
+            log.warn("Trade {}: counterparty {} not eligible: {}", execution.getId(), partyEntityId, e.getMessage());
+            // cause keeps the detail for the audit event of an unresolved trade (never serialised to the caller)
+            throw new ComplianceGateException("The counterparty is currently not eligible for this trade.", e);
+        }
+    }
+
+    private void requireIssued(Asset asset, String operation) {
+        if (asset.getStatus() != AssetStatus.ISSUED) {
+            throw new InvalidStateTransitionException(operation + " refused: asset " + asset.getId()
+                    + " is " + asset.getStatus() + " - only ISSUED assets can be traded.");
+        }
+    }
+
+    /**
+     * Lot size (5A-05 approved interim, T4-01/T5-05): bonds whose terms record a denomination trade in
+     * whole multiples of it. Nothing is enforced where no denomination is recorded.
+     */
+    private void requireWholeDenomination(Asset asset, BigDecimal quantity) {
+        BigDecimal denomination = asset.getDenomination();
+        if (denomination == null || denomination.signum() <= 0 || tradingAssetTypeResolver.resolve(asset) != TradingAssetType.BOND) {
+            return;
+        }
+        if (quantity.remainder(denomination).signum() != 0) {
+            throw new IllegalArgumentException("Quantity must be a whole multiple of the bond denomination " + denomination);
+        }
+    }
+
+    /**
+     * 5A-06 reservation caps, applied after the gates and before the reservation: one open
+     * reservation per buyer and listing, at most N open reservations per buyer, and a cool-down after
+     * the buyer cancelled or let a reservation on this listing lapse. The per-buyer advisory lock
+     * makes the count race-free across different listings.
+     */
+    private void enforceReservationLimits(UUID buyerEntityId, TradeListing listing) {
+        tradeExecutionRepository.lockBuyerReservations(buyerEntityId.toString());
+        if (tradeExecutionRepository.countByBuyerEntityIdAndListingIdAndSettlementStatusIn(
+                buyerEntityId, listing.getId(), SettlementStatus.RESERVING) > 0) {
+            throw new InvalidStateTransitionException(
+                    "You already hold an open reservation on this listing - settle or cancel it first.");
+        }
+        if (tradeExecutionRepository.countByBuyerEntityIdAndSettlementStatusIn(
+                buyerEntityId, SettlementStatus.RESERVING) >= tradingProperties.getMaxOpenReservationsPerBuyer()) {
+            throw new InvalidStateTransitionException("You may hold at most "
+                    + tradingProperties.getMaxOpenReservationsPerBuyer() + " open reservations at a time.");
+        }
+        if (tradeExecutionRepository.existsByBuyerEntityIdAndListingIdAndBuyerCooldownUntilAfter(
+                buyerEntityId, listing.getId(), Instant.now())) {
+            throw new InvalidStateTransitionException("You recently cancelled or let a reservation on this listing lapse; "
+                    + "please wait " + tradingProperties.getReservationCooldownHours() + "h before reserving it again.");
+        }
+    }
+
+    /**
+     * 5C-03: a wallet that will receive registered securities must already be known to the platform
+     * as belonging to this entity - a signature-verified org member wallet or one of its own address
+     * endpoints. A free-text address can no longer become a register wallet.
+     */
+    private void requireEntityBoundAddress(UUID entityId, String address) {
+        String wanted = AddressNormalizer.normalize(requireNotBlank(address, "Wallet address is required"));
+        boolean bound = endpointRepository.findByOwnerTypeAndOwnerId(AddressEndpoint.OwnerType.ENTITY, entityId).stream()
+                .anyMatch(e -> wanted.equals(AddressNormalizer.normalize(e.getAddress())))
+                || orgMemberWalletRepository.findActiveByLegalEntityId(entityId).stream()
+                        .map(OrgMemberWallet::getWalletAddress)
+                        .anyMatch(w -> wanted.equals(AddressNormalizer.normalize(w)));
+        if (!bound) {
+            throw new IllegalArgumentException("The wallet address " + address + " is not registered for your company. "
+                    + "Add it as an address endpoint (or bind it as a member wallet) first, then select it.");
         }
     }
 
@@ -924,19 +1231,6 @@ public class TradingService {
         tradeListingRepository.save(listing);
     }
 
-    /** Releases a trade's reserved quantity back to its listing — used by every terminal path
-     *  that does NOT end in SETTLED (cancel, dispute, timeout), so the seller's units become
-     *  sellable again instead of being silently and permanently stranded. */
-    private void restoreListingAvailability(TradeExecution execution) {
-        tradeListingRepository.findByIdForUpdate(execution.getListingId()).ifPresent(listing -> {
-            listing.setQuantityAvailable(listing.getQuantityAvailable().add(execution.getExecutedQuantity()));
-            if (listing.getStatus() == ListingStatus.FILLED || listing.getStatus() == ListingStatus.PARTIALLY_FILLED) {
-                listing.setStatus(ListingStatus.OPEN);
-            }
-            tradeListingRepository.save(listing);
-        });
-    }
-
     private ResolvedWallet resolveWallet(
             UUID entityId,
             TradingAssetType assetType,
@@ -952,10 +1246,10 @@ public class TradingService {
                 AddressEndpoint endpoint = validateEndpointOwnership(entityId, resolvedEndpointId);
                 yield new ResolvedWallet(WalletPreferenceMode.ENDPOINT, resolvedEndpointId, endpoint.getAddress());
             }
-            case CUSTOM_ADDRESS -> new ResolvedWallet(
-                    WalletPreferenceMode.CUSTOM_ADDRESS,
-                    null,
-                    requireNotBlank(walletAddress, "Wallet address is required"));
+            case CUSTOM_ADDRESS -> {
+                requireEntityBoundAddress(entityId, walletAddress);
+                yield new ResolvedWallet(WalletPreferenceMode.CUSTOM_ADDRESS, null, walletAddress);
+            }
         };
     }
 
@@ -967,6 +1261,8 @@ public class TradingService {
             AddressEndpoint endpoint = validateEndpointOwnership(entityId, walletDefault.getEndpointId());
             return new ResolvedWallet(mode, endpoint.getId(), endpoint.getAddress());
         }
+        // Legacy free-text defaults (stored before 5C-03) must now be bound to the entity too.
+        requireEntityBoundAddress(entityId, walletDefault.getWalletAddress());
         return new ResolvedWallet(mode, null, walletDefault.getWalletAddress());
     }
 
@@ -1014,11 +1310,16 @@ public class TradingService {
                 listing.getPricePerUnit(),
                 new ArrayList<>(listing.getAllowedPaymentOptions()),
                 listing.getCreatedAt(),
-                lastTradePrice(listing.getAssetId())
+                lastTradePrice(listing.getAssetId()),
+                listing.isAllowInstantSettlement(),
+                listing.getCurrency(),
+                listing.getPaymentRailCode(),
+                listing.getTargetEntityId(),
+                lastTradePrice(listing.getAssetId()) != null
         );
     }
 
-    private TradingVenueOfferResponse toOfferResponse(TradingVenueOffer offer) {
+    private TradingVenueOfferResponse toOfferResponse(TradingVenueOffer offer, TradeListing listing, UUID viewerEntityId) {
         return new TradingVenueOfferResponse(
                 offer.listingId(),
                 offer.venueCode(),
@@ -1035,51 +1336,28 @@ public class TradingService {
                 new ArrayList<>(offer.allowedPaymentOptions()),
                 offer.supportedOrderTypes(),
                 offer.createdAt(),
-                lastTradePrice(offer.assetId())
+                lastTradePrice(offer.assetId()),
+                listing != null ? listing.getCurrency() : null,
+                listing != null ? listing.getPaymentRailCode() : null,
+                listing != null && viewerEntityId.equals(listing.getTargetEntityId())
         );
     }
 
-    /** Reference price for a marketplace listing/offer — the most recent
-     *  settled trade for the same asset, or null if none has settled yet. */
+    /** Reference price for a marketplace listing/offer — the most recent settled trade between
+     *  UNRELATED parties for the same asset (5A-06: linked parties cannot move it), or null if
+     *  none has settled yet. Indicative only. */
     private BigDecimal lastTradePrice(UUID assetId) {
         if (assetId == null) {
             return null;
         }
         return tradeExecutionRepository
-                .findFirstByAssetIdAndSettlementStatusOrderBySettledAtDesc(assetId, SettlementStatus.SETTLED)
+                .findFirstByAssetIdAndSettlementStatusAndRelatedPartyFalseOrderBySettledAtDesc(assetId, SettlementStatus.SETTLED)
                 .map(TradeExecution::getUnitPrice)
                 .orElse(null);
     }
 
     private TradeExecutionResponse toTradeExecutionResponse(UUID viewerEntityId, TradeExecution execution) {
-        String side = viewerEntityId.equals(execution.getBuyerEntityId()) ? "BUY" : "SELL";
-        return new TradeExecutionResponse(
-                execution.getId(),
-                side,
-                execution.getListingId(),
-                execution.getVenueCode(),
-                execution.getAssetId(),
-                execution.getAssetNumber(),
-                execution.getAssetName(),
-                execution.getIsin(),
-                execution.getAssetType(),
-                execution.getTokenStandard(),
-                execution.getChain(),
-                execution.getOrderType(),
-                execution.getExecutedQuantity(),
-                execution.getUnitPrice(),
-                execution.getTotalPrice(),
-                execution.getPaymentOption(),
-                execution.getSettlementStatus(),
-                execution.getWalletPreferenceMode(),
-                execution.getWalletEndpointId(),
-                execution.getWalletAddress(),
-                execution.getCreatedAt(),
-                execution.getSettledAt(),
-                execution.getFailureReason(),
-                execution.getPaymentReference(),
-                execution.getPaymentDeclaredAt()
-        );
+        return TradeResponses.execution(viewerEntityId, execution);
     }
 
     private void ensureTradingEnabled() {

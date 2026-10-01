@@ -32,11 +32,13 @@ public class LendingPositionController {
     @GetMapping("/my-positions")
     public ResponseEntity<List<LendingPositionResponse>> myPositions(Authentication authentication) {
         UUID legalEntityId = SecurityUtils.extractEntityId(authentication);
+        var shortfall = positionService.shortfallMarketIds();
         List<LendingPositionResponse> positions = positionService.refreshAndListMyPositions(legalEntityId).stream()
                 .map(p -> new LendingPositionResponse(
                         p.getMarketId(), p.getWalletAddress(), p.getCollateralAmount(), p.getCurrentDebt(),
                         p.getHealthFactorWad(), p.getHealthFactorReliable(), p.getLiquidationSurplus(), p.getStatus(),
-                        p.getLastSyncedAt()))
+                        p.getLastSyncedAt(), p.isSyncStale(), p.getLastSyncError(),
+                        shortfall.contains(p.getMarketId())))
                 .toList();
         return ResponseEntity.ok(positions);
     }

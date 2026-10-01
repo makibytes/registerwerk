@@ -51,7 +51,9 @@ class LocalLendingDemoSeederTest {
                 mock(LegalEntityRepository.class), mock(ChainConfigRepository.class), mock(RpcNodeRepository.class),
                 mock(BlockchainClientRegistry.class), mock(OrgRegistrationRepository.class),
                 mock(OrgMemberWalletRepository.class), mock(LendingMarketRepository.class),
-                mock(LendingMarketRegistrar.class), mock(ContractAddressConfig.class), transfers);
+                mock(LendingMarketRegistrar.class), mock(ContractAddressConfig.class), transfers,
+                mock(de.makibytes.registerwerk.payment.api.PaymentRailRepository.class),
+                mock(de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository.class));
 
         Asset greenBond = new Asset();
         greenBond.setId(UUID.randomUUID());

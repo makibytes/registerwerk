@@ -30,5 +30,15 @@ public record TradeListingResponse(
         Instant createdAt,
         // Most recent settled trade price for this asset, if any — a benchmark for the listed
         // price; null when the asset has never settled a trade yet.
-        BigDecimal lastTradePrice) {
+        BigDecimal lastTradePrice,
+        // Seller opted in to the demo instant path (only ever true while the demo property is on).
+        boolean allowInstantSettlement,
+        // Settlement currency of pricePerUnit; null on legacy listings ("currency not recorded").
+        String currency,
+        String paymentRailCode,
+        // Bilateral listing: the only entity that may buy; null = open listing.
+        UUID targetEntityId,
+        // The reference price is one settled trade between unrelated parties - indicative only,
+        // not a price formed on an authorised venue.
+        boolean lastTradePriceIndicative) {
 }

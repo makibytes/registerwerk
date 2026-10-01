@@ -43,5 +43,13 @@ public record LendingMarketResponse(
         Instant createdAt,
         boolean riskParametersLegacy,
         String operatorOrg,
-        String treasury
+        String treasury,
+        // COLLATERAL_SHORTFALL | BINDING_UNVERIFIED | BORROW_PAUSED_ONCHAIN | CHAIN_READ_FAILED when
+        // status is PAUSED although the market is registered ACTIVE; null otherwise. Hide borrow when set.
+        String pauseReason,
+        // False when re-verification found the factory/collateral/loan-token binding broken (operator view only;
+        // such markets are not listed for customers).
+        boolean bindingVerified,
+        String bindingFailure,
+        boolean collateralShortfall
 ) {}

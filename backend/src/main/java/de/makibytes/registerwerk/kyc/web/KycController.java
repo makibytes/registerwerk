@@ -168,7 +168,7 @@ public class KycController {
             @PathVariable UUID entityId,
             @RequestBody @Valid KycRejectionRequest body,
             Authentication auth) {
-        kycService.rejectKyc(entityId, body.reason().trim(), extractActorId(auth));
+        kycService.rejectKyc(entityId, body.reason().trim(), body.customerReasonCode(), extractActorId(auth));
         return ResponseEntity.noContent().build();
     }
 

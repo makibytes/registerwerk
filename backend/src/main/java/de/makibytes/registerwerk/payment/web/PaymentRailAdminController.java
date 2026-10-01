@@ -57,15 +57,16 @@ public class PaymentRailAdminController {
     }
 
     @PostMapping
-    @RequiresStepUp(reason = "Payment rail creation")
+    @RequiresStepUp(reason = "Payment rail creation", requireSecondApprover = true)
     public ResponseEntity<PaymentRailResponse> createRail(
-            @Valid @RequestBody PaymentRailRequest request, Authentication auth) {
+            @Valid @RequestBody PaymentRailRequest request, Authentication auth,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         PaymentRail rail = railService.create(
                 request.code(), request.displayName(), request.railType(), request.currency(),
                 request.decimals(), request.description(), request.issuerName(), request.issuerLei(),
                 request.micarAuthorization(), request.emtFlag(), request.whitePaperUrl(), request.redemptionAtPar(),
                 toAddressMap(request.chainAddresses()),
-                SecurityUtils.extractUserId(auth), primaryRole(auth));
+                SecurityUtils.extractUserId(auth), primaryRole(auth), approverId);
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(rail));
     }
 
@@ -85,36 +86,39 @@ public class PaymentRailAdminController {
     }
 
     @PostMapping("/{railId}/enable")
-    @RequiresStepUp(reason = "Payment rail enablement")
-    public ResponseEntity<PaymentRailResponse> enableRail(@PathVariable UUID railId, Authentication auth) {
+    @RequiresStepUp(reason = "Payment rail enablement", requireSecondApprover = true)
+    public ResponseEntity<PaymentRailResponse> enableRail(@PathVariable UUID railId, Authentication auth,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         return ResponseEntity.ok(toResponse(
-                railService.setEnabled(railId, true, SecurityUtils.extractUserId(auth), primaryRole(auth))));
+                railService.setEnabled(railId, true, SecurityUtils.extractUserId(auth), primaryRole(auth), approverId)));
     }
 
     @PostMapping("/{railId}/disable")
     @RequiresStepUp(reason = "Payment rail deactivation")
     public ResponseEntity<PaymentRailResponse> disableRail(@PathVariable UUID railId, Authentication auth) {
         return ResponseEntity.ok(toResponse(
-                railService.setEnabled(railId, false, SecurityUtils.extractUserId(auth), primaryRole(auth))));
+                railService.setEnabled(railId, false, SecurityUtils.extractUserId(auth), primaryRole(auth), null)));
     }
 
     /**
      * Records the operator's own attestation that this rail's MiCAR disclosure fields were
      * checked against a real external source — not a live register cross-check (see
-     * {@code PaymentRailAdminService.setMicarVerified}).
+     * {@code PaymentRailAdminService.setMicarVerified}). Needs a second approver; the attester must
+     * differ from the rail's creator and last editor.
      */
     @PostMapping("/{railId}/verify-micar")
-    @RequiresStepUp(reason = "Payment rail MiCAR attestation")
-    public ResponseEntity<PaymentRailResponse> verifyMicar(@PathVariable UUID railId, Authentication auth) {
+    @RequiresStepUp(reason = "Payment rail MiCAR attestation", requireSecondApprover = true)
+    public ResponseEntity<PaymentRailResponse> verifyMicar(@PathVariable UUID railId, Authentication auth,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
         return ResponseEntity.ok(toResponse(
-                railService.setMicarVerified(railId, true, SecurityUtils.extractUserId(auth), primaryRole(auth))));
+                railService.setMicarVerified(railId, true, SecurityUtils.extractUserId(auth), primaryRole(auth), approverId)));
     }
 
     @PostMapping("/{railId}/unverify-micar")
     @RequiresStepUp(reason = "Payment rail MiCAR attestation cleared")
     public ResponseEntity<PaymentRailResponse> unverifyMicar(@PathVariable UUID railId, Authentication auth) {
         return ResponseEntity.ok(toResponse(
-                railService.setMicarVerified(railId, false, SecurityUtils.extractUserId(auth), primaryRole(auth))));
+                railService.setMicarVerified(railId, false, SecurityUtils.extractUserId(auth), primaryRole(auth), null)));
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────

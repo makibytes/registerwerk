@@ -76,6 +76,9 @@ public class ContractAddressConfig {
      *  An EOA cannot be used: {@code Identity.addClaim} calls {@code isClaimValid} on the issuer. */
     private Map<String, String> claimIssuer = new HashMap<>();
 
+    /** EwpgRepoMarketFactory address per chain identifier — the provenance anchor of lending markets. */
+    private Map<String, String> repoMarketFactory = new HashMap<>();
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -213,6 +216,12 @@ public class ContractAddressConfig {
         return require(claimIssuer, chainIdentifier, "ClaimIssuer");
     }
 
+    /** Whether a repo-market factory is configured for the chain (no exception). */
+    public java.util.Optional<String> findRepoMarketFactory(String chainIdentifier) {
+        String address = repoMarketFactory.get(chainIdentifier.toLowerCase().replace('_', '-'));
+        return address == null || address.isBlank() ? java.util.Optional.empty() : java.util.Optional.of(address);
+    }
+
     private String require(Map<String, String> map, String key, String contractName) {
         // Normalise: "ETHEREUM_TESTNET" → "ethereum-testnet"
         String normalized = key.toLowerCase().replace('_', '-');
@@ -226,6 +235,9 @@ public class ContractAddressConfig {
     }
 
     // ── Getters / Setters (required by @ConfigurationProperties) ─────────────
+
+    public Map<String, String> getRepoMarketFactory() { return repoMarketFactory; }
+    public void setRepoMarketFactory(Map<String, String> m) { this.repoMarketFactory = m; }
 
     public Map<String, String> getAssetTokenFactory() { return assetTokenFactory; }
     public void setAssetTokenFactory(Map<String, String> m) { this.assetTokenFactory = m; }

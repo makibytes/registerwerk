@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.events.AssetApprovedEvent;
 import de.makibytes.registerwerk.kyc.events.KycApprovedEvent;
+import de.makibytes.registerwerk.kyc.events.KycRejectedEvent;
 import de.makibytes.registerwerk.trading.api.TradeExecution;
 import de.makibytes.registerwerk.trading.api.TradeExecutionRepository;
 import de.makibytes.registerwerk.trading.events.TradeExecutedEvent;
@@ -20,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -49,6 +51,21 @@ class WebhookEventListenerTest {
         listener.on(new KycApprovedEvent(entityId, UUID.randomUUID(), null, Map.of()));
 
         verify(dispatchService).dispatch(eq(entityId), eq(WebhookEventType.KYC_APPROVED), any());
+    }
+
+    @Test
+    @DisplayName("KycRejectedEvent webhook carries only the fixed reason code, never the operator's internal reason (5C-09, GwG s.47)")
+    void on_kycRejected_carriesOnlyReasonCode() {
+        UUID entityId = UUID.randomUUID();
+
+        listener.on(new KycRejectedEvent(entityId, UUID.randomUUID(), null, Map.of(
+                "internalReason", "sanctions match - do not disclose", "reasonCode", "CONTACT_SUPPORT")));
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<Map<String, Object>> data = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(dispatchService).dispatch(eq(entityId), eq(WebhookEventType.KYC_REJECTED), data.capture());
+        assertThat(data.getValue()).containsEntry("reasonCode", "CONTACT_SUPPORT").doesNotContainKey("reason");
+        assertThat(data.getValue().toString()).doesNotContain("sanctions").doesNotContain("do not disclose");
     }
 
     @Test
@@ -104,5 +121,21 @@ class WebhookEventListenerTest {
 
         verify(dispatchService).dispatch(eq(buyerId), eq(WebhookEventType.TRADE_PAYMENT_DISPUTED), any());
         verify(dispatchService, never()).dispatch(eq(execution.getSellerEntityId()), any(), any());
+    }
+
+    @Test
+    @DisplayName("N3: every listener method runs without a listener transaction (no nested connection during the HTTP send)")
+    void listenersRunWithoutTransaction() {
+        int checked = 0;
+        for (java.lang.reflect.Method m : WebhookEventListener.class.getDeclaredMethods()) {
+            if (!m.getName().equals("on")) continue;
+            org.springframework.transaction.annotation.Transactional tx =
+                    org.springframework.core.annotation.AnnotatedElementUtils.findMergedAnnotation(
+                            m, org.springframework.transaction.annotation.Transactional.class);
+            assertThat(tx).isNotNull();
+            assertThat(tx.propagation()).isEqualTo(org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED);
+            checked++;
+        }
+        assertThat(checked).isGreaterThan(5);
     }
 }

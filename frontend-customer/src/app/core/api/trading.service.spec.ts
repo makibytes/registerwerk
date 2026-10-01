@@ -20,6 +20,35 @@ describe('TradingService', () => {
 
     afterEach(() => httpMock.verify());
 
+    it('getConfig() GETs /trading/config', () => {
+        service.getConfig().subscribe();
+        const req = httpMock.expectOne(`${base}/config`);
+        expect(req.request.method).toBe('GET');
+        req.flush({ demoInstantSettlementAvailable: false, maxOpenReservationsPerBuyer: 3, reservationCooldownHours: 24, pendingTimeoutHours: 48 });
+    });
+
+    it('listNotes() and addNote() use the trade notes endpoint', () => {
+        service.listNotes('t1').subscribe();
+        httpMock.expectOne(`${base}/history/t1/notes`).flush([]);
+        service.addNote('t1', 'bank statement').subscribe();
+        const req = httpMock.expectOne(`${base}/history/t1/notes`);
+        expect(req.request.method).toBe('POST');
+        expect(req.request.body).toEqual({ text: 'bank statement' });
+        req.flush({});
+    });
+
+    it('createListing() carries currency, rail code, target entity and the seller instant opt-in', () => {
+        const body = {
+            holderId: 'h', quantity: 1, pricePerUnit: 2, useCompanyDefaultPaymentOption: false,
+            allowedPaymentOptions: ['STABLECOIN'], allowInstantSettlement: false,
+            currency: null, paymentRailCode: 'aueur', targetEntityId: 'e1',
+        };
+        service.createListing(body).subscribe();
+        const req = httpMock.expectOne(`${base}/listings`);
+        expect(req.request.body).toEqual(body);
+        req.flush({});
+    });
+
     it('listVenues() GETs /trading/venues', () => {
         service.listVenues().subscribe();
         const req = httpMock.expectOne(`${base}/venues`);

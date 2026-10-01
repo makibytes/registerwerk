@@ -4,7 +4,10 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   CompanyTraderSettings,
+  CatalogPaymentRail,
+  TradeConfig,
   TradeExecution,
+  TradeNote,
   TradeListing,
   TradingOffer,
   TradingVenue,
@@ -15,6 +18,23 @@ import {
 export class TradingService {
   private readonly http = inject(HttpClient);
   private readonly base = `${environment.apiUrl}/trading`;
+
+  getConfig(): Observable<TradeConfig> {
+    return this.http.get<TradeConfig>(`${this.base}/config`);
+  }
+
+  /** Enabled payment rails (stablecoin rails are the only ones a listing may name). */
+  listPaymentRails(): Observable<CatalogPaymentRail[]> {
+    return this.http.get<CatalogPaymentRail[]>(`${environment.apiUrl}/payment-rails/catalog`);
+  }
+
+  listNotes(executionId: string): Observable<TradeNote[]> {
+    return this.http.get<TradeNote[]>(`${this.base}/history/${executionId}/notes`);
+  }
+
+  addNote(executionId: string, text: string): Observable<TradeNote> {
+    return this.http.post<TradeNote>(`${this.base}/history/${executionId}/notes`, { text });
+  }
 
   listVenues(): Observable<TradingVenue[]> {
     return this.http.get<TradingVenue[]>(`${this.base}/venues`);
@@ -42,6 +62,11 @@ export class TradingService {
     pricePerUnit: number;
     useCompanyDefaultPaymentOption: boolean;
     allowedPaymentOptions: string[];
+    /** Seller opt-in for the DEMO instant path; ignored by the backend unless the demo property is on. */
+    allowInstantSettlement?: boolean;
+    currency?: string | null;
+    paymentRailCode?: string | null;
+    targetEntityId?: string | null;
   }): Observable<TradeListing> {
     return this.http.post<TradeListing>(`${this.base}/listings`, body);
   }

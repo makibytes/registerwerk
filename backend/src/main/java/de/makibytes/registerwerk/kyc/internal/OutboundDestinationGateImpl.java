@@ -1,7 +1,5 @@
 package de.makibytes.registerwerk.kyc.internal;
 
-import de.makibytes.registerwerk.customer.api.EntityStatus;
-import de.makibytes.registerwerk.customer.api.KycStatus;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
@@ -17,6 +15,8 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Component
@@ -59,17 +59,9 @@ class OutboundDestinationGateImpl implements OutboundDestinationGate {
                 .orElseThrow(() -> deny(purpose, address, "is not an active registered holder of this asset — onboard the holder first"));
         LegalEntity entity = entityRepository.findById(holder.getInvestorId())
                 .orElseThrow(() -> deny(purpose, address, "belongs to an unknown legal entity"));
-        if (entity.getStatus() != EntityStatus.ACTIVE) {
-            throw deny(purpose, address, "belongs to an entity in status " + entity.getStatus());
-        }
-        if (entity.getKycStatus() != KycStatus.APPROVED) {
-            throw deny(purpose, address, "belongs to an entity whose KYC is " + entity.getKycStatus());
-        }
-        if (screeningGate.hasUnresolvedHit(entity.getId()) || screeningGate.hasUnresolvedBeneficialOwnerHit(entity.getId())) {
-            throw deny(purpose, address, "belongs to an entity with an unresolved sanctions-screening result");
-        }
-        if (holderBlockGate.isBlocked(entity.getId(), normalized)) {
-            throw deny(purpose, address, "is subject to an active §16 eWpG Sperrvermerk");
+        List<String> reasons = PartyEligibility.reasons(entity, normalized, screeningGate, holderBlockGate, LocalDate.now());
+        if (!reasons.isEmpty()) {
+            throw deny(purpose, address, "belongs to an entity that " + String.join("; ", reasons));
         }
         return new ResolvedDestination(holder.getId(), entity.getId(), entity.getCurrentName(), normalized);
     }

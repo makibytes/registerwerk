@@ -18,16 +18,20 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../shared/components/address-picker-dialog.component';
 import { EndpointService } from '../../core/api/endpoint.service';
+import { AuthService } from '../../core/auth/auth.service';
 import { TradingService } from '../../core/api/trading.service';
 import { downloadBlob } from '../../core/utils/download.util';
 import {
+  CatalogPaymentRail,
   CompanyTraderSettings,
   CompanyTraderWalletDefault,
   Endpoint,
   PaymentOption,
   SellableHolding,
+  TradeConfig,
   TradeExecution,
   TradeListing,
+  TradeNote,
   TradingAssetType,
   TradingOffer,
   TradingOrderType,
@@ -42,6 +46,11 @@ interface SellForm {
   pricePerUnit: number | null;
   useCompanyDefaultPaymentOption: boolean;
   allowedPaymentOptions: PaymentOption[];
+  /** Seller opt-in for the demo instant path; only offered while the backend exposes it. */
+  allowInstantSettlement: boolean;
+  currency: string;
+  paymentRailCode: string | null;
+  targetEntityId: string;
 }
 
 interface BuyForm {
@@ -82,6 +91,22 @@ interface BuyForm {
           <p class="page-subtitle">Browse integrated venues, sell held assets, manage company-shared trader defaults, and monitor settlements.</p>
         </div>
       </div>
+
+      <mat-card class="warning-card demo-notice" role="note">
+        <mat-card-content>
+          <div class="warning-line">
+            <mat-icon>science</mat-icon>
+            <div>
+              <strong>Demonstration secondary-market workflow, not an authorised trading venue</strong>
+              <p>
+                This desk records bilateral trades between two customers and is not a regulated
+                market, MTF or OTF. Payment is arranged and confirmed by the parties themselves;
+                Registerwerk does not hold or verify funds.
+              </p>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
 
       @if (loading) {
         <div class="loading-overlay"><mat-spinner diameter="40"></mat-spinner></div>
@@ -228,12 +253,22 @@ interface BuyForm {
                             <td>{{ assetTypeLabel(offer.assetType) }}</td>
                             <td>{{ offer.chain ?? '—' }}</td>
                             <td>{{ offer.quantityAvailable | number:'1.0-4' }}</td>
-                            <td>{{ offer.pricePerUnit | number:'1.2-4' }}</td>
+                            <td>
+                              {{ offer.pricePerUnit | number:'1.2-4' }}
+                              @if (offer.currency) { <span class="ccy">{{ offer.currency }}</span> }
+                              @else { <span class="ccy legacy">currency not recorded</span> }
+                              @if (offer.lastTradePrice !== null && offer.lastTradePrice !== undefined) {
+                                <div class="dimmed small" matTooltip="One settled trade between unrelated parties. Indicative only, not a price formed on an authorised venue.">
+                                  last trade {{ offer.lastTradePrice | number:'1.2-4' }} (indicative)
+                                </div>
+                              }
+                            </td>
                             <td>
                               <div class="chip-row">
                                 @for (option of offer.allowedPaymentOptions; track option) {
-                                  <mat-chip>{{ paymentLabel(option) }}</mat-chip>
+                                  <mat-chip>{{ paymentLabel(option) }}{{ option === 'STABLECOIN' && offer.paymentRailCode ? ' (' + offer.paymentRailCode + ')' : '' }}</mat-chip>
                                 }
+                                @if (offer.targeted) { <mat-chip>Addressed to you</mat-chip> }
                               </div>
                             </td>
                             <td>
@@ -257,9 +292,18 @@ interface BuyForm {
                 <mat-card class="action-card">
                   <mat-card-header>
                     <mat-card-title>Buy {{ selectedOffer.assetName }}</mat-card-title>
-                    <mat-card-subtitle>{{ selectedOffer.venueDisplayName }} · {{ selectedOffer.pricePerUnit | number:'1.2-4' }} per unit</mat-card-subtitle>
+                    <mat-card-subtitle>{{ selectedOffer.venueDisplayName }} · {{ selectedOffer.pricePerUnit | number:'1.2-4' }} {{ selectedOffer.currency ?? '(currency not recorded)' }} per unit</mat-card-subtitle>
                   </mat-card-header>
                   <mat-card-content>
+                    @if (config) {
+                      <p class="hint" role="note">
+                        Buying reserves the units for up to {{ config.pendingTimeoutHours }} h while you pay and the
+                        seller confirms. You can hold at most {{ config.maxOpenReservationsPerBuyer }} open reservations
+                        and after a cancelled or failed reservation you cannot reserve the same listing again for
+                        {{ config.reservationCooldownHours }} h. Payment is between you and the seller; no instant
+                        settlement is offered on your side.
+                      </p>
+                    }
                     <div class="form-grid">
                       <mat-form-field appearance="outline">
                         <mat-label>Quantity</mat-label>
@@ -313,8 +357,8 @@ interface BuyForm {
 
                       @if (buyForm.walletPreferenceMode === 'CUSTOM_ADDRESS') {
                         <mat-form-field appearance="outline">
-                          <mat-label>Custom wallet address</mat-label>
-                          <input matInput [(ngModel)]="buyForm.walletAddress" placeholder="0x…" style="font-family:'IBM Plex Mono',monospace;font-size:13px">
+                          <mat-label>Bound wallet (address book)</mat-label>
+                          <input matInput [(ngModel)]="buyForm.walletAddress" readonly placeholder="Pick a bound wallet from the address book" style="font-family:'IBM Plex Mono',monospace;font-size:13px">
                           <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
                                   (click)="pickWallet(a => buyForm.walletAddress = a)">
                             <mat-icon style="font-size:18px">contacts</mat-icon>
@@ -337,7 +381,7 @@ interface BuyForm {
               <mat-card class="action-card">
                 <mat-card-header>
                   <mat-card-title>Create sell listing</mat-card-title>
-                  <mat-card-subtitle>Publish inventory to the executable simulated venue and choose accepted payment options.</mat-card-subtitle>
+                  <mat-card-subtitle>Publish inventory to the simulated demonstration venue and choose the settlement currency and accepted payment options.</mat-card-subtitle>
                 </mat-card-header>
                 <mat-card-content>
                   @if (hasNonListableHoldings) {
@@ -375,7 +419,47 @@ interface BuyForm {
                       <mat-label>Price per unit</mat-label>
                       <input matInput type="number" min="0.0001" [(ngModel)]="sellForm.pricePerUnit">
                     </mat-form-field>
+
+                    <mat-form-field appearance="outline">
+                      <mat-label>Currency (ISO 4217)</mat-label>
+                      <input matInput maxlength="3" [ngModel]="sellForm.currency"
+                             (ngModelChange)="sellForm.currency = ($event ?? '').toUpperCase()"
+                             placeholder="e.g. EUR" [disabled]="sellUsesStablecoin">
+                      <mat-hint>
+                        {{ sellUsesStablecoin ? 'Taken from the selected payment rail.' : 'Leave empty to use the asset currency.' }}
+                      </mat-hint>
+                    </mat-form-field>
+
+                    @if (sellUsesStablecoin) {
+                      <mat-form-field appearance="outline">
+                        <mat-label>Stablecoin payment rail</mat-label>
+                        <mat-select [(ngModel)]="sellForm.paymentRailCode">
+                          @for (rail of stablecoinRails; track rail.code) {
+                            <mat-option [value]="rail.code">{{ rail.displayName }} ({{ rail.currency }})</mat-option>
+                          }
+                        </mat-select>
+                        @if (stablecoinRails.length === 0) {
+                          <mat-hint>No enabled stablecoin rail is available.</mat-hint>
+                        }
+                      </mat-form-field>
+                    }
+
+                    <mat-form-field appearance="outline" class="span-2">
+                      <mat-label>Counterparty entity ID (optional)</mat-label>
+                      <input matInput [(ngModel)]="sellForm.targetEntityId" placeholder="Leave empty for an open listing">
+                      <mat-hint>A bilateral listing is visible to and buyable by this company only.</mat-hint>
+                    </mat-form-field>
                   </div>
+
+                  @if (config?.demoInstantSettlementAvailable) {
+                    <mat-slide-toggle [(ngModel)]="sellForm.allowInstantSettlement">
+                      Allow instant settlement (demo only, no cash leg)
+                    </mat-slide-toggle>
+                    <p class="hint" role="note">
+                      When on, a buyer's order moves the register immediately without any payment. Use it only
+                      for demonstrations; it is unavailable in production.
+                    </p>
+                  }
 
                   <mat-slide-toggle [(ngModel)]="sellForm.useCompanyDefaultPaymentOption">
                     Use company default payment option
@@ -426,12 +510,18 @@ interface BuyForm {
                             <td>{{ listing.status }}</td>
                             <td>{{ listing.quantityAvailable | number:'1.0-4' }}</td>
                             <td>{{ listing.quantityTotal | number:'1.0-4' }}</td>
-                            <td>{{ listing.pricePerUnit | number:'1.2-4' }}</td>
+                            <td>
+                              {{ listing.pricePerUnit | number:'1.2-4' }}
+                              @if (listing.currency) { <span class="ccy">{{ listing.currency }}</span> }
+                              @else { <span class="ccy legacy">currency not recorded</span> }
+                            </td>
                             <td>
                               <div class="chip-row">
                                 @for (option of listing.allowedPaymentOptions; track option) {
-                                  <mat-chip>{{ paymentLabel(option) }}</mat-chip>
+                                  <mat-chip>{{ paymentLabel(option) }}{{ option === 'STABLECOIN' && listing.paymentRailCode ? ' (' + listing.paymentRailCode + ')' : '' }}</mat-chip>
                                 }
+                                @if (listing.allowInstantSettlement) { <mat-chip>Instant (demo)</mat-chip> }
+                                @if (listing.targetEntityId) { <mat-chip>Bilateral</mat-chip> }
                               </div>
                             </td>
                             <td>
@@ -485,12 +575,33 @@ interface BuyForm {
                             <td>{{ venueLabel(trade.venueCode) }}</td>
                             <td>{{ trade.executedQuantity | number:'1.0-4' }}</td>
                             <td>{{ trade.unitPrice | number:'1.2-4' }}</td>
-                            <td>{{ trade.totalPrice | number:'1.2-4' }}</td>
-                            <td>{{ paymentLabel(trade.paymentOption) }}</td>
                             <td>
-                              {{ trade.settlementStatus }}
-                              @if (trade.settlementStatus === 'FAILED' && trade.failureReason) {
+                              {{ trade.totalPrice | number:'1.2-4' }}
+                              @if (trade.currency) { <span class="ccy">{{ trade.currency }}</span> }
+                              @else { <span class="ccy legacy">currency not recorded</span> }
+                              @if (trade.totalPriceUnrounded !== null && trade.totalPriceUnrounded !== undefined && trade.totalPriceUnrounded !== trade.totalPrice) {
+                                <div class="dimmed small">rounded from {{ trade.totalPriceUnrounded }} ({{ trade.priceRoundingMode }})</div>
+                              }
+                            </td>
+                            <td>{{ paymentLabel(trade.paymentOption) }}{{ trade.paymentRailCode ? ' (' + trade.paymentRailCode + ')' : '' }}</td>
+                            <td>
+                              <span class="status-chip" [class]="'status-' + trade.settlementStatus.toLowerCase()"
+                                    [matTooltip]="statusExplanation(trade)">{{ statusLabel(trade.settlementStatus) }}</span>
+                              @if (trade.instantSettlement) {
+                                <div class="small sim-flag">SIMULATED, no cash leg</div>
+                              }
+                              @if (trade.relatedParty) {
+                                <div class="small dimmed" [matTooltip]="trade.relatedPartyReasons ?? ''">Related-party trade, excluded from reference price</div>
+                              }
+                              @if (trade.settlementStatus === 'PAYMENT_UNRESOLVED') {
+                                <div class="small dimmed">{{ statusExplanation(trade) }}</div>
+                                @if (trade.unresolvedReason) { <div class="small dimmed">{{ trade.unresolvedReason }}</div> }
+                              }
+                              @if ((trade.settlementStatus === 'FAILED' || trade.settlementStatus === 'CANCELLED') && trade.failureReason) {
                                 <mat-icon class="status-hint" [matTooltip]="trade.failureReason" inline="true">info</mat-icon>
+                              }
+                              @if (trade.side === 'BUY' && isCoolingDown(trade)) {
+                                <div class="small dimmed">You can reserve this listing again after {{ trade.buyerCooldownUntil | date:'medium' }}.</div>
                               }
                             </td>
                             <td class="mono">{{ trade.walletAddress }}</td>
@@ -498,8 +609,17 @@ interface BuyForm {
                               @if (trade.side === 'BUY' && trade.settlementStatus === 'PENDING') {
                                 <button type="button" mat-flat-button color="primary" (click)="openDeclarePaymentDialog(trade)">Declare payment</button>
                               }
-                              @if (trade.settlementStatus === 'PENDING') {
+                              @if (trade.side === 'BUY' && trade.settlementStatus === 'PENDING') {
                                 <button type="button" mat-stroked-button (click)="openCancelDialog(trade)">Cancel</button>
+                              }
+                              @if (trade.side === 'SELL' && trade.settlementStatus === 'PENDING') {
+                                <span class="dimmed small">Awaiting buyer payment…</span>
+                              }
+                              @if (trade.settlementStatus === 'AWAITING_SELLER_CONFIRMATION' || trade.settlementStatus === 'PAYMENT_UNRESOLVED') {
+                                <button type="button" mat-stroked-button (click)="openNotesDialog(trade)">
+                                  <mat-icon>forum</mat-icon>
+                                  Evidence notes
+                                </button>
                               }
                               @if (trade.side === 'SELL' && trade.settlementStatus === 'AWAITING_SELLER_CONFIRMATION') {
                                 <button type="button" mat-flat-button color="primary" (click)="confirmPayment(trade.id)"
@@ -552,9 +672,10 @@ interface BuyForm {
                     </mat-form-field>
                   </div>
 
-                  <mat-slide-toggle [(ngModel)]="settings.immediateSettlementEnabled">
-                    Immediate post-trade settlement
-                  </mat-slide-toggle>
+                  <p class="hint" role="note">
+                    Settlement is always confirmed by the seller after the buyer declares payment. A seller can
+                    offer the demo-only instant option per listing on the Sell tab where the platform allows it.
+                  </p>
 
                   <div class="wallet-defaults">
                     <div class="wallet-defaults-header">
@@ -581,7 +702,7 @@ interface BuyForm {
                           <mat-label>Target type</mat-label>
                           <mat-select [(ngModel)]="walletDefault.targetType">
                             <mat-option value="ENDPOINT">Endpoint</mat-option>
-                            <mat-option value="CUSTOM_ADDRESS">Custom address</mat-option>
+                            <mat-option value="CUSTOM_ADDRESS">Bound wallet (address book)</mat-option>
                           </mat-select>
                         </mat-form-field>
 
@@ -597,7 +718,7 @@ interface BuyForm {
                         } @else {
                           <mat-form-field appearance="outline" class="span-2">
                             <mat-label>Wallet address</mat-label>
-                            <input matInput [(ngModel)]="walletDefault.walletAddress" placeholder="0x…" style="font-family:'IBM Plex Mono',monospace;font-size:13px">
+                            <input matInput [(ngModel)]="walletDefault.walletAddress" readonly placeholder="Pick a bound wallet from the address book" style="font-family:'IBM Plex Mono',monospace;font-size:13px">
                             <button matSuffix mat-icon-button type="button" matTooltip="Pick from address book"
                                     (click)="pickWallet(a => walletDefault.walletAddress = a)">
                               <mat-icon style="font-size:18px">contacts</mat-icon>
@@ -647,7 +768,7 @@ interface BuyForm {
       <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
         <p class="dimmed small" style="margin:0">
           This records evidence of payment for the seller to independently confirm — it does not
-          settle the trade by itself. Total due: {{ activeTrade?.totalPrice | number:'1.2-4' }}.
+          settle the trade by itself. Total due: {{ activeTrade?.totalPrice | number:'1.2-4' }} {{ activeTrade?.currency ?? '(currency not recorded)' }}.
         </p>
         <mat-form-field appearance="outline">
           <mat-label>Payment reference</mat-label>
@@ -667,8 +788,9 @@ interface BuyForm {
       <h2 mat-dialog-title>Dispute Payment</h2>
       <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
         <p class="dimmed small" style="margin:0">
-          The trade will fail and the units return to your listing. The buyer's payment
-          reference was: {{ activeTrade?.paymentReference }}.
+          The trade moves to "payment unresolved": the units stay reserved and are not re-offered until a
+          registry operator resolves it (second approver required). Add evidence notes afterwards. The
+          buyer's payment reference was: {{ activeTrade?.paymentReference }}.
         </p>
         <mat-form-field appearance="outline">
           <mat-label>Reason</mat-label>
@@ -681,6 +803,34 @@ interface BuyForm {
         <button mat-raised-button color="warn" type="button" [disabled]="mutating || !disputeReasonInput.trim()" (click)="submitDisputePayment()">
           Dispute payment
         </button>
+      </mat-dialog-actions>
+    </ng-template>
+
+    <ng-template #notesDialogTpl>
+      <h2 mat-dialog-title>Evidence notes</h2>
+      <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+        <p class="dimmed small" style="margin:0">
+          Notes are visible to both parties and to the registry operator who resolves an unresolved payment.
+          They cannot be edited or deleted.
+        </p>
+        @if (notes.length === 0) {
+          <p class="dimmed small" style="margin:0">No notes yet.</p>
+        }
+        @for (note of notes; track note.id) {
+          <div class="note">
+            <div class="small dimmed">{{ note.actorRole === 'REGISTRY_ADMIN' ? 'Registry operator' : (note.actorEntityId === ownEntityId ? 'You' : 'Counterparty') }} · {{ note.createdAt | date:'medium' }}</div>
+            <div>{{ note.text }}</div>
+          </div>
+        }
+        <mat-form-field appearance="outline">
+          <mat-label>Add a note</mat-label>
+          <textarea matInput rows="3" maxlength="2000" [(ngModel)]="noteInput" placeholder="e.g. bank statement shows transfer on 2 March"></textarea>
+        </mat-form-field>
+        @if (dialogError) { <p class="error-text" role="alert">{{ dialogError }}</p> }
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button mat-stroked-button type="button" mat-dialog-close>Close</button>
+        <button mat-raised-button color="primary" type="button" [disabled]="mutating || !noteInput.trim()" (click)="submitNote()">Add note</button>
       </mat-dialog-actions>
     </ng-template>
 
@@ -702,6 +852,15 @@ interface BuyForm {
     </ng-template>
   `,
   styles: [`
+    .ccy { font-size: 11px; color: var(--rw-text-muted); margin-left: 4px; }
+    .ccy.legacy { font-style: italic; }
+    .demo-notice { margin-bottom: 16px; }
+    .sim-flag { color: var(--rw-text-danger); font-weight: 600; }
+    .note { border: 1px solid var(--rw-border); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+    .status-chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600;
+      border: 1px solid var(--rw-border); color: var(--rw-text-secondary); cursor: help; }
+    .status-payment_unresolved { border-color: var(--rw-accent); color: var(--rw-accent); }
+    .status-settled { color: var(--rw-text-primary); }
     .hint { margin: 0 0 12px; font-size: 13px; color: var(--rw-text-secondary); }
     .page-container { max-width: 1320px; margin: 0 auto; padding: 32px 24px; }
     .page-header { margin-bottom: 20px; }
@@ -762,16 +921,24 @@ export class TradingDeskComponent implements OnInit {
   private readonly endpointService = inject(EndpointService);
   private readonly snackBar = inject(MatSnackBar);
   private readonly dialog = inject(MatDialog);
+  private readonly auth = inject(AuthService);
+
+  readonly ownEntityId = this.auth.getEntityId();
 
   @ViewChild('declarePaymentDialogTpl') declarePaymentDialogTpl!: TemplateRef<unknown>;
   @ViewChild('disputeDialogTpl') disputeDialogTpl!: TemplateRef<unknown>;
   @ViewChild('cancelDialogTpl') cancelDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('notesDialogTpl') notesDialogTpl!: TemplateRef<unknown>;
 
   activeTrade: TradeExecution | null = null;
   paymentReferenceInput = '';
   disputeReasonInput = '';
   cancelReasonInput = '';
   dialogError = '';
+  notes: TradeNote[] = [];
+  noteInput = '';
+  config: TradeConfig | null = null;
+  stablecoinRails: CatalogPaymentRail[] = [];
 
   loading = true;
   tradingDisabled = false;
@@ -781,6 +948,13 @@ export class TradingDeskComponent implements OnInit {
   venues: TradingVenue[] = [];
   offers: TradingOffer[] = [];
   sellableHoldings: SellableHolding[] = [];
+
+  /** Stablecoin payment is offered on the listing being composed (explicitly or via the company default). */
+  get sellUsesStablecoin(): boolean {
+    return this.sellForm.useCompanyDefaultPaymentOption
+      ? this.settings.defaultPaymentOption === 'STABLECOIN'
+      : this.sellForm.allowedPaymentOptions.includes('STABLECOIN');
+  }
 
   get hasNonListableHoldings(): boolean {
     return this.sellableHoldings.some((h) => !h.listable);
@@ -812,6 +986,10 @@ export class TradingDeskComponent implements OnInit {
     pricePerUnit: null,
     useCompanyDefaultPaymentOption: true,
     allowedPaymentOptions: [],
+    allowInstantSettlement: false,
+    currency: '',
+    paymentRailCode: null,
+    targetEntityId: '',
   };
 
   buyForm: BuyForm = {
@@ -845,7 +1023,7 @@ export class TradingDeskComponent implements OnInit {
     { value: 'GLOBAL_DEFAULT', label: 'Company global default' },
     { value: 'ASSET_TYPE_DEFAULT', label: 'Company asset-type default' },
     { value: 'ENDPOINT', label: 'Select endpoint' },
-    { value: 'CUSTOM_ADDRESS', label: 'Custom address' },
+    { value: 'CUSTOM_ADDRESS', label: 'Bound wallet (address book)' },
   ];
 
   readonly tokenStandardOptions: TokenStandard[] = [
@@ -929,6 +1107,17 @@ export class TradingDeskComponent implements OnInit {
       this.snackBar.open('Select at least one accepted payment option.', 'OK', { duration: 3000 });
       return;
     }
+    const currency = this.sellForm.currency.trim().toUpperCase();
+    if (currency && !/^[A-Z]{3}$/.test(currency)) {
+      this.snackBar.open('Currency must be a three-letter ISO 4217 code, e.g. EUR.', 'OK', { duration: 3500 });
+      return;
+    }
+    if (this.sellUsesStablecoin && !this.sellForm.paymentRailCode) {
+      this.snackBar.open('Select the stablecoin payment rail.', 'OK', { duration: 3500 });
+      return;
+    }
+    const rail = this.sellUsesStablecoin ? this.sellForm.paymentRailCode : null;
+    const target = this.sellForm.targetEntityId.trim();
     this.mutating = true;
     this.tradingService.createListing({
       holderId: this.sellForm.holderId,
@@ -936,6 +1125,10 @@ export class TradingDeskComponent implements OnInit {
       pricePerUnit,
       useCompanyDefaultPaymentOption: this.sellForm.useCompanyDefaultPaymentOption,
       allowedPaymentOptions: this.sellForm.allowedPaymentOptions,
+      allowInstantSettlement: !!this.config?.demoInstantSettlementAvailable && this.sellForm.allowInstantSettlement,
+      currency: rail ? null : (currency || null),
+      paymentRailCode: rail,
+      targetEntityId: target || null,
     }).subscribe({
       next: () => {
         this.mutating = false;
@@ -946,6 +1139,10 @@ export class TradingDeskComponent implements OnInit {
           pricePerUnit: null,
           useCompanyDefaultPaymentOption: true,
           allowedPaymentOptions: [],
+          allowInstantSettlement: false,
+          currency: '',
+          paymentRailCode: null,
+          targetEntityId: '',
         };
         this.reload();
       },
@@ -1181,6 +1378,79 @@ export class TradingDeskComponent implements OnInit {
     });
   }
 
+  statusLabel(status: string): string {
+    switch (status) {
+      case 'PENDING': return 'Awaiting buyer payment';
+      case 'AWAITING_SELLER_CONFIRMATION': return 'Awaiting seller confirmation';
+      case 'PAYMENT_UNRESOLVED': return 'Payment unresolved';
+      case 'SETTLED': return 'Settled';
+      case 'FAILED': return 'Failed';
+      case 'CANCELLED': return 'Cancelled';
+      case 'REFUNDED': return 'Refunded';
+      default: return status;
+    }
+  }
+
+  statusExplanation(trade: TradeExecution): string {
+    switch (trade.settlementStatus) {
+      case 'PENDING':
+        return `The units are reserved. The buyer has ${this.config?.pendingTimeoutHours ?? 'a limited number of'} h to pay and declare the payment.`;
+      case 'AWAITING_SELLER_CONFIRMATION':
+        return 'The buyer declared a payment. The register changes only when the seller confirms receipt or disputes it.';
+      case 'PAYMENT_UNRESOLVED':
+        return trade.disputeReason
+          ? 'The seller disputed the declared payment. The units stay reserved until a registry operator resolves the trade with a second approver.'
+          : 'The trade could not be settled automatically while a payment may have been made. The units stay reserved until a registry operator resolves it with a second approver. Add evidence notes to help.';
+      case 'SETTLED':
+        return trade.instantSettlement ? 'Settled in demo mode: the register moved with no cash leg.' : 'Settled: the register was updated after the seller confirmed receipt.';
+      case 'FAILED':
+        return 'The trade did not go through. The units were released.';
+      case 'CANCELLED':
+        return 'Cancelled by the buyer before payment was declared.';
+      case 'REFUNDED':
+        return 'Reversed after settlement by a registry operator.';
+      default:
+        return trade.settlementStatus;
+    }
+  }
+
+  isCoolingDown(trade: TradeExecution): boolean {
+    return !!trade.buyerCooldownUntil && new Date(trade.buyerCooldownUntil).getTime() > Date.now();
+  }
+
+  openNotesDialog(trade: TradeExecution): void {
+    this.activeTrade = trade;
+    this.notes = [];
+    this.noteInput = '';
+    this.dialogError = '';
+    this.tradingService.listNotes(trade.id).subscribe({
+      next: (notes) => { this.notes = notes; this.cdr.markForCheck(); },
+      error: () => { this.dialogError = 'Notes could not be loaded.'; this.cdr.markForCheck(); },
+    });
+    this.dialog.open(this.notesDialogTpl, { width: '520px', maxWidth: '95vw' });
+  }
+
+  submitNote(): void {
+    const trade = this.activeTrade;
+    const text = this.noteInput.trim();
+    if (!trade || !text || this.mutating) return;
+    this.mutating = true;
+    this.dialogError = '';
+    this.tradingService.addNote(trade.id, text).subscribe({
+      next: (note) => {
+        this.mutating = false;
+        this.notes = [...this.notes, note];
+        this.noteInput = '';
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.mutating = false;
+        this.dialogError = err?.error?.message ?? 'Failed to add the note.';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
   paymentLabel(option: PaymentOption): string {
     return this.paymentOptions.find(candidate => candidate.value === option)?.label ?? option;
   }
@@ -1211,6 +1481,8 @@ export class TradingDeskComponent implements OnInit {
       history: safe(this.tradingService.listHistory(), this.history, 'Trade history'),
       settings: safe(this.tradingService.getSettings(), this.settings, 'Trader settings'),
       endpoints: safe(this.endpointService.listEndpoints(), this.walletEndpoints, 'Wallet endpoints'),
+      config: safe(this.tradingService.getConfig(), this.config, 'Trading configuration'),
+      rails: safe(this.tradingService.listPaymentRails(), this.stablecoinRails, 'Payment rails'),
     }).subscribe({
       next: (payload) => {
         this.venues = payload.venues;
@@ -1219,6 +1491,8 @@ export class TradingDeskComponent implements OnInit {
         this.companyListings = payload.companyListings;
         this.history = payload.history;
         this.settings = payload.settings;
+        this.config = payload.config;
+        this.stablecoinRails = (payload.rails ?? []).filter((rail) => rail.railType === 'STABLECOIN');
         this.walletEndpoints = payload.endpoints.filter(endpoint => endpoint.addressType === 'WALLET');
         this.loading = false;
         this.tradingDisabled = failures.some((failure) => failure.error?.status === 501);

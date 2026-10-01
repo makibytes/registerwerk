@@ -33,5 +33,24 @@ public record TradeExecutionResponse(
         Instant settledAt,
         String failureReason,
         String paymentReference,
-        Instant paymentDeclaredAt) {
+        Instant paymentDeclaredAt,
+        // Demo instant path: register moved with NO cash leg - "SIMULATED - no cash leg".
+        boolean instantSettlement,
+        // PAYMENT_UNRESOLVED: why, since when, and the seller's dispute reason (if disputed).
+        String disputeReason,
+        Instant unresolvedAt,
+        String unresolvedReason,
+        // Buyer may not re-reserve this listing before this instant (5A-06 cool-down); null if none.
+        Instant buyerCooldownUntil,
+        // Settlement currency; null on legacy trades ("currency not recorded").
+        String currency,
+        String paymentRailCode,
+        // Exact price*quantity before rounding and the stored rounding (null on legacy trades).
+        BigDecimal totalPriceUnrounded,
+        Short priceRoundingScale,
+        String priceRoundingMode,
+        // Buyer and seller are linked (shared beneficial owner / member / wallet) - permitted only
+        // with allow-related-party-trades and excluded from the reference price.
+        boolean relatedParty,
+        String relatedPartyReasons) {
 }

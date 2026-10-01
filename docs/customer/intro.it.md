@@ -93,7 +93,7 @@ Più precisamente, non è:
 
 - **Un servizio di valutazione.** Il registro annota valori nominali, non prezzi di mercato.
 - **Un custode delle tue chiavi.** La chiave privata del tuo wallet la tieni tu. Nessuno può recuperarla.
-- **Una sede di negoziazione.** Si collega a sedi di negoziazione; non gestisce un mercato.
+- **Una sede di negoziazione autorizzata.** Le proposte tra pari integrate sono un flusso dimostrativo del mercato secondario, non una sede autorizzata (MTF/OTF); in produzione sono disattivate salvo classificazione dell'operatore con parere legale.
 - **Un sistema di pagamento.** Supporta diversi canali di pagamento; il denaro si muove lì, non qui.
 - **Un garante.** Se un emittente è inadempiente, la piattaforma lo annota. Non risarcisce i titolari.
 

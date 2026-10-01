@@ -11,7 +11,7 @@ public class RepoLifecycleEvent {
     @Id @GeneratedValue(strategy=GenerationType.UUID) private UUID id;
     @Column(name="repo_trade_id", nullable=false) private UUID repoTradeId;
     @Enumerated(EnumType.STRING) @Column(name="event_type", nullable=false, length=40) private RepoTypes.LifecycleEventType eventType;
-    @Column(name="actor_entity_id", nullable=false) private UUID actorEntityId;
+    @Column(name="actor_entity_id") private UUID actorEntityId;
     @Column(name="actor_user_id") private UUID actorUserId;
     @Column(precision=38, scale=18) private BigDecimal amount;
     @Column(name="asset_id") private UUID assetId;

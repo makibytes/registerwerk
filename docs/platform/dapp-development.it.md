@@ -157,6 +157,29 @@ passaggio "Metodi di pagamento" della procedura guidata di pubblicazione) e copi
 viene convalidata all'invio **e di nuovo all'approvazione** — un canale disabilitato dall'operatore nel frattempo
 blocca l'approvazione della versione finché il manifest non viene aggiornato.
 
+!!! warning "I campi MiCAR sono dichiarazioni inserite dall'operatore"
+    Emittente, LEI, riferimento di autorizzazione, flag EMT, link al white paper e flag
+    «rimborsabile alla pari» di un canale stablecoin sono inseriti dall'operatore. Registerwerk
+    non li verifica rispetto a un registro. Catalogo e marketplace mostrano quindi uno stato
+    di attestazione: `OPERATOR_ATTESTED` (con la data) significa che un operatore ha
+    controllato i fatti presso una fonte esterna e che un secondo operatore lo ha approvato;
+    l'avviso recita «Attestato dall'operatore, non verificato in modo indipendente da
+    Registerwerk». `UNVERIFIED` significa che i dati sono dichiarazioni non controllate.
+    `railDisabledReason` spiega perché un canale è stato disattivato automaticamente.
+
+Controlli dell'operatore: creare, attivare, modificare e attestare un canale richiedono
+ciascuno step-up e un secondo approvatore; i nuovi canali partono disattivati; l'operatore
+che ha creato o modificato per ultimo un canale non può attestarlo; un canale stablecoin EMT
+non può essere attivato senza un'attestazione efficace. L'attestazione è legata a
+un'impronta del contenuto (codice, tipo, valuta, decimali, emittente, LEI, autorizzazione,
+flag EMT, white paper, flag alla pari e indirizzo del token per chain): qualsiasi modifica la
+invalida e un canale EMT attivo viene disattivato automaticamente
+(`MICAR_ATTESTATION_INVALIDATED`) finché non viene attestato di nuovo. Al salvataggio di un
+indirizzo di token il backend verifica che l'indirizzo contenga codice e che `decimals()`
+coincida con i decimali dichiarati (`registerwerk.payment.onchain-verify`, rifiuto in caso di
+errore RPC). Eventi di audit: `PAYMENT_RAIL_CREATED`, `_UPDATED`, `_ENABLED`, `_DISABLED`,
+`_MICAR_VERIFIED`, `_MICAR_VERIFICATION_CLEARED`, `_MICAR_ATTESTATION_INVALIDATED`.
+
 Si tratta di un'indicazione, non di una whitelist: la tua dApp può sempre implementare la propria logica di
 pagamento. Dichiarala come voce `custom` invece che come riferimento `rail`:
 

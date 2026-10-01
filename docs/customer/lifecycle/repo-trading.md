@@ -36,13 +36,15 @@ Use a **targeted RFQ** for a selected dealer group. Only those companies can dis
 
 ## 2. Compare private quotes
 
-Each invited dealer may keep one active quote and replace it until expiry. Dealers cannot see competitors' terms. The requester sees cash amount, annual rate, haircut, validity and message together, so the economic package—not only the headline rate—can be compared.
+Each invited dealer may keep one active quote and replace it until expiry. A replacement is a **new quote version**: the earlier version becomes `SUPERSEDED` and can no longer be accepted. Dealers cannot see competitors' terms. The requester sees cash amount, annual rate, haircut, validity and message together, so the economic package—not only the headline rate—can be compared.
 
-Accepting a quote rejects the alternatives and fixes a trade. For an ACT/360 quote, the system calculates:
+Accepting a quote rejects the alternatives and fixes a trade. The accept request carries the `termsHash` the server showed for that quote version; if the quote was replaced or changed in the meantime the accept is refused (409) and you review the current terms. The accepted terms are stored on the trade and never change afterwards. The system calculates:
 
 ```text
-repurchase amount = cash principal × (1 + annual rate × term days / 360)
+repurchase amount = cash principal + round(cash principal × annual rate × term days / (basis × 100))
 ```
+
+The day-count basis is 360 (ACT/360) by default and 365 for currencies that conventionally use ACT/365 (for example GBP); interest and amounts are rounded to the currency's minor unit.
 
 The UI expresses the annual rate as a percentage, so 3.25 means 3.25%, not 0.0325%.
 
@@ -65,10 +67,19 @@ The platform does not infer receipt from a typed transaction reference. Each **r
 
 ## 4. Manage the term
 
-- The cash lender can issue a time-bound **margin call**. The borrower records delivery with a transfer reference.
-- The borrower can request **collateral substitution**. The lender must explicitly approve before the trade's collateral terms change.
+- Every leg has a **payer** who declares it sent (with a reference) and a **receiver** who confirms or disputes it.
+- The cash lender can issue a **margin call** backed by a valuation reference and amount; the amount may not exceed the shortfall that valuation implies, and the borrower gets at least the configured cure period (default 24 hours). The borrower declares the top-up as delivered; **only the lender's confirmation clears the call**.
+- The borrower can request **collateral substitution** (a separate request record). If the lender approves, both legs must be confirmed (lender: replacement received; borrower: original returned) before the collateral changes. Substitution is impossible on closed, defaulted or disputed trades, and the replacement must pass the same maturity and holding checks.
+- **Default is a two-step process.** The creditor of an overdue obligation serves a *default notice*; after the grace period (default 24 hours) the default can be declared, but only if the obligation is still unmet and the counterparty has not declared performance. If the borrower paid and the lender confirmed, but the lender never returned the collateral, the *borrower* may declare the default (the lender is then the defaulting party). The lender cannot default a borrower who has paid.
+- Either party can open a **dispute**; the trade freezes (no default, close, margin call or substitution) until the operator records an outcome under a legal basis with a second approver. The operator does not decide the merits. Parties may add evidence notes at any time.
 - Every action is appended to the shared lifecycle with company, time, amount/reference and note.
-- Default can be declared only for an overdue margin obligation or overdue closing obligation; it is not a general-purpose status button.
+
+### Eligibility, holdings and collateral
+
+- Both companies must have **opted in** to the Repo Desk (company administrator), be a professional client or eligible counterparty, and pass the KYC/screening gate. The directory lists only opted-in, listed companies (name and LEI only); the collateral picker shows only securities you actually hold.
+- The cash borrower must hold the collateral units on the register and they must not be encumbered: units pledged in another open repo or listed/reserved in secondary trading cannot be pledged again, and pledged units cannot be listed or sold. This is an internal encumbrance; no register entry (Sperrvermerk) is written.
+- The repo must end **before** the maturity (or pending call/redemption) of the collateral, and the collateral asset cannot be redeemed while an open repo uses it. Corporate actions on the collateral during the term are recorded on the trade and both parties are notified; any manufactured payment is for the parties to settle under their agreement.
+- Both companies need a valid **LEI**. Each trade gets a UTI and exposes the SFTR fields Registerwerk holds (`GET /api/v1/repo-desk/trades/{id}/sftr-fields`). Registerwerk does not report under SFTR; the parties remain responsible. Settlement is bilateral and self-confirmed: there is no atomic delivery-versus-payment mechanism.
 
 These controls record the workflow. They do not replace the parties' master agreement, eligibility schedule, valuation agent, custody arrangement, dispute process or applicable close-out netting opinion.
 

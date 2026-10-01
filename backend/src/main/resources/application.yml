@@ -1,6 +1,12 @@
 spring:
   application:
     name: registerwerk
+  http:
+    clients:
+      # httpclient5 is on the classpath for webhook delivery only; keep every other auto-configured
+      # RestClient/RestTemplate on the JDK client so their behaviour does not change.
+      imperative:
+        factory: jdk
   threads:
     virtual:
       enabled: true
@@ -323,6 +329,10 @@ registerwerk:
       pin: ${REGISTERWERK_HSM_PIN:}
       signature-algorithm: ${REGISTERWERK_HSM_SIGNATURE_ALGORITHM:}
   contracts:
+    # EwpgRepoMarketFactory per chain: lending market registration requires factory.isMarket(market)
+    repo-market-factory:
+      ethereum-mainnet:  ${REPO_MARKET_FACTORY_ETH_MAINNET:}
+      ethereum-testnet:  ${REPO_MARKET_FACTORY_ETH_TESTNET:}
     # AssetTokenFactory address per chain identifier (populated after `forge script Deploy`)
     asset-token-factory:
       ethereum-mainnet:  ${ASSET_TOKEN_FACTORY_ETH_MAINNET:}
@@ -586,6 +596,10 @@ registerwerk:
       # Production must keep this true; tests/demo seeding may relax it.
       enforce: ${REGISTERWERK_INDEXER_COVERAGE_ENFORCE:true}
       max-staleness: ${REGISTERWERK_INDEXER_COVERAGE_MAX_STALENESS:PT2H}
+  payment:
+    # 5A-11: chain-bound payment rails are checked against the chain at save (address holds code,
+    # stablecoin decimals() equals the declared decimals); fails closed on RPC errors.
+    onchain-verify: ${REGISTERWERK_PAYMENT_ONCHAIN_VERIFY:true}
   lending:
     local-demo-backend-rpc-url: ${LENDING_LOCAL_DEMO_BACKEND_RPC_URL:http://anvil:8545}
     local-demo-public-rpc-url: ${LENDING_LOCAL_DEMO_PUBLIC_RPC_URL:http://localhost:48545}
@@ -594,6 +608,8 @@ registerwerk:
     # or endpoint/service access.
     enabled: ${REGISTERWERK_LENDING_ENABLED:false}
     release-approved: ${REGISTERWERK_LENDING_RELEASE_APPROVED:false}
+    # 5B-09: market registration requires the configured factory to vouch for the address. Tests only.
+    require-factory: ${REGISTERWERK_LENDING_REQUIRE_FACTORY:true}
     # Optional output of contracts/script/DeployLocalLendingDemo.s.sol. Only the demo seeder
     # reads it; production deployments leave it blank.
     local-demo-addresses-file: ${REGISTERWERK_LENDING_LOCAL_DEMO_ADDRESSES_FILE:}
@@ -623,12 +639,49 @@ registerwerk:
   repo-desk:
     enabled: ${REGISTERWERK_REPO_DESK_ENABLED:false}
     release-approved: ${REGISTERWERK_REPO_DESK_RELEASE_APPROVED:false}
+    # T5-09 interim: minimum margin cure period and default grace after notice
+    min-margin-cure-hours: ${REGISTERWERK_REPO_DESK_MIN_MARGIN_CURE_HOURS:24}
+    default-grace-hours: ${REGISTERWERK_REPO_DESK_DEFAULT_GRACE_HOURS:24}
+  # Phase 5 / K4: outbound webhook hardening (5D-08/5D-09). See webhook.internal.OutboundUrlPolicy.
+  webhook:
+    # Dev/local receivers only (http, any port, loopback/private targets). Refused at start-up when
+    # REGISTERWERK_PRODUCTION_MODE=true.
+    allow-insecure-urls: ${REGISTERWERK_WEBHOOK_ALLOW_INSECURE_URLS:false}
+    allowed-ports: 443,8443
+    connect-timeout-ms: 3000
+    response-timeout-ms: 5000
+    max-concurrency: 8
+    max-per-host: 2
+    sweep-batch-size: 100
+    lease-seconds: 120
+    max-attempts: 8
+    circuit-breaker-failures: 20
+    rotation-overlap-hours: 24
+    replay-tolerance-seconds: 300
   trading:
     enabled: ${REGISTERWERK_TRADING_ENABLED:true}
     # T3-09: list/settle chain-deployed assets on the simulated venue without an on-chain leg.
     # Keep false outside a demo: the holder sync would reset the seller to its on-chain balance
     # while the buyer's off-chain row stays, so the register would exceed the supply.
     offchain-settlement-on-deployed-assets: ${REGISTERWERK_TRADING_OFFCHAIN_SETTLEMENT_ON_DEPLOYED_ASSETS:false}
+    # 5A-01: DEMO ONLY. Lets a SIMULATED listing whose seller ticked "allow instant settlement" move the
+    # register inside the buyer's request with NO cash leg. Refused at start-up in production mode.
+    demo-instant-settlement: ${REGISTERWERK_TRADING_DEMO_INSTANT_SETTLEMENT:false}
+    # 5A-06: reservation economics (T5-04 interim). Open reservations = PENDING + awaiting seller + unresolved.
+    max-open-reservations-per-buyer: ${REGISTERWERK_TRADING_MAX_OPEN_RESERVATIONS_PER_BUYER:3}
+    reservation-cooldown-hours: ${REGISTERWERK_TRADING_RESERVATION_COOLDOWN_HOURS:24}
+    # 5A-03: PAYMENT_UNRESOLVED trades older than this raise the aged-unresolved gauge / hourly alert log.
+    unresolved-alert-hours: ${REGISTERWERK_TRADING_UNRESOLVED_ALERT_HOURS:24}
+    # 5C-06 (parked T5-06): DEMO_ONLY (default; peer listings refused in production mode) | BILATERAL_ONLY
+    # (listings addressed to one named counterparty) | LICENSED_VENUE. Non-demo values need a legal-opinion-ref.
+    venue-classification: ${REGISTERWERK_TRADING_VENUE_CLASSIFICATION:DEMO_ONLY}
+    legal-opinion-ref: ${REGISTERWERK_TRADING_LEGAL_OPINION_REF:}
+    # 5A-06 (T5-04): related parties (shared UBO / member / wallet) may not trade unless this is true.
+    allow-related-party-trades: ${REGISTERWERK_TRADING_ALLOW_RELATED_PARTY_TRADES:false}
+    # 5A-06 (T5-04): price collar vs the last unrelated trade price in basis points; 0 = off.
+    max-price-deviation-bps: ${REGISTERWERK_TRADING_MAX_PRICE_DEVIATION_BPS:0}
+    # 5A-02 (T5-03): ISO 4217 currencies accepted for SEPA / CBMT / Pontes listings.
+    fiat-currencies: ${REGISTERWERK_TRADING_FIAT_CURRENCIES:EUR}
     venues:
       simulated:
         enabled: ${REGISTERWERK_TRADING_VENUE_SIMULATED_ENABLED:true}

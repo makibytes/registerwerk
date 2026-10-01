@@ -9,6 +9,11 @@ import {
   Jurisdiction,
   JurisdictionRequirement,
 } from '../models';
+import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
+
+/** Fixed customer-facing category of a KYC rejection (the customer never sees the internal reason). */
+export type KycRejectionCategory =
+  | 'INFORMATION_INCOMPLETE' | 'DOCUMENTS_UNREADABLE' | 'INFORMATION_INCONSISTENT' | 'CONTACT_SUPPORT';
 
 @Injectable({ providedIn: 'root' })
 export class KycService {
@@ -44,12 +49,26 @@ export class KycService {
     return this.http.delete<void>(`${this.base}/${entityId}/kyc/documents/${docId}`);
   }
 
-  approveKyc(entityId: string, expiryDate: string): Observable<unknown> {
-    return this.http.post(`${this.base}/${entityId}/kyc/approve`, { expiryDate });
+  /** Needs step-up and a second approver (`KYC_APPROVE`). */
+  approveKyc(entityId: string, expiryDate: string, tokens?: DualControlTokens): Observable<unknown> {
+    return this.http.post(
+      `${this.base}/${entityId}/kyc/approve`, { expiryDate }, tokens ? { headers: dualControlHeaders(tokens) } : {},
+    );
   }
 
-  rejectKyc(entityId: string, reason: string): Observable<unknown> {
-    return this.http.post(`${this.base}/${entityId}/kyc/reject`, { reason });
+  /**
+   * Rejects the entity's KYC. `reason` is the INTERNAL reason (audit trail and operator UI only, never sent
+   * to the customer); `customerReasonCode` is the fixed category the customer sees. Needs step-up and a
+   * second approver (`KYC_REJECT`); pass the tokens from `StepUpDialogComponent`.
+   */
+  rejectKyc(
+    entityId: string, reason: string, customerReasonCode: KycRejectionCategory, tokens?: DualControlTokens
+  ): Observable<unknown> {
+    return this.http.post(
+      `${this.base}/${entityId}/kyc/reject`,
+      { reason, customerReasonCode },
+      tokens ? { headers: dualControlHeaders(tokens) } : {},
+    );
   }
 
   // ── Per-jurisdiction endpoints ─────────────────────────────────────────────
@@ -58,21 +77,29 @@ export class KycService {
     return this.http.get<KycJurisdictionApproval[]>(`${this.base}/${entityId}/kyc/jurisdictions`);
   }
 
+  /** Needs step-up and a second approver (`KYC_JURISDICTION_APPROVE`). */
   approveJurisdiction(
-    entityId: string, jurisdiction: Jurisdiction, expiresAt?: string
+    entityId: string, jurisdiction: Jurisdiction, expiresAt?: string, tokens?: DualControlTokens
   ): Observable<KycJurisdictionApproval> {
     return this.http.post<KycJurisdictionApproval>(
       `${this.base}/${entityId}/kyc/jurisdictions/${jurisdiction}/approve`,
-      expiresAt ? { expiresAt } : {}
+      expiresAt ? { expiresAt } : {},
+      tokens ? { headers: dualControlHeaders(tokens) } : {},
     );
   }
 
+  /**
+   * Needs step-up and a second approver (`KYC_JURISDICTION_REJECT`). Note: the backend stores `reason` as
+   * the jurisdiction's rejection reason, which the customer's KYC status page displays.
+   */
   rejectJurisdiction(
-    entityId: string, jurisdiction: Jurisdiction, reason: string
+    entityId: string, jurisdiction: Jurisdiction, reason: string,
+    customerReasonCode?: KycRejectionCategory, tokens?: DualControlTokens
   ): Observable<KycJurisdictionApproval> {
     return this.http.post<KycJurisdictionApproval>(
       `${this.base}/${entityId}/kyc/jurisdictions/${jurisdiction}/reject`,
-      { reason }
+      customerReasonCode ? { reason, customerReasonCode } : { reason },
+      tokens ? { headers: dualControlHeaders(tokens) } : {},
     );
   }
 

@@ -13,4 +13,6 @@ public interface WebhookSubscriptionRepository extends JpaRepository<WebhookSubs
     List<WebhookSubscription> findByEntityIdAndEnabledTrue(UUID entityId);
 
     Optional<WebhookSubscription> findByIdAndEntityId(UUID id, UUID entityId);
+
+    List<WebhookSubscription> findByEnabledTrue();
 }

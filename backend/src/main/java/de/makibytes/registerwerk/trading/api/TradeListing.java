@@ -83,6 +83,33 @@ public class TradeListing {
     @Column(name = "payment_option", nullable = false, length = 30)
     private Set<PaymentOption> allowedPaymentOptions = new LinkedHashSet<>();
 
+    /** Seller pre-authorisation for the DEMO instant path (5A-01): the register moves in the
+     *  buyer's request with no cash leg. Honoured only while
+     *  {@code registerwerk.trading.demo-instant-settlement} is on. Replaces the buyer-owned
+     *  company setting, which gave the wrong party the say over the seller's register. */
+    @Column(name = "allow_instant_settlement", nullable = false)
+    private boolean allowInstantSettlement;
+
+    /** Settlement currency of {@code pricePerUnit} (5A-02); NULL on legacy rows = "currency not recorded". */
+    @Column(length = 10)
+    private String currency;
+
+    /** {@code payment_rail.code} for a STABLECOIN listing (the rail fixes the currency). */
+    @Column(name = "payment_rail_code", length = 40)
+    private String paymentRailCode;
+
+    /** Bilateral / targeted listing (5C-06 interim): only this entity may buy. NULL = open listing. */
+    @Column(name = "target_entity_id")
+    private UUID targetEntityId;
+
+    /** User who placed the order (RTS 22-style order record). */
+    @Column(name = "created_by_actor_id")
+    private UUID createdByActorId;
+
+    /** {@code registerwerk.trading.venue-classification} at the time the listing was created. */
+    @Column(name = "venue_classification", length = 20)
+    private String venueClassification;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -95,8 +122,56 @@ public class TradeListing {
         this.updatedAt = Instant.now();
     }
 
+    public String getCurrency() {
+        return currency;
+    }
+
+    public void setCurrency(String currency) {
+        this.currency = currency;
+    }
+
+    public String getPaymentRailCode() {
+        return paymentRailCode;
+    }
+
+    public void setPaymentRailCode(String paymentRailCode) {
+        this.paymentRailCode = paymentRailCode;
+    }
+
+    public UUID getTargetEntityId() {
+        return targetEntityId;
+    }
+
+    public void setTargetEntityId(UUID targetEntityId) {
+        this.targetEntityId = targetEntityId;
+    }
+
+    public UUID getCreatedByActorId() {
+        return createdByActorId;
+    }
+
+    public void setCreatedByActorId(UUID createdByActorId) {
+        this.createdByActorId = createdByActorId;
+    }
+
+    public String getVenueClassification() {
+        return venueClassification;
+    }
+
+    public void setVenueClassification(String venueClassification) {
+        this.venueClassification = venueClassification;
+    }
+
     public UUID getId() {
         return id;
+    }
+
+    public boolean isAllowInstantSettlement() {
+        return allowInstantSettlement;
+    }
+
+    public void setAllowInstantSettlement(boolean allowInstantSettlement) {
+        this.allowInstantSettlement = allowInstantSettlement;
     }
 
     public TradingVenueCode getVenueCode() {

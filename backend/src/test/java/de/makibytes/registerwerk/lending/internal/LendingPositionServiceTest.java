@@ -321,10 +321,11 @@ class LendingPositionServiceTest {
     }
 
     @Test
-    @DisplayName("reads zero surplus on a market that predates surplusOf")
+    @DisplayName("reads zero surplus on a market probed at registration as predating surplusOf")
     void legacyMarketWithoutSurplusGetterReadsZero() {
         when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
         LendingMarket market = activeMarket();
+        market.setSurplusSupported(false);
         when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
         when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
         when(positionRepository.findByMarketIdAndWalletAddressIgnoreCase(market.getId(), walletAddress))
@@ -333,13 +334,40 @@ class LendingPositionServiceTest {
                 .thenReturn(BigInteger.valueOf(100));
         when(onchainReader.debtOf("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
                 .thenReturn(BigInteger.valueOf(1_000_000L));
-        when(onchainReader.liquidationSurplus("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
-                .thenThrow(new IllegalStateException("Call to surplusOf reverted"));
 
         var positions = service.refreshAndListMyPositions(appUserId);
 
         assertThat(positions).hasSize(1);
         assertThat(positions.get(0).getLiquidationSurplus()).isZero();
+        assertThat(positions.get(0).isSyncStale()).isFalse();
+    }
+
+    @Test
+    @DisplayName("5B-11: a failed surplus read keeps the previous surplus and marks the row stale, never zero")
+    void failedSurplusReadKeepsPreviousValueAndMarksStale() {
+        when(memberWalletRepository.findActiveByLegalEntityId(appUserId)).thenReturn(List.of(activeWallet()));
+        LendingMarket market = activeMarket();
+        when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE)).thenReturn(List.of(market));
+        when(marketService.resolveChainIdentifier(chainConfigId)).thenReturn("ETHEREUM_SEPOLIA");
+        LendingPosition existing = new LendingPosition();
+        existing.setMarketId(market.getId());
+        existing.setWalletAddress(walletAddress);
+        existing.setLiquidationSurplus(BigInteger.valueOf(5_000_000L));
+        existing.setStatus(LendingPositionStatus.CLOSED);
+        when(positionRepository.findByMarketIdAndWalletAddressIgnoreCase(market.getId(), walletAddress))
+                .thenReturn(Optional.of(existing));
+        when(onchainReader.positionCollateralAmount("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
+                .thenReturn(BigInteger.ZERO);
+        when(onchainReader.debtOf("ETHEREUM_SEPOLIA", marketAddress, walletAddress)).thenReturn(BigInteger.ZERO);
+        when(onchainReader.liquidationSurplus("ETHEREUM_SEPOLIA", marketAddress, walletAddress))
+                .thenThrow(new IllegalStateException("Failed to call surplusOf: timeout"));
+
+        var positions = service.refreshAndListMyPositions(appUserId);
+
+        assertThat(positions).hasSize(1);
+        assertThat(positions.get(0).getLiquidationSurplus()).isEqualTo(BigInteger.valueOf(5_000_000L));
+        assertThat(positions.get(0).isSyncStale()).isTrue();
+        assertThat(positions.get(0).getLastSyncError()).contains("surplus");
     }
 
     @Test

@@ -28,8 +28,12 @@
             Your KYC (Know Your Customer) verification could not be approved by the
             Registerwerk compliance team.
         </p>
-        <div class="reason-box" th:if="${reason}">
-            <strong>Reason:</strong> <span th:text="${reason}">Reason text</span>
+        <!-- Only the fixed customer-facing category is shown, never the reviewer's internal notes. -->
+        <div class="reason-box" th:if="${reasonCode}" th:switch="${reasonCode}">
+            <span th:case="'INFORMATION_INCOMPLETE'">Some of the information you provided is incomplete.</span>
+            <span th:case="'DOCUMENTS_UNREADABLE'">One or more of the documents you provided could not be read.</span>
+            <span th:case="'INFORMATION_INCONSISTENT'">Some of the information you provided is inconsistent.</span>
+            <span th:case="*">Please contact support for more information.</span>
         </div>
         <p>Please review and resubmit your documentation, or contact support if you believe this was made in error.</p>
         <p>Kind regards,<br/>The Registerwerk Compliance Team</p>

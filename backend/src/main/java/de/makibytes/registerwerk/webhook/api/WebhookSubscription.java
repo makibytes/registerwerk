@@ -34,10 +34,31 @@ public class WebhookSubscription {
     @Column(nullable = false, length = 2048)
     private String url;
 
-    /** HMAC-SHA256 signing secret — generated server-side, shown to the caller once at
-     *  creation, never re-displayed afterward (see the controller's create response). */
-    @Column(nullable = false, length = 128)
+    /** HMAC-SHA256 signing secret, stored as {@code enc:v1:<b64>} (AES-256-GCM under a KEK-wrapped
+     *  data key, AAD = subscription id). Generated server-side; the plaintext is returned once, in
+     *  the create / rotate-secret response, and never re-displayed. Rows from before V28 may still
+     *  hold legacy plaintext until the startup maintenance re-encrypts them. */
+    @Column(nullable = false)
     private String secret;
+
+    /** Previous secret (encrypted the same way), still accepted for signing during the rotation
+     *  overlap window; see {@code registerwerk.webhook.rotation-overlap-hours}. */
+    @Column(name = "secret_previous_enc")
+    private String secretPreviousEnc;
+
+    @Column(name = "secret_rotated_at")
+    private Instant secretRotatedAt;
+
+    @Column(name = "key_version", nullable = false)
+    private int keyVersion = 1;
+
+    /** Why the subscription was disabled by the platform (URL_POLICY, CIRCUIT_BREAKER); null if
+     *  enabled or disabled by its owner. */
+    @Column(name = "disabled_reason", length = 40)
+    private String disabledReason;
+
+    @Column(name = "consecutive_failures", nullable = false)
+    private int consecutiveFailures = 0;
 
     @Column(name = "event_types", nullable = false, length = 1000)
     private String eventTypesRaw = "";
@@ -61,6 +82,21 @@ public class WebhookSubscription {
 
     public String getSecret() { return secret; }
     public void setSecret(String secret) { this.secret = secret; }
+
+    public String getSecretPreviousEnc() { return secretPreviousEnc; }
+    public void setSecretPreviousEnc(String secretPreviousEnc) { this.secretPreviousEnc = secretPreviousEnc; }
+
+    public Instant getSecretRotatedAt() { return secretRotatedAt; }
+    public void setSecretRotatedAt(Instant secretRotatedAt) { this.secretRotatedAt = secretRotatedAt; }
+
+    public int getKeyVersion() { return keyVersion; }
+    public void setKeyVersion(int keyVersion) { this.keyVersion = keyVersion; }
+
+    public String getDisabledReason() { return disabledReason; }
+    public void setDisabledReason(String disabledReason) { this.disabledReason = disabledReason; }
+
+    public int getConsecutiveFailures() { return consecutiveFailures; }
+    public void setConsecutiveFailures(int consecutiveFailures) { this.consecutiveFailures = consecutiveFailures; }
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

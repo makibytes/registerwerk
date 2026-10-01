@@ -588,7 +588,7 @@ export type TradingOrderType = 'MARKET' | 'LIMIT' | 'IOC' | 'FOK';
 
 export type ListingStatus = 'OPEN' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELLED';
 
-export type SettlementStatus = 'PENDING' | 'AWAITING_SELLER_CONFIRMATION' | 'SETTLED' | 'FAILED' | 'CANCELLED' | 'REFUNDED';
+export type SettlementStatus = 'PENDING' | 'AWAITING_SELLER_CONFIRMATION' | 'PAYMENT_UNRESOLVED' | 'SETTLED' | 'FAILED' | 'CANCELLED' | 'REFUNDED';
 
 export type WalletPreferenceMode = 'GLOBAL_DEFAULT' | 'ASSET_TYPE_DEFAULT' | 'ENDPOINT' | 'CUSTOM_ADDRESS';
 
@@ -652,6 +652,15 @@ export interface TradeListing {
   pricePerUnit: number;
   allowedPaymentOptions: PaymentOption[];
   createdAt: string;
+  lastTradePrice?: number | null;
+  /** Seller opted in to the demo instant path (only ever true while the demo property is on). */
+  allowInstantSettlement?: boolean;
+  /** ISO 4217 settlement currency; null on legacy listings ("currency not recorded"). */
+  currency?: string | null;
+  paymentRailCode?: string | null;
+  /** Bilateral listing: the only entity that may buy; null = open listing. */
+  targetEntityId?: string | null;
+  lastTradePriceIndicative?: boolean;
 }
 
 export interface TradingOffer {
@@ -670,6 +679,37 @@ export interface TradingOffer {
   allowedPaymentOptions: PaymentOption[];
   supportedOrderTypes: TradingOrderType[];
   createdAt: string;
+  lastTradePrice?: number | null;
+  currency?: string | null;
+  paymentRailCode?: string | null;
+  /** Bilateral listing addressed to the viewer. */
+  targeted?: boolean;
+}
+
+/** Tenant-visible trading switches (`GET /trading/config`). */
+export interface TradeConfig {
+  demoInstantSettlementAvailable: boolean;
+  maxOpenReservationsPerBuyer: number;
+  reservationCooldownHours: number;
+  pendingTimeoutHours: number;
+}
+
+export interface TradeNote {
+  id: string;
+  actorRole: string;
+  actorEntityId: string | null;
+  text: string;
+  createdAt: string;
+}
+
+/** Enabled payment rail from `GET /payment-rails/catalog` (subset used by the trading desk). */
+export interface CatalogPaymentRail {
+  id: string;
+  code: string;
+  displayName: string;
+  railType: string;
+  currency: string;
+  decimals: number | null;
 }
 
 export interface TradeExecution {
@@ -698,6 +738,20 @@ export interface TradeExecution {
   failureReason: string | null;
   paymentReference: string | null;
   paymentDeclaredAt: string | null;
+  /** Demo instant path: the register moved with NO cash leg. */
+  instantSettlement?: boolean;
+  disputeReason?: string | null;
+  unresolvedAt?: string | null;
+  unresolvedReason?: string | null;
+  buyerCooldownUntil?: string | null;
+  /** ISO 4217; null on legacy trades ("currency not recorded"). */
+  currency?: string | null;
+  paymentRailCode?: string | null;
+  totalPriceUnrounded?: number | null;
+  priceRoundingScale?: number | null;
+  priceRoundingMode?: string | null;
+  relatedParty?: boolean;
+  relatedPartyReasons?: string | null;
 }
 
 // ─── Page / Query Params ──────────────────────────────────────────────────────
@@ -907,6 +961,14 @@ export interface PaymentMethodView {
   whitePaperUrl: string | null;
   redemptionAtPar: boolean | null;
   railEnabled: boolean;
+  /** Operator-entered claim, see `attestationStatus`. */
+  micarAuthorization?: string | null;
+  /** OPERATOR_ATTESTED = effective attestation bound to the current token/issuer; UNVERIFIED = claims only. */
+  attestationStatus?: 'OPERATOR_ATTESTED' | 'UNVERIFIED' | 'NOT_APPLICABLE';
+  micarVerifiedAt?: string | null;
+  /** Why a disabled rail is off, e.g. MICAR_ATTESTATION_INVALIDATED or MICAR_ATTESTATION_MISSING. */
+  railDisabledReason?: string | null;
+  attestationNotice?: string | null;
   customName: string | null;
   customDescription: string | null;
   note: string | null;
@@ -975,6 +1037,14 @@ export interface LendingMarket {
   operatorOrg: string | null;
   /** The market's fixed reserve recipient; null for a legacy market. */
   treasury: string | null;
+  /**
+   * Why `status` reads PAUSED although the market is registered ACTIVE. Hide borrowing when set.
+   */
+  pauseReason?: 'COLLATERAL_SHORTFALL' | 'BINDING_UNVERIFIED' | 'BORROW_PAUSED_ONCHAIN' | 'CHAIN_READ_FAILED' | string | null;
+  /** False when re-verification found the factory / collateral / loan-token binding broken. */
+  bindingVerified?: boolean;
+  bindingFailure?: string | null;
+  collateralShortfall?: boolean;
 }
 
 export interface LendingQuote {
@@ -1002,6 +1072,12 @@ export interface LendingPosition {
   liquidationSurplus: string;
   status: LendingPositionStatus;
   lastSyncedAt: string;
+  /** The last refresh could not read the chain: values are the previous ones and may be out of date. */
+  stale?: boolean;
+  /** Operator diagnostic only. */
+  lastSyncError?: string | null;
+  /** The market's collateral balance is below its recorded total (forced move not yet reconciled). */
+  collateralUnverified?: boolean;
 }
 
 export interface LendingSupplyPosition {
@@ -1016,16 +1092,24 @@ export interface LendingSupplyPosition {
 export type RepoRfqSide = 'BORROW_CASH' | 'LEND_CASH';
 export type RepoRfqVisibility = 'TARGETED' | 'BROADCAST';
 export type RepoRfqStatus = 'OPEN' | 'MATCHED' | 'CANCELLED' | 'EXPIRED';
-export type RepoQuoteStatus = 'ACTIVE' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED';
-export type RepoTradeStatus = 'PENDING_OPEN_SETTLEMENT' | 'OPEN' | 'MARGIN_CALL' | 'PENDING_CLOSE' | 'CLOSED' | 'DEFAULTED' | 'CANCELLED';
+export type RepoQuoteStatus = 'ACTIVE' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED' | 'SUPERSEDED';
+export type RepoTradeStatus = 'PENDING_OPEN_SETTLEMENT' | 'OPEN' | 'MARGIN_CALL' | 'PENDING_CLOSE' | 'DISPUTED' | 'CLOSED' | 'DEFAULTED' | 'CANCELLED';
+export type RepoDefaultGround = 'MARGIN_NOT_MET' | 'REPURCHASE_UNPAID' | 'COLLATERAL_RETURN_FAILURE';
+export type RepoSubstitutionStatus = 'PENDING' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED';
 export type RepoSettlementMethod = 'DVP' | 'FOP';
 
 export interface RepoCounterparty { id: string; name: string; lei: string | null; }
-export interface RepoCollateral { id: string; name: string; isin: string | null; assetNumber: string; }
+export interface RepoCollateral {
+  id: string; name: string; isin: string | null; assetNumber: string;
+  heldQuantity: number; availableQuantity: number; maturityDate: string | null;
+}
+export interface RepoParticipation {
+  participating: boolean; listed: boolean; optedInAt: string | null; eligibilityIssues: string[];
+}
 export interface RepoQuote {
   id: string; quotingEntityId: string; quotingEntityName: string; cashAmount: number;
   repoRate: number; haircutBps: number; validUntil: string; status: RepoQuoteStatus;
-  message: string | null; createdAt: string;
+  message: string | null; createdAt: string; version: number; termsHash: string;
 }
 export interface RepoRfq {
   id: string; side: RepoRfqSide; visibility: RepoRfqVisibility; status: RepoRfqStatus;
@@ -1038,7 +1122,7 @@ export interface RepoRfq {
   quotes: RepoQuote[]; createdAt: string; updatedAt: string;
 }
 export interface RepoLifecycleEvent {
-  id: string; type: string; actorEntityId: string; actorName: string; amount: number | null;
+  id: string; type: string; actorEntityId: string | null; actorName: string | null; amount: number | null;
   assetId: string | null; quantity: number | null; reference: string | null;
   note: string | null; createdAt: string;
 }
@@ -1053,6 +1137,28 @@ export interface RepoTrade {
   closeCollateralConfirmed: boolean; marginCallAmount: number | null; marginCallDueAt: string | null;
   pendingSubstitutionAssetId: string | null; pendingSubstitutionQuantity: number | null;
   borrower: boolean; events: RepoLifecycleEvent[]; createdAt: string; updatedAt: string;
+  termsHash: string; acceptedQuoteVersion: number | null; dayCountBasis: number; uti: string | null;
+  venue: string | null; collateralReuseConsent: boolean;
+  openCashDeclaredAt: string | null; openCollateralDeclaredAt: string | null;
+  closeCashDeclaredAt: string | null; closeCollateralDeclaredAt: string | null;
+  marginValuationReference: string | null; marginValuationAmount: number | null;
+  marginHaircutBps: number | null; marginDeliveredAt: string | null;
+  defaultNoticeAt: string | null; defaultNoticeGround: RepoDefaultGround | null;
+  defaultGround: RepoDefaultGround | null; defaultingPartyEntityId: string | null;
+  disputeReason: string | null; preDisputeStatus: RepoTradeStatus | null; disputedAt: string | null;
+  substitutions: RepoSubstitution[];
+}
+export interface RepoSubstitution {
+  id: string; assetId: string; quantity: number; status: RepoSubstitutionStatus; requestedBy: string;
+  requestedAt: string | null; decidedAt: string | null; replacementReceivedAt: string | null;
+  originalReturnedAt: string | null; completedAt: string | null; note: string | null;
+}
+export interface RepoSftrFields {
+  uti: string | null; venue: string | null; lenderLei: string | null; borrowerLei: string | null; roles: string;
+  currency: string; principalAmount: number; repoRatePercent: number; dayCountBasis: number;
+  startDate: string; maturityDate: string; repurchaseAmount: number; collateralIsin: string | null;
+  collateralQuantity: number; haircutBps: number; collateralReuseConsent: boolean; termsHash: string;
+  status: RepoTradeStatus; notice: string;
 }
 
 // ─── Webhooks ───────────────────────────────────────────────────────────────
@@ -1070,18 +1176,28 @@ export interface WebhookSubscription {
   eventTypes: WebhookEventType[];
   enabled: boolean;
   createdAt: string;
-  /** Only populated in the response to the create call. */
+  /** Set when the platform (not the owner) disabled it: URL_POLICY or CIRCUIT_BREAKER. */
+  disabledReason?: 'URL_POLICY' | 'CIRCUIT_BREAKER' | string | null;
+  secretRotatedAt?: string | null;
+  /** Only populated in the response to the create / rotate-secret call, never shown again. */
   secret: string | null;
 }
 
 export type WebhookDeliveryStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
+/** Coarse by design: no HTTP status code or error text is exposed. */
+export type WebhookDeliveryOutcome = 'OK' | 'RECEIVER_ERROR' | 'UNREACHABLE' | 'BLOCKED';
 
 export interface WebhookDelivery {
+  /** The delivery id sent in `X-Registerwerk-Delivery`. */
   id: string;
+  /** Shared by all subscribers of the same event (`X-Registerwerk-Event-Id`); dedupe on it. */
+  eventId: string;
   eventType: WebhookEventType;
   status: WebhookDeliveryStatus;
-  responseCode: number | null;
+  outcome: WebhookDeliveryOutcome | null;
   attemptCount: number;
   lastAttemptedAt: string | null;
+  /** When the next retry is due; null once delivered or given up. */
+  nextAttemptAt: string | null;
   createdAt: string;
 }

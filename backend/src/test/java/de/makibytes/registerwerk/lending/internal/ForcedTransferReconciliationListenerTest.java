@@ -103,4 +103,41 @@ class ForcedTransferReconciliationListenerTest {
         verify(marketRepository, never()).findByMarketAddressIgnoreCase(any());
         verify(eventPublisher, never()).publishEvent(any());
     }
+
+    @Test
+    @DisplayName("5A-10: ERC-3643 force burn (function name 'burn') from the market publishes")
+    void publishesForErc3643Burn() {
+        UUID marketId = UUID.randomUUID();
+        when(marketRepository.findByMarketAddressIgnoreCase(MARKET_ADDRESS)).thenReturn(Optional.of(market(marketId)));
+
+        listener.onTokenAdminAction(new TokenAdminActionEvent(UUID.randomUUID(), "burn", UUID.randomUUID(),
+                "REGISTRY_ADMIN", Map.of("from", MARKET_ADDRESS, "amount", "42", "legalBasis", "court order")));
+
+        verify(eventPublisher).publishEvent(any(LendingCollateralReconciliationNeededEvent.class));
+    }
+
+    @Test
+    @DisplayName("5A-10: batchForcedTransfer / batchBurn read every element of 'froms'; one event per market")
+    void publishesForBatchOperationsWithListValuedFroms() {
+        UUID marketId = UUID.randomUUID();
+        when(marketRepository.findByMarketAddressIgnoreCase(MARKET_ADDRESS)).thenReturn(Optional.of(market(marketId)));
+        when(marketRepository.findByMarketAddressIgnoreCase("0xother")).thenReturn(Optional.empty());
+
+        listener.onTokenAdminAction(new TokenAdminActionEvent(UUID.randomUUID(), "batchForcedTransfer",
+                UUID.randomUUID(), "REGISTRY_ADMIN",
+                Map.of("count", 2, "froms", java.util.List.of("0xother", MARKET_ADDRESS), "tos", java.util.List.of("0x1", "0x2"))));
+        listener.onTokenAdminAction(new TokenAdminActionEvent(UUID.randomUUID(), "batchBurn",
+                UUID.randomUUID(), "REGISTRY_ADMIN", Map.of("froms", java.util.List.of(MARKET_ADDRESS))));
+
+        verify(eventPublisher, org.mockito.Mockito.times(2))
+                .publishEvent(any(LendingCollateralReconciliationNeededEvent.class));
+    }
+
+    @Test
+    @DisplayName("unrelated admin actions (mint, pause, freeze) never publish")
+    void ignoresUnrelatedMethods() {
+        listener.onTokenAdminAction(new TokenAdminActionEvent(UUID.randomUUID(), "batchMint",
+                UUID.randomUUID(), "REGISTRY_ADMIN", Map.of("from", MARKET_ADDRESS)));
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
+    }
 }

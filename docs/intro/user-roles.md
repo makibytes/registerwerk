@@ -109,7 +109,7 @@ A machine or human user authorised to interact with trading venue integrations:
 
 - Submit and manage trade listings
 - View trade execution reports
-- These actions are reported to regulators via [MiFIR RTS 22](../compliance/mifir.md)
+- The platform keeps an order and execution record (export for the operator at `/api/v1/admin/trading/order-history`); it does **not** file MiFIR RTS 22 reports — see [MiFIR](../compliance/mifir.md) (draft, unvalidated)
 
 ---
 

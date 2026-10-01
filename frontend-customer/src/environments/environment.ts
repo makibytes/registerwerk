@@ -6,6 +6,8 @@ export const environment = {
   // ERC-4337 bundler endpoint for SponsoredTxService — unset by default since no bundler
   // ships in docker-compose; point at a bundler provider (Pimlico/Stackup/Alchemy) or a
   // self-hosted one to enable sponsored transactions. See core/wallet/sponsored-tx.service.ts.
+  // Base URL of the documentation site (signature recipe link on the Webhooks page); blank hides the link.
+  docsUrl: 'http://localhost:48003',
   bundlerUrl: '',
   // Optional build-time override of the sign-in config fetched from
   // GET /public/auth/config. Only for exercising MSAL locally without an Entra-configured

@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.webhook.web;
 
 import de.makibytes.registerwerk.shared.SecurityUtils;
-import de.makibytes.registerwerk.webhook.api.WebhookSubscription;
+import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import de.makibytes.registerwerk.webhook.internal.WebhookSubscriptionService;
 import de.makibytes.registerwerk.webhook.web.dto.CreateWebhookSubscriptionRequest;
 import de.makibytes.registerwerk.webhook.web.dto.SetEnabledRequest;
@@ -31,7 +31,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/me/webhooks")
-@PreAuthorize("isAuthenticated()")
+@PreAuthorize("hasRole('COMPANY_ADMIN')")
 public class WebhookSubscriptionController {
 
     private final WebhookSubscriptionService service;
@@ -44,10 +44,10 @@ public class WebhookSubscriptionController {
     public ResponseEntity<WebhookSubscriptionResponse> create(
             @RequestBody @Valid CreateWebhookSubscriptionRequest request, Authentication auth) {
         UUID entityId = requireEntityId(auth);
-        WebhookSubscription created = service.create(
+        var created = service.create(
                 entityId, request.url(), request.eventTypes(), SecurityUtils.extractUserId(auth));
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(WebhookSubscriptionResponse.from(created, created.getSecret()));
+                .body(WebhookSubscriptionResponse.from(created.subscription(), created.secret()));
     }
 
     @GetMapping
@@ -60,14 +60,22 @@ public class WebhookSubscriptionController {
     @PutMapping("/{id}/enabled")
     public ResponseEntity<Void> setEnabled(@PathVariable UUID id, @RequestBody @Valid SetEnabledRequest request,
                                            Authentication auth) {
-        service.setEnabled(requireEntityId(auth), id, request.enabled());
+        service.setEnabled(requireEntityId(auth), id, request.enabled(), SecurityUtils.extractUserId(auth));
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable UUID id, Authentication auth) {
-        service.delete(requireEntityId(auth), id);
+        service.delete(requireEntityId(auth), id, SecurityUtils.extractUserId(auth));
         return ResponseEntity.noContent().build();
+    }
+
+    /** Issues a new signing secret (shown once); the old one keeps signing for the overlap window. */
+    @PostMapping("/{id}/rotate-secret")
+    @RequiresStepUp(reason = "WEBHOOK_SECRET_ROTATE")
+    public ResponseEntity<WebhookSubscriptionResponse> rotateSecret(@PathVariable UUID id, Authentication auth) {
+        var rotated = service.rotateSecret(requireEntityId(auth), id, SecurityUtils.extractUserId(auth));
+        return ResponseEntity.ok(WebhookSubscriptionResponse.from(rotated.subscription(), rotated.secret()));
     }
 
     @GetMapping("/{id}/deliveries")

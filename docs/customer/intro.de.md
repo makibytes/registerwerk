@@ -93,7 +93,7 @@ Genauer gesagt ist es nicht:
 
 - **Ein Bewertungsdienst.** Das Register hält Nennbeträge fest, keine Marktpreise.
 - **Ein Verwahrer Ihrer Schlüssel.** Sie halten den privaten Schlüssel Ihrer Wallet. Niemand kann ihn wiederherstellen.
-- **Ein Handelsplatz.** Es bindet Handelsplätze an; es betreibt keinen Markt.
+- **Ein zugelassener Handelsplatz.** Die integrierten Peer-Angebote sind ein Demonstrations-Workflow für den Sekundärmarkt, kein zugelassener Handelsplatz (MTF/OTF); in Produktion sind sie deaktiviert, sofern der Betreiber sie nicht mit Rechtsgutachten klassifiziert hat.
 - **Ein Zahlungssystem.** Es unterstützt mehrere Zahlungswege; Geld bewegt sich dort, nicht hier.
 - **Ein Garantiegeber.** Fällt ein Emittent aus, zeichnet die Plattform das auf. Sie entschädigt die Inhaber nicht.
 

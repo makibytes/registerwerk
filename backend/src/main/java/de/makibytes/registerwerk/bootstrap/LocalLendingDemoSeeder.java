@@ -17,6 +17,9 @@ import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
 import de.makibytes.registerwerk.lending.api.LendingMarketRepository;
 import de.makibytes.registerwerk.lending.api.LendingMarketStatus;
 import de.makibytes.registerwerk.lending.api.LendingMarketRegistrar;
+import de.makibytes.registerwerk.payment.api.PaymentRailChainAddress;
+import de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository;
+import de.makibytes.registerwerk.payment.api.PaymentRailRepository;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationRepository;
@@ -91,6 +94,8 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
     private final LendingMarketRegistrar marketRegistrar;
     private final ContractAddressConfig contractAddresses;
     private final TokenTransferRepository tokenTransfers;
+    private final PaymentRailRepository paymentRails;
+    private final PaymentRailChainAddressRepository paymentRailAddresses;
 
     public LocalLendingDemoSeeder(
             AssetRepository assets,
@@ -105,7 +110,11 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
             LendingMarketRepository markets,
             LendingMarketRegistrar marketRegistrar,
             ContractAddressConfig contractAddresses,
-            TokenTransferRepository tokenTransfers) {
+            TokenTransferRepository tokenTransfers,
+            PaymentRailRepository paymentRails,
+            PaymentRailChainAddressRepository paymentRailAddresses) {
+        this.paymentRails = paymentRails;
+        this.paymentRailAddresses = paymentRailAddresses;
         this.assets = assets;
         this.deployments = deployments;
         this.holders = holders;
@@ -189,6 +198,7 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
         updateHoldingWallet(infraNote, "DEMO-FD-001");
         updateHoldingWallet(infraNote, "DEMO-WI-001");
 
+        bindLoanRail(chain, requireAddress(addresses, "LOAN_TOKEN"));
         registerFreshMarket(chain, greenBond, requireAddress(addresses, "GREEN_BOND_MARKET"));
         registerFreshMarket(chain, infraNote, requireAddress(addresses, "INFRA_NOTE_MARKET"));
         log.info("Local on-chain demo linked: all 7 EVM standards, 2 lending markets, 5 funded companies");
@@ -204,6 +214,10 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
         contractAddresses.getPermissionOracle().put(key, requireAddress(addresses, "PERMISSION_ORACLE"));
         contractAddresses.getDappRegistry().put(key, requireAddress(addresses, "DAPP_REGISTRY"));
         contractAddresses.getEcosystemTir().put(key, requireAddress(addresses, "ECOSYSTEM_TIR"));
+        String repoFactory = addresses.getProperty("REPO_MARKET_FACTORY");
+        if (repoFactory != null && !repoFactory.isBlank()) {
+            contractAddresses.getRepoMarketFactory().put(key, repoFactory.trim());
+        }
     }
 
     private void configureLocalRpc(ChainConfig chain) {
@@ -268,6 +282,9 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
                 .orElseThrow(() -> new IllegalStateException("Ethereum testnet deployment missing for "
                         + asset.getAssetNumber()));
         deployment.setContractAddress(contractAddress);
+        if (deployment.getChainConfigId() == null) {
+            chains.findByIdentifier(DEMO_CHAIN).ifPresent(c -> deployment.setChainConfigId(c.getId()));
+        }
         deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
         deployments.save(deployment);
     }
@@ -326,6 +343,22 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered {
         if (seededWallet == null) return null;
         String entityNumber = SEEDED_GREEN_BOND_WALLETS.get(seededWallet.toLowerCase(Locale.ROOT));
         return entityNumber == null ? null : COMPANY_WALLETS.get(entityNumber);
+    }
+
+    /** Market registration checks the loan token against the rail; point the demo rail at the demo stablecoin. */
+    private void bindLoanRail(ChainConfig chain, String loanToken) {
+        paymentRails.findByCode("aueur").ifPresent(rail -> {
+            var existing = paymentRailAddresses.findByPaymentRailId(rail.getId()).stream()
+                    .filter(a -> chain.getId().equals(a.getChainConfigId())).findFirst();
+            PaymentRailChainAddress address = existing.orElseGet(() -> {
+                PaymentRailChainAddress created = new PaymentRailChainAddress();
+                created.setPaymentRailId(rail.getId());
+                created.setChainConfigId(chain.getId());
+                return created;
+            });
+            address.setTokenAddress(loanToken);
+            paymentRailAddresses.save(address);
+        });
     }
 
     private void registerFreshMarket(ChainConfig chain, Asset asset, String marketAddress) {

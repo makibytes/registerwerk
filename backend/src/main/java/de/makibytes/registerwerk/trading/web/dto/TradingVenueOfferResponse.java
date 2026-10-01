@@ -30,5 +30,9 @@ public record TradingVenueOfferResponse(
         Instant createdAt,
         // Most recent settled trade price for this asset, if any — a benchmark for the quoted
         // offer price; null when the asset has never settled a trade yet.
-        BigDecimal lastTradePrice) {
+        BigDecimal lastTradePrice,
+        String currency,
+        String paymentRailCode,
+        // Bilateral listing addressed to the viewer.
+        boolean targeted) {
 }

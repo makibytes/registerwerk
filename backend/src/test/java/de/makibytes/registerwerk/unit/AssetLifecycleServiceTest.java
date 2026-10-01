@@ -54,8 +54,16 @@ class AssetLifecycleServiceTest {
     @Mock
     private RedemptionReadinessPort redemptionReadiness;
 
+    @Mock
+    private org.springframework.beans.factory.ObjectProvider<de.makibytes.registerwerk.asset.api.RedemptionBlocker> redemptionBlockers;
+
     @InjectMocks
     private AssetLifecycleService assetLifecycleService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void noBlockersByDefault() {
+        org.mockito.Mockito.lenient().when(redemptionBlockers.orderedStream()).thenAnswer(i -> java.util.stream.Stream.empty());
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -292,6 +300,20 @@ class AssetLifecycleServiceTest {
         assertThatThrownBy(() -> assetLifecycleService.redeem(asset.getId(), "eWpG §26", "REF", UUID.randomUUID(), null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("corporate action");
+    }
+
+    @Test
+    @DisplayName("redeem refused while a blocker (open repo trade) holds the asset as collateral")
+    void redeemRefusedWhileRedemptionBlocked() {
+        Asset asset = buildAsset(AssetStatus.ISSUED);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        when(redemptionBlockers.orderedStream()).thenAnswer(i -> java.util.stream.Stream.of(
+                (de.makibytes.registerwerk.asset.api.RedemptionBlocker) id -> Optional.of("pledged in an open repo")));
+
+        assertThatThrownBy(() -> assetLifecycleService.redeem(asset.getId(), "eWpG §26", "REF", UUID.randomUUID(), null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("pledged in an open repo");
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.ISSUED);
     }
 
     @Test

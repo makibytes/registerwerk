@@ -24,8 +24,9 @@
         <p>Dear <strong th:text="${entityName}">Entity Name</strong>,</p>
         <p>
             The seller has disputed the payment you declared for your trade in
-            <strong th:text="${assetName}">Asset Name</strong>. The trade has failed and no
-            units were transferred.
+            <strong th:text="${assetName}">Asset Name</strong>. The trade is on hold and no
+            units were transferred; the units stay reserved until the registry operator has
+            reviewed the case. It is not cancelled automatically.
         </p>
         <div class="reason-box" th:if="${reason}">
             <strong>Seller's stated reason:</strong> <span th:text="${reason}">Reason text</span>

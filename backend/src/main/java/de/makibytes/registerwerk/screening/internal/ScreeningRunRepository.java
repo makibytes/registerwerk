@@ -42,4 +42,12 @@ public interface ScreeningRunRepository extends JpaRepository<ScreeningRun, UUID
                AND sr.natural_person_id IS NOT NULL
             """, nativeQuery = true)
     List<UUID> findNaturalPersonIdsByEntityLinkedRuns(@Param("entityId") UUID entityId);
+
+    /** Natural persons currently recorded as beneficial owners of the entity (with or without a run). */
+    @Query(value = """
+            SELECT DISTINCT bo.natural_person_id FROM beneficial_owner bo
+             WHERE bo.entity_id = :entityId AND bo.ceased_at IS NULL
+               AND bo.natural_person_id IS NOT NULL
+            """, nativeQuery = true)
+    List<UUID> findCurrentBeneficialOwnerPersonIds(@Param("entityId") UUID entityId);
 }

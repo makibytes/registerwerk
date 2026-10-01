@@ -111,7 +111,7 @@ Esiste perché, senza di essa, l'unica via d'uscita di un investitore da un regi
 Quando un'organizzazione smette di usare il registro:
 
 1. **Verifica le posizioni aperte.** Partecipazioni, proposte di vendita, prestiti, operazioni in sospeso. Tutto ciò che è aperto va prima risolto o migrato.
-2. **Ritira le proposte di vendita.** Gestito automaticamente: le proposte di vendita di un cliente in cessazione vengono annullate invece di restare orfane in attesa che qualcuno le colga.
+2. **Ritira le proposte di vendita.** Gestito automaticamente: le proposte di vendita di un cliente in cessazione vengono annullate invece di restare orfane in attesa che qualcuno le colga. Sono gestite anche le operazioni in corso: un'operazione non pagata viene annullata, un'operazione con pagamento dichiarato passa nella coda dei pagamenti non risolti (`GET /api/v1/admin/trading/unresolved`) per una decisione secondo il principio dei quattro occhi — non viene mai scartata automaticamente.
 3. **Disattiva gli utenti.** Immediato, reversibile, non cancella nulla.
 4. **Imposta lo stato dell'entità.** Sospesa o sciolta, a seconda dei casi.
 5. **Registra il perché**, con una data e un riferimento.

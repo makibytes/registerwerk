@@ -15,7 +15,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { InvestmentService } from '../../../core/api/investment.service';
 import { LendingService } from '../../../core/api/lending.service';
 import { WalletService } from '../../../core/wallet/wallet.service';
-import { erc20Abi, repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
+import { repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
 import { InvestmentRecord, LendingMarket, LendingQuote } from '../../../core/models';
 import { LendingComplianceBannerComponent } from '../compliance-banner.component';
 import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem';
@@ -93,7 +93,7 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
           <mat-card-content>
             <mat-icon class="warn-icon">pause_circle_outline</mat-icon>
             <p>
-              This market is temporarily paused for new borrowing by the registry operator.
+              {{ pauseMessage }}
               Existing loans are unaffected — you can still repay or manage a loan you already
               have from My Loans.
             </p>
@@ -309,6 +309,21 @@ export class BorrowStepperComponent implements OnInit {
     return this.market?.status === 'PAUSED';
   }
 
+  /** Customer-facing wording for `market.pauseReason` (falls back to a generic operator pause). */
+  get pauseMessage(): string {
+    switch (this.market?.pauseReason) {
+      case 'COLLATERAL_SHORTFALL':
+        return 'New borrowing is paused: the market holds less collateral than it has recorded (for example after a forced transfer) and the registry operator is reconciling it.';
+      case 'BINDING_UNVERIFIED':
+        return 'New borrowing is paused while the registry operator re-verifies this market against its asset and payment rail.';
+      case 'CHAIN_READ_FAILED':
+        return 'New borrowing is paused because the market state could not be read from the chain right now. Try again later.';
+      case 'BORROW_PAUSED_ONCHAIN':
+      default:
+        return 'This market is temporarily paused for new borrowing by the registry operator.';
+    }
+  }
+
   /** Legacy risk parameters (see `LendingMarket.riskParametersLegacy`): no new borrowing. */
   get marketLegacy(): boolean {
     return this.market?.riskParametersLegacy === true;
@@ -330,10 +345,12 @@ export class BorrowStepperComponent implements OnInit {
         this.quoteError = '';
         this.cdr.markForCheck();
         return this.lendingService.quote(this.market.id, String(amount)).pipe(
-          catchError(() => {
+          catchError((err) => {
             this.quote = null;
             this.quoting = false;
-            this.quoteError = 'A live quote could not be loaded. Change the amount or try again.';
+            this.quoteError = err?.status === 403
+              ? (err.error?.message ?? 'Borrowing is not available for your entity classification.')
+              : 'A live quote could not be loaded. Change the amount or try again.';
             this.cdr.markForCheck();
             return EMPTY;
           }),
@@ -451,26 +468,9 @@ export class BorrowStepperComponent implements OnInit {
       const marketAddress = this.market.marketAddress as Address;
       const collateralToken = this.market.collateralTokenAddress as Address;
 
-      this.executionStage = 'Checking allowance…';
+      this.executionStage = 'Approving collateral…';
       this.cdr.markForCheck();
-      const allowance = await this.wallet.readContract<bigint>({
-        address: collateralToken,
-        abi: erc20Abi,
-        functionName: 'allowance',
-        args: [this.wallet.address(), marketAddress],
-      });
-
-      if (allowance < collateralAmount) {
-        this.executionStage = 'Approving collateral…';
-        this.cdr.markForCheck();
-        const approveHash = await this.wallet.writeContract({
-          address: collateralToken,
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [marketAddress, collateralAmount],
-        });
-        await this.wallet.waitForTransaction(approveHash);
-      }
+      await this.wallet.ensureAllowance(collateralToken, marketAddress, collateralAmount);
 
       // Lending-market borrowing uses the connected wallet's direct transaction path.
       const hash = await this.wallet.writeContract({

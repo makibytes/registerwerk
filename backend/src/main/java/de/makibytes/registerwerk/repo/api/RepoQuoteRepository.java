@@ -8,6 +8,8 @@ import java.util.UUID;
 
 public interface RepoQuoteRepository extends JpaRepository<RepoQuote, UUID> {
     List<RepoQuote> findByRfqIdOrderByRepoRateAscCreatedAtAsc(UUID rfqId);
-    Optional<RepoQuote> findByRfqIdAndQuotingEntityId(UUID rfqId, UUID quotingEntityId);
+    Optional<RepoQuote> findByRfqIdAndQuotingEntityIdAndStatus(UUID rfqId, UUID quotingEntityId, RepoTypes.QuoteStatus status);
+    @org.springframework.data.jpa.repository.Query("select coalesce(max(q.quoteVersion), 0) from RepoQuote q where q.rfqId = :rfqId and q.quotingEntityId = :entityId")
+    int maxVersion(@org.springframework.data.repository.query.Param("rfqId") UUID rfqId, @org.springframework.data.repository.query.Param("entityId") UUID entityId);
 }
 

@@ -105,4 +105,17 @@ class OutboundDestinationGateImplTest {
         assertThat(off.require(assetId, "0x" + "9".repeat(40), "mint")).isNull();
         verifyNoInteractions(entities);
     }
+
+    @Test
+    @DisplayName("5C-03: an unresolved BENEFICIAL OWNER hit and an expired KYC date refuse the destination too (shared helper)")
+    void uboHitAndExpiredKycRefused() {
+        when(screening.hasUnresolvedBeneficialOwnerHit(entityId)).thenReturn(true);
+        assertThatThrownBy(() -> gate.require(assetId, ADDR, "mint")).isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("screening");
+        when(screening.hasUnresolvedBeneficialOwnerHit(entityId)).thenReturn(false);
+
+        entity.setKycExpiryDate(java.time.LocalDate.now().minusDays(1));
+        assertThatThrownBy(() -> gate.require(assetId, ADDR, "mint")).isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("expired KYC");
+    }
 }

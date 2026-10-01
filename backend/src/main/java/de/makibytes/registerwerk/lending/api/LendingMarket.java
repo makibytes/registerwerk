@@ -97,6 +97,29 @@ public class LendingMarket {
     @NotNull
     private LendingMarketStatus status = LendingMarketStatus.ACTIVE;
 
+    /** 5B-09: false once a re-verification found the on-chain binding (factory, collateral or loan
+     *  token) no longer matches; such a market is hidden from the customer catalogue. */
+    @Column(name = "binding_verified", nullable = false)
+    private boolean bindingVerified = true;
+
+    @Column(name = "binding_verified_at")
+    private Instant bindingVerifiedAt;
+
+    @Column(name = "binding_failure", length = 500)
+    private String bindingFailure;
+
+    /** keccak256 of the deployed runtime code at registration; a proxy upgrade changes it. */
+    @Column(name = "code_hash", length = 66)
+    private String codeHash;
+
+    /** 5B-11: {@code surplusOf(address)} exists on the deployed market. */
+    @Column(name = "surplus_supported", nullable = false)
+    private boolean surplusSupported = true;
+
+    /** 5B-10: collateral token balance of the market is below its recorded totalCollateral. */
+    @Column(name = "collateral_shortfall", nullable = false)
+    private boolean collateralShortfall = false;
+
     @Column(name = "registered_by")
     private UUID registeredBy;
 
@@ -169,6 +192,24 @@ public class LendingMarket {
 
     public UUID getRegisteredBy() { return registeredBy; }
     public void setRegisteredBy(UUID registeredBy) { this.registeredBy = registeredBy; }
+
+    public boolean isBindingVerified() { return bindingVerified; }
+    public void setBindingVerified(boolean bindingVerified) { this.bindingVerified = bindingVerified; }
+
+    public Instant getBindingVerifiedAt() { return bindingVerifiedAt; }
+    public void setBindingVerifiedAt(Instant bindingVerifiedAt) { this.bindingVerifiedAt = bindingVerifiedAt; }
+
+    public String getBindingFailure() { return bindingFailure; }
+    public void setBindingFailure(String bindingFailure) { this.bindingFailure = bindingFailure; }
+
+    public String getCodeHash() { return codeHash; }
+    public void setCodeHash(String codeHash) { this.codeHash = codeHash; }
+
+    public boolean isSurplusSupported() { return surplusSupported; }
+    public void setSurplusSupported(boolean surplusSupported) { this.surplusSupported = surplusSupported; }
+
+    public boolean isCollateralShortfall() { return collateralShortfall; }
+    public void setCollateralShortfall(boolean collateralShortfall) { this.collateralShortfall = collateralShortfall; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

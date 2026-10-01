@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.trading.api.TradingVenueCode;
 import de.makibytes.registerwerk.trading.web.dto.*;
 import de.makibytes.registerwerk.shared.api.PageResponse;
 import de.makibytes.registerwerk.shared.SecurityUtils;
+import de.makibytes.registerwerk.trading.internal.TradeQueueService;
 import de.makibytes.registerwerk.trading.internal.TradingService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -26,9 +27,32 @@ import java.util.UUID;
 public class TradingController {
 
     private final TradingService tradingService;
+    private final TradeQueueService queueService;
 
-    public TradingController(TradingService tradingService) {
+    public TradingController(TradingService tradingService, TradeQueueService queueService) {
         this.tradingService = tradingService;
+        this.queueService = queueService;
+    }
+
+    /** Which trading behaviours are switched on (e.g. the demo instant-settlement option a seller may offer). */
+    @GetMapping("/config")
+    public ResponseEntity<TradeConfigResponse> config() {
+        return ResponseEntity.ok(tradingService.config());
+    }
+
+    /** Evidence notes on a trade (both parties; the operator sees them in the unresolved queue). */
+    @GetMapping("/history/{executionId}/notes")
+    public ResponseEntity<List<TradeNoteResponse>> listNotes(@PathVariable UUID executionId, Authentication authentication) {
+        return ResponseEntity.ok(queueService.listNotes(extractEntityId(authentication), executionId));
+    }
+
+    @PostMapping("/history/{executionId}/notes")
+    public ResponseEntity<TradeNoteResponse> addNote(
+            @PathVariable UUID executionId,
+            @RequestBody @Valid AddTradeNoteRequest request,
+            Authentication authentication) {
+        return ResponseEntity.ok(queueService.addNote(
+                extractEntityId(authentication), extractActorId(authentication), "TRADER", executionId, request.text()));
     }
 
     @GetMapping("/venues")

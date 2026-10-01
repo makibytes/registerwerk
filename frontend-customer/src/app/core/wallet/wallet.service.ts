@@ -9,6 +9,7 @@ import {
   createWalletClient,
   custom,
 } from 'viem';
+import { erc20Abi } from './abi/repo-market.abi';
 
 /** Shared viem layer for browser-wallet connection, signing, and direct transactions. */
 @Injectable({ providedIn: 'root' })
@@ -143,6 +144,32 @@ export class WalletService {
     } catch (err: unknown) {
       throw new Error(this.extractMessage(err, 'Transaction failed or was rejected.'), { cause: err });
     }
+  }
+
+  /**
+   * Makes sure `spender` may pull exactly `amount` of `token` from the connected wallet, without ever
+   * granting an unlimited allowance. A non-zero allowance below `amount` is first reset to 0 (tokens such
+   * as USDT refuse to move a non-zero allowance to another non-zero value, and a stale allowance must not
+   * silently linger), then set to `amount`. Returns the approval transaction hashes it sent (empty when the
+   * allowance already covers `amount`). Each approval is awaited, and a revert throws.
+   */
+  async ensureAllowance(token: Address, spender: Address, amount: bigint): Promise<Hash[]> {
+    const owner = this.requireAddress();
+    if (amount <= 0n) return [];
+    const current = await this.readContract<bigint>({
+      address: token, abi: erc20Abi, functionName: 'allowance', args: [owner, spender],
+    });
+    if (current >= amount) return [];
+    const sent: Hash[] = [];
+    if (current > 0n) {
+      const reset = await this.writeContract({ address: token, abi: erc20Abi, functionName: 'approve', args: [spender, 0n] });
+      await this.waitForTransaction(reset);
+      sent.push(reset);
+    }
+    const approval = await this.writeContract({ address: token, abi: erc20Abi, functionName: 'approve', args: [spender, amount] });
+    await this.waitForTransaction(approval);
+    sent.push(approval);
+    return sent;
   }
 
   async waitForTransaction(hash: Hash) {

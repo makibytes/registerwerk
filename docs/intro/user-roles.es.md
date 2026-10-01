@@ -109,7 +109,7 @@ Un usuario, máquina o persona, autorizado a interactuar con las integraciones d
 
 - Enviar y gestionar ofertas de venta
 - Consultar los informes de ejecución
-- Estas actuaciones se reportan a los supervisores mediante [MiFIR RTS 22](../compliance/mifir.md)
+- La plataforma conserva un registro de órdenes y ejecuciones (exportación del operador en `/api/v1/admin/trading/order-history`); **no** presenta reportes MiFIR RTS 22 — véase [MiFIR](../compliance/mifir.md) (borrador, sin validar)
 
 ---
 

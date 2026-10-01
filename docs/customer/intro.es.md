@@ -93,7 +93,7 @@ Más concretamente, no es:
 
 - **Un servicio de valoración.** El registro anota importes nominales, no precios de mercado.
 - **Un custodio de sus claves.** La clave privada de su monedero la tiene usted. Nadie puede recuperarla.
-- **Un centro de negociación.** Se conecta a centros de negociación; no gestiona un mercado.
+- **Un centro de negociación autorizado.** Las ofertas entre pares integradas son un flujo de demostración del mercado secundario, no un centro autorizado (SMN/SOC); están desactivadas en producción salvo que el operador las clasifique con dictamen jurídico.
 - **Un sistema de pagos.** Admite varias vías de pago; el dinero se mueve por ellas, no aquí.
 - **Un garante.** Si un emisor incumple, la plataforma lo anota. No resarce a los titulares.
 

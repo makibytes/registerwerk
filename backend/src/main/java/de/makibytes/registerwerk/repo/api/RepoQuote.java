@@ -17,6 +17,8 @@ public class RepoQuote {
     private UUID rfqId;
     @Column(name = "quoting_entity_id", nullable = false)
     private UUID quotingEntityId;
+    @Column(name = "quote_version", nullable = false, updatable = false)
+    private int quoteVersion = 1;
     @Column(name = "quoting_user_id")
     private UUID quotingUserId;
     @Column(name = "cash_amount", nullable = false, precision = 38, scale = 18)
@@ -44,6 +46,8 @@ public class RepoQuote {
     public void setRfqId(UUID value) { rfqId = value; }
     public UUID getQuotingEntityId() { return quotingEntityId; }
     public void setQuotingEntityId(UUID value) { quotingEntityId = value; }
+    public int getQuoteVersion() { return quoteVersion; }
+    public void setQuoteVersion(int value) { quoteVersion = value; }
     public UUID getQuotingUserId() { return quotingUserId; }
     public void setQuotingUserId(UUID value) { quotingUserId = value; }
     public BigDecimal getCashAmount() { return cashAmount; }

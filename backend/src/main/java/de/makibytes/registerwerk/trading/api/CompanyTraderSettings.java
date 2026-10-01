@@ -23,8 +23,11 @@ public class CompanyTraderSettings {
     @Column(name = "default_payment_option", nullable = false, length = 30)
     private PaymentOption defaultPaymentOption = PaymentOption.OFFCHAIN_SEPA;
 
+    /** @deprecated 5A-01: ignored. The buyer must never decide whether the SELLER's register
+     *  moves without a cash leg; see {@code TradeListing#allowInstantSettlement}. */
+    @Deprecated
     @Column(name = "immediate_settlement_enabled", nullable = false)
-    private boolean immediateSettlementEnabled = true;
+    private boolean immediateSettlementEnabled = false;
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();

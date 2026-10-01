@@ -6,6 +6,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
+import { AuthService } from '../../../core/auth/auth.service';
 import { PaymentRailService } from '../../../core/api/payment-rail.service';
 import { PaymentRailView } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
@@ -13,6 +14,7 @@ import {
   StepUpDialogComponent,
   StepUpDialogResult,
 } from '../../../shared/components/step-up/step-up-dialog.component';
+import { DualControlTokens } from '../../../core/api/dual-control-headers';
 import { RailFormDialogComponent, RailFormDialogData } from '../rail-form-dialog/rail-form-dialog.component';
 
 const RAIL_TYPE_LABELS: Record<string, string> = {
@@ -34,11 +36,22 @@ const RAIL_TYPE_LABELS: Record<string, string> = {
     DataTableComponent,
     PageHeaderComponent,
   ],
+  styles: [`
+    .rail-note { margin: 0 0 12px; font-size: 12.5px; color: var(--rw-text-secondary); max-width: 900px; }
+  `],
   template: `
     <app-page-header
       title="Payment Rails"
       subtitle="Operator-curated payment methods dApps can inject instead of building their own — MiCAR stablecoins, Pontes, ERC-7573 DvP, SEPA">
     </app-page-header>
+
+    <p class="rail-note" role="note">
+      Creating, updating, enabling and attesting a rail each need step-up and a second approver. New rails start
+      disabled. The MiCAR fields are operator-entered claims: an attestation records that an operator checked them
+      against an external source (Registerwerk does not verify them), is bound to the current token address and
+      issuer details, and must be given by an operator who neither created nor last edited the rail. Changing any
+      bound detail clears the attestation and switches an enabled EMT rail off automatically.
+    </p>
 
     <rw-data-table
       [columns]="columns"
@@ -55,15 +68,28 @@ const RAIL_TYPE_LABELS: Record<string, string> = {
     </rw-data-table>
 
     <ng-template #actions let-rail>
-      <button type="button" mat-icon-button color="primary" (click)="openEditDialog(rail)" matTooltip="Edit (step-up)">
+      <button type="button" mat-icon-button color="primary" (click)="openEditDialog(rail)" matTooltip="Edit (step-up + second approver)">
         <mat-icon>edit</mat-icon>
       </button>
+      @if (rail.railType === 'STABLECOIN' && rail.emtFlag) {
+        @if (rail.micarVerified) {
+          <button type="button" mat-icon-button (click)="unverify(rail)" matTooltip="Clear MiCAR attestation (step-up)">
+            <mat-icon>remove_done</mat-icon>
+          </button>
+        } @else {
+          <button type="button" mat-icon-button color="primary" (click)="verify(rail)"
+                  [disabled]="isCreatorOrEditor(rail)"
+                  [matTooltip]="isCreatorOrEditor(rail) ? 'You created or last edited this rail: another operator must attest it' : 'Attest MiCAR details (step-up + second approver)'">
+            <mat-icon>verified</mat-icon>
+          </button>
+        }
+      }
       @if (rail.enabled) {
         <button type="button" mat-icon-button color="warn" (click)="disable(rail)" matTooltip="Disable (step-up)">
           <mat-icon>toggle_off</mat-icon>
         </button>
       } @else {
-        <button type="button" mat-icon-button color="primary" (click)="enable(rail)" matTooltip="Enable (step-up)">
+        <button type="button" mat-icon-button color="primary" (click)="enable(rail)" matTooltip="Enable (step-up + second approver)">
           <mat-icon>toggle_on</mat-icon>
         </button>
       }
@@ -75,6 +101,7 @@ export class RailListComponent implements OnInit {
   private readonly dialog = inject(MatDialog);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly auth = inject(AuthService);
 
   rails: PaymentRailView[] = [];
   state: AsyncSectionStatus = 'pending';
@@ -94,10 +121,23 @@ export class RailListComponent implements OnInit {
       cell: (r: PaymentRailView) => (r.railType === 'STABLECOIN' ? (r.issuerName ?? '—') : '—'),
     },
     {
+      key: 'attestation',
+      header: 'MiCAR attestation',
+      cell: (r: PaymentRailView) =>
+        r.railType !== 'STABLECOIN' ? '—'
+          : r.micarVerified ? 'OPERATOR-ATTESTED'
+          : r.emtFlag ? 'NOT ATTESTED' : 'NO EMT CLAIM',
+    },
+    {
       key: 'enabled',
       header: 'Status',
       cell: (r: PaymentRailView) => (r.enabled ? 'ENABLED' : 'DISABLED'),
       type: 'badge',
+    },
+    {
+      key: 'disabledReason',
+      header: 'Disabled because',
+      cell: (r: PaymentRailView) => this.disabledText(r),
     },
   ];
 
@@ -128,10 +168,10 @@ export class RailListComponent implements OnInit {
       .afterClosed()
       .subscribe((body) => {
         if (!body) return;
-        this.withStepUp('Payment rail creation', (token) =>
-          this.railService.create(body, token).subscribe({
+        this.withDualControlStepUp('Payment rail creation', (tokens) =>
+          this.railService.create(body, tokens).subscribe({
             next: () => {
-              this.snackBar.open('Payment rail created.', 'Dismiss', { duration: 5000 });
+              this.snackBar.open('Payment rail created. It starts disabled; enable it (and attest it, for an EMT) separately.', 'Dismiss', { duration: 7000 });
               this.load();
             },
             error: (err) => {
@@ -151,8 +191,8 @@ export class RailListComponent implements OnInit {
       .afterClosed()
       .subscribe((body) => {
         if (!body) return;
-        this.withDualControlStepUp('Payment rail update', (token, dualControlToken) =>
-          this.railService.update(rail.id, body, token, dualControlToken).subscribe({
+        this.withDualControlStepUp('Payment rail update', (tokens) =>
+          this.railService.update(rail.id, body, tokens).subscribe({
             next: () => {
               this.snackBar.open('Payment rail updated.', 'Dismiss', { duration: 5000 });
               this.load();
@@ -168,8 +208,8 @@ export class RailListComponent implements OnInit {
   }
 
   enable(rail: PaymentRailView): void {
-    this.withStepUp('Payment rail enablement', (token) =>
-      this.railService.enable(rail.id, token).subscribe({
+    this.withDualControlStepUp('Payment rail enablement', (tokens) =>
+      this.railService.enable(rail.id, tokens).subscribe({
         next: () => {
           this.snackBar.open('Payment rail enabled.', 'Dismiss', { duration: 5000 });
           this.load();
@@ -199,6 +239,50 @@ export class RailListComponent implements OnInit {
     );
   }
 
+  verify(rail: PaymentRailView): void {
+    this.withDualControlStepUp('Payment rail MiCAR attestation', (tokens) =>
+      this.railService.verifyMicar(rail.id, tokens).subscribe({
+        next: () => {
+          this.snackBar.open('MiCAR details attested. The attestation is bound to the current token address and issuer details.', 'Dismiss', { duration: 6000 });
+          this.load();
+        },
+        error: (err) => {
+          this.snackBar.open(err?.error?.message ?? 'Failed to attest the rail.', 'Dismiss', { duration: 7000 });
+        },
+      }),
+    );
+  }
+
+  unverify(rail: PaymentRailView): void {
+    this.withStepUp('Payment rail MiCAR attestation cleared', (token) =>
+      this.railService.unverifyMicar(rail.id, token).subscribe({
+        next: () => {
+          this.snackBar.open('Attestation cleared. An enabled EMT rail was switched off.', 'Dismiss', { duration: 6000 });
+          this.load();
+        },
+        error: (err) => {
+          this.snackBar.open(err?.error?.message ?? 'Failed to clear the attestation.', 'Dismiss', { duration: 6000 });
+        },
+      }),
+    );
+  }
+
+  /** The attester must differ from the rail's creator and last editor (403 otherwise). */
+  isCreatorOrEditor(rail: PaymentRailView): boolean {
+    const me = this.auth.getUserId();
+    return !!me && (rail.createdBy === me || rail.updatedBy === me);
+  }
+
+  disabledText(rail: PaymentRailView): string {
+    switch (rail.disabledReason) {
+      case 'MICAR_ATTESTATION_INVALIDATED': return 'Attestation invalidated by an edit';
+      case 'MICAR_ATTESTATION_MISSING': return 'EMT claim without attestation';
+      case undefined:
+      case null: return '—';
+      default: return rail.disabledReason;
+    }
+  }
+
   private withStepUp(reason: string, action: (stepUpToken: string) => void): void {
     this.dialog
       .open(StepUpDialogComponent, {
@@ -214,11 +298,8 @@ export class RailListComponent implements OnInit {
       });
   }
 
-  /** "Payment rail update" is dual-control on the backend, unlike the other rail actions. */
-  private withDualControlStepUp(
-    reason: string,
-    action: (stepUpToken: string, dualControlToken: string) => void,
-  ): void {
+  /** Create, update, enable and MiCAR attestation are dual-control on the backend. */
+  private withDualControlStepUp(reason: string, action: (tokens: DualControlTokens) => void): void {
     this.dialog
       .open(StepUpDialogComponent, {
         data: { requireDualControl: true, reason, action: reason },
@@ -228,7 +309,7 @@ export class RailListComponent implements OnInit {
       .afterClosed()
       .subscribe((result: StepUpDialogResult | undefined) => {
         if (result?.stepUpToken && result.dualControlToken) {
-          action(result.stepUpToken, result.dualControlToken);
+          action({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
         }
       });
   }

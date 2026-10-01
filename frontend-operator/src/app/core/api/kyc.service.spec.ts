@@ -74,10 +74,18 @@ describe('KycService', () => {
     });
 
     it('rejectKyc() POSTs the reason to the reject sub-path', () => {
-        service.rejectKyc('entity-1', 'Document expired').subscribe();
+        service.rejectKyc('entity-1', 'Document expired', 'DOCUMENTS_UNREADABLE').subscribe();
         const req = httpMock.expectOne(`${base}/entity-1/kyc/reject`);
         expect(req.request.method).toBe('POST');
-        expect(req.request.body).toEqual({ reason: 'Document expired' });
+        expect(req.request.body).toEqual({ reason: 'Document expired', customerReasonCode: 'DOCUMENTS_UNREADABLE' });
+        req.flush({});
+    });
+
+    it('rejectKyc() sends the step-up bearer and the second approver token when given', () => {
+        service.rejectKyc('entity-1', 'internal', 'CONTACT_SUPPORT', { stepUpToken: 's', dualControlToken: 'd' }).subscribe();
+        const req = httpMock.expectOne(`${base}/entity-1/kyc/reject`);
+        expect(req.request.headers.get('Authorization')).toBe('Bearer s');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('d');
         req.flush({});
     });
 
@@ -123,5 +131,24 @@ describe('KycService', () => {
         const req = httpMock.expectOne(`${publicBase}/jurisdictions`);
         expect(req.request.method).toBe('GET');
         req.flush([]);
+    });
+
+    it('approve and reject calls carry the step-up and dual-control tokens the backend requires', () => {
+        const tokens = { stepUpToken: 'su', dualControlToken: 'dc' };
+        const expectTokens = (url: string) => {
+            const req = httpMock.expectOne(url);
+            expect(req.request.headers.get('Authorization')).toBe('Bearer su');
+            expect(req.request.headers.get('X-Dual-Control-Token')).toBe('dc');
+            req.flush({});
+        };
+        service.approveKyc('entity-1', '2027-01-01', tokens).subscribe();
+        expectTokens(`${base}/entity-1/kyc/approve`);
+        service.approveJurisdiction('entity-1', 'DE_EWPG', undefined, tokens).subscribe();
+        expectTokens(`${base}/entity-1/kyc/jurisdictions/DE_EWPG/approve`);
+        service.rejectJurisdiction('entity-1', 'DE_EWPG', 'why', 'CONTACT_SUPPORT', tokens).subscribe();
+        const reject = httpMock.expectOne(`${base}/entity-1/kyc/jurisdictions/DE_EWPG/reject`);
+        expect(reject.request.body).toEqual({ reason: 'why', customerReasonCode: 'CONTACT_SUPPORT' });
+        expect(reject.request.headers.get('X-Dual-Control-Token')).toBe('dc');
+        reject.flush({});
     });
 });

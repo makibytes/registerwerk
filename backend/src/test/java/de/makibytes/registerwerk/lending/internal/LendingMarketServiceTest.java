@@ -53,6 +53,20 @@ class LendingMarketServiceTest {
     private JurisdictionRequirementConfig jurisdictionConfig;
     @Mock
     private LendingReleaseGate releaseGate;
+    @Mock
+    private de.makibytes.registerwerk.blockchain.api.ContractAddressConfig contractAddresses;
+    @Mock
+    private de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository deploymentRepository;
+    @Mock
+    private de.makibytes.registerwerk.payment.api.PaymentRailRepository railRepository;
+    @Mock
+    private de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository railAddressRepository;
+    @Mock
+    private de.makibytes.registerwerk.customer.api.LegalEntityRepository legalEntityRepository;
+    private final LendingProperties properties = new LendingProperties();
+
+    private static final String FACTORY = "0x9999999999999999999999999999999999999999";
+    private static final String COLLATERAL_TOKEN = "0x2222222222222222222222222222222222222222";
 
     private LendingMarketService service;
 
@@ -64,12 +78,180 @@ class LendingMarketServiceTest {
     void setUp() {
         service = new LendingMarketService(
                 marketRepository, assetRepository, chainConfigRepository, onchainReader, eventPublisher,
-                jurisdictionConfig, releaseGate);
+                jurisdictionConfig, releaseGate, properties, contractAddresses, deploymentRepository,
+                railRepository, railAddressRepository, legalEntityRepository);
+        stubValidBinding();
         lenient().when(marketRepository.save(any(LendingMarket.class))).thenAnswer(invocation -> {
             LendingMarket market = invocation.getArgument(0);
             if (market.getId() == null) market.setId(UUID.randomUUID());
             return market;
         });
+    }
+
+    private de.makibytes.registerwerk.payment.api.PaymentRail rail;
+    private de.makibytes.registerwerk.payment.api.PaymentRailChainAddress railAddress;
+    private de.makibytes.registerwerk.deployment.api.AssetDeployment deployment;
+
+    /** Defaults under which binding verification passes; tests break one link at a time. */
+    private void stubValidBinding() {
+        lenient().when(contractAddresses.findRepoMarketFactory("ETHEREUM_SEPOLIA")).thenReturn(Optional.of(FACTORY));
+        lenient().when(onchainReader.isFactoryMarket("ETHEREUM_SEPOLIA", FACTORY, marketAddress)).thenReturn(true);
+        deployment = new de.makibytes.registerwerk.deployment.api.AssetDeployment();
+        deployment.setChainConfigId(chainConfigId);
+        deployment.setContractAddress(COLLATERAL_TOKEN);
+        deployment.setDeploymentStatus(de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.CONFIRMED);
+        lenient().when(deploymentRepository.findByAssetId(any())).thenAnswer(i -> List.of(deployment));
+        rail = new de.makibytes.registerwerk.payment.api.PaymentRail();
+        rail.setId(UUID.randomUUID());
+        rail.setCode("aueur");
+        rail.setRailType(de.makibytes.registerwerk.payment.api.PaymentRailType.STABLECOIN);
+        rail.setDecimals(6);
+        rail.setEnabled(true);
+        lenient().when(railRepository.findByCode("aueur")).thenAnswer(i -> Optional.of(rail));
+        railAddress = new de.makibytes.registerwerk.payment.api.PaymentRailChainAddress();
+        railAddress.setChainConfigId(chainConfigId);
+        railAddress.setTokenAddress(LOAN_TOKEN);
+        lenient().when(railAddressRepository.findByPaymentRailId(any())).thenAnswer(i -> List.of(railAddress));
+    }
+
+    private Asset issuedAsset() {
+        Asset asset = new Asset();
+        asset.setId(UUID.randomUUID());
+        asset.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.ISSUED);
+        return asset;
+    }
+
+    private void stubRegistration(Asset asset) {
+        ChainConfig chainConfig = new ChainConfig();
+        chainConfig.setId(chainConfigId);
+        chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
+        chainConfig.setChainType(ChainConfig.ChainType.EVM);
+        chainConfig.setEnabled(true);
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        when(onchainReader.marketParameters("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(parameters());
+    }
+
+    @Test
+    @DisplayName("5B-09: refuses a market whose collateral token is not the asset's confirmed deployment")
+    void rejectsCollateralTokenMismatch() {
+        Asset asset = issuedAsset();
+        stubRegistration(asset);
+        deployment.setContractAddress("0x1234123412341234123412341234123412341234");
+
+        assertThatThrownBy(() -> service.registerMarket(
+                chainConfigId, marketAddress, null, asset.getId(), "aueur", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("confirmed deployment");
+        verify(marketRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("5B-09: refuses a market that the configured factory did not deploy")
+    void rejectsNonFactoryMarket() {
+        Asset asset = issuedAsset();
+        stubRegistration(asset);
+        when(onchainReader.isFactoryMarket("ETHEREUM_SEPOLIA", FACTORY, marketAddress)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.registerMarket(
+                chainConfigId, marketAddress, null, asset.getId(), "aueur", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("factory");
+        verify(marketRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("5B-09: fails closed when no factory is configured for the chain")
+    void rejectsWhenNoFactoryConfigured() {
+        Asset asset = issuedAsset();
+        stubRegistration(asset);
+        when(contractAddresses.findRepoMarketFactory("ETHEREUM_SEPOLIA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.registerMarket(
+                chainConfigId, marketAddress, null, asset.getId(), "aueur", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("No repo-market factory");
+    }
+
+    @Test
+    @DisplayName("5B-09: refuses a loan token that is not the rail's token on this chain, or other decimals")
+    void rejectsLoanRailMismatch() {
+        Asset asset = issuedAsset();
+        stubRegistration(asset);
+        railAddress.setTokenAddress("0x7777777777777777777777777777777777777777");
+        assertThatThrownBy(() -> service.registerMarket(
+                chainConfigId, marketAddress, null, asset.getId(), "aueur", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("token of rail");
+
+        railAddress.setTokenAddress(LOAN_TOKEN);
+        rail.setDecimals(18);
+        assertThatThrownBy(() -> service.registerMarket(
+                chainConfigId, marketAddress, null, asset.getId(), "aueur", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("decimals");
+    }
+
+    @Test
+    @DisplayName("5B-09: refuses an asset that is not ISSUED")
+    void rejectsNonIssuedAsset() {
+        Asset asset = issuedAsset();
+        asset.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.DRAFT);
+        stubRegistration(asset);
+
+        assertThatThrownBy(() -> service.registerMarket(
+                chainConfigId, marketAddress, null, asset.getId(), "aueur", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("ISSUED");
+    }
+
+    @Test
+    @DisplayName("T5-13: quote refuses RETAIL and unclassified entities, admits professional clients")
+    void quoteRefusesRetail() {
+        UUID retail = UUID.randomUUID();
+        UUID unclassified = UUID.randomUUID();
+        UUID professional = UUID.randomUUID();
+        var e1 = new de.makibytes.registerwerk.customer.api.LegalEntity();
+        e1.setClientCategory(de.makibytes.registerwerk.customer.api.ClientCategory.RETAIL);
+        var e2 = new de.makibytes.registerwerk.customer.api.LegalEntity();
+        var e3 = new de.makibytes.registerwerk.customer.api.LegalEntity();
+        e3.setClientCategory(de.makibytes.registerwerk.customer.api.ClientCategory.PROFESSIONAL);
+        when(legalEntityRepository.findById(retail)).thenReturn(Optional.of(e1));
+        when(legalEntityRepository.findById(unclassified)).thenReturn(Optional.of(e2));
+        when(legalEntityRepository.findById(professional)).thenReturn(Optional.of(e3));
+
+        assertThatThrownBy(() -> service.requireLendingEligible(retail))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThatThrownBy(() -> service.requireLendingEligible(unclassified))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        service.requireLendingEligible(professional);
+    }
+
+    @Test
+    @DisplayName("5B-10: a market with a recorded collateral shortfall reads as PAUSED (COLLATERAL_SHORTFALL)")
+    void shortfallMarketIsPaused() {
+        LendingMarket market = registeredMarket(7500);
+        market.setCollateralShortfall(true);
+        when(marketRepository.findById(market.getId())).thenReturn(Optional.of(market));
+        when(onchainReader.oracleQuoteToken("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(LOAN_TOKEN);
+        when(onchainReader.oracleMaxDeviationBps("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(BigInteger.valueOf(2000));
+        when(onchainReader.operatorOrg("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(OPERATOR_ORG);
+        when(onchainReader.treasury("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(TREASURY);
+
+        var view = service.getMarket(market.getId());
+
+        assertThat(view.effectiveStatus()).isEqualTo(LendingMarketStatus.PAUSED);
+        assertThat(view.pauseReason()).isEqualTo("COLLATERAL_SHORTFALL");
+        assertThatThrownBy(() -> service.requireOperational(market)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("5B-09: unverified markets are hidden from customers but visible to operators")
+    void unverifiedMarketHiddenFromCustomers() {
+        LendingMarket market = registeredMarket(7500);
+        market.setBindingVerified(false);
+        when(marketRepository.findAll()).thenReturn(List.of(market));
+        when(onchainReader.oracleQuoteToken("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(LOAN_TOKEN);
+        when(onchainReader.oracleMaxDeviationBps("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(BigInteger.valueOf(2000));
+        when(onchainReader.operatorOrg("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(OPERATOR_ORG);
+        when(onchainReader.treasury("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(TREASURY);
+
+        assertThat(service.listMarkets(null, false)).isEmpty();
+        assertThat(service.listMarkets(null, true)).hasSize(1);
     }
 
     @Test
@@ -78,6 +260,7 @@ class LendingMarketServiceTest {
         when(marketRepository.existsByChainConfigIdAndMarketAddressIgnoreCase(chainConfigId, marketAddress))
                 .thenReturn(false);
         ChainConfig chainConfig = new ChainConfig();
+        chainConfig.setId(chainConfigId);
         chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
         chainConfig.setChainType(ChainConfig.ChainType.EVM);
         chainConfig.setEnabled(true);
@@ -85,6 +268,8 @@ class LendingMarketServiceTest {
 
         UUID assetId = UUID.randomUUID();
         Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setStatus(de.makibytes.registerwerk.asset.api.AssetStatus.ISSUED);
         asset.setJurisdiction(Jurisdiction.DE_EWPG);
         asset.setName("Green Bond 2030");
         when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));

@@ -15,7 +15,6 @@ import { PageHeaderComponent, DataTableComponent, TableColumn, AsyncSectionStatu
 import { LendingService } from '../../../core/api/lending.service';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import {
-  erc20Abi,
   repoMarketAbi,
   trexEligibilityAbi,
   trexIdentityRegistryAbi,
@@ -28,6 +27,7 @@ interface LoanRow extends LendingPosition {
   surplusDisplay: string;
   healthFactorDisplay: string;
   healthFactorSeverity: 'ok' | 'warn' | 'danger' | 'none';
+  dataNotes: string;
 }
 
 @Component({
@@ -64,6 +64,15 @@ interface LoanRow extends LendingPosition {
         </p>
       }
 
+      @if (hasStaleOrUnverified) {
+        <p class="warning-text" role="status">
+          <mat-icon>info_outline</mat-icon>
+          Some figures are not confirmed: "Balance may be out of date" means the chain could not be read at the
+          last refresh; "Collateral unverified" means the market holds less collateral than recorded (for example
+          after a forced transfer) and the operator is reconciling it. Amounts may overstate what can be returned.
+        </p>
+      }
+
       @if (claimError) {
         <p class="error-text" role="alert">{{ claimError }}</p>
       }
@@ -72,6 +81,7 @@ interface LoanRow extends LendingPosition {
         <p class="hint-text" role="status">
           A liquidation sold your collateral in whole units for more than the debt it closed. The
           difference is yours: use "Claim … surplus" to receive it in your wallet.
+          @if (hasStaleSurplus) { The surplus shown may be out of date; check again after the next refresh. }
         </p>
       }
 
@@ -221,6 +231,7 @@ export class OpenLoansComponent implements OnInit {
     { key: 'currentDebt', header: 'Debt', cell: (r: LoanRow) => this.formatDebt(r) },
     { key: 'healthFactorDisplay', header: 'Health factor', cell: (r: LoanRow) => r.healthFactorDisplay },
     { key: 'surplusDisplay', header: 'Claimable surplus', cell: (r: LoanRow) => r.surplusDisplay },
+    { key: 'dataNotes', header: 'Data quality', cell: (r: LoanRow) => r.dataNotes },
     { key: 'status', header: 'Status', cell: (r: LoanRow) => r.status, type: 'badge' },
   ];
 
@@ -278,6 +289,10 @@ export class OpenLoansComponent implements OnInit {
         ? 'Unavailable (stale price)'
         : hfRaw !== null ? hfRaw.toFixed(2) : '—',
       healthFactorSeverity: severity,
+      dataNotes: [
+        position.stale ? 'Balance may be out of date' : '',
+        position.collateralUnverified ? 'Collateral unverified' : '',
+      ].filter(Boolean).join(' · ') || '—',
     };
   }
 
@@ -318,6 +333,14 @@ export class OpenLoansComponent implements OnInit {
   /** A liquidation credited loan-token cash to this wallet (`surplusOf`). */
   hasClaimableSurplus(row: LoanRow): boolean {
     return BigInt(row.liquidationSurplus ?? '0') > 0n;
+  }
+
+  get hasStaleSurplus(): boolean {
+    return this.rows.some((row) => row.stale && this.hasClaimableSurplus(row));
+  }
+
+  get hasStaleOrUnverified(): boolean {
+    return this.rows.some((row) => row.stale || row.collateralUnverified);
   }
 
   get hasAnySurplus(): boolean {
@@ -489,21 +512,7 @@ export class OpenLoansComponent implements OnInit {
       const amount = BigInt(this.collateralAmount);
       if (this.collateralAction === 'add') {
         const collateralToken = market.collateralTokenAddress as Address;
-        const allowance = await this.wallet.readContract<bigint>({
-          address: collateralToken,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [walletAddress, marketAddress],
-        });
-        if (allowance < amount) {
-          const approval = await this.wallet.writeContract({
-            address: collateralToken,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [marketAddress, amount],
-          });
-          await this.wallet.waitForTransaction(approval);
-        }
+        await this.wallet.ensureAllowance(collateralToken, marketAddress, amount);
       }
       const hash = await this.wallet.writeContract({
         address: marketAddress,
@@ -556,6 +565,9 @@ export class OpenLoansComponent implements OnInit {
       }
       const repayAmountUnits = parseUnits(String(this.repayAmount), this.loanTokenDecimals(row));
       const debtOnly = this.collateralReleaseBlocker !== null && this.repayKeepCollateral;
+      // repay and repayDebtOnly both pull the loan token from the borrower (5D-01): approve the exact
+      // amount entered (the contract pulls at most that) before the call, or it reverts on allowance.
+      await this.wallet.ensureAllowance(market.loanTokenAddress as Address, market.marketAddress as Address, repayAmountUnits);
       const hash = await this.wallet.writeContract({
         address: market.marketAddress as Address,
         abi: repoMarketAbi,

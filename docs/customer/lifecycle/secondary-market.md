@@ -46,14 +46,20 @@ A **listing** is an offer to sell: which holding, how many units, at what price,
 
 ### Venues
 
-Registerwerk does not run a market of its own. It connects to venues:
+The built-in peer listings are a **demonstration secondary-market workflow, not an authorised trading venue**. External venues are reached through adapters:
 
 | Venue | |
 |---|---|
-| `SIMULATED` | Built in. For demos and testing — matches instantly, no external counterparty. |
+| `SIMULATED` | Built in. For demos and testing — trades against other companies' listings on the platform, no external counterparty. |
 | `ASSETERA`, `ARCHAX`, `TALOS` | Adapters for external regulated venues. |
 
-The simulated venue is what a local or demo deployment uses, and it is why trades appear to fill immediately there. It supports **market** and **limit** orders only.
+The simulated venue is what a local or demo deployment uses. Trades there settle as described below; only when the seller has explicitly chosen the demo option "allow instant settlement" on their listing does a trade fill immediately (and then with no cash leg). It supports **market** and **limit** orders only.
+
+!!! warning "Currency, rounding, related parties and the venue perimeter"
+    - **Currency.** Every listing carries a settlement currency. Fiat options (SEPA, CBMT, Pontes) accept the currencies the operator allows (default EUR); a stablecoin listing names an enabled payment rail and takes its currency. Native chain currency is not supported yet. Older listings show "currency not recorded".
+    - **Rounding.** The total is rounded half-even to the currency's minor unit (EUR: 2 decimals; stablecoin rail: its decimals, at most 6). The exact product and the rounding are stored with the trade, and the confirmation states the currency.
+    - **Related parties.** A buyer and seller linked by a shared beneficial owner, a shared member or a shared wallet cannot trade with each other; the attempt raises an alert. Corporate groups beyond shared owners are not modelled. Trades between related parties (only if the operator allows them) are flagged and never set the reference price, which is indicative only.
+    - **Bilateral listings.** A seller may address a listing to one named counterparty; nobody else can see or buy it. In production the operator must set a venue classification (`BILATERAL_ONLY` or `LICENSED_VENUE`) and reference a legal opinion; otherwise peer listings are refused.
 
 ---
 
@@ -66,7 +72,7 @@ Choose an offer, a quantity, an order type, and a payment option:
 - **Market order** — take the listed price.
 - **Limit order** — specify the most you will pay. If the listing is above it, the order is refused rather than filled at a worse price.
 
-Then pick the wallet to receive into: your global default, your default for that asset type, one of your registered endpoints, or a specific address.
+Then pick the wallet to receive into: your global default, your default for that asset type, one of your registered endpoints, or a specific address registered for your company (endpoint or member wallet; a freely typed address is rejected).
 
 ??? note "For the specialist: what protects the trade"
 
@@ -84,21 +90,36 @@ Then pick the wallet to receive into: your global default, your default for that
 
 ## Settlement: the part that carries the risk
 
-An execution does not start life complete. It starts **`PENDING`**.
+A trade does not start life complete. Buying only **reserves** the units: the trade is **`PENDING`**.
 
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> PENDING: order matched
-    PENDING --> SETTLED: buyer confirms payment
-    PENDING --> CANCELLED: either side withdraws
-    PENDING --> FAILED: venue rejects, or times out
+    [*] --> PENDING: buyer reserves units
+    PENDING --> AWAITING_SELLER_CONFIRMATION: buyer declares payment
+    PENDING --> CANCELLED: buyer withdraws
+    PENDING --> FAILED: not paid in time
+    AWAITING_SELLER_CONFIRMATION --> SETTLED: seller confirms receipt
+    AWAITING_SELLER_CONFIRMATION --> PAYMENT_UNRESOLVED: seller disputes, no answer in time, or a check fails
+    PAYMENT_UNRESOLVED --> SETTLED: operator decides the payment arrived
+    PAYMENT_UNRESOLVED --> FAILED: operator releases the units
     SETTLED --> REFUNDED: operator reverses (4-eyes)
 ```
 
-`PENDING` means: the trade is agreed, the money has not been confirmed, and **the securities have not moved**. The seller still holds them.
+`PENDING` means: the trade is agreed, the units are **reserved** (the seller cannot offer them elsewhere), the money is not confirmed, and **the register has not moved**. Before anything is reserved, every check runs: status, KYC and sanctions screening of *both* parties, the buyer's target market and holding limits, the asset must be issued (`ISSUED`), and the seller's register entry must be active and cover the units. A buyer may hold at most **3** open reservations at once, one per listing, and after a withdrawal or a lapse a **24-hour cool-down** applies to that same listing.
 
-To settle, the buyer supplies a **payment reference** — a stablecoin transaction hash, a SEPA reference, whatever evidences the payment on the rail they chose. Only then does the register move the units.
+The buyer pays on the agreed rail and **declares the payment** with a **payment reference** — a stablecoin transaction hash, a SEPA reference, whatever evidences the payment on the rail they chose. The trade moves to `AWAITING_SELLER_CONFIRMATION`. The register still has not moved.
+
+**Only the seller's confirmation moves the register.** When the seller confirms receipt, the checks run one last time; if they pass, the units move and the trade is `SETTLED`. If a check fails at that moment, the trade is *not* silently dropped: it goes to `PAYMENT_UNRESOLVED`.
+
+If the seller disputes the payment, or does not answer within the timeout (72 hours; the expiry job runs hourly), the trade also goes to **`PAYMENT_UNRESOLVED`** and not to `FAILED`, because the buyer may have paid. The units stay reserved, the listing is not offered again, and both parties can add notes with their evidence. The operator decides under **four-eyes** and states a legal basis: force-settle (all checks run again), record the return of funds to the buyer, or release the units when the seller establishes non-receipt. The operator records evidence; it does not judge the merits of the dispute.
+
+Only the buyer can withdraw from a `PENDING` trade. If it is not paid in time it expires (`FAILED`) and the units go back to the listing.
+
+If the seller's register entry is removed or handed over, the asset is suspended (`SUSPENDED`) or redeemed (`REDEEMED`), or a party leaves the platform, the listings are cancelled, unpaid trades are cancelled and paid trades go to `PAYMENT_UNRESOLVED`. Nothing is ever settled against a removed register entry.
+
+!!! note "Demo deployments only: instant settlement"
+    In a demo deployment a *seller* can tick "allow instant settlement" on a listing. A purchase then moves the register immediately — **with no cash leg at all** — and confirmations carry the mark "SIMULATED - no cash leg". It is never a real settlement; the platform refuses to start in production mode if the option is on. The old company setting of the *buyer* no longer has any effect.
 
 !!! warning "Be honest about what a payment reference proves"
     It proves the buyer *asserted* a payment, and it gives reconciliation something concrete to check. It is not the platform verifying that money arrived.
@@ -107,7 +128,7 @@ To settle, the buyer supplies a **payment reference** — a stablecoin transacti
 
     If you want the security and the cash to be genuinely conditional on each other, use a [DvP rail](primary-issuance.md#where-the-money-goes) and put both legs on the same ledger.
 
-Trades that sit `PENDING` too long are timed out automatically, so a stale order cannot hold a seller's units hostage indefinitely. A settled trade can be reversed by the operator, but only as a **[four-eyes](../../compliance/step-up-mfa.md)** action — two different people — because unwinding a completed settlement is exactly the kind of power that should never rest with one person.
+A settled trade can be reversed by the operator, but only as a **[four-eyes](../../compliance/step-up-mfa.md)** action — two different people — because unwinding a completed settlement is exactly the kind of power that should never rest with one person.
 
 ---
 
@@ -133,20 +154,20 @@ The effect is that Nordwind's restriction — professional investors only — is
     1. *Trading Desk* → **Create listing**
     2. Pick the holding, quantity, price, accepted payment options
     3. Wait. The listing is visible to eligible buyers.
-    4. On a match, the trade goes `PENDING`
-    5. Confirm payment arrived; the buyer settles; your position decreases
+    4. When someone buys, your units are reserved and the trade goes `PENDING`
+    5. Check that the payment arrived and **confirm** receipt — only then does your position decrease. If it did not arrive, **dispute** it with a reason; the operator decides.
 
-    Cancel any time before settlement.
+    You can cancel a listing any time before a purchase. Only the buyer can withdraw from a `PENDING` trade.
 
 === "You are buying"
 
     1. *Trading Desk* → browse offers
     2. Choose quantity, order type, payment option, receiving wallet
-    3. Execute — the trade goes `PENDING`
+    3. Execute — the units are reserved and the trade goes `PENDING`
     4. Pay on the agreed rail
-    5. Settle with the payment reference; the units arrive
+    5. **Declare** the payment with its reference; the seller confirms and the units arrive
 
-    Your KYC must be current and your wallet registered *before* step 2.
+    Your KYC must be current and your receiving wallet registered for your company (endpoint or member wallet) *before* step 2.
 
 === "You are the issuer"
 

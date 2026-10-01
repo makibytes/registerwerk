@@ -96,4 +96,36 @@ class TradingNotificationListenerTest {
         verify(emailPort).sendHtml(eq("buyer@x.example"), anyString(), eq("trade-payment-disputed"), varsCaptor.capture());
         assertThat(varsCaptor.getValue()).containsEntry("reason", "never received");
     }
+
+    @Test
+    @DisplayName("B1: unresolved e-mail carries no reason variable and the template states units stay reserved, not failed")
+    void on_unresolved_passesNoReasonAndTemplateIsHoldWording() {
+        when(appUserRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(buyerId)).thenReturn(List.of(companyAdmin("buyer@x.example")));
+        when(appUserRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(sellerId)).thenReturn(List.of(companyAdmin("seller@x.example")));
+        UUID executionId = UUID.randomUUID();
+        TradeExecution execution = new TradeExecution();
+        execution.setAssetId(assetId);
+        when(tradeExecutionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+
+        listener.on(new de.makibytes.registerwerk.trading.events.TradePaymentUnresolvedEvent(executionId, null, "SYSTEM",
+                "GATE_FAILED_AT_CONFIRM", "Entity X has KYC status REJECTED; Sperrvermerk", buyerId, sellerId));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> vars = ArgumentCaptor.forClass(Map.class);
+        verify(emailPort, times(2)).sendHtml(anyString(), anyString(), eq("trade-payment-unresolved"), vars.capture());
+        assertThat(vars.getAllValues()).allSatisfy(m -> assertThat(m).doesNotContainKey("reason"));
+
+        org.thymeleaf.templateresolver.ClassLoaderTemplateResolver resolver = new org.thymeleaf.templateresolver.ClassLoaderTemplateResolver();
+        resolver.setPrefix("templates/email/");
+        resolver.setSuffix(".html");
+        resolver.setTemplateMode(org.thymeleaf.templatemode.TemplateMode.HTML);
+        org.thymeleaf.spring6.SpringTemplateEngine engine = new org.thymeleaf.spring6.SpringTemplateEngine();
+        engine.setTemplateResolver(resolver);
+        org.thymeleaf.context.Context ctx = new org.thymeleaf.context.Context();
+        ctx.setVariable("entityName", "Acme");
+        ctx.setVariable("assetName", "Test Bond");
+        ctx.setVariable("reason", "Sperrvermerk internal detail"); // even if passed, never printed
+        String html = engine.process("trade-payment-unresolved", ctx);
+        assertThat(html).contains("stay reserved").doesNotContain("Sperrvermerk").doesNotContain("has failed").doesNotContain("disputed");
+    }
 }

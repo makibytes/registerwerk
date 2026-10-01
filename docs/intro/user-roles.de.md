@@ -109,7 +109,7 @@ Ein maschineller oder menschlicher Nutzer, der zur Interaktion mit Handelsplatz-
 
 - Verkaufsangebote einstellen und verwalten
 - Berichte zu Handelsausführungen einsehen
-- Diese Handlungen werden über [MiFIR RTS 22](../compliance/mifir.md) an die Aufsicht gemeldet
+- Die Plattform führt ein Order- und Ausführungsprotokoll (Export für den Betreiber unter `/api/v1/admin/trading/order-history`); sie erstattet **keine** MiFIR-RTS-22-Meldungen — siehe [MiFIR](../compliance/mifir.md) (Entwurf, nicht validiert)
 
 ---
 

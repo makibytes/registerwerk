@@ -155,6 +155,29 @@ surfaced in the publish wizard's "Payment methods" step) and copy a `code`. Each
 entry is validated at submission **and again at approval** — a rail the operator disabled
 in between blocks the version from being approved until the manifest is updated.
 
+!!! warning "MiCAR fields are operator-entered claims"
+    Issuer, LEI, authorisation reference, the EMT flag, the white-paper link and the
+    "redeemable at par" flag of a stablecoin rail are entered by the operator. Registerwerk
+    does not verify them against a register. The catalog and the marketplace therefore show
+    an attestation status: `OPERATOR_ATTESTED` (with the attestation date) means an
+    operator checked the facts against an external source and a second operator approved
+    it; the notice reads "Operator-attested, not independently verified by Registerwerk".
+    `UNVERIFIED` means the details are unchecked claims. `railDisabledReason` explains why
+    a rail was switched off automatically.
+
+Operator controls: creating a rail, enabling it, updating it and attesting it each need
+step-up plus a second approver; new rails start disabled; the operator who created or last
+changed a rail cannot attest it; an EMT stablecoin rail cannot be enabled without an
+effective attestation. The attestation is bound to a fingerprint of the rail content
+(code, type, currency, decimals, issuer, LEI, authorisation, EMT flag, white paper, par
+flag and token address per chain): changing any of these voids it, and an enabled EMT rail
+is then disabled automatically (`MICAR_ATTESTATION_INVALIDATED`) until it is attested
+again. When a token address is saved, the backend checks that the address holds code and
+that `decimals()` equals the declared decimals (`registerwerk.payment.onchain-verify`,
+fails closed on RPC errors). Audit events: `PAYMENT_RAIL_CREATED`, `_UPDATED`, `_ENABLED`,
+`_DISABLED`, `_MICAR_VERIFIED`, `_MICAR_VERIFICATION_CLEARED`,
+`_MICAR_ATTESTATION_INVALIDATED`.
+
 This is advisory, not a whitelist: your dApp can always implement its own payment logic.
 Declare it as a `custom` entry instead of a `rail` reference:
 

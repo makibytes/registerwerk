@@ -242,6 +242,7 @@ contract DeployLocalLendingDemo is Script {
         output = string.concat(output, "DEMO_ERC3525_TOKEN=", vm.toString(erc3525Token), "\n");
         output = string.concat(output, "DEMO_ERC4626_VAULT=", vm.toString(erc4626Vault), "\n");
         output = string.concat(output, "DEMO_ERC7540_VAULT=", vm.toString(erc7540Vault), "\n");
+        output = string.concat(output, "REPO_MARKET_FACTORY=", vm.toString(address(factory)), "\n");
         output = string.concat(output, "LOAN_TOKEN=", vm.toString(address(loanToken)), "\n");
         output = string.concat(output, "NAV_ORACLE=", vm.toString(address(navOracle)), "\n");
         output = string.concat(output, "GREEN_BOND_TOKEN=", vm.toString(address(greenBond)), "\n");

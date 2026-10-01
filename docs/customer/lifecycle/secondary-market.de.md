@@ -46,14 +46,20 @@ Ein **Angebot** (*listing*) ist eine Verkaufsofferte: welcher Bestand, wie viele
 
 ### Handelsplätze
 
-Registerwerk betreibt keinen eigenen Markt. Es bindet Handelsplätze an:
+Die integrierten Peer-Angebote sind ein **Demonstrations-Workflow für den Sekundärmarkt, kein zugelassener Handelsplatz**. Externe Handelsplätze werden über Adapter angebunden:
 
 | Handelsplatz | |
 |---|---|
-| `SIMULATED` | Eingebaut. Für Demos und Tests — führt sofort aus, keine externe Gegenpartei. |
+| `SIMULATED` | Eingebaut. Für Demos und Tests — handelt gegen Angebote anderer Unternehmen auf der Plattform, keine externe Gegenpartei. |
 | `ASSETERA`, `ARCHAX`, `TALOS` | Adapter für externe regulierte Handelsplätze. |
 
-Der simulierte Handelsplatz ist das, was eine lokale oder Demo-Installation nutzt, und deshalb werden Geschäfte dort scheinbar sofort ausgeführt. Er unterstützt ausschließlich **Market**- und **Limit**-Orders.
+Der simulierte Handelsplatz ist das, was eine lokale oder Demo-Installation nutzt. Geschäfte dort werden wie unten beschrieben abgewickelt; nur wenn der Verkäufer bei seinem Angebot ausdrücklich die Demo-Option „Sofortabwicklung erlauben" gewählt hat, wird sofort (und dann ohne Zahlungsseite) ausgeführt. Er unterstützt ausschließlich **Market**- und **Limit**-Orders.
+
+!!! warning "Währung, Rundung, nahestehende Parteien und Handelsplatz-Perimeter"
+    - **Währung.** Jedes Angebot hat eine Abwicklungswährung. Fiat-Optionen (SEPA, CBMT, Pontes) akzeptieren die vom Betreiber zugelassenen Währungen (Standard EUR); ein Stablecoin-Angebot nennt einen aktivierten Zahlungsweg und übernimmt dessen Währung. Native Chain-Währung wird noch nicht unterstützt. Ältere Angebote zeigen „Währung nicht erfasst“.
+    - **Rundung.** Der Gesamtbetrag wird kaufmännisch-gerade (Half-Even) auf die kleinste Einheit der Währung gerundet (EUR: 2 Stellen; Stablecoin-Zahlungsweg: dessen Dezimalstellen, höchstens 6). Das exakte Produkt und die Rundung werden mit dem Trade gespeichert; die Bestätigung nennt die Währung.
+    - **Nahestehende Parteien.** Käufer und Verkäufer, die einen wirtschaftlich Berechtigten, ein Mitglied oder eine Wallet teilen, können nicht miteinander handeln; der Versuch löst einen Alarm aus. Konzerne über gemeinsame Berechtigte hinaus sind nicht abgebildet. Geschäfte zwischen nahestehenden Parteien (nur wenn der Betreiber sie erlaubt) werden markiert und setzen nie den Referenzpreis, der nur indikativ ist.
+    - **Bilaterale Angebote.** Ein Verkäufer kann ein Angebot an eine benannte Gegenpartei richten; niemand sonst sieht oder kauft es. In Produktion muss der Betreiber eine Handelsplatz-Klassifizierung (`BILATERAL_ONLY` oder `LICENSED_VENUE`) setzen und ein Rechtsgutachten referenzieren; sonst werden Peer-Angebote abgelehnt.
 
 ---
 
@@ -66,7 +72,7 @@ Wählen Sie ein Angebot, eine Stückzahl, einen Ordertyp und eine Zahlungsoption
 - **Market-Order** — zum angebotenen Preis nehmen.
 - **Limit-Order** — geben Sie an, wie viel Sie höchstens zahlen. Liegt das Angebot darüber, wird die Order abgelehnt statt zu einem schlechteren Preis ausgeführt.
 
-Dann wählen Sie die empfangende Wallet: Ihre globale Vorgabe, Ihre Vorgabe für diesen Asset-Typ, einen Ihrer registrierten Endpunkte oder eine bestimmte Adresse.
+Dann wählen Sie die empfangende Wallet: Ihre globale Vorgabe, Ihre Vorgabe für diesen Asset-Typ, einen Ihrer registrierten Endpunkte oder eine bestimmte, für Ihr Unternehmen registrierte Adresse (Endpunkt oder Mitglieds-Wallet; frei eingegebene Adressen werden abgelehnt).
 
 ??? note "Für Fachleute: was den Handel absichert"
 
@@ -84,21 +90,36 @@ Dann wählen Sie die empfangende Wallet: Ihre globale Vorgabe, Ihre Vorgabe für
 
 ## Abwicklung: der Teil mit dem Risiko
 
-Eine Ausführung beginnt nicht fertig. Sie beginnt als **`PENDING`**.
+Ein Geschäft beginnt nicht fertig. Ein Kauf **reserviert** zunächst nur die Stücke: Das Geschäft steht auf **`PENDING`**.
 
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> PENDING: Order zusammengeführt
-    PENDING --> SETTLED: Käufer bestätigt Zahlung
-    PENDING --> CANCELLED: eine Seite zieht zurück
-    PENDING --> FAILED: Handelsplatz lehnt ab oder Zeitablauf
+    [*] --> PENDING: Käufer reserviert Stücke
+    PENDING --> AWAITING_SELLER_CONFIRMATION: Käufer meldet die Zahlung
+    PENDING --> CANCELLED: Käufer zieht zurück
+    PENDING --> FAILED: nicht rechtzeitig bezahlt
+    AWAITING_SELLER_CONFIRMATION --> SETTLED: Verkäufer bestätigt den Zahlungseingang
+    AWAITING_SELLER_CONFIRMATION --> PAYMENT_UNRESOLVED: Verkäufer bestreitet, keine Antwort rechtzeitig oder eine Prüfung schlägt fehl
+    PAYMENT_UNRESOLVED --> SETTLED: Betreiber entscheidet, dass die Zahlung einging
+    PAYMENT_UNRESOLVED --> FAILED: Betreiber gibt die Stücke frei
     SETTLED --> REFUNDED: Betreiber storniert (Vier-Augen)
 ```
 
-`PENDING` bedeutet: Das Geschäft ist vereinbart, das Geld ist nicht bestätigt, und **die Wertpapiere haben sich nicht bewegt**. Der Verkäufer hält sie weiterhin.
+`PENDING` bedeutet: Das Geschäft ist vereinbart, die Stücke sind **reserviert** (der Verkäufer kann sie nicht anderweitig anbieten), das Geld ist nicht bestätigt, und **das Register hat sich nicht bewegt**. Bevor etwas reserviert wird, laufen alle Prüfungen: Status, KYC und Sanktionsprüfung *beider* Parteien, Zielmarkt und Haltegrenzen des Käufers, das Wertpapier muss ausgegeben (`ISSUED`) sein, und die Registereintragung des Verkäufers muss aktiv sein und die Stücke abdecken. Ein Käufer darf höchstens **3** offene Reservierungen gleichzeitig halten, nur eine je Angebot, und nach einem Rückzug oder Zeitablauf gilt für dasselbe Angebot eine **Sperrfrist von 24 Stunden**.
 
-Zur Abwicklung liefert der Käufer eine **Zahlungsreferenz** — einen Stablecoin-Transaktions-Hash, eine SEPA-Referenz, was auch immer die Zahlung auf dem gewählten Weg belegt. Erst dann bewegt das Register die Stücke.
+Der Käufer zahlt auf dem vereinbarten Weg und **meldet die Zahlung** mit einer **Zahlungsreferenz** — Stablecoin-Transaktions-Hash, SEPA-Referenz, was die Zahlung auf dem gewählten Weg belegt. Das Geschäft geht auf `AWAITING_SELLER_CONFIRMATION`. Das Register hat sich noch immer nicht bewegt.
+
+**Erst die Bestätigung des Verkäufers bewegt das Register.** Bestätigt der Verkäufer den Zahlungseingang, laufen die Prüfungen ein letztes Mal; bestehen sie, gehen die Stücke über und das Geschäft steht auf `SETTLED`. Scheitert in diesem Moment eine Prüfung, wird das Geschäft *nicht* stillschweigend verworfen: Es geht auf `PAYMENT_UNRESOLVED`.
+
+Bestreitet der Verkäufer die Zahlung oder antwortet er nicht innerhalb der Frist (72 Stunden; der Ablauf-Job läuft stündlich), geht das Geschäft ebenfalls auf **`PAYMENT_UNRESOLVED`** und nicht auf `FAILED`, denn der Käufer kann bezahlt haben. Die Stücke bleiben reserviert, das Angebot wird nicht erneut angeboten, und beide Parteien können Notizen mit Belegen hinzufügen. Der Betreiber entscheidet im **Vier-Augen-Prinzip** und mit Angabe der Rechtsgrundlage: erzwungene Abwicklung (alle Prüfungen laufen erneut), Erfassen der Rückzahlung an den Käufer oder Freigabe der Stücke, wenn der Verkäufer den Nichteingang belegt. Der Betreiber hält Belege fest; er urteilt nicht über die Sache selbst.
+
+Nur der Käufer kann ein Geschäft in `PENDING` zurückziehen. Wird nicht rechtzeitig gezahlt, läuft es ab (`FAILED`) und die Stücke gehen an das Angebot zurück.
+
+Wird die Registereintragung des Verkäufers entfernt oder übergeben, ein Wertpapier ausgesetzt (`SUSPENDED`) oder zurückgezahlt (`REDEEMED`) oder verlässt eine Partei die Plattform, werden die Angebote storniert, unbezahlte Geschäfte abgebrochen und bezahlte Geschäfte auf `PAYMENT_UNRESOLVED` gesetzt. Gegen eine entfernte Registereintragung wird nie abgewickelt.
+
+!!! note "Nur in Demo-Installationen: Sofortabwicklung"
+    In einer Demo-Installation kann ein *Verkäufer* bei einem Angebot „Sofortabwicklung erlauben" wählen. Ein Kauf bewegt dann das Register sofort — **ohne jede Zahlungsseite** — und Bestätigungen tragen den Vermerk „SIMULATED - no cash leg". Das ist nie eine echte Abwicklung; die Plattform verweigert im Produktionsbetrieb den Start, wenn die Option aktiv ist. Die frühere Firmeneinstellung des *Käufers* wirkt nicht mehr.
 
 !!! warning "Seien Sie ehrlich, was eine Zahlungsreferenz beweist"
     Sie belegt, dass der Käufer eine Zahlung *behauptet* hat, und gibt der Abstimmung etwas Konkretes zum Prüfen. Sie ist nicht die Plattform, die bestätigt, dass Geld angekommen ist.
@@ -107,7 +128,7 @@ Zur Abwicklung liefert der Käufer eine **Zahlungsreferenz** — einen Stablecoi
 
     Wenn Wertpapier und Geld wirklich voneinander abhängen sollen, nutzen Sie einen [LgZ-Weg](primary-issuance.md#wo-das-geld-bleibt) und legen Sie beide Seiten auf dasselbe Ledger.
 
-Geschäfte, die zu lange in `PENDING` stehen, laufen automatisch ab, damit eine schlafende Order die Stücke eines Verkäufers nicht unbegrenzt binden kann. Ein abgewickeltes Geschäft kann vom Betreiber rückabgewickelt werden, aber nur im **[Vier-Augen-Prinzip](../../compliance/step-up-mfa.md)** — zwei verschiedene Personen — denn das Aufheben einer abgeschlossenen Abwicklung ist genau die Art von Befugnis, die niemals bei einer Person allein liegen sollte.
+Ein abgewickeltes Geschäft kann vom Betreiber rückabgewickelt werden, aber nur im **[Vier-Augen-Prinzip](../../compliance/step-up-mfa.md)** — zwei verschiedene Personen — denn das Aufheben einer abgeschlossenen Abwicklung ist genau die Art von Befugnis, die niemals bei einer Person allein liegen sollte.
 
 ---
 
@@ -133,20 +154,20 @@ Im Ergebnis wird Nordwinds Beschränkung — nur professionelle Anleger — beim
     1. *Trading Desk* → **Create listing**
     2. Bestand, Stückzahl, Preis und akzeptierte Zahlungsoptionen wählen
     3. Warten. Das Angebot ist für berechtigte Käufer sichtbar.
-    4. Bei einer Zusammenführung geht das Geschäft auf `PENDING`
-    5. Zahlungseingang bestätigen; der Käufer wickelt ab; Ihre Position sinkt
+    4. Bei einem Kauf sind Ihre Stücke reserviert und das Geschäft steht auf `PENDING`
+    5. Prüfen, ob die Zahlung eingegangen ist, und den Eingang **bestätigen** — erst dann sinkt Ihre Position. Ist sie nicht eingegangen, **bestreiten** Sie sie mit Begründung; der Betreiber entscheidet.
 
-    Bis zur Abwicklung können Sie jederzeit stornieren.
+    Ein Angebot können Sie bis zu einem Kauf jederzeit stornieren. Ein Geschäft in `PENDING` kann nur der Käufer zurückziehen.
 
 === "Sie kaufen"
 
     1. *Trading Desk* → Angebote durchsehen
     2. Stückzahl, Ordertyp, Zahlungsoption und empfangende Wallet wählen
-    3. Ausführen — das Geschäft geht auf `PENDING`
+    3. Ausführen — die Stücke werden reserviert, das Geschäft geht auf `PENDING`
     4. Auf dem vereinbarten Weg zahlen
-    5. Mit der Zahlungsreferenz abwickeln; die Stücke kommen an
+    5. Die Zahlung mit der Zahlungsreferenz **melden**; der Verkäufer bestätigt, und die Stücke kommen an
 
-    Ihr KYC muss aktuell und Ihre Wallet registriert sein — *vor* Schritt 2.
+    Ihr KYC muss aktuell und Ihre empfangende Wallet für Ihr Unternehmen registriert sein (Endpunkt oder Mitglieds-Wallet) — *vor* Schritt 2.
 
 === "Sie sind der Emittent"
 

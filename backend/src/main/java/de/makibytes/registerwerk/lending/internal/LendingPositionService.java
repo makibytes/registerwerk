@@ -91,6 +91,8 @@ public class LendingPositionService {
                 } catch (RuntimeException e) {
                     log.warn("Unable to refresh lending position for market {} wallet {}: {}",
                             market.getId(), wallet.getWalletAddress(), e.getMessage());
+                    // 5B-11: keep the previous values but say so, instead of hiding the row or zeroing it.
+                    markStale(market, wallet.getWalletAddress(), e).ifPresent(results::add);
                 }
             }
         }
@@ -124,6 +126,23 @@ public class LendingPositionService {
             }
         }
         return results;
+    }
+
+    private Optional<LendingPosition> markStale(LendingMarket market, String walletAddress, RuntimeException cause) {
+        return positionRepository.findByMarketIdAndWalletAddressIgnoreCase(market.getId(), walletAddress).map(p -> {
+            p.setSyncStale(true);
+            String message = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+            p.setLastSyncError(message.substring(0, Math.min(message.length(), 500)));
+            return positionRepository.save(p);
+        });
+    }
+
+    /** Ids of markets whose collateral balance is below their recorded total (positions unverified). */
+    @Transactional(readOnly = true)
+    public java.util.Set<UUID> shortfallMarketIds() {
+        java.util.Set<UUID> ids = new java.util.HashSet<>();
+        marketRepository.findByCollateralShortfallTrue().forEach(m -> ids.add(m.getId()));
+        return ids;
     }
 
     private Optional<LendingPosition> refreshPosition(LendingMarket market, String chainIdentifier, String walletAddress) {
@@ -174,6 +193,8 @@ public class LendingPositionService {
         position.setHealthFactorWad(healthFactor);
         position.setHealthFactorReliable(healthFactorReliable);
         position.setLiquidationSurplus(surplus);
+        position.setSyncStale(false);
+        position.setLastSyncError(null);
         if (debt.signum() > 0) {
             position.setStatus(LendingPositionStatus.OPEN);
         } else {
@@ -190,17 +211,22 @@ public class LendingPositionService {
     }
 
     /**
-     * Liquidation surplus owed to the wallet. A market predating {@code surplusOf} reverts the
-     * read; it has no surplus to offer, so that reads as zero.
+     * Liquidation surplus owed to the wallet. A market without {@code surplusOf} (probed at
+     * registration) deliberately reads as zero. On a supporting market a failed read is an error
+     * ({@link PositionRefreshException}): the caller keeps the previous value and marks the row stale.
      */
     private BigInteger liquidationSurplus(LendingMarket market, String chainIdentifier, String walletAddress) {
+        if (!market.isSurplusSupported()) {
+            return BigInteger.ZERO;
+        }
         try {
             BigInteger surplus = onchainReader.liquidationSurplus(chainIdentifier, market.getMarketAddress(), walletAddress);
             return surplus != null ? surplus : BigInteger.ZERO;
+        } catch (PositionRefreshException e) {
+            throw e;
         } catch (RuntimeException e) {
-            log.debug("No liquidation surplus readable for market {} wallet {}: {}",
-                    market.getMarketAddress(), walletAddress, e.getMessage());
-            return BigInteger.ZERO;
+            throw new PositionRefreshException("Liquidation surplus unreadable for market "
+                    + market.getMarketAddress() + ": " + e.getMessage(), e);
         }
     }
 

@@ -20,5 +20,12 @@ public record LendingPositionResponse(
         // claimLiquidationSurplus() on the market; zero when there is none.
         BigInteger liquidationSurplus,
         LendingPositionStatus status,
-        Instant lastSyncedAt
+        Instant lastSyncedAt,
+        // True when the last refresh could not read the chain: values are the previous ones and
+        // "balance may be out of date" must be shown. lastSyncError is an operator diagnostic.
+        boolean stale,
+        String lastSyncError,
+        // True when the market's collateral balance is below its recorded total (forced move not yet
+        // reconciled): collateralAmount may overstate what the market can deliver.
+        boolean collateralUnverified
 ) {}

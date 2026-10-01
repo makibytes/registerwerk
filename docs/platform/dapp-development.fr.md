@@ -159,6 +159,30 @@ entrée de rail est validée à la soumission **et de nouveau à l'approbation**
 l'opérateur a désactivé entre-temps bloque l'approbation de la version tant que le manifeste n'a
 pas été mis à jour.
 
+!!! warning "Les champs MiCAR sont des déclarations saisies par l'opérateur"
+    L'émetteur, le LEI, la référence d'agrément, l'indicateur EMT, le lien du livre blanc et
+    l'indicateur « remboursable au pair » d'un rail stablecoin sont saisis par l'opérateur.
+    Registerwerk ne les vérifie pas auprès d'un registre. Le catalogue et la place de marché
+    affichent donc un statut d'attestation : `OPERATOR_ATTESTED` (avec la date) signifie
+    qu'un opérateur a contrôlé les faits auprès d'une source externe et qu'un second
+    opérateur l'a approuvé ; la mention indique « Attesté par l'opérateur, non vérifié de
+    manière indépendante par Registerwerk ». `UNVERIFIED` signifie que les informations sont
+    des déclarations non contrôlées. `railDisabledReason` explique pourquoi un rail a été
+    désactivé automatiquement.
+
+Contrôles opérateur : la création, l'activation, la modification et l'attestation d'un rail
+exigent chacune un step-up et un second approbateur ; les nouveaux rails démarrent
+désactivés ; l'opérateur qui a créé ou modifié en dernier un rail ne peut pas l'attester ;
+un rail stablecoin EMT ne peut pas être activé sans attestation effective. L'attestation
+est liée à une empreinte du contenu (code, type, devise, décimales, émetteur, LEI, agrément,
+indicateur EMT, livre blanc, indicateur au pair et adresse du token par chaîne) : toute
+modification l'invalide, et un rail EMT activé est alors désactivé automatiquement
+(`MICAR_ATTESTATION_INVALIDATED`) jusqu'à une nouvelle attestation. À l'enregistrement d'une
+adresse de token, le backend vérifie que l'adresse contient du code et que `decimals()` est
+égal aux décimales déclarées (`registerwerk.payment.onchain-verify`, refus en cas d'erreur
+RPC). Événements d'audit : `PAYMENT_RAIL_CREATED`, `_UPDATED`, `_ENABLED`, `_DISABLED`,
+`_MICAR_VERIFIED`, `_MICAR_VERIFICATION_CLEARED`, `_MICAR_ATTESTATION_INVALIDATED`.
+
 C'est indicatif, pas une liste blanche : votre dApp peut toujours implémenter sa propre logique de
 paiement. Déclarez-la comme entrée `custom` au lieu d'une référence `rail` :
 

@@ -46,14 +46,20 @@ Una **proposta di vendita** (*listing*) è un'offerta: quale posizione, quanti t
 
 ### Sedi di negoziazione
 
-Registerwerk non gestisce un mercato proprio. Si collega a sedi esterne:
+Le proposte tra pari integrate sono un **flusso dimostrativo del mercato secondario, non una sede di negoziazione autorizzata**. Le sedi esterne si raggiungono tramite adattatori:
 
 | Sede | |
 |---|---|
-| `SIMULATED` | Integrata. Per dimostrazioni e test — esegue subito, nessuna controparte esterna. |
+| `SIMULATED` | Integrata. Per dimostrazioni e test — negozia contro le proposte di altre aziende della piattaforma, nessuna controparte esterna. |
 | `ASSETERA`, `ARCHAX`, `TALOS` | Connettori verso sedi regolamentate esterne. |
 
-La sede simulata è quella usata da un'installazione locale o dimostrativa, ed è il motivo per cui lì le operazioni sembrano eseguirsi all'istante. Supporta solo ordini **al mercato** e **con limite di prezzo**.
+La sede simulata è quella usata da un'installazione locale o dimostrativa. Le operazioni vi si regolano come descritto sotto; solo se il venditore ha scelto espressamente sulla sua proposta l'opzione dimostrativa «consenti regolamento immediato» l'esecuzione è immediata (e senza componente di pagamento). Supporta solo ordini **al mercato** e **con limite di prezzo**.
+
+!!! warning "Valuta, arrotondamento, parti correlate e perimetro della sede"
+    - **Valuta.** Ogni proposta ha una valuta di regolamento. Le opzioni fiat (SEPA, CBMT, Pontes) accettano le valute consentite dall'operatore (EUR di default); una proposta in stablecoin indica un canale di pagamento attivo e ne assume la valuta. La valuta nativa della chain non è ancora supportata. Le proposte più vecchie mostrano «valuta non registrata».
+    - **Arrotondamento.** Il totale è arrotondato half-even all'unità minore della valuta (EUR: 2 decimali; canale stablecoin: i suoi decimali, al massimo 6). Il prodotto esatto e l'arrotondamento sono salvati con l'operazione; la conferma indica la valuta.
+    - **Parti correlate.** Acquirente e venditore collegati da un titolare effettivo, un membro o un wallet in comune non possono negoziare tra loro; il tentativo genera un allarme. I gruppi oltre i titolari effettivi comuni non sono modellati. Le operazioni tra parti correlate (solo se l'operatore le consente) sono segnalate e non fissano mai il prezzo di riferimento, solo indicativo.
+    - **Proposte bilaterali.** Un venditore può indirizzare una proposta a una controparte nominata; nessun altro la vede o la acquista. In produzione l'operatore deve impostare una classificazione (`BILATERAL_ONLY` o `LICENSED_VENUE`) e citare un parere legale; altrimenti le proposte tra pari sono rifiutate.
 
 ---
 
@@ -66,7 +72,7 @@ Scegli una proposta, una quantità, un tipo di ordine e un'opzione di pagamento:
 - **Ordine al mercato** — accetti il prezzo esposto.
 - **Ordine con limite** — indichi il massimo che pagheresti. Se la proposta è superiore, l'ordine viene rifiutato anziché eseguito a un prezzo peggiore.
 
-Poi scegli il wallet di ricezione: la tua impostazione predefinita globale, quella per quel tipo di asset, uno dei tuoi endpoint registrati o un indirizzo specifico.
+Poi scegli il wallet di ricezione: la tua impostazione predefinita globale, quella per quel tipo di asset, uno dei tuoi endpoint registrati o un indirizzo specifico registrato per la tua azienda (endpoint o wallet di membro; gli indirizzi digitati liberamente vengono rifiutati).
 
 ??? note "Per gli specialisti: che cosa protegge l'operazione"
 
@@ -84,21 +90,36 @@ Poi scegli il wallet di ricezione: la tua impostazione predefinita globale, quel
 
 ## Il regolamento: la parte che porta il rischio
 
-Un'esecuzione non nasce completa. Nasce **`PENDING`**.
+Un'esecuzione non nasce completa. Un acquisto **riserva** soltanto le unità: l'operazione è **`PENDING`**.
 
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> PENDING: ordine abbinato
-    PENDING --> SETTLED: l'acquirente conferma il pagamento
-    PENDING --> CANCELLED: una parte si ritira
-    PENDING --> FAILED: la sede rifiuta, o scade il tempo
+    [*] --> PENDING: l'acquirente riserva le unità
+    PENDING --> AWAITING_SELLER_CONFIRMATION: l'acquirente dichiara il pagamento
+    PENDING --> CANCELLED: l'acquirente si ritira
+    PENDING --> FAILED: non pagata in tempo
+    AWAITING_SELLER_CONFIRMATION --> SETTLED: il venditore conferma la ricezione
+    AWAITING_SELLER_CONFIRMATION --> PAYMENT_UNRESOLVED: il venditore contesta, nessuna risposta in tempo o un controllo fallisce
+    PAYMENT_UNRESOLVED --> SETTLED: l'operatore decide che il pagamento è arrivato
+    PAYMENT_UNRESOLVED --> FAILED: l'operatore libera le unità
     SETTLED --> REFUNDED: storno dell'operatore (quattro occhi)
 ```
 
-`PENDING` significa: l'operazione è concordata, il denaro non è confermato e **i titoli non si sono mossi**. Il venditore li detiene ancora.
+`PENDING` significa: l'operazione è concordata, le unità sono **riservate** (il venditore non può offrirle altrove), il denaro non è confermato e **il registro non si è mosso**. Prima di riservare vengono eseguiti tutti i controlli: stato, KYC e verifica delle sanzioni di *entrambe* le parti, mercato di riferimento e limiti di detenzione dell'acquirente, strumento emesso (`ISSUED`), iscrizione del venditore attiva e capiente. Un acquirente può avere al massimo **3** prenotazioni aperte contemporaneamente, una sola per proposta, e dopo un ritiro o una scadenza vale per la stessa proposta un **periodo di attesa di 24 ore**.
 
-Per regolare, l'acquirente fornisce un **riferimento di pagamento** — un hash di transazione stablecoin, un riferimento SEPA, qualunque cosa attesti il pagamento sul binario scelto. Solo allora il registro muove i titoli.
+L'acquirente paga sul canale concordato e **dichiara il pagamento** con un **riferimento di pagamento** — un hash di transazione stablecoin, un riferimento SEPA, ciò che documenta il pagamento sul canale scelto. L'operazione passa a `AWAITING_SELLER_CONFIRMATION`. Il registro non si è ancora mosso.
+
+**Solo la conferma del venditore muove il registro.** Quando il venditore conferma la ricezione, i controlli vengono eseguiti un'ultima volta; se sono superati, le unità passano e l'operazione è `SETTLED`. Se un controllo fallisce in quel momento, l'operazione *non* viene scartata in silenzio: passa a `PAYMENT_UNRESOLVED`.
+
+Se il venditore contesta il pagamento o non risponde entro il termine (72 ore; il job di scadenza gira ogni ora), l'operazione passa anch'essa a **`PAYMENT_UNRESOLVED`** e non a `FAILED`, perché l'acquirente potrebbe aver pagato. Le unità restano riservate, la proposta non viene rimessa in vendita ed entrambe le parti possono aggiungere note con le prove. L'operatore decide secondo il **principio dei quattro occhi** e indicando la base giuridica: regolamento forzato (tutti i controlli vengono rieseguiti), registrazione della restituzione dei fondi all'acquirente, oppure rilascio delle unità quando il venditore dimostra il mancato accredito. L'operatore raccoglie le prove; non giudica nel merito.
+
+Solo l'acquirente può ritirarsi da un'operazione `PENDING`. Se non viene pagata in tempo, scade (`FAILED`) e le unità tornano alla proposta.
+
+Se l'iscrizione del venditore viene rimossa o trasferita, lo strumento viene sospeso (`SUSPENDED`) o rimborsato (`REDEEMED`), o una parte lascia la piattaforma, le proposte vengono annullate, le operazioni non pagate revocate e quelle pagate passano a `PAYMENT_UNRESOLVED`. Non si regola mai contro un'iscrizione rimossa.
+
+!!! note "Solo nelle installazioni dimostrative: regolamento immediato"
+    In un'installazione dimostrativa un *venditore* può spuntare «consenti regolamento immediato» su una proposta. Un acquisto sposta allora il registro subito — **senza alcuna componente di pagamento** — e le conferme riportano la dicitura «SIMULATED - no cash leg». Non è mai un regolamento reale; la piattaforma rifiuta di avviarsi in produzione se l'opzione è attiva. La precedente impostazione aziendale dell'*acquirente* non ha più alcun effetto.
 
 !!! warning "Sii onesto su che cosa prova un riferimento di pagamento"
     Prova che l'acquirente ha *dichiarato* un pagamento e dà alla riconciliazione qualcosa di concreto da verificare. Non è la piattaforma che conferma l'arrivo del denaro.
@@ -107,7 +128,7 @@ Per regolare, l'acquirente fornisce un **riferimento di pagamento** — un hash 
 
     Se vuoi che titolo e denaro siano davvero condizionati l'uno all'altro, usa un [binario a consegna contro pagamento](primary-issuance.md#dove-va-il-denaro) e metti entrambe le gambe sullo stesso registro.
 
-Le operazioni che restano troppo a lungo in `PENDING` scadono automaticamente, così un ordine dormiente non può tenere bloccati indefinitamente i titoli di un venditore. Un'operazione regolata può essere stornata dall'operatore, ma solo con il **[principio dei quattro occhi](../../compliance/step-up-mfa.md)** — due persone diverse — perché disfare un regolamento concluso è esattamente il tipo di potere che non dovrebbe mai stare in capo a una sola persona.
+Un'operazione regolata può essere stornata dall'operatore, ma solo secondo il **[principio dei quattro occhi](../../compliance/step-up-mfa.md)** — due persone distinte — perché annullare un regolamento concluso è proprio il tipo di potere che non dovrebbe mai spettare a una sola persona.
 
 ---
 
@@ -131,22 +152,22 @@ L'effetto è che la restrizione di Nordwind — solo investitori professionali �
 === "Stai vendendo"
 
     1. *Trading Desk* → **Create listing**
-    2. Scegli posizione, quantità, prezzo e opzioni di pagamento accettate
-    3. Aspetta. La proposta è visibile agli acquirenti idonei.
-    4. All'abbinamento, l'operazione passa a `PENDING`
-    5. Conferma l'arrivo del pagamento; l'acquirente regola; la tua posizione cala
+    2. Scegli la posizione, la quantità, il prezzo e le opzioni di pagamento accettate
+    3. Attendi. La proposta è visibile agli acquirenti idonei.
+    4. Quando qualcuno acquista, le tue unità sono riservate e l'operazione passa a `PENDING`
+    5. Verifica che il pagamento sia arrivato e **conferma** la ricezione — solo allora la tua posizione diminuisce. Se non è arrivato, **contestalo** motivando; decide l'operatore.
 
-    Puoi annullare in qualsiasi momento prima del regolamento.
+    Puoi annullare una proposta in qualsiasi momento prima di un acquisto. Solo l'acquirente può ritirarsi da un'operazione `PENDING`.
 
 === "Stai comprando"
 
     1. *Trading Desk* → sfoglia le proposte
     2. Scegli quantità, tipo di ordine, opzione di pagamento e wallet di ricezione
-    3. Esegui — l'operazione passa a `PENDING`
-    4. Paga sul binario concordato
-    5. Regola con il riferimento di pagamento; i titoli arrivano
+    3. Esegui — le unità vengono riservate e l'operazione passa a `PENDING`
+    4. Paga sul canale concordato
+    5. **Dichiara** il pagamento con il riferimento; il venditore conferma e le unità arrivano
 
-    Il tuo KYC deve essere in corso di validità e il wallet registrato *prima* del passaggio 2.
+    Il tuo KYC deve essere in corso di validità e il wallet di ricezione registrato per la tua azienda (endpoint o wallet di membro) *prima* del passaggio 2.
 
 === "Sei l'emittente"
 

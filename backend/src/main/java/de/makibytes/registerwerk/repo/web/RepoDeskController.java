@@ -63,8 +63,27 @@ public class RepoDeskController {
     }
 
     @PostMapping("/rfqs/{rfqId}/quotes/{quoteId}/accept")
-    public RfqResponse acceptQuote(@PathVariable UUID rfqId, @PathVariable UUID quoteId, Authentication auth) {
-        return response(service.acceptQuote(rfqId, quoteId, SecurityUtils.extractEntityId(auth)));
+    public RfqResponse acceptQuote(@PathVariable UUID rfqId, @PathVariable UUID quoteId,
+                                   @RequestBody @Valid AcceptQuoteRequest request, Authentication auth) {
+        return response(service.acceptQuote(rfqId, quoteId, SecurityUtils.extractEntityId(auth), request.termsHash()));
+    }
+
+    @GetMapping("/participation")
+    public ParticipationView participation(Authentication auth) {
+        return service.participation(SecurityUtils.extractEntityId(auth));
+    }
+
+    /** Opt in to the repo desk (company administrators only); {@code listed} shows the company in the directory. */
+    @PutMapping("/participation")
+    @PreAuthorize("hasRole('COMPANY_ADMIN')")
+    public ParticipationView optIn(@RequestBody @Valid ParticipationRequest request, Authentication auth) {
+        return service.optIn(SecurityUtils.extractEntityId(auth), SecurityUtils.extractUserId(auth), request.listed());
+    }
+
+    @DeleteMapping("/participation")
+    @PreAuthorize("hasRole('COMPANY_ADMIN')")
+    public ParticipationView optOut(Authentication auth) {
+        return service.optOut(SecurityUtils.extractEntityId(auth), SecurityUtils.extractUserId(auth));
     }
 
     @GetMapping("/counterparties")
@@ -73,7 +92,7 @@ public class RepoDeskController {
     }
 
     @GetMapping("/collateral")
-    public List<CollateralView> collateral() { return service.collateral(); }
+    public List<CollateralView> collateral(Authentication auth) { return service.collateral(SecurityUtils.extractEntityId(auth)); }
 
     private RfqResponse response(RfqView view) {
         var rfq = view.rfq();
@@ -91,7 +110,7 @@ public class RepoDeskController {
         var quote = view.quote();
         return new QuoteResponse(quote.getId(), quote.getQuotingEntityId(), view.quotingEntityName(),
                 quote.getCashAmount(), quote.getRepoRate(), quote.getHaircutBps(), quote.getValidUntil(),
-                quote.getStatus(), quote.getMessage(), quote.getCreatedAt());
+                quote.getStatus(), quote.getMessage(), quote.getCreatedAt(), quote.getQuoteVersion(), view.termsHash());
     }
 
     public record CreateRfqRequest(
@@ -129,5 +148,10 @@ public class RepoDeskController {
 
     public record QuoteResponse(UUID id, UUID quotingEntityId, String quotingEntityName,
                                 BigDecimal cashAmount, BigDecimal repoRate, int haircutBps,
-                                Instant validUntil, QuoteStatus status, String message, Instant createdAt) {}
+                                Instant validUntil, QuoteStatus status, String message, Instant createdAt,
+                                int version, String termsHash) {}
+
+    public record AcceptQuoteRequest(@NotBlank @Size(max = 64) String termsHash) {}
+
+    public record ParticipationRequest(boolean listed) {}
 }

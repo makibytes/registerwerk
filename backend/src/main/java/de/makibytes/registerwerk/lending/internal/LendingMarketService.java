@@ -2,6 +2,17 @@ package de.makibytes.registerwerk.lending.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
+import de.makibytes.registerwerk.customer.api.ClientCategory;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.payment.api.PaymentRail;
+import de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository;
+import de.makibytes.registerwerk.payment.api.PaymentRailRepository;
+import de.makibytes.registerwerk.payment.api.PaymentRailType;
+import org.springframework.security.access.AccessDeniedException;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
@@ -46,6 +57,12 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
     private final ApplicationEventPublisher eventPublisher;
     private final JurisdictionRequirementConfig jurisdictionConfig;
     private final LendingReleaseGate releaseGate;
+    private final LendingProperties properties;
+    private final ContractAddressConfig contractAddresses;
+    private final AssetDeploymentRepository deploymentRepository;
+    private final PaymentRailRepository railRepository;
+    private final PaymentRailChainAddressRepository railAddressRepository;
+    private final LegalEntityRepository legalEntityRepository;
 
     LendingMarketService(
             LendingMarketRepository marketRepository,
@@ -54,7 +71,19 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
             RepoMarketOnchainReader onchainReader,
             ApplicationEventPublisher eventPublisher,
             JurisdictionRequirementConfig jurisdictionConfig,
-            LendingReleaseGate releaseGate) {
+            LendingReleaseGate releaseGate,
+            LendingProperties properties,
+            ContractAddressConfig contractAddresses,
+            AssetDeploymentRepository deploymentRepository,
+            PaymentRailRepository railRepository,
+            PaymentRailChainAddressRepository railAddressRepository,
+            LegalEntityRepository legalEntityRepository) {
+        this.properties = properties;
+        this.contractAddresses = contractAddresses;
+        this.deploymentRepository = deploymentRepository;
+        this.railRepository = railRepository;
+        this.railAddressRepository = railAddressRepository;
+        this.legalEntityRepository = legalEntityRepository;
         this.marketRepository = marketRepository;
         this.assetRepository = assetRepository;
         this.chainConfigRepository = chainConfigRepository;
@@ -86,13 +115,16 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
      *                        closed). Always false for a RETIRED market, which is never read.
      * @param operatorOrg     the org operating the market on-chain ({@code operatorOrg()}); null
      *                        for a legacy market or when the read failed.
+     * @param pauseReason     why {@code effectiveStatus} is PAUSED although the row is ACTIVE:
+     *                        {@code COLLATERAL_SHORTFALL} (5B-10), {@code BINDING_UNVERIFIED} (5B-09),
+     *                        {@code BORROW_PAUSED_ONCHAIN} or {@code CHAIN_READ_FAILED}; null otherwise.
      * @param treasury        the market's fixed reserve recipient ({@code treasury()}); null as
      *                        for {@code operatorOrg}.
      */
     public record MarketView(
             LendingMarket market, Jurisdiction jurisdiction, String collateralAssetName, String collateralIsin,
             Boolean micarApplicable, DefiInteropModel defiInteropModel, LendingMarketStatus effectiveStatus,
-            boolean riskParametersLegacy, String operatorOrg, String treasury) {}
+            boolean riskParametersLegacy, String operatorOrg, String treasury, String pauseReason) {}
 
     /** On-chain facts about a market's risk construction and operating binding — see {@link MarketView}. */
     private record OnchainBinding(boolean riskParametersLegacy, String operatorOrg, String treasury) {}
@@ -142,7 +174,7 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
         if (!chainConfig.isEnabled() || chainConfig.getChainType() != ChainConfig.ChainType.EVM) {
             throw new IllegalArgumentException("Lending markets require an enabled EVM chain");
         }
-        assetRepository.findById(collateralAssetId)
+        Asset collateralAsset = assetRepository.findById(collateralAssetId)
                 .orElseThrow(() -> new EntityNotFoundException("Asset", collateralAssetId));
 
         RepoMarketOnchainReader.MarketParameters parameters =
@@ -160,6 +192,14 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
             throw new IllegalArgumentException(
                     "Deployed market's liquidation LTV and bonus exceed the oracle's deviation haircut: "
                             + "lltv × (1 + bonus) must be at most 1 − maxDeviation");
+        }
+
+        // 5B-09: the operator-supplied links are only trusted once they match the chain.
+        String bindingFailure = bindingFailure(chainConfig, marketAddress, vaultAddress, collateralAsset,
+                loanRailCode, parameters.collateralTokenAddress(), parameters.loanTokenAddress(),
+                parameters.loanTokenDecimals());
+        if (bindingFailure != null) {
+            throw new IllegalArgumentException(bindingFailure);
         }
 
         LendingMarket market = new LendingMarket();
@@ -180,6 +220,10 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
         market.setLiquidationGracePeriodSeconds(parameters.liquidationGracePeriodSeconds());
         market.setPriceOracleAddress(parameters.priceOracleAddress());
         market.setRegisteredBy(actorId);
+        market.setCodeHash(onchainReader.codeHash(chainConfig.getIdentifier(), marketAddress));
+        market.setSurplusSupported(onchainReader.surplusSupported(chainConfig.getIdentifier(), marketAddress));
+        market.setBindingVerified(true);
+        market.setBindingVerifiedAt(Instant.now());
         market = marketRepository.save(market);
 
         eventPublisher.publishEvent(new LendingMarketRegisteredEvent(market.getId(), actorId, actorRole,
@@ -192,12 +236,129 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
         return toView(market);
     }
 
+    /**
+     * 5B-09: null when the market's on-chain binding matches what the registry believes, otherwise
+     * the reason. Reads fail closed: a transport error propagates as {@link IllegalStateException}.
+     */
+    String bindingFailure(ChainConfig chain, String marketAddress, String vaultAddress, Asset asset,
+                          String loanRailCode, String collateralToken, String loanToken, int loanTokenDecimals) {
+        String id = chain.getIdentifier();
+        if (properties.isRequireFactory()) {
+            String factory = contractAddresses.findRepoMarketFactory(id).orElse(null);
+            if (factory == null) {
+                return "No repo-market factory is configured for chain " + id
+                        + " (registerwerk.contracts.repo-market-factory)";
+            }
+            if (!onchainReader.isFactoryMarket(id, factory, marketAddress)) {
+                return "Market " + marketAddress + " was not deployed by the configured repo-market factory";
+            }
+        }
+        if (asset.getStatus() != AssetStatus.ISSUED) {
+            return "Collateral asset must be ISSUED (is " + asset.getStatus() + ")";
+        }
+        boolean collateralMatches = deploymentRepository.findByAssetId(asset.getId()).stream()
+                .filter(d -> d.getDeploymentStatus() == AssetDeployment.DeploymentStatus.CONFIRMED)
+                .filter(d -> chain.getId().equals(d.getChainConfigId()))
+                .anyMatch(d -> d.getContractAddress() != null
+                        && d.getContractAddress().equalsIgnoreCase(collateralToken));
+        if (!collateralMatches) {
+            return "Market collateral token " + collateralToken
+                    + " is not the confirmed deployment of the collateral asset on this chain";
+        }
+        if (loanRailCode == null || loanRailCode.isBlank()) {
+            return "A loan payment rail code is required";
+        }
+        PaymentRail rail = railRepository.findByCode(loanRailCode).orElse(null);
+        if (rail == null || !rail.isEnabled() || rail.getRailType() != PaymentRailType.STABLECOIN) {
+            return "Loan rail " + loanRailCode + " is not an enabled stablecoin rail";
+        }
+        boolean railMatches = railAddressRepository.findByPaymentRailId(rail.getId()).stream()
+                .filter(a -> chain.getId().equals(a.getChainConfigId()))
+                .anyMatch(a -> a.getTokenAddress() != null && a.getTokenAddress().equalsIgnoreCase(loanToken));
+        if (!railMatches) {
+            return "Market loan token " + loanToken + " is not the token of rail " + loanRailCode + " on this chain";
+        }
+        if (rail.getDecimals() == null || rail.getDecimals() != loanTokenDecimals) {
+            return "Loan token decimals (" + loanTokenDecimals + ") differ from rail " + loanRailCode
+                    + " decimals (" + rail.getDecimals() + ")";
+        }
+        if (vaultAddress != null && !vaultAddress.isBlank() && !onchainReader.hasCode(id, vaultAddress)) {
+            return "No contract is deployed at vault address " + vaultAddress;
+        }
+        return null;
+    }
+
+    public record ReverifyResult(UUID marketId, String marketAddress, boolean verified, String failure) {}
+
+    /**
+     * 5B-09: re-checks every non-retired market against the chain. Mismatches are flagged
+     * ({@code binding_verified=false}) and hide the market from customers, never deleted; a market
+     * that verifies again is restored. An unreadable chain leaves the row unchanged.
+     */
+    public List<ReverifyResult> reverifyMarkets() {
+        List<ReverifyResult> results = new java.util.ArrayList<>();
+        for (LendingMarket market : marketRepository.findAll()) {
+            if (market.getStatus() == LendingMarketStatus.RETIRED) continue;
+            try {
+                ChainConfig chain = resolveChainConfig(market.getChainConfigId());
+                Asset asset = market.getCollateralAssetId() == null ? null
+                        : assetRepository.findById(market.getCollateralAssetId()).orElse(null);
+                String failure;
+                if (asset == null) {
+                    failure = "Collateral asset link is missing";
+                } else {
+                    failure = bindingFailure(chain, market.getMarketAddress(), market.getVaultAddress(), asset,
+                            market.getLoanRailCode(), market.getCollateralTokenAddress(),
+                            market.getLoanTokenAddress(),
+                            market.getLoanTokenDecimals() == null ? -1 : market.getLoanTokenDecimals());
+                }
+                String hash = onchainReader.codeHash(chain.getIdentifier(), market.getMarketAddress());
+                if (failure == null && market.getCodeHash() != null && !market.getCodeHash().equalsIgnoreCase(hash)) {
+                    failure = "Market runtime code changed since registration";
+                }
+                if (failure == null && market.getCodeHash() == null) {
+                    market.setCodeHash(hash);
+                    market.setSurplusSupported(
+                            onchainReader.surplusSupported(chain.getIdentifier(), market.getMarketAddress()));
+                }
+                market.setBindingVerified(failure == null);
+                market.setBindingVerifiedAt(Instant.now());
+                market.setBindingFailure(failure == null ? null
+                        : failure.substring(0, Math.min(failure.length(), 500)));
+                marketRepository.save(market);
+                results.add(new ReverifyResult(market.getId(), market.getMarketAddress(), failure == null, failure));
+            } catch (RuntimeException e) {
+                log.warn("Re-verification of market {} skipped: {}", market.getMarketAddress(), e.getMessage());
+                results.add(new ReverifyResult(market.getId(), market.getMarketAddress(), market.isBindingVerified(),
+                        "not checked: " + e.getMessage()));
+            }
+        }
+        return results;
+    }
+
+    /** T5-13 interim: only PROFESSIONAL / ELIGIBLE_COUNTERPARTY entities may borrow against securities. */
+    public void requireLendingEligible(UUID legalEntityId) {
+        if (legalEntityId == null) return; // operator token, no customer entity
+        ClientCategory category = legalEntityRepository.findById(legalEntityId)
+                .map(e -> e.getClientCategory()).orElse(null);
+        if (category == null || category == ClientCategory.RETAIL) {
+            throw new AccessDeniedException(
+                    "Borrowing against securities is only available to classified professional clients and "
+                            + "eligible counterparties; retail or unclassified clients are not admitted");
+        }
+    }
+
     public List<MarketView> listMarkets(LendingMarketStatus statusFilter) {
+        return listMarkets(statusFilter, true);
+    }
+
+    public List<MarketView> listMarkets(LendingMarketStatus statusFilter, boolean includeUnverified) {
         releaseGate.requireReleased();
         List<LendingMarket> markets = statusFilter != null
                 ? marketRepository.findByStatus(statusFilter)
                 : marketRepository.findAll();
         return markets.stream()
+                .filter(m -> includeUnverified || m.isBindingVerified())
                 .map(this::toView)
                 .filter(view -> statusFilter == null || view.effectiveStatus() == statusFilter)
                 .toList();
@@ -219,7 +380,12 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
      * real numbers before signing anything.
      */
     public LendingQuote quote(UUID marketId, BigInteger collateralAmount) {
+        return quote(marketId, collateralAmount, null);
+    }
+
+    public LendingQuote quote(UUID marketId, BigInteger collateralAmount, UUID legalEntityId) {
         releaseGate.requireReleased();
+        requireLendingEligible(legalEntityId);
         if (collateralAmount == null || collateralAmount.signum() <= 0) {
             throw new IllegalArgumentException("Collateral amount must be greater than zero");
         }
@@ -284,6 +450,15 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
             throw new IllegalStateException(
                     "Lending market " + market.getId() + " is not operational");
         }
+        // 5B-09: a proxy/code swap after registration must not keep quoting as if nothing happened.
+        if (market.getCodeHash() != null) {
+            String current = onchainReader.codeHash(
+                    resolveChainIdentifier(market.getChainConfigId()), market.getMarketAddress());
+            if (!market.getCodeHash().equalsIgnoreCase(current)) {
+                throw new IllegalStateException("Lending market " + market.getId()
+                        + " runtime code changed since registration; re-verification required");
+            }
+        }
     }
 
     private MarketView toView(LendingMarket market) {
@@ -306,13 +481,13 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
                 .orElseGet(() -> view(market, null, null, null, null, null, effectiveStatus, binding));
     }
 
-    private static MarketView view(
+    private MarketView view(
             LendingMarket market, Jurisdiction jurisdiction, String collateralAssetName, String collateralIsin,
             Boolean micarApplicable, DefiInteropModel defiInteropModel, LendingMarketStatus effectiveStatus,
             OnchainBinding binding) {
         return new MarketView(market, jurisdiction, collateralAssetName, collateralIsin, micarApplicable,
                 defiInteropModel, effectiveStatus, binding.riskParametersLegacy(), binding.operatorOrg(),
-                binding.treasury());
+                binding.treasury(), pauseReason(market, effectiveStatus));
     }
 
     /**
@@ -347,6 +522,16 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
         return new OnchainBinding(legacy, operatorOrg, treasury);
     }
 
+    private String pauseReason(LendingMarket market, LendingMarketStatus effective) {
+        if (market.getStatus() != LendingMarketStatus.ACTIVE || effective == LendingMarketStatus.ACTIVE) return null;
+        if (market.isCollateralShortfall()) return "COLLATERAL_SHORTFALL";
+        if (!market.isBindingVerified()) return "BINDING_UNVERIFIED";
+        return lastPauseCause.getOrDefault(market.getId(), "BORROW_PAUSED_ONCHAIN");
+    }
+
+    private final java.util.concurrent.ConcurrentHashMap<UUID, String> lastPauseCause =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
      * Reflects the on-chain {@code borrowPaused} flag as {@code PAUSED} for an otherwise-ACTIVE
      * market — see {@link MarketView#effectiveStatus}. Never overrides an already-PAUSED or
@@ -358,12 +543,19 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
         if (market.getStatus() != LendingMarketStatus.ACTIVE) {
             return market.getStatus();
         }
+        // 5B-10 / 5B-09: a recorded collateral shortfall or failed binding pauses the market for new
+        // borrowing independently of the on-chain flag (the operator pauses on-chain separately).
+        if (market.isCollateralShortfall() || !market.isBindingVerified()) {
+            return LendingMarketStatus.PAUSED;
+        }
         try {
             String chainIdentifier = resolveChainIdentifier(market.getChainConfigId());
             boolean paused = onchainReader.borrowPaused(chainIdentifier, market.getMarketAddress());
+            lastPauseCause.remove(market.getId());
             return paused ? LendingMarketStatus.PAUSED : LendingMarketStatus.ACTIVE;
         } catch (RuntimeException e) {
             log.warn("borrowPaused read failed for market {}: {}", market.getMarketAddress(), e.getMessage());
+            lastPauseCause.put(market.getId(), "CHAIN_READ_FAILED");
             return LendingMarketStatus.PAUSED;
         }
     }

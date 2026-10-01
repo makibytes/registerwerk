@@ -1383,6 +1383,17 @@ export interface PaymentRailView {
   whitePaperUrl: string | null;
   redemptionAtPar: boolean;
   enabled: boolean;
+  /**
+   * EFFECTIVE operator attestation: false when the attested content (token address, issuer, LEI,
+   * currency, decimals, ...) changed since it was given. Operator-entered claims, never verified by Registerwerk.
+   */
+  micarVerified?: boolean;
+  micarVerifiedAt?: string | null;
+  micarVerifiedBy?: string | null;
+  /** Why the rail was switched off automatically (MICAR_ATTESTATION_INVALIDATED / MICAR_ATTESTATION_MISSING). */
+  disabledReason?: string | null;
+  createdBy?: string | null;
+  updatedBy?: string | null;
   createdAt: string;
   updatedAt: string;
   chainAddresses: PaymentRailChainAddressView[];

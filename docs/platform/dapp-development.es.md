@@ -157,6 +157,29 @@ Obtenga el catálogo vigente de vías de pago habilitadas en `GET /api/v1/paymen
 el operador deshabilitó entretanto bloquea la aprobación de la versión hasta que se actualice el
 manifiesto.
 
+!!! warning "Los campos MiCAR son afirmaciones introducidas por el operador"
+    El emisor, el LEI, la referencia de autorización, el indicador EMT, el enlace al libro
+    blanco y el indicador «reembolsable a la par» de una vía stablecoin los introduce el
+    operador. Registerwerk no los verifica contra ningún registro. Por ello el catálogo y el
+    marketplace muestran un estado de atestación: `OPERATOR_ATTESTED` (con la fecha) significa
+    que un operador comprobó los hechos en una fuente externa y que un segundo operador lo
+    aprobó; el aviso dice «Atestado por el operador, no verificado de forma independiente por
+    Registerwerk». `UNVERIFIED` significa que los datos son afirmaciones sin comprobar.
+    `railDisabledReason` explica por qué una vía se desactivó automáticamente.
+
+Controles del operador: crear, activar, modificar y atestar una vía exigen cada uno step-up
+y un segundo aprobador; las vías nuevas empiezan desactivadas; el operador que creó o
+modificó por última vez una vía no puede atestarla; una vía stablecoin EMT no puede
+activarse sin una atestación efectiva. La atestación está vinculada a una huella del
+contenido (código, tipo, divisa, decimales, emisor, LEI, autorización, indicador EMT, libro
+blanco, indicador a la par y dirección del token por cadena): cualquier cambio la invalida y
+una vía EMT activada se desactiva automáticamente (`MICAR_ATTESTATION_INVALIDATED`) hasta que
+se ateste de nuevo. Al guardar una dirección de token, el backend comprueba que la dirección
+contiene código y que `decimals()` coincide con los decimales declarados
+(`registerwerk.payment.onchain-verify`, se rechaza ante errores de RPC). Eventos de
+auditoría: `PAYMENT_RAIL_CREATED`, `_UPDATED`, `_ENABLED`, `_DISABLED`, `_MICAR_VERIFIED`,
+`_MICAR_VERIFICATION_CLEARED`, `_MICAR_ATTESTATION_INVALIDATED`.
+
 Esto es orientativo, no una lista blanca: su dApp siempre puede implementar su propia lógica de
 pago. Declárela como una entrada `custom` en lugar de una referencia `rail`:
 

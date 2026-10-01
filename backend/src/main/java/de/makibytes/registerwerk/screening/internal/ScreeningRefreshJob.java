@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -23,10 +24,13 @@ public class ScreeningRefreshJob {
     private final ScreeningRunRepository runRepository;
     private final ScreeningService screeningService;
     private final AtomicInteger lastFailures = new AtomicInteger();
+    private final boolean demoSeeded;
 
     public ScreeningRefreshJob(ScreeningRunRepository runRepository,
                                ScreeningService screeningService,
-                               MeterRegistry meterRegistry) {
+                               MeterRegistry meterRegistry,
+                               @Value("${registerwerk.seed-demo-data:false}") boolean demoSeeded) {
+        this.demoSeeded = demoSeeded;
         this.runRepository = runRepository;
         this.screeningService = screeningService;
         Gauge.builder("registerwerk_screening_periodic_refresh_last_failures", lastFailures,
@@ -38,6 +42,12 @@ public class ScreeningRefreshJob {
     @SchedulerLock(name = "screeningPeriodicRefresh", lockAtMostFor = "PT2H")
     @Scheduled(cron = "0 0 1 * * *")
     public void periodicRefresh() {
+        if (demoSeeded) {
+            // The demo stack has no reachable screening provider: a re-screen would append an ERROR run per
+            // demo party, which becomes the "latest" run and makes the fail-closed gates refuse them again.
+            log.info("Periodic sanctions re-screening skipped: demo data is seeded (registerwerk.seed-demo-data=true).");
+            return;
+        }
         log.info("Starting periodic sanctions re-screening...");
         List<UUID> entityIds = runRepository.findDistinctActiveEntityIds();
         int succeeded = 0;

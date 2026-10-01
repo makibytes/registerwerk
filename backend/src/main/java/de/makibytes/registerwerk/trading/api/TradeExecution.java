@@ -10,6 +10,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -100,6 +101,38 @@ public class TradeExecution {
     @Column(name = "wallet_address", nullable = false, length = 128)
     private String walletAddress;
 
+    /** Settlement currency (5A-02), copied from the listing; NULL on legacy rows = "currency not recorded". */
+    @Column(length = 10)
+    private String currency;
+
+    @Column(name = "payment_rail_code", length = 40)
+    private String paymentRailCode;
+
+    /** Exact {@code unitPrice * quantity} before rounding; {@code totalPrice} is this rounded to
+     *  {@code priceRoundingScale} decimals using {@code priceRoundingMode}. */
+    @Column(name = "total_price_unrounded", precision = 38, scale = 18)
+    private BigDecimal totalPriceUnrounded;
+
+    @Column(name = "price_rounding_scale")
+    private Short priceRoundingScale;
+
+    @Column(name = "price_rounding_mode", length = 20)
+    private String priceRoundingMode;
+
+    /** Buyer and seller are linked (shared beneficial owner / member / wallet); excluded from the reference price. */
+    @Column(name = "related_party", nullable = false)
+    private boolean relatedParty;
+
+    @Column(name = "related_party_reasons", length = 300)
+    private String relatedPartyReasons;
+
+    /** User who submitted the order (RTS 22-style order record). */
+    @Column(name = "created_by_actor_id")
+    private UUID createdByActorId;
+
+    @Column(name = "venue_classification", length = 20)
+    private String venueClassification;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -125,12 +158,156 @@ public class TradeExecution {
     @Column(name = "payment_declared_at")
     private Instant paymentDeclaredAt;
 
+    /** Optimistic version (V26). The pessimistic {@code findByIdForUpdate} is the primary guard;
+     *  this makes any path that forgets the lock fail with a conflict instead of merging a stale
+     *  whole-entity write over a SETTLED trade (timeout job vs seller confirm). */
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
+
+    /** True only for the demo instant path (SIMULATED venue, seller opt-in): register moved with
+     *  NO cash leg. Confirmations of such trades carry a "SIMULATED - no cash leg" watermark. */
+    @Column(name = "instant_settlement", nullable = false)
+    private boolean instantSettlement;
+
+    /** The seller's stated reason when the payment was disputed. */
+    @Column(name = "dispute_reason", length = 1000)
+    private String disputeReason;
+
+    /** When the trade entered PAYMENT_UNRESOLVED (age of the operator queue item). */
+    @Column(name = "unresolved_at")
+    private Instant unresolvedAt;
+
+    @Column(name = "unresolved_reason", length = 1000)
+    private String unresolvedReason;
+
+    /** Set when the buyer cancels / lets a reservation lapse: the buyer may not re-reserve the
+     *  same listing before this instant (5A-06 cool-down). */
+    @Column(name = "buyer_cooldown_until")
+    private Instant buyerCooldownUntil;
+
+    public long getVersion() {
+        return version;
+    }
+
+    public boolean isInstantSettlement() {
+        return instantSettlement;
+    }
+
+    public void setInstantSettlement(boolean instantSettlement) {
+        this.instantSettlement = instantSettlement;
+    }
+
+    public String getDisputeReason() {
+        return disputeReason;
+    }
+
+    public void setDisputeReason(String disputeReason) {
+        this.disputeReason = disputeReason;
+    }
+
+    public Instant getUnresolvedAt() {
+        return unresolvedAt;
+    }
+
+    public void setUnresolvedAt(Instant unresolvedAt) {
+        this.unresolvedAt = unresolvedAt;
+    }
+
+    public String getUnresolvedReason() {
+        return unresolvedReason;
+    }
+
+    public void setUnresolvedReason(String unresolvedReason) {
+        this.unresolvedReason = unresolvedReason;
+    }
+
+    public Instant getBuyerCooldownUntil() {
+        return buyerCooldownUntil;
+    }
+
+    public void setBuyerCooldownUntil(Instant buyerCooldownUntil) {
+        this.buyerCooldownUntil = buyerCooldownUntil;
+    }
+
     public Instant getPaymentDeclaredAt() {
         return paymentDeclaredAt;
     }
 
     public void setPaymentDeclaredAt(Instant paymentDeclaredAt) {
         this.paymentDeclaredAt = paymentDeclaredAt;
+    }
+
+    public String getCurrency() {
+        return currency;
+    }
+
+    public void setCurrency(String currency) {
+        this.currency = currency;
+    }
+
+    public String getPaymentRailCode() {
+        return paymentRailCode;
+    }
+
+    public void setPaymentRailCode(String paymentRailCode) {
+        this.paymentRailCode = paymentRailCode;
+    }
+
+    public BigDecimal getTotalPriceUnrounded() {
+        return totalPriceUnrounded;
+    }
+
+    public void setTotalPriceUnrounded(BigDecimal totalPriceUnrounded) {
+        this.totalPriceUnrounded = totalPriceUnrounded;
+    }
+
+    public Short getPriceRoundingScale() {
+        return priceRoundingScale;
+    }
+
+    public void setPriceRoundingScale(Short priceRoundingScale) {
+        this.priceRoundingScale = priceRoundingScale;
+    }
+
+    public String getPriceRoundingMode() {
+        return priceRoundingMode;
+    }
+
+    public void setPriceRoundingMode(String priceRoundingMode) {
+        this.priceRoundingMode = priceRoundingMode;
+    }
+
+    public boolean isRelatedParty() {
+        return relatedParty;
+    }
+
+    public void setRelatedParty(boolean relatedParty) {
+        this.relatedParty = relatedParty;
+    }
+
+    public String getRelatedPartyReasons() {
+        return relatedPartyReasons;
+    }
+
+    public void setRelatedPartyReasons(String relatedPartyReasons) {
+        this.relatedPartyReasons = relatedPartyReasons;
+    }
+
+    public UUID getCreatedByActorId() {
+        return createdByActorId;
+    }
+
+    public void setCreatedByActorId(UUID createdByActorId) {
+        this.createdByActorId = createdByActorId;
+    }
+
+    public String getVenueClassification() {
+        return venueClassification;
+    }
+
+    public void setVenueClassification(String venueClassification) {
+        this.venueClassification = venueClassification;
     }
 
     public UUID getId() {

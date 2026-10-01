@@ -111,7 +111,7 @@ Esto existe porque, sin ello, la única salida de un inversor de un registro es 
 Cuando una organización deja de utilizar el registro:
 
 1. **Consulte posiciones abiertas.** Tenencias, listados, préstamos, operaciones pendientes. Cualquier cosa abierta debe resolverse o migrarse primero.
-2. **Retire los listados de negociación.** Se maneja automáticamente: los listados de un cliente que causa baja se cancelan en lugar de quedar huérfanos para que alguien tropiece con ellos.
+2. **Retire los listados de negociación.** Se maneja automáticamente: los listados de un cliente que causa baja se cancelan en lugar de quedar huérfanos para que alguien tropiece con ellos. También se tratan las operaciones en curso: una operación sin pagar se cancela, una operación con pago declarado pasa a la cola de pagos no resueltos (`GET /api/v1/admin/trading/unresolved`) para una decisión con doble control — nunca se descarta automáticamente.
 3. **Desactive usuarios.** Inmediato, reversible, no elimina nada.
 4. **Establezca el estado de la entidad.** Suspendido o disuelto según corresponda.
 5. **Anote el motivo**, con una fecha y una referencia.

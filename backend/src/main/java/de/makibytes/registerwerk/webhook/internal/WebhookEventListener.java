@@ -12,6 +12,7 @@ import de.makibytes.registerwerk.asset.events.SubscriptionOrderRejectedEvent;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderSettledEvent;
 import de.makibytes.registerwerk.kyc.events.KycApprovedEvent;
 import de.makibytes.registerwerk.kyc.events.KycRejectedEvent;
+import de.makibytes.registerwerk.kyc.events.KycRejectionCategory;
 import de.makibytes.registerwerk.trading.api.TradeExecution;
 import de.makibytes.registerwerk.trading.api.TradeExecutionRepository;
 import de.makibytes.registerwerk.trading.events.TradeExecutedEvent;
@@ -20,6 +21,8 @@ import de.makibytes.registerwerk.trading.events.TradePaymentDisputedEvent;
 import de.makibytes.registerwerk.webhook.api.WebhookEventType;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
 import java.util.UUID;
@@ -30,6 +33,11 @@ import java.util.UUID;
  * per-source listeners (e.g. {@code TradingNotificationListener}) already consume these same
  * events for email. Deliberately narrow: only {@link WebhookEventType}'s allow-listed events are
  * wired here, not every {@code AuditableEvent} in the system.
+ *
+ * <p>Every listener opts out of the listener transaction ({@code NOT_SUPPORTED} overrides the
+ * {@code REQUIRES_NEW} of {@code @ApplicationModuleListener}): the dispatch service opens its own short
+ * transactions, so holding a listener connection across the HTTP send (and acquiring a second one
+ * inside) would starve the pool under bursts.
  */
 @Component
 class WebhookEventListener {
@@ -46,19 +54,25 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(KycApprovedEvent event) {
         dispatchService.dispatch(event.entityId(), WebhookEventType.KYC_APPROVED,
                 Map.of("entityId", event.entityId().toString()));
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(KycRejectedEvent event) {
-        Object reason = event.payload().get("reason");
+        // Tipping-off (GwG s.47): only the fixed customer-facing category ever leaves the platform;
+        // the operator's free-text internal reason stays in the audit trail.
+        Object reasonCode = event.payload().get("reasonCode");
         dispatchService.dispatch(event.entityId(), WebhookEventType.KYC_REJECTED, Map.of(
-                "entityId", event.entityId().toString(), "reason", reason != null ? reason : ""));
+                "entityId", event.entityId().toString(),
+                "reasonCode", reasonCode != null ? reasonCode.toString() : KycRejectionCategory.CONTACT_SUPPORT.name()));
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(AssetApprovedEvent event) {
         Asset asset = assetRepository.findById(event.assetId()).orElse(null);
         if (asset == null || asset.getIssuerId() == null) return;
@@ -67,6 +81,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(AssetRejectedEvent event) {
         Asset asset = assetRepository.findById(event.assetId()).orElse(null);
         if (asset == null || asset.getIssuerId() == null) return;
@@ -76,6 +91,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(SubscriptionOrderAllocatedEvent event) {
         UUID investorEntityId = investorEntityId(event.payload());
         if (investorEntityId == null) return;
@@ -84,6 +100,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(SubscriptionOrderConfirmedEvent event) {
         UUID investorEntityId = investorEntityId(event.payload());
         if (investorEntityId == null) return;
@@ -92,6 +109,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(SubscriptionOrderPaymentConfirmedEvent event) {
         UUID investorEntityId = investorEntityId(event.payload());
         if (investorEntityId == null) return;
@@ -100,6 +118,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(SubscriptionOrderSettledEvent event) {
         UUID investorEntityId = investorEntityId(event.payload());
         if (investorEntityId == null) return;
@@ -108,6 +127,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(SubscriptionOrderLapsedEvent event) {
         UUID investorEntityId = investorEntityId(event.payload());
         if (investorEntityId == null) return;
@@ -116,6 +136,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(SubscriptionOrderRejectedEvent event) {
         UUID investorEntityId = investorEntityId(event.payload());
         if (investorEntityId == null) return;
@@ -124,6 +145,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(TradeExecutedEvent event) {
         Map<String, Object> payload = Map.of(
                 "executionId", event.executionId().toString(), "assetId", event.assetId().toString(),
@@ -134,6 +156,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(TradePaymentConfirmedEvent event) {
         TradeExecution execution = tradeExecutionRepository.findById(event.executionId()).orElse(null);
         if (execution == null) return;
@@ -143,6 +166,7 @@ class WebhookEventListener {
     }
 
     @ApplicationModuleListener
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void on(TradePaymentDisputedEvent event) {
         TradeExecution execution = tradeExecutionRepository.findById(event.executionId()).orElse(null);
         if (execution == null) return;

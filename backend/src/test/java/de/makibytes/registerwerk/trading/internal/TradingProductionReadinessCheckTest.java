@@ -52,4 +52,34 @@ class TradingProductionReadinessCheckTest {
         assertThatCode(() -> new TradingProductionReadinessCheck(properties).check(false))
                 .doesNotThrowAnyException();
     }
+
+    @Test
+    void productionRefusesDemoInstantSettlementEvenWithSimulatedDisabled() {
+        TradingProperties properties = propertiesWithSimulated(true, false);
+        properties.setDemoInstantSettlement(true);
+
+        assertThatThrownBy(() -> new TradingProductionReadinessCheck(properties).check(true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("demo-instant-settlement");
+    }
+
+    @Test
+    void demoInstantSettlementIsAllowedOutsideProduction() {
+        TradingProperties properties = propertiesWithSimulated(true, true);
+        properties.setDemoInstantSettlement(true);
+
+        assertThatCode(() -> new TradingProductionReadinessCheck(properties).check(false)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void nonDemoVenueClassificationNeedsALegalOpinionReference() {
+        TradingProperties properties = propertiesWithSimulated(true, false);
+        properties.setVenueClassification(TradingProperties.VenueClassification.BILATERAL_ONLY);
+
+        assertThatThrownBy(() -> new TradingProductionReadinessCheck(properties).check(true))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("legal-opinion-ref");
+
+        properties.setLegalOpinionRef("OPINION-2026-01");
+        assertThatCode(() -> new TradingProductionReadinessCheck(properties).check(true)).doesNotThrowAnyException();
+    }
 }

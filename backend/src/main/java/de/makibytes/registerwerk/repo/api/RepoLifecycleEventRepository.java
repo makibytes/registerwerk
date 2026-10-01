@@ -3,5 +3,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.*;
 public interface RepoLifecycleEventRepository extends JpaRepository<RepoLifecycleEvent, UUID> {
     List<RepoLifecycleEvent> findByRepoTradeIdOrderByCreatedAtAsc(UUID repoTradeId);
+    boolean existsByRepoTradeIdAndEventTypeAndReference(UUID repoTradeId, RepoTypes.LifecycleEventType type, String reference);
 }
 

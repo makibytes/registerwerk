@@ -213,7 +213,7 @@ class ScreeningServiceAcceptHitTest {
         ScreeningService serviceWithProvider = new ScreeningService(
                 List.of(provider), runRepository, hitRepository, events, legalEntityRepository, ownRegistry,
                 naturalPersonResolver);
-        ScreeningRefreshJob refreshJob = new ScreeningRefreshJob(runRepository, serviceWithProvider, ownRegistry);
+        ScreeningRefreshJob refreshJob = new ScreeningRefreshJob(runRepository, serviceWithProvider, ownRegistry, false);
 
         // The very first save() call inside screenEntity() (before its own try/catch) throws for
         // failingEntity's run — screenEntity() itself never catches provider-level orchestration

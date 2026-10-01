@@ -7,6 +7,8 @@ import de.makibytes.registerwerk.marketplace.api.DappRequiredPermission;
 import de.makibytes.registerwerk.marketplace.api.DappVersion;
 import de.makibytes.registerwerk.marketplace.api.DappVersionStatus;
 import de.makibytes.registerwerk.payment.api.PaymentRail;
+import de.makibytes.registerwerk.payment.api.PaymentRailAttestation;
+import de.makibytes.registerwerk.payment.api.PaymentRailType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -14,6 +16,7 @@ import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Request/response records of the marketplace REST API. */
@@ -157,6 +160,8 @@ public final class MarketplaceDtos {
             String displayName,
             String railType,
             String currency,
+            // The MiCAR-related fields below are OPERATOR-ENTERED CLAIMS about the token, not
+            // facts established by Registerwerk; render them qualified (see attestationStatus).
             Boolean emtFlag,
             String issuerName,
             String issuerLei,
@@ -165,23 +170,45 @@ public final class MarketplaceDtos {
             boolean railEnabled,
             String customName,
             String customDescription,
-            String note) {
+            String note,
+            String micarAuthorization,
+            // OPERATOR_ATTESTED (effective, bound to the current token address/issuer/...),
+            // UNVERIFIED (claims entered, no effective attestation) or NOT_APPLICABLE.
+            String attestationStatus,
+            Instant micarVerifiedAt,
+            // Why a disabled rail is off (e.g. MICAR_ATTESTATION_INVALIDATED); null otherwise.
+            String railDisabledReason,
+            String attestationNotice) {
 
-        public static PaymentMethodResponse forRail(DappPaymentMethod method, PaymentRail rail) {
+        public static final String NOTICE_ATTESTED =
+                "Operator-attested, not independently verified by Registerwerk.";
+        public static final String NOTICE_UNVERIFIED =
+                "Details entered by the operator; not verified by the operator or by Registerwerk.";
+
+        public static PaymentMethodResponse forRail(DappPaymentMethod method, PaymentRail rail,
+                                                    Map<UUID, String> chainAddresses) {
             if (rail == null) {
                 return new PaymentMethodResponse("RAIL", method.getRailCode(), method.getRailCode(),
-                        null, null, null, null, null, null, null, false, null, null, method.getNote());
+                        null, null, null, null, null, null, null, false, null, null, method.getNote(),
+                        null, "NOT_APPLICABLE", null, null, null);
             }
+            boolean stablecoin = rail.getRailType() == PaymentRailType.STABLECOIN;
+            boolean attested = stablecoin && PaymentRailAttestation.isEffective(rail, chainAddresses);
+            String status = !stablecoin ? "NOT_APPLICABLE" : attested ? "OPERATOR_ATTESTED" : "UNVERIFIED";
             return new PaymentMethodResponse("RAIL", rail.getCode(), rail.getDisplayName(),
                     rail.getRailType().name(), rail.getCurrency(), rail.isEmtFlag(),
                     rail.getIssuerName(), rail.getIssuerLei(), rail.getWhitePaperUrl(), rail.isRedemptionAtPar(),
-                    rail.isEnabled(), null, null, method.getNote());
+                    rail.isEnabled(), null, null, method.getNote(),
+                    rail.getMicarAuthorization(), status,
+                    attested ? rail.getMicarVerifiedAt() : null, rail.getDisabledReason(),
+                    !stablecoin ? null : attested ? NOTICE_ATTESTED : NOTICE_UNVERIFIED);
         }
 
         public static PaymentMethodResponse forCustom(DappPaymentMethod method) {
             return new PaymentMethodResponse("CUSTOM", null, method.getCustomName(), null,
                     method.getCurrency(), null, null, null, null, null, false,
-                    method.getCustomName(), method.getCustomDescription(), method.getNote());
+                    method.getCustomName(), method.getCustomDescription(), method.getNote(),
+                    null, "NOT_APPLICABLE", null, null, null);
         }
     }
 }

@@ -125,6 +125,10 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
      *  (see ProductionReadinessCheck.checkDualControlAvailability). */
     private static final String DEMO_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 
+    /** 5A-01: seeded live listings offer the no-cash-leg instant path only while the demo property is on. */
+    @Value("${registerwerk.trading.demo-instant-settlement:false}")
+    private boolean demoInstantSettlement;
+
     public DemoDataSeeder(
             LegalEntityRepository entities,
             AppUserRepository users,
@@ -1500,6 +1504,8 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered {
         l.setStatus(status);
         l.setVenueCode(TradingVenueCode.SIMULATED);
         l.setAllowedPaymentOptions(paymentOptions);
+        l.setAllowInstantSettlement(demoInstantSettlement
+                && (status == ListingStatus.OPEN || status == ListingStatus.PARTIALLY_FILLED));
         return listings.save(l);
     }
 

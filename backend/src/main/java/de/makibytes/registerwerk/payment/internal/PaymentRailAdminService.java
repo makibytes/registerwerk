@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.payment.internal;
 
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.payment.api.PaymentRail;
+import de.makibytes.registerwerk.payment.api.PaymentRailAttestation;
 import de.makibytes.registerwerk.payment.api.PaymentRailChainAddress;
 import de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository;
 import de.makibytes.registerwerk.payment.api.PaymentRailRepository;
@@ -9,6 +10,7 @@ import de.makibytes.registerwerk.payment.api.PaymentRailType;
 import de.makibytes.registerwerk.payment.events.PaymentRailEvent;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,12 +35,18 @@ public class PaymentRailAdminService {
     private final PaymentRailChainAddressRepository chainAddressRepository;
     private final ChainConfigRepository chainConfigRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final PaymentRailOnchainVerifier onchainVerifier;
+
+    /** Reason code stored on a rail that was switched off because its attestation was voided. */
+    public static final String REASON_ATTESTATION_INVALIDATED = "MICAR_ATTESTATION_INVALIDATED";
 
     PaymentRailAdminService(
             PaymentRailRepository railRepository,
             PaymentRailChainAddressRepository chainAddressRepository,
             ChainConfigRepository chainConfigRepository,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            PaymentRailOnchainVerifier onchainVerifier) {
+        this.onchainVerifier = onchainVerifier;
         this.railRepository = railRepository;
         this.chainAddressRepository = chainAddressRepository;
         this.chainConfigRepository = chainConfigRepository;
@@ -48,7 +56,8 @@ public class PaymentRailAdminService {
     public PaymentRail create(String code, String displayName, PaymentRailType railType, String currency,
                               Integer decimals, String description, String issuerName, String issuerLei,
                               String micarAuthorization, boolean emtFlag, String whitePaperUrl, boolean redemptionAtPar,
-                              Map<UUID, String> chainAddresses, UUID actorId, String actorRole) {
+                              Map<UUID, String> chainAddresses, UUID actorId, String actorRole,
+                              UUID dualControlApproverId) {
         if (railRepository.existsByCode(code)) {
             throw new IllegalArgumentException("Payment rail code '" + code + "' already exists");
         }
@@ -56,11 +65,18 @@ public class PaymentRailAdminService {
         rail.setCode(code);
         applyFields(rail, displayName, railType, currency, decimals, description,
                 issuerName, issuerLei, micarAuthorization, emtFlag, whitePaperUrl, redemptionAtPar);
+        // New rails start disabled: enabling is a separate 4-eyes step (and, for EMT rails,
+        // requires an effective attestation), so creation alone never exposes a rail.
+        rail.setEnabled(false);
+        rail.setCreatedBy(actorId);
+        rail.setUpdatedBy(actorId);
+        onchainVerifier.verify(railType, decimals, chainAddresses);
         rail = railRepository.save(rail);
         replaceChainAddresses(rail, chainAddresses);
 
         eventPublisher.publishEvent(new PaymentRailEvent("CREATED", rail.getId(), actorId, actorRole,
-                Map.of("code", code, "railType", railType.name(), "currency", currency)));
+                Map.of("code", code, "railType", railType.name(), "currency", currency),
+                dualControlApproverId));
         return rail;
     }
 
@@ -71,18 +87,32 @@ public class PaymentRailAdminService {
                               Map<UUID, String> chainAddresses, UUID actorId, String actorRole, UUID dualControlApproverId) {
         PaymentRail rail = requireRail(railId);
         Map<String, String> oldAddresses = currentChainAddresses(rail.getId());
-        if (micarDisclosureChanged(rail, micarAuthorization, emtFlag, whitePaperUrl, redemptionAtPar)
-                && rail.isMicarVerified()) {
-            // A prior attestation covered the old values — it no longer applies once the
-            // disclosed facts themselves change, so require operators to re-attest.
-            rail.setMicarVerified(false);
-            rail.setMicarVerifiedAt(null);
-            rail.setMicarVerifiedBy(null);
-        }
+        boolean wasAttested = rail.isMicarVerified();
+        boolean wasEmt = rail.isEmtFlag();
+        Integer oldDecimals = rail.getDecimals();
+        Map<UUID, String> requested = chainAddresses == null ? Map.of() : chainAddresses;
         applyFields(rail, displayName, railType, currency, decimals, description,
                 issuerName, issuerLei, micarAuthorization, emtFlag, whitePaperUrl, redemptionAtPar);
+        rail.setUpdatedBy(actorId);
+        boolean addressesChanged = !oldAddresses.equals(stringKeyed(requested));
+        if (addressesChanged || !Objects.equals(oldDecimals, decimals)) {
+            onchainVerifier.verify(railType, decimals, requested);
+        }
         rail = railRepository.save(rail);
         replaceChainAddresses(rail, chainAddresses);
+        Map<UUID, String> currentAddresses = PaymentRailAttestation.addressMap(
+                chainAddressRepository.findByPaymentRailId(rail.getId()));
+        boolean autoDisabled = false;
+        if (wasAttested && !PaymentRailAttestation.isEffective(rail, currentAddresses)) {
+            // The attestation covered the old content (incl. token address, issuer, LEI,
+            // currency, decimals) - it does not apply to the new one; require re-attestation.
+            autoDisabled = voidAttestation(rail, "MICAR_ATTESTATION_INVALIDATED", "content changed by update", actorId, actorRole,
+                    dualControlApproverId);
+        } else if (emtFlag && !wasEmt && rail.isEnabled() && requiresAttestation(rail)) {
+            autoDisabled = disableForAttestation(rail, "MICAR_ATTESTATION_MISSING", actorId, actorRole,
+                    dualControlApproverId);
+        }
+        rail = railRepository.save(rail);
         Map<String, String> newAddresses = currentChainAddresses(rail.getId());
 
         Map<String, Object> details = new LinkedHashMap<>();
@@ -91,20 +121,36 @@ public class PaymentRailAdminService {
             details.put("oldChainAddresses", oldAddresses);
             details.put("newChainAddresses", newAddresses);
         }
+        if (autoDisabled) {
+            details.put("autoDisabled", true);
+        }
         eventPublisher.publishEvent(
                 new PaymentRailEvent("UPDATED", rail.getId(), actorId, actorRole, details, dualControlApproverId));
         return rail;
     }
 
-    public PaymentRail setEnabled(UUID railId, boolean enabled, UUID actorId, String actorRole) {
+    public PaymentRail setEnabled(UUID railId, boolean enabled, UUID actorId, String actorRole,
+                                  UUID dualControlApproverId) {
         PaymentRail rail = requireRail(railId);
+        if (enabled && requiresAttestation(rail) && !isAttested(rail)) {
+            throw new IllegalStateException("EMT stablecoin rail '" + rail.getCode()
+                    + "' cannot be enabled without an effective operator MiCAR attestation "
+                    + "(attest it first; a change of token address, issuer, LEI, currency or decimals voids it)");
+        }
         rail.setEnabled(enabled);
+        rail.setDisabledReason(null);
         rail.setUpdatedAt(Instant.now());
         rail = railRepository.save(rail);
 
         eventPublisher.publishEvent(new PaymentRailEvent(enabled ? "ENABLED" : "DISABLED",
-                rail.getId(), actorId, actorRole, Map.of("code", rail.getCode())));
+                rail.getId(), actorId, actorRole, Map.of("code", rail.getCode()), dualControlApproverId));
         return rail;
+    }
+
+    /** Whether the rail's operator attestation is set and still matches its current content. */
+    public boolean isAttested(PaymentRail rail) {
+        return PaymentRailAttestation.isEffective(rail, PaymentRailAttestation.addressMap(
+                chainAddressRepository.findByPaymentRailId(rail.getId())));
     }
 
     public PaymentRail requireRail(UUID railId) {
@@ -120,26 +166,73 @@ public class PaymentRailAdminService {
      * live public register is out of scope for this codebase (no such API is reachable
      * here), so this only ever records the operator's own attestation, never a live result.
      */
-    public PaymentRail setMicarVerified(UUID railId, boolean verified, UUID actorId, String actorRole) {
+    public PaymentRail setMicarVerified(UUID railId, boolean verified, UUID actorId, String actorRole,
+                                        UUID dualControlApproverId) {
         PaymentRail rail = requireRail(railId);
-        rail.setMicarVerified(verified);
-        rail.setMicarVerifiedAt(verified ? Instant.now() : null);
-        rail.setMicarVerifiedBy(verified ? actorId : null);
+        if (!verified) {
+            if (rail.isMicarVerified()) {
+                voidAttestation(rail, "MICAR_VERIFICATION_CLEARED", "attestation cleared by operator", actorId, actorRole, dualControlApproverId);
+                rail = railRepository.save(rail);
+            }
+            return rail;
+        }
+        // Separation of duties: whoever entered or last changed the facts cannot attest them.
+        if (actorId != null && (actorId.equals(rail.getCreatedBy()) || actorId.equals(rail.getUpdatedBy()))) {
+            throw new AccessDeniedException(
+                    "The operator who created or last changed a payment rail cannot attest its MiCAR facts");
+        }
+        rail.setMicarVerified(true);
+        rail.setMicarVerifiedAt(Instant.now());
+        rail.setMicarVerifiedBy(actorId);
+        rail.setMicarAttestedFingerprint(PaymentRailAttestation.fingerprint(rail, PaymentRailAttestation.addressMap(
+                chainAddressRepository.findByPaymentRailId(rail.getId()))));
         rail = railRepository.save(rail);
 
-        eventPublisher.publishEvent(new PaymentRailEvent(verified ? "MICAR_VERIFIED" : "MICAR_VERIFICATION_CLEARED",
-                rail.getId(), actorId, actorRole, Map.of("code", rail.getCode())));
+        eventPublisher.publishEvent(new PaymentRailEvent("MICAR_VERIFIED", rail.getId(), actorId, actorRole,
+                Map.of("code", rail.getCode(), "fingerprint", rail.getMicarAttestedFingerprint()),
+                dualControlApproverId));
         return rail;
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
-    private boolean micarDisclosureChanged(PaymentRail rail, String micarAuthorization, boolean emtFlag,
-                                           String whitePaperUrl, boolean redemptionAtPar) {
-        return !Objects.equals(rail.getMicarAuthorization(), micarAuthorization)
-                || rail.isEmtFlag() != emtFlag
-                || !Objects.equals(rail.getWhitePaperUrl(), whitePaperUrl)
-                || rail.isRedemptionAtPar() != redemptionAtPar;
+    private static boolean requiresAttestation(PaymentRail rail) {
+        return rail.getRailType() == PaymentRailType.STABLECOIN && rail.isEmtFlag();
+    }
+
+    /**
+     * Clears the attestation and, for an enabled EMT stablecoin rail, switches the rail off with
+     * a visible reason so investors are never shown an unattested EMT as ready to use.
+     *
+     * @return whether the rail was auto-disabled
+     */
+    private boolean voidAttestation(PaymentRail rail, String action, String why, UUID actorId, String actorRole,
+                                    UUID dualControlApproverId) {
+        rail.setMicarVerified(false);
+        rail.setMicarVerifiedAt(null);
+        rail.setMicarVerifiedBy(null);
+        rail.setMicarAttestedFingerprint(null);
+        eventPublisher.publishEvent(new PaymentRailEvent(action, rail.getId(), actorId,
+                actorRole, Map.of("code", rail.getCode(), "reason", why), dualControlApproverId));
+        if (rail.isEnabled() && requiresAttestation(rail)) {
+            return disableForAttestation(rail, REASON_ATTESTATION_INVALIDATED, actorId, actorRole,
+                    dualControlApproverId);
+        }
+        return false;
+    }
+
+    private boolean disableForAttestation(PaymentRail rail, String reason, UUID actorId, String actorRole,
+                                          UUID dualControlApproverId) {
+        rail.setEnabled(false);
+        rail.setDisabledReason(reason);
+        eventPublisher.publishEvent(new PaymentRailEvent("DISABLED", rail.getId(), actorId, actorRole,
+                Map.of("code", rail.getCode(), "reason", reason, "automatic", true), dualControlApproverId));
+        return true;
+    }
+
+    private static Map<String, String> stringKeyed(Map<UUID, String> byId) {
+        return byId.entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().toString(), Map.Entry::getValue));
     }
 
     private void applyFields(PaymentRail rail, String displayName, PaymentRailType railType, String currency,
@@ -178,6 +271,9 @@ public class PaymentRailAdminService {
                     "Chain addresses are not allowed for off-chain payment rails");
         }
         chainAddressRepository.deleteByPaymentRailId(rail.getId());
+        // Hibernate flushes inserts before deletes: without this an update that keeps a
+        // chain violates uq_payment_rail_chain.
+        chainAddressRepository.flush();
         if (chainAddresses == null || chainAddresses.isEmpty()) {
             return;
         }

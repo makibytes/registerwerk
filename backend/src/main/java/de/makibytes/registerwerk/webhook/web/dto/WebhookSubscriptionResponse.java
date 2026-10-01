@@ -12,13 +12,17 @@ public record WebhookSubscriptionResponse(
         String url,
         Set<WebhookEventType> eventTypes,
         boolean enabled,
+        /** Set when the platform (not the owner) disabled it: URL_POLICY or CIRCUIT_BREAKER. */
+        String disabledReason,
+        Instant secretRotatedAt,
         Instant createdAt,
-        /** Only populated in the response to the create call — never re-shown afterward. */
+        /** Only populated in the create / rotate-secret response — never re-shown afterward. */
         String secret
 ) {
-    public static WebhookSubscriptionResponse from(WebhookSubscription s, String secretIfJustCreated) {
+    public static WebhookSubscriptionResponse from(WebhookSubscription s, String secretIfJustIssued) {
         return new WebhookSubscriptionResponse(
-                s.getId(), s.getUrl(), s.getEventTypes(), s.isEnabled(), s.getCreatedAt(), secretIfJustCreated);
+                s.getId(), s.getUrl(), s.getEventTypes(), s.isEnabled(), s.getDisabledReason(),
+                s.getSecretRotatedAt(), s.getCreatedAt(), secretIfJustIssued);
     }
 
     public static WebhookSubscriptionResponse from(WebhookSubscription s) {

@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.kyc.events.KycApprovedEvent;
 import de.makibytes.registerwerk.kyc.events.KycExpiringEvent;
 import de.makibytes.registerwerk.kyc.events.KycRejectedEvent;
+import de.makibytes.registerwerk.kyc.events.KycRejectionCategory;
 import de.makibytes.registerwerk.notification.api.EmailPort;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
@@ -45,10 +46,12 @@ class KycNotificationListener {
     @ApplicationModuleListener
     void on(KycRejectedEvent event) {
         String entityName = entityName(event.entityId());
-        Object reason = event.payload().get("reason");
+        // Tipping-off (GwG s.47): the e-mail carries only the fixed customer-facing category, never
+        // the operator's free-text internal reason.
+        Object reasonCode = event.payload().get("reasonCode");
         notifyCompanyAdmins(event.entityId(), "Registerwerk: KYC verification rejected", "kyc-rejected", Map.of(
                 "entityName", entityName,
-                "reason", reason != null ? reason : ""
+                "reasonCode", reasonCode != null ? reasonCode.toString() : KycRejectionCategory.CONTACT_SUPPORT.name()
         ));
     }
 

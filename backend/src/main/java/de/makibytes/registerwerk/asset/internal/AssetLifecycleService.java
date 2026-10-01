@@ -50,18 +50,21 @@ public class AssetLifecycleService {
     private final AssetBondTermsRepository bondTermsRepository;
     private final AssetHolderRepository holderRepository;
     private final RedemptionReadinessPort redemptionReadiness;
+    private final org.springframework.beans.factory.ObjectProvider<de.makibytes.registerwerk.asset.api.RedemptionBlocker> redemptionBlockers;
 
     public AssetLifecycleService(
             AssetRepository assetRepository,
             ApplicationEventPublisher eventPublisher,
             AssetBondTermsRepository bondTermsRepository,
             AssetHolderRepository holderRepository,
-            RedemptionReadinessPort redemptionReadiness) {
+            RedemptionReadinessPort redemptionReadiness,
+            org.springframework.beans.factory.ObjectProvider<de.makibytes.registerwerk.asset.api.RedemptionBlocker> redemptionBlockers) {
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
         this.bondTermsRepository = bondTermsRepository;
         this.holderRepository = holderRepository;
         this.redemptionReadiness = redemptionReadiness;
+        this.redemptionBlockers = redemptionBlockers;
     }
 
     /** Submits a DRAFT asset for approval → PENDING_APPROVAL. */
@@ -176,6 +179,12 @@ public class AssetLifecycleService {
         if (poolHoldsUnits) {
             throw new IllegalStateException("Asset " + assetId + " still has units in a nominee pool "
                     + "(lending market, DvP escrow, desk or facility) — unwind the pools before redeeming.");
+        }
+        for (var blocker : (Iterable<de.makibytes.registerwerk.asset.api.RedemptionBlocker>) redemptionBlockers.orderedStream()::iterator) {
+            Optional<String> reason = blocker.blocksRedemption(assetId);
+            if (reason.isPresent()) {
+                throw new IllegalStateException("Asset " + assetId + " cannot be redeemed: " + reason.get());
+            }
         }
         Optional<AssetBondTerms> bondTerms = bondTermsRepository.findById(assetId);
         UUID retirementActionId = null;

@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import de.makibytes.registerwerk.kyc.events.KycApprovedEvent;
 import de.makibytes.registerwerk.kyc.events.KycRejectedEvent;
+import de.makibytes.registerwerk.kyc.events.KycRejectionCategory;
 import de.makibytes.registerwerk.kyc.events.KycJurisdictionApprovedEvent;
 import de.makibytes.registerwerk.kyc.events.KycJurisdictionRejectedEvent;
 import org.springframework.context.ApplicationEventPublisher;
@@ -80,14 +81,18 @@ public class KycService {
     }
 
     /**
-     * Rejects KYC for the given entity, recording the rejection reason.
+     * Rejects KYC for the given entity. {@code internalReason} is the operator's free text: it goes to
+     * the audit trail only (payload key {@code internalReason}). Webhooks and e-mails receive just the
+     * fixed {@code customerReasonCode} category (GwG s.47 tipping-off; parked decision T5-14).
      */
-    public void rejectKyc(UUID entityId, String reason, UUID actorId) {
+    public void rejectKyc(UUID entityId, String internalReason, KycRejectionCategory customerReasonCode, UUID actorId) {
         LegalEntity entity = legalEntityRepository.findById(entityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
         entity.setKycStatus(KycStatus.REJECTED);
         legalEntityRepository.save(entity);
-        eventPublisher.publishEvent(new KycRejectedEvent(entityId, actorId, null, java.util.Map.of("reason", reason != null ? reason : "")));
+        eventPublisher.publishEvent(new KycRejectedEvent(entityId, actorId, null, java.util.Map.of(
+            "internalReason", internalReason != null ? internalReason : "",
+            "reasonCode", (customerReasonCode != null ? customerReasonCode : KycRejectionCategory.CONTACT_SUPPORT).name())));
         log.info("KYC rejected for entityId={}", entityId);
     }
 

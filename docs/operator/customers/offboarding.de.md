@@ -111,7 +111,7 @@ Das gibt es, weil ein Anleger ohne diese Möglichkeit nur durch Verkauf aus eine
 Wenn eine Organisation das Register nicht mehr nutzt:
 
 1. **Offene Positionen prüfen.** Bestände, Verkaufsangebote, Darlehen, ausstehende Geschäfte. Alles Offene muss zuerst aufgelöst oder migriert werden.
-2. **Verkaufsangebote zurückziehen.** Wird automatisch erledigt – die Verkaufsangebote eines offboardenden Kunden werden storniert, statt verwaist liegen zu bleiben, bis jemand darauf zugreift.
+2. **Verkaufsangebote zurückziehen.** Wird automatisch erledigt – die Verkaufsangebote eines offboardenden Kunden werden storniert, statt verwaist liegen zu bleiben, bis jemand darauf zugreift. Laufende Geschäfte werden ebenfalls behandelt: ein unbezahltes Geschäft wird abgebrochen, ein Geschäft mit gemeldeter Zahlung kommt in die Warteschlange für ungeklärte Zahlungen (`GET /api/v1/admin/trading/unresolved`) zur Entscheidung im Vier-Augen-Prinzip — es wird nie automatisch verworfen.
 3. **Nutzer deaktivieren.** Sofort, umkehrbar, löscht nichts.
 4. **Status der Entität setzen.** Je nach Lage ausgesetzt oder aufgelöst.
 5. **Grund festhalten**, mit Datum und Referenz.

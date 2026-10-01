@@ -76,6 +76,13 @@ public class LendingPosition {
     @NotNull
     private LendingPositionStatus status = LendingPositionStatus.OPEN;
 
+    /** 5B-11: the last refresh failed to read on-chain state; the values above are the previous ones. */
+    @Column(name = "sync_stale", nullable = false)
+    private boolean syncStale = false;
+
+    @Column(name = "last_sync_error", length = 500)
+    private String lastSyncError;
+
     @Column(name = "last_synced_at", nullable = false)
     private Instant lastSyncedAt = Instant.now();
 
@@ -110,6 +117,12 @@ public class LendingPosition {
 
     public LendingPositionStatus getStatus() { return status; }
     public void setStatus(LendingPositionStatus status) { this.status = status; }
+
+    public boolean isSyncStale() { return syncStale; }
+    public void setSyncStale(boolean syncStale) { this.syncStale = syncStale; }
+
+    public String getLastSyncError() { return lastSyncError; }
+    public void setLastSyncError(String lastSyncError) { this.lastSyncError = lastSyncError; }
 
     public Instant getLastSyncedAt() { return lastSyncedAt; }
     public void setLastSyncedAt(Instant lastSyncedAt) { this.lastSyncedAt = lastSyncedAt; }

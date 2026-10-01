@@ -16,6 +16,8 @@ public class LendingProperties {
 
     private boolean enabled;
     private boolean releaseApproved;
+    /** 5B-09: registration requires {@code factory.isMarket(market)}; off only in tests. */
+    private boolean requireFactory = true;
 
     public boolean isEnabled() {
         return enabled;
@@ -31,6 +33,14 @@ public class LendingProperties {
 
     public void setReleaseApproved(boolean releaseApproved) {
         this.releaseApproved = releaseApproved;
+    }
+
+    public boolean isRequireFactory() {
+        return requireFactory;
+    }
+
+    public void setRequireFactory(boolean requireFactory) {
+        this.requireFactory = requireFactory;
     }
 
     public boolean isReleased() {

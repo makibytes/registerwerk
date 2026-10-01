@@ -18,5 +18,7 @@ public interface LendingMarketRepository extends JpaRepository<LendingMarket, UU
      *  whose {@code from} address is a known lending market's own collateral custody address. */
     Optional<LendingMarket> findByMarketAddressIgnoreCase(String marketAddress);
 
+    List<LendingMarket> findByCollateralShortfallTrue();
+
     List<LendingMarket> findByCollateralAssetId(UUID collateralAssetId);
 }

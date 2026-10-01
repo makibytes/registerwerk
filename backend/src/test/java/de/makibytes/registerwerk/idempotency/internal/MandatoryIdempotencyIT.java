@@ -59,6 +59,7 @@ class MandatoryIdempotencyIT {
 
     @Autowired TestRestTemplate rest;
     @Autowired JdbcTemplate jdbc;
+    @Autowired de.makibytes.registerwerk.auth.api.AppUserRepository appUserRepository;
     @LocalServerPort int port;
 
     private ResponseEntity<String> createRail(UUID operator, String key, String code) {
@@ -68,6 +69,12 @@ class MandatoryIdempotencyIT {
         if (key != null) {
             h.set("Idempotency-Key", key);
         }
+        // Rail creation is a 4-eyes action (5A-11): a second, DB-backed REGISTRY_ADMIN approves.
+        de.makibytes.registerwerk.auth.api.AppUser approver = new de.makibytes.registerwerk.auth.api.AppUser();
+        approver.setEmail("approver-" + UUID.randomUUID() + "@test.local");
+        UUID approverId = appUserRepository.save(approver).getId();
+        h.set("X-Dual-Control-Token",
+                TestJwt.mint(SECRET, approverId, true, "Payment rail creation", null, "REGISTRY_ADMIN"));
         String body = "{\"code\":\"" + code + "\",\"displayName\":\"Rail\",\"railType\":\"OFFCHAIN_SEPA\",\"currency\":\"EUR\","
                 + "\"emtFlag\":false,\"redemptionAtPar\":false}";
         return rest.exchange("http://localhost:" + port + "/api/v1/payment-rails", HttpMethod.POST,

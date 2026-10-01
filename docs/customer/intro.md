@@ -93,7 +93,7 @@ More specifically, it is not:
 
 - **A valuation service.** The register records nominal amounts, not market prices.
 - **A custodian of your keys.** You hold your wallet's private key. Nobody can recover it.
-- **A trading venue.** It connects to venues; it does not run a market.
+- **An authorised trading venue.** The built-in peer listings are a demonstration secondary-market workflow, not an authorised trading venue (MTF/OTF); they are disabled in production unless the operator has classified them with a legal opinion.
 - **A payments system.** It supports several payment rails; money moves on those, not here.
 - **A guarantor.** If an issuer defaults, the platform records it. It does not make holders whole.
 

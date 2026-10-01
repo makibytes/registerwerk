@@ -93,7 +93,7 @@ Plus précisément, ce n'est pas :
 
 - **Un service de valorisation.** Le registre consigne des montants nominaux, pas des prix de marché.
 - **Un conservateur de vos clés.** C'est vous qui détenez la clé privée de votre portefeuille. Personne ne peut la récupérer.
-- **Une plateforme de négociation.** Il se raccorde à des plateformes ; il n'anime pas de marché.
+- **Une plateforme de négociation agréée.** Les offres entre pairs intégrées sont un flux de démonstration du marché secondaire, pas une plateforme agréée (MTF/OTF) ; elles sont désactivées en production sauf classification par l'opérateur avec avis juridique.
 - **Un système de paiement.** Il prend en charge plusieurs dispositifs de paiement ; l'argent circule sur ceux-ci, pas ici.
 - **Un garant.** Si un émetteur fait défaut, la plateforme le consigne. Elle n'indemnise pas les titulaires.
 

@@ -26,20 +26,21 @@ const JURISDICTION_LABELS: Record<Jurisdiction, string> = {
   template: `
     <mat-card class="compliance-banner">
       <mat-card-content>
-        <mat-icon class="shield-icon">verified_user</mat-icon>
+        <mat-icon class="shield-icon">info</mat-icon>
         <div class="text">
-          <strong>Compliant by design ({{ jurisdictionLabel }})</strong>
+          <strong>Risk notice ({{ jurisdictionLabel }})</strong>
           <span>
-            Your pledged security stays in collective custody with the operator as a verified
-            nominee holder — the position, coupon, and redemption rights remain yours.
-            @if (micarApplicable === false) {
-              MiCAR applies only to the stablecoin you borrow, not to the security itself.
-            } @else if (micarApplicable === true) {
-              MiCAR considerations apply to this jurisdiction's issuance beyond just the payment
-              leg — see the operator's jurisdiction compliance profile for details.
+            Borrowing pledges your securities: the collateral is transferred to the market contract
+            for the life of the loan. Coupons and redemption proceeds on pledged units are held
+            pending the operator's process and are not paid out to you while the units are pledged.
+            If the loan is liquidated, title to the pledged units passes to the buyer. Access is
+            intended for professional clients; margin-lending rules are subject to
+            jurisdiction-specific legal review, and the backend cannot block an on-chain borrow
+            made directly against the contract.
+            @if (micarApplicable === true) {
+              MiCAR considerations may apply to this jurisdiction's issuance beyond the payment leg.
             }
-            Margin-lending rules are still subject to jurisdiction-specific legal review before
-            scaled production use.
+            This is not legal or investment advice.
           </span>
         </div>
       </mat-card-content>
@@ -47,8 +48,8 @@ const JURISDICTION_LABELS: Record<Jurisdiction, string> = {
   `,
   styles: [`
     .compliance-banner {
-      background: var(--rw-accent-light, #ccfbf1);
-      border: 1px solid var(--rw-accent, #0d9488);
+      background: var(--rw-surface-raised);
+      border: 1px solid var(--rw-border);
       border-radius: 10px;
       margin-bottom: 16px;
     }
@@ -58,7 +59,7 @@ const JURISDICTION_LABELS: Record<Jurisdiction, string> = {
       gap: 12px;
       padding: 12px 16px !important;
     }
-    .shield-icon { color: var(--rw-accent, #0d9488); flex-shrink: 0; margin-top: 2px; }
+    .shield-icon { color: var(--rw-text-secondary); flex-shrink: 0; margin-top: 2px; }
     .text {
       display: flex;
       flex-direction: column;

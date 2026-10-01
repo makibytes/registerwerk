@@ -25,6 +25,11 @@ public class WebhookDelivery {
     @Column(name = "subscription_id", nullable = false)
     private UUID subscriptionId;
 
+    /** Stable per event across all subscribers; receivers dedupe on it. The delivery {@link #getId()}
+     *  is the per-subscriber id, stable across retries. */
+    @Column(name = "event_id", nullable = false, updatable = false)
+    private UUID eventId = UUID.randomUUID();
+
     @Enumerated(EnumType.STRING)
     @Column(name = "event_type", nullable = false, length = 50)
     private WebhookEventType eventType;
@@ -41,6 +46,14 @@ public class WebhookDelivery {
     @Column(name = "response_code")
     private Integer responseCode;
 
+    /** Coarse result of the last attempt; the raw HTTP code stays internal (status oracle). */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private WebhookDeliveryOutcome outcome;
+
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
+
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount = 0;
 
@@ -54,6 +67,15 @@ public class WebhookDelivery {
 
     public UUID getSubscriptionId() { return subscriptionId; }
     public void setSubscriptionId(UUID subscriptionId) { this.subscriptionId = subscriptionId; }
+
+    public UUID getEventId() { return eventId; }
+    public void setEventId(UUID eventId) { this.eventId = eventId; }
+
+    public WebhookDeliveryOutcome getOutcome() { return outcome; }
+    public void setOutcome(WebhookDeliveryOutcome outcome) { this.outcome = outcome; }
+
+    public Instant getNextAttemptAt() { return nextAttemptAt; }
+    public void setNextAttemptAt(Instant nextAttemptAt) { this.nextAttemptAt = nextAttemptAt; }
 
     public WebhookEventType getEventType() { return eventType; }
     public void setEventType(WebhookEventType eventType) { this.eventType = eventType; }

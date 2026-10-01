@@ -3,6 +3,8 @@ export const environment = {
   testEnvironment: true,
   apiUrl: '/api/v1',
   operatorUrl: '',
+  // Base URL of the documentation site (signature recipe link on the Webhooks page); blank hides the link.
+  docsUrl: '',
   bundlerUrl: '',
   // Optional build-time override of the sign-in config fetched from
   // GET /public/auth/config. Only for exercising MSAL locally without an Entra-configured

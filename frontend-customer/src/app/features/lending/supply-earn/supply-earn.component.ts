@@ -15,7 +15,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { PageHeaderComponent } from '@registerwerk/ui';
 import { LendingService } from '../../../core/api/lending.service';
 import { WalletService } from '../../../core/wallet/wallet.service';
-import { erc20Abi, repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
+import { repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
 import { LendingMarket, LendingSupplyPosition } from '../../../core/models';
 import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem';
 
@@ -90,7 +90,9 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
               <p class="hint-text" role="status">
                 {{ selectedMarket.riskParametersLegacy
                   ? 'This market was set up under earlier risk parameters and takes no new supply. You can still withdraw.'
-                  : 'This market is paused. You can still withdraw.' }}
+                  : (selectedMarket.pauseReason === 'COLLATERAL_SHORTFALL'
+                      ? 'This market is paused while the operator reconciles a collateral shortfall. You can still withdraw, subject to available liquidity.'
+                      : 'This market is paused. You can still withdraw.') }}
               </p>
             }
             @if (actionError) {
@@ -239,21 +241,7 @@ export class SupplyEarnComponent implements OnInit {
       const loanToken = market.loanTokenAddress as Address;
       const amountUnits = this.amountUnits(market);
 
-      const allowance = await this.wallet.readContract<bigint>({
-        address: loanToken,
-        abi: erc20Abi,
-        functionName: 'allowance',
-        args: [this.wallet.address(), marketAddress],
-      });
-      if (allowance < amountUnits) {
-        const approveHash = await this.wallet.writeContract({
-          address: loanToken,
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [marketAddress, amountUnits],
-        });
-        await this.wallet.waitForTransaction(approveHash);
-      }
+      await this.wallet.ensureAllowance(loanToken, marketAddress, amountUnits);
 
       const hash = await this.wallet.writeContract({
         address: marketAddress,

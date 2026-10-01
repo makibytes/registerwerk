@@ -159,6 +159,30 @@ wird bei der Einreichung **und erneut bei der Genehmigung** validiert — ein Za
 Betreiber zwischenzeitlich deaktiviert hat, blockiert die Genehmigung der Version, bis das
 Manifest aktualisiert wird.
 
+!!! warning "MiCAR-Angaben sind vom Betreiber erfasste Behauptungen"
+    Emittent, LEI, Zulassungsreferenz, das EMT-Kennzeichen, der Whitepaper-Link und das
+    Kennzeichen „zum Nennwert rückzahlbar" eines Stablecoin-Zahlungswegs werden vom Betreiber
+    erfasst. Registerwerk prüft sie nicht gegen ein Register. Katalog und Marktplatz zeigen
+    daher einen Attestierungsstatus: `OPERATOR_ATTESTED` (mit Datum) bedeutet, dass ein
+    Betreiber die Angaben anhand einer externen Quelle geprüft und ein zweiter Betreiber
+    zugestimmt hat; der Hinweis lautet „Vom Betreiber attestiert, nicht unabhängig durch
+    Registerwerk geprüft". `UNVERIFIED` bedeutet: ungeprüfte Angaben. `railDisabledReason`
+    nennt den Grund, wenn ein Zahlungsweg automatisch deaktiviert wurde.
+
+Betreiberkontrollen: Anlegen, Aktivieren, Ändern und Attestieren eines Zahlungswegs
+erfordern jeweils Step-up und einen zweiten Freigeber; neue Zahlungswege starten
+deaktiviert; der Betreiber, der einen Zahlungsweg angelegt oder zuletzt geändert hat, darf
+ihn nicht attestieren; ein EMT-Stablecoin-Zahlungsweg kann ohne wirksame Attestierung nicht
+aktiviert werden. Die Attestierung ist an einen Fingerabdruck des Inhalts gebunden (Code,
+Typ, Währung, Dezimalstellen, Emittent, LEI, Zulassung, EMT-Kennzeichen, Whitepaper,
+Nennwert-Kennzeichen und Token-Adresse je Chain): Jede Änderung hebt sie auf, und ein
+aktivierter EMT-Zahlungsweg wird automatisch deaktiviert (`MICAR_ATTESTATION_INVALIDATED`),
+bis er erneut attestiert wird. Beim Speichern einer Token-Adresse prüft das Backend, dass
+die Adresse Code enthält und `decimals()` den deklarierten Dezimalstellen entspricht
+(`registerwerk.payment.onchain-verify`, bei RPC-Fehlern wird abgelehnt). Audit-Ereignisse:
+`PAYMENT_RAIL_CREATED`, `_UPDATED`, `_ENABLED`, `_DISABLED`, `_MICAR_VERIFIED`,
+`_MICAR_VERIFICATION_CLEARED`, `_MICAR_ATTESTATION_INVALIDATED`.
+
 Das ist eine Empfehlung, keine Whitelist: Ihre dApp kann jederzeit ihre eigene Zahlungslogik
 implementieren. Deklarieren Sie sie dann als `custom`-Eintrag statt als `rail`-Referenz:
 

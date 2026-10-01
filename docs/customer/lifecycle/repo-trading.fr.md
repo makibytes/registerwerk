@@ -25,6 +25,15 @@ Le Repo Desk modélise ce processus bilatéral. Il est distinct du [prêt garant
 5. À l'ouverture et à la clôture, chaque destinataire confirme la jambe espèces ou titres réellement reçue avec une référence.
 6. Appels de marge et substitutions de garantie restent dans l'historique partagé et immuable.
 
+## Contrôles du desk
+
+- **Les cotations sont versionnées.** Une cotation remplacée devient `SUPERSEDED` et ne peut plus être acceptée. L'acceptation porte le `termsHash` fourni par le serveur ; en cas d'écart (409), examinez les conditions actuelles. Les conditions acceptées sont figées sur la transaction. Montants et intérêts sont arrondis à la sous-unité de la devise (ACT/360, ACT/365 pour GBP notamment).
+- **Chaque jambe a un payeur** (déclare « envoyé » avec référence) **et un receveur** (confirme ou conteste). Un appel de marge exige une référence de valorisation et un montant, ne peut dépasser l'insuffisance qui en découle et laisse au moins 24 heures ; **seule la confirmation du prêteur le clôt**.
+- **Le défaut se déroule en deux temps :** notification de défaut par le créancier, puis, après le délai de grâce (24 heures par défaut), déclaration – tant que l'obligation reste inexécutée et que la contrepartie n'a pas déclaré l'avoir exécutée. Si l'emprunteur a payé et que le prêteur ne restitue pas les titres, c'est l'*emprunteur* qui peut déclarer le défaut.
+- **Litige :** chaque partie peut geler la transaction ; l'opérateur consigne l'issue avec base juridique et second approbateur, sans trancher sur le fond.
+- **Substitution :** demande distincte ; la garantie ne change qu'après confirmation des deux jambes, jamais sur une transaction clôturée, en défaut ou litigieuse.
+- **Accès :** adhésion de la société, client professionnel ou contrepartie éligible, contrôle KYC/filtrage. L'emprunteur doit détenir les titres au registre ; les titres déjà nantis ou mis en vente sont indisponibles (grèvement interne, sans Sperrvermerk au registre). Le terme doit précéder l'échéance ou le rappel de la garantie ; le remboursement est bloqué tant qu'un repo est ouvert. Les opérations sur titres sont consignées ; les paiements compensatoires relèvent des parties.
+- **SFTR :** les deux parties ont besoin d'un LEI ; chaque transaction reçoit un UTI et expose les champs SFTR détenus (`/sftr-fields`). Registerwerk ne déclare pas ; les parties restent responsables. Le règlement est bilatéral et auto-confirmé, non atomique.
+
 !!! warning "Le contrat-cadre reste indispensable"
     Le flux ne remplace ni contrat-cadre, barème d'éligibilité, agent de valorisation, conservation, procédure de litige ni avis de compensation. Le DvP reste préférable au FoP.
-

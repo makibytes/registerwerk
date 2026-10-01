@@ -1,7 +1,7 @@
 package de.makibytes.registerwerk.lending.web;
 
 import de.makibytes.registerwerk.lending.internal.LendingProperties;
-import de.makibytes.registerwerk.repo.api.RepoDeskCapability;
+import de.makibytes.registerwerk.shared.api.RepoDeskCapability;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

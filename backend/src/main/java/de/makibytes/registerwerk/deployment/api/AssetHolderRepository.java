@@ -64,6 +64,15 @@ public interface AssetHolderRepository extends JpaRepository<AssetHolder, UUID> 
     @Query("SELECT h FROM AssetHolder h WHERE h.investorId = :investorId AND h.assetId = :assetId AND h.removedAt IS NULL")
     Optional<AssetHolder> findActiveByInvestorIdAndAssetId(@Param("investorId") UUID investorId, @Param("assetId") UUID assetId);
 
+    /** Active-only lookup by id: a register entry that was removed / handed over is not tradable. */
+    @Query("SELECT h FROM AssetHolder h WHERE h.id = :id AND h.removedAt IS NULL")
+    Optional<AssetHolder> findActiveById(@Param("id") UUID id);
+
+    /** Same, with a row write lock: trading debits the seller row and must not race a removal. */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT h FROM AssetHolder h WHERE h.id = :id AND h.removedAt IS NULL")
+    Optional<AssetHolder> findActiveByIdForUpdate(@Param("id") UUID id);
+
     @Query("SELECT h FROM AssetHolder h WHERE h.assetId = :assetId AND h.walletAddress = :walletAddress AND h.removedAt IS NULL")
     Optional<AssetHolder> findActiveByAssetIdAndWalletAddress(
             @Param("assetId") UUID assetId, @Param("walletAddress") String walletAddress);

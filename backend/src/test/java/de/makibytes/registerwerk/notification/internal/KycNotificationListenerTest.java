@@ -70,16 +70,18 @@ class KycNotificationListenerTest {
     }
 
     @Test
-    @DisplayName("KycRejectedEvent emails company admins the kyc-rejected template with the reason")
+    @DisplayName("KycRejectedEvent emails company admins the kyc-rejected template with the category code only (5C-09)")
     void on_kycRejected_emailsCompanyAdmins() {
         when(appUserRepository.findByLegalEntityIdOrderByFullNameAscEmailAsc(entityId)).thenReturn(List.of(companyAdmin()));
 
-        listener.on(new KycRejectedEvent(entityId, UUID.randomUUID(), null, Map.of("reason", "Document expired")));
+        listener.on(new KycRejectedEvent(entityId, UUID.randomUUID(), null, Map.of(
+                "internalReason", "sanctions match", "reasonCode", "DOCUMENTS_UNREADABLE")));
 
         ArgumentCaptor<Map<String, Object>> varsCaptor = ArgumentCaptor.forClass(Map.class);
         verify(emailPort).sendHtml(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.eq("kyc-rejected"), varsCaptor.capture());
-        assertThat(varsCaptor.getValue()).containsEntry("reason", "Document expired");
+        assertThat(varsCaptor.getValue()).containsEntry("reasonCode", "DOCUMENTS_UNREADABLE")
+                .doesNotContainKey("reason").doesNotContainValue("sanctions match");
     }
 
     @Test

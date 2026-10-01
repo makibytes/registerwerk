@@ -544,6 +544,8 @@ public class EcosystemDemoDataSeeder implements ApplicationRunner, Ordered {
         rail.setEmtFlag(emtFlag);
         rail.setWhitePaperUrl(whitePaperUrl);
         rail.setRedemptionAtPar(redemptionAtPar);
+        // Demo rails are enabled but deliberately NOT attested: a seeded MiCAR claim must not
+        // appear as operator-verified (investors see "details entered by the operator").
         rail.setEnabled(true);
         rail = paymentRails.save(rail);
 

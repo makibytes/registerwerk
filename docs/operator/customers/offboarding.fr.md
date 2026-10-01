@@ -111,7 +111,7 @@ Cela existe parce que sans cela, la seule sortie d'un investisseur d'un registre
 Lorsqu'une organisation cesse d'utiliser le registre :
 
 1. **Vérifiez les positions ouvertes.** Avoirs, inscriptions, prêts, transactions en attente. Tout ce qui est ouvert doit d'abord être résolu ou migré.
-2. **Retirez les offres de vente.** Géré automatiquement : les offres d'un client sortant sont annulées plutôt que laissées orphelines pour que quelqu'un les exécute par erreur.
+2. **Retirez les offres de vente.** Géré automatiquement : les offres d'un client sortant sont annulées plutôt que laissées orphelines pour que quelqu'un les exécute par erreur. Les transactions en cours sont traitées aussi : une transaction impayée est annulée, une transaction avec paiement déclaré passe dans la file des paiements non résolus (`GET /api/v1/admin/trading/unresolved`) pour une décision en double validation — elle n'est jamais abandonnée automatiquement.
 3. **Désactivez les utilisateurs.** Immédiat, réversible, ne supprime rien.
 4. **Définissez le statut de l'entité.** Suspendue ou dissoute selon le cas.
 5. **Enregistrez pourquoi**, avec une date et une référence.

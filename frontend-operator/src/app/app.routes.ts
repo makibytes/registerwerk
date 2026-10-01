@@ -105,6 +105,33 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'trading',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
+        loadChildren: () =>
+          import('./features/trading/trading.routes').then(
+            (m) => m.TRADING_ROUTES
+          ),
+      },
+      {
+        path: 'repo-disputes',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
+        loadChildren: () =>
+          import('./features/repo/repo.routes').then(
+            (m) => m.REPO_ROUTES
+          ),
+      },
+      {
+        path: 'lending',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN'] },
+        loadChildren: () =>
+          import('./features/lending/lending.routes').then(
+            (m) => m.LENDING_ROUTES
+          ),
+      },
+      {
         path: 'payment-rails',
         canActivate: [roleGuard],
         data: { roles: ['REGISTRY_ADMIN'] },

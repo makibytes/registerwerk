@@ -39,4 +39,12 @@ public interface TradeListingRepository extends JpaRepository<TradeListing, UUID
     BigDecimal sumQuantityAvailableBySellerHolderIdAndStatusIn(
             @Param("sellerHolderId") UUID sellerHolderId,
             @Param("statuses") Collection<ListingStatus> statuses);
+
+    List<TradeListing> findBySellerHolderId(UUID sellerHolderId);
+
+    List<TradeListing> findByAssetId(UUID assetId);
+
+    /** Order-record export (5C-06): every listing (open or cancelled, nothing is deleted) created in the window. */
+    List<TradeListing> findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtAsc(
+            java.time.Instant from, java.time.Instant to);
 }

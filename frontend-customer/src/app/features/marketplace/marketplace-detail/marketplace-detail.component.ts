@@ -115,6 +115,10 @@ interface ManifestImage {
       border-radius: var(--rw-radius-sm);
       padding: 2px 6px;
     }
+    .emt-badge.unverified { color: var(--rw-text-secondary); background: var(--rw-surface-raised); border: 1px solid var(--rw-border); text-transform: none; letter-spacing: 0; }
+    .rail-disabled { display: flex; align-items: flex-start; gap: 6px; margin: 6px 0; font-size: 12.5px; color: var(--rw-text-danger); }
+    .rail-disabled mat-icon { font-size: 18px; width: 18px; height: 18px; flex-shrink: 0; }
+    .attestation-notice { font-style: italic; }
     .custom-badge {
       font-size: 10px;
       font-weight: 700;
@@ -221,24 +225,39 @@ interface ManifestImage {
                     <div class="payment-card-header">
                       <mat-icon style="color:var(--rw-accent)">payments</mat-icon>
                       {{ method.displayName }}
-                      @if (method.emtFlag) {
-                        <span class="emt-badge">MiCAR EMT</span>
+                      @if (method.emtFlag && method.attestationStatus === 'OPERATOR_ATTESTED') {
+                        <span class="emt-badge">MiCAR EMT - verified by operator{{ method.micarVerifiedAt ? ' on ' + (method.micarVerifiedAt | date:'mediumDate') : '' }}</span>
+                      } @else if (method.emtFlag) {
+                        <span class="emt-badge unverified">EMT claim entered by operator, not verified</span>
                       }
                     </div>
+                    @if (!method.railEnabled) {
+                      <p class="rail-disabled" role="alert">
+                        <mat-icon>block</mat-icon>
+                        This payment rail is currently disabled{{ railDisabledText(method.railDisabledReason) }}
+                        Do not use it to settle payments until the operator re-enables it.
+                      </p>
+                    }
                     <p class="payment-card-meta">{{ method.railType }} · {{ method.currency }}</p>
                     @if (method.issuerName) {
                       <p class="payment-card-meta">
-                        Issued by {{ method.issuerName }}
+                        Issuer named by the operator: {{ method.issuerName }}
                         @if (method.issuerLei) { (LEI {{ method.issuerLei }}) }
                       </p>
                     }
-                    @if (method.redemptionAtPar || method.whitePaperUrl) {
+                    @if (method.micarAuthorization) {
+                      <p class="payment-card-meta">Authorisation stated: {{ method.micarAuthorization }}</p>
+                    }
+                    @if ((method.redemptionAtPar && method.attestationStatus === 'OPERATOR_ATTESTED') || method.whitePaperUrl) {
                       <p class="payment-card-meta">
-                        @if (method.redemptionAtPar) { Redeemable at par at any time. }
+                        @if (method.redemptionAtPar && method.attestationStatus === 'OPERATOR_ATTESTED') { Issuer states: redeemable at par. }
                         @if (externalUrl(method.whitePaperUrl); as whitePaperUrl) {
-                          <a [href]="whitePaperUrl" target="_blank" rel="noopener noreferrer">Read the white paper</a>
+                          <a [href]="whitePaperUrl" target="_blank" rel="noopener noreferrer">Issuer document: white paper (external)</a>
                         }
                       </p>
+                    }
+                    @if (method.attestationStatus && method.attestationStatus !== 'NOT_APPLICABLE') {
+                      <p class="payment-card-meta attestation-notice">{{ method.attestationNotice || defaultAttestationNotice(method.attestationStatus) }}</p>
                     }
                   } @else {
                     <div class="payment-card-header">
@@ -403,6 +422,23 @@ export class MarketplaceDetailComponent implements OnInit {
       'Dismiss',
       { duration: copied ? 3000 : 6000, panelClass: copied ? undefined : 'snack-error' },
     );
+  }
+
+  railDisabledText(reason: string | null | undefined): string {
+    switch (reason) {
+      case 'MICAR_ATTESTATION_INVALIDATED':
+        return ': its MiCAR attestation no longer matches the rail details, so it was switched off automatically.';
+      case 'MICAR_ATTESTATION_MISSING':
+        return ': it was switched off because it is flagged as an EMT without a current operator attestation.';
+      default:
+        return '.';
+    }
+  }
+
+  defaultAttestationNotice(status: string): string {
+    return status === 'OPERATOR_ATTESTED'
+      ? 'Operator-attested, not independently verified by Registerwerk.'
+      : 'Details entered by the operator; not verified by the operator or by Registerwerk.';
   }
 
   externalUrl(value: string | null | undefined): string | null {

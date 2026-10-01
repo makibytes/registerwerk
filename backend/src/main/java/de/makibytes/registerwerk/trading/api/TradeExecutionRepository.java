@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -40,12 +41,63 @@ public interface TradeExecutionRepository extends JpaRepository<TradeExecution, 
             @Param("sellerHolderId") UUID sellerHolderId,
             @Param("settlementStatuses") List<SettlementStatus> settlementStatuses);
 
-    /** Input for {@code TradingService.timeoutStuckPendingTrades}. */
-    List<TradeExecution> findBySettlementStatusAndCreatedAtBefore(SettlementStatus status, Instant cutoff);
+    /** Input for the timeout job: ids only, each row is then re-loaded under its own lock. */
+    @Query("SELECT e.id FROM TradeExecution e WHERE e.settlementStatus = :status AND e.createdAt < :cutoff")
+    List<UUID> findIdsBySettlementStatusAndCreatedAtBefore(
+            @Param("status") SettlementStatus status, @Param("cutoff") Instant cutoff);
 
-    /** Input for the seller-confirmation half of {@code TradingService.timeoutStuckPendingTrades}
-     *  — measured from when the buyer declared payment, not from trade creation. */
-    List<TradeExecution> findBySettlementStatusAndPaymentDeclaredAtBefore(SettlementStatus status, Instant cutoff);
+    @Query("SELECT e.id FROM TradeExecution e WHERE e.settlementStatus = :status AND e.paymentDeclaredAt < :cutoff")
+    List<UUID> findIdsBySettlementStatusAndPaymentDeclaredAtBefore(
+            @Param("status") SettlementStatus status, @Param("cutoff") Instant cutoff);
+
+    List<TradeExecution> findBySettlementStatusOrderByUnresolvedAtAsc(SettlementStatus status);
+
+    long countBySettlementStatus(SettlementStatus status);
+
+    long countBySettlementStatusAndPaymentDeclaredAtBefore(SettlementStatus status, Instant cutoff);
+
+    long countBySettlementStatusAndUnresolvedAtBefore(SettlementStatus status, Instant cutoff);
+
+    /** SRE backlog report: declared-payment trades that were terminally FAILED before PAYMENT_UNRESOLVED existed. */
+    @Query("""
+        SELECT e FROM TradeExecution e
+        WHERE e.settlementStatus = de.makibytes.registerwerk.trading.api.SettlementStatus.FAILED
+          AND e.paymentDeclaredAt IS NOT NULL AND e.paymentReference IS NOT NULL
+        ORDER BY e.paymentDeclaredAt
+        """)
+    List<TradeExecution> findFailedAfterDeclaredPayment();
+
+    /** Executions of a seller holding in the given statuses (register removal invalidation). */
+    List<TradeExecution> findBySellerHolderIdAndSettlementStatusIn(UUID sellerHolderId, Collection<SettlementStatus> statuses);
+
+    List<TradeExecution> findByAssetIdAndSettlementStatusIn(UUID assetId, Collection<SettlementStatus> statuses);
+
+    @Query("""
+        SELECT e FROM TradeExecution e
+        WHERE (e.buyerEntityId = :entityId OR e.sellerEntityId = :entityId)
+          AND e.settlementStatus IN :statuses
+        """)
+    List<TradeExecution> findByPartyAndSettlementStatusIn(
+            @Param("entityId") UUID entityId, @Param("statuses") Collection<SettlementStatus> statuses);
+
+    long countByListingIdAndSettlementStatusIn(UUID listingId, Collection<SettlementStatus> statuses);
+
+    /** Open (reserving) executions of one buyer - the per-buyer reservation cap. */
+    long countByBuyerEntityIdAndSettlementStatusIn(UUID buyerEntityId, Collection<SettlementStatus> statuses);
+
+    long countByBuyerEntityIdAndListingIdAndSettlementStatusIn(
+            UUID buyerEntityId, UUID listingId, Collection<SettlementStatus> statuses);
+
+    boolean existsByBuyerEntityIdAndListingIdAndBuyerCooldownUntilAfter(
+            UUID buyerEntityId, UUID listingId, Instant now);
+
+    /**
+     * Serialises reservation-cap checks per buyer across DIFFERENT listings (the listing row lock
+     * only serialises one listing). Transaction-scoped advisory lock; PostgreSQL only.
+     */
+    @Query(value = "SELECT count(*) FROM (SELECT pg_advisory_xact_lock(hashtextextended(cast(:key AS text), 0))) t",
+            nativeQuery = true)
+    long lockBuyerReservations(@Param("key") String key);
 
     /**
      * Most recent settled trade price for an asset — the reference price surfaced alongside
@@ -54,4 +106,12 @@ public interface TradeExecutionRepository extends JpaRepository<TradeExecution, 
      */
     Optional<TradeExecution> findFirstByAssetIdAndSettlementStatusOrderBySettledAtDesc(
             UUID assetId, SettlementStatus settlementStatus);
+
+    /** Reference price for the marketplace: latest SETTLED trade between UNRELATED parties (5A-06). */
+    Optional<TradeExecution> findFirstByAssetIdAndSettlementStatusAndRelatedPartyFalseOrderBySettledAtDesc(
+            UUID assetId, SettlementStatus settlementStatus);
+
+    /** Order-record export (5C-06): every execution created in the window. */
+    List<TradeExecution> findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtAsc(
+            java.time.Instant from, java.time.Instant to);
 }

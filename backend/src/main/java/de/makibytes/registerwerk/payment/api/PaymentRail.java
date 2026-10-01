@@ -72,8 +72,9 @@ public class PaymentRail {
      * Whether an operator has explicitly attested the MiCAR fields above against a real
      * external source (e.g. the EBA Art. 109 authorized-issuer register) — distinct from
      * simply having non-blank values, which are operator-entered free text with no
-     * cross-check on their own. Resets to false whenever the disclosed fields change, since
-     * a prior attestation no longer covers the new values.
+     * cross-check on their own. Only counts while {@link #getMicarAttestedFingerprint()}
+     * still matches the rail's current content ({@link PaymentRailAttestation#isEffective});
+     * it is cleared whenever any attested fact (incl. token address) changes.
      */
     @Column(name = "micar_verified", nullable = false)
     private boolean micarVerified = false;
@@ -83,6 +84,25 @@ public class PaymentRail {
 
     @Column(name = "micar_verified_by")
     private UUID micarVerifiedBy;
+
+    /**
+     * SHA-256 over the canonical facts that were attested (see {@link PaymentRailAttestation});
+     * the attestation only counts while the recomputed fingerprint still equals this value.
+     */
+    @Column(name = "micar_attested_fingerprint", length = 64)
+    private String micarAttestedFingerprint;
+
+    /** Operator who created the rail (NULL on legacy rows); may not attest it. */
+    @Column(name = "created_by")
+    private UUID createdBy;
+
+    /** Operator who last changed it (NULL on legacy rows); may not attest it. */
+    @Column(name = "updated_by")
+    private UUID updatedBy;
+
+    /** Set when the rail was switched off automatically (e.g. {@code MICAR_ATTESTATION_INVALIDATED}). */
+    @Column(name = "disabled_reason", length = 100)
+    private String disabledReason;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
@@ -142,6 +162,18 @@ public class PaymentRail {
 
     public UUID getMicarVerifiedBy() { return micarVerifiedBy; }
     public void setMicarVerifiedBy(UUID micarVerifiedBy) { this.micarVerifiedBy = micarVerifiedBy; }
+
+    public String getMicarAttestedFingerprint() { return micarAttestedFingerprint; }
+    public void setMicarAttestedFingerprint(String micarAttestedFingerprint) { this.micarAttestedFingerprint = micarAttestedFingerprint; }
+
+    public UUID getCreatedBy() { return createdBy; }
+    public void setCreatedBy(UUID createdBy) { this.createdBy = createdBy; }
+
+    public UUID getUpdatedBy() { return updatedBy; }
+    public void setUpdatedBy(UUID updatedBy) { this.updatedBy = updatedBy; }
+
+    public String getDisabledReason() { return disabledReason; }
+    public void setDisabledReason(String disabledReason) { this.disabledReason = disabledReason; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

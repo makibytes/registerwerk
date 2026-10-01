@@ -2,7 +2,10 @@ package de.makibytes.registerwerk.screening.internal;
 
 import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -30,6 +33,10 @@ public class ScreeningRun {
     @Column(nullable = false)
     private String provider;
 
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "lists_checked", columnDefinition = "text[]")
+    private List<String> listsChecked;
+
     @Column(name = "started_at", nullable = false)
     private Instant startedAt;
 
@@ -53,6 +60,8 @@ public class ScreeningRun {
     public void setStatus(ScreeningStatus status) { this.status = status; }
     public String getProvider() { return provider; }
     public void setProvider(String provider) { this.provider = provider; }
+    public List<String> getListsChecked() { return listsChecked; }
+    public void setListsChecked(List<String> listsChecked) { this.listsChecked = listsChecked; }
     public Instant getStartedAt() { return startedAt; }
     public void setStartedAt(Instant startedAt) { this.startedAt = startedAt; }
     public Instant getCompletedAt() { return completedAt; }

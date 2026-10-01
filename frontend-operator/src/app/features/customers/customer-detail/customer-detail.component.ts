@@ -28,7 +28,9 @@ import { environment } from '../../../../environments/environment';
 import { AddressComponent } from '../../../shared/components/address.component';
 import { KycService } from '../../../core/api/kyc.service';
 import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor } from '../../../core/api/gas-sponsorship.service';
-import { StepUpDialogComponent } from '../../../shared/components/step-up/step-up-dialog.component';
+import { DualControlTokens } from '../../../core/api/dual-control-headers';
+import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/components/step-up/step-up-dialog.component';
+import { KycRejectDialogComponent, KycRejectDialogResult } from './kyc-reject-dialog.component';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 import {
   LegalEntity, KycDocument, LegalEntityNameHistory, EntityMergeRecordView,
@@ -216,6 +218,20 @@ interface OnchainIdentityView {
           @if (entity.status !== 'CLOSED' && entity.status !== 'DISSOLVED') {
             <button type="button" mat-stroked-button color="warn" (click)="terminate()" matTooltip="End the customer relationship: disables users, cancels open listings, revokes admin grants, moves to CLOSED. Requires step-up + a second approver.">
               Terminate
+            </button>
+          }
+          @if (entity.kycStatus !== 'APPROVED') {
+            <button type="button" mat-stroked-button (click)="approveKyc()"
+                    matTooltip="Approve this customer's KYC for one year. Requires step-up + a second approver.">
+              <mat-icon>verified</mat-icon>
+              Approve KYC
+            </button>
+          }
+          @if (entity.kycStatus !== 'REJECTED') {
+            <button type="button" mat-stroked-button color="warn" (click)="rejectKyc()"
+                    matTooltip="Reject this customer's KYC: internal reason plus a category the customer sees. Requires step-up + a second approver.">
+              <mat-icon>cancel</mat-icon>
+              Reject KYC
             </button>
           }
           <button type="button" mat-raised-button color="primary" (click)="generateToken()">
@@ -1024,8 +1040,6 @@ export class CustomerDetailComponent implements OnInit {
   screeningRunColumns = ['status', 'trigger', 'provider', 'startedAt', 'actions'];
   holderBlockColumns = ['blockType', 'walletAddress', 'legalBasis', 'startsAt', 'expiresAt'];
   uboColumns = ['name', 'country', 'pepStatus', 'ownershipPct', 'controlType', 'registeredAt', 'actions'];
-  showRejectForm = false;
-  rejectReason = '';
 
   // ── Jurisdiction KYC ──────────────────────────────────────────────────────
   readonly allJurisdictions: Jurisdiction[] = ['DE_EWPG', 'LU_CSSF', 'FR_AMF', 'LI_TVTG'];
@@ -1266,30 +1280,60 @@ export class CustomerDetailComponent implements OnInit {
     return labels[jur] ?? jur;
   }
 
+  /** Step-up plus second approver for a KYC decision; calls back with the tokens or not at all when cancelled. */
+  private withDualControl(action: string, reason: string, then: (tokens: DualControlTokens) => void): void {
+    this.dialog.open(StepUpDialogComponent, {
+      data: { requireDualControl: true, reason, action },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (!result?.stepUpToken || !result.dualControlToken) return;
+      then({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
+    });
+  }
+
   approveJurisdiction(jur: Jurisdiction): void {
-    this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
-    this.kycService.approveJurisdiction(this.id, jur).subscribe({
-      next: () => {
-        this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
-        this.cdr.markForCheck();
-        this.loadJurisdictionApprovals();
-        this.loadCompliance(jur);
-      },
-      error: () => { this.jurActionLoading = { ...this.jurActionLoading, [jur]: false }; this.cdr.markForCheck(); },
+    this.withDualControl('KYC_JURISDICTION_APPROVE', `Approve KYC for ${this.jurisdictionLabel(jur)}`, tokens => {
+      this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
+      this.kycService.approveJurisdiction(this.id, jur, undefined, tokens).subscribe({
+        next: () => {
+          this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
+          this.snackBar.open('Jurisdiction KYC approved.', 'Dismiss', { duration: 4000 });
+          this.cdr.markForCheck();
+          this.loadJurisdictionApprovals();
+          this.loadCompliance(jur);
+        },
+        error: (err) => {
+          this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
+          this.showActionError('Failed to approve jurisdiction KYC.', err);
+          this.cdr.markForCheck();
+        },
+      });
     });
   }
 
   rejectJurisdiction(jur: Jurisdiction): void {
-    const reason = prompt('Rejection reason (required):');
-    if (!reason) return;
-    this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
-    this.kycService.rejectJurisdiction(this.id, jur, reason).subscribe({
-      next: () => {
-        this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
-        this.cdr.markForCheck();
-        this.loadJurisdictionApprovals();
-      },
-      error: () => { this.jurActionLoading = { ...this.jurActionLoading, [jur]: false }; this.cdr.markForCheck(); },
+    this.dialog.open(KycRejectDialogComponent, {
+      width: '520px', maxWidth: '95vw',
+      data: { title: `Reject KYC for ${this.jurisdictionLabel(jur)}`, reasonVisibleToCustomer: true },
+    }).afterClosed().subscribe((decision: KycRejectDialogResult | undefined) => {
+      if (!decision) return;
+      this.withDualControl('KYC_JURISDICTION_REJECT', `Reject KYC for ${this.jurisdictionLabel(jur)}`, tokens => {
+        this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
+        this.kycService.rejectJurisdiction(this.id, jur, decision.reason, decision.customerReasonCode, tokens).subscribe({
+          next: () => {
+            this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
+            this.snackBar.open('Jurisdiction KYC rejected.', 'Dismiss', { duration: 4000 });
+            this.cdr.markForCheck();
+            this.loadJurisdictionApprovals();
+          },
+          error: (err) => {
+            this.jurActionLoading = { ...this.jurActionLoading, [jur]: false };
+            this.showActionError('Failed to reject jurisdiction KYC.', err);
+            this.cdr.markForCheck();
+          },
+        });
+      });
     });
   }
 
@@ -1337,16 +1381,18 @@ export class CustomerDetailComponent implements OnInit {
   approveKyc(): void {
     const expiry = new Date();
     expiry.setFullYear(expiry.getFullYear() + 1);
-    this.kycService.approveKyc(this.id, expiry.toISOString().split('T')[0]).subscribe({
-      next: () => {
-        this.loadEntity();
-        // Prompt operator to also issue on-chain KYC claim
-        if (this.identities.length > 0 && confirm(
-          `KYC approved. Issue KYC claim on-chain for all deployed ONCHAINID identities?`)) {
-          this.identities.forEach(identity => this.issueKycClaim(identity));
-        }
-      },
-      error: (err) => this.showActionError('Failed to approve KYC.', err),
+    this.withDualControl('KYC_APPROVE', 'Approve KYC for this customer', tokens => {
+      this.kycService.approveKyc(this.id, expiry.toISOString().split('T')[0], tokens).subscribe({
+        next: () => {
+          this.loadEntity();
+          // Prompt operator to also issue on-chain KYC claim
+          if (this.identities.length > 0 && confirm(
+            `KYC approved. Issue KYC claim on-chain for all deployed ONCHAINID identities?`)) {
+            this.identities.forEach(identity => this.issueKycClaim(identity));
+          }
+        },
+        error: (err) => this.showActionError('Failed to approve KYC.', err),
+      });
     });
   }
 
@@ -1406,14 +1452,19 @@ export class CustomerDetailComponent implements OnInit {
   }
 
   rejectKyc(): void {
-    this.kycService.rejectKyc(this.id, this.rejectReason).subscribe({
-      next: () => {
-        this.showRejectForm = false;
-        this.rejectReason = '';
-        this.loadEntity();
-      },
-      error: (err) => this.showActionError('Failed to reject KYC.', err),
-    });
+    this.dialog.open(KycRejectDialogComponent, { width: '520px', maxWidth: '95vw' })
+      .afterClosed().subscribe((decision: KycRejectDialogResult | undefined) => {
+        if (!decision) return;
+        this.withDualControl('KYC_REJECT', 'Reject KYC for this customer', tokens => {
+          this.kycService.rejectKyc(this.id, decision.reason, decision.customerReasonCode, tokens).subscribe({
+            next: () => {
+              this.snackBar.open('KYC rejected. The customer is told the selected category only.', 'Dismiss', { duration: 6000 });
+              this.loadEntity();
+            },
+            error: (err) => this.showActionError('Failed to reject KYC.', err),
+          });
+        });
+      });
   }
 
   suspend(): void {
