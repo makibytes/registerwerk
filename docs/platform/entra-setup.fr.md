@@ -230,3 +230,26 @@ entièrement documenté :
 - La limitation de débit (throttling) de Graph sous interrogation soutenue de
   `/two-factor/refresh`. Le backend limite par utilisateur, mais les limites à l'échelle du
   locataire s'appliquent quand même.
+
+## Content-Security-Policy pour la connexion Entra
+
+Le portail client livre une directive `connect-src` stricte (`'self'` et le relayer Zama). La connexion Entra fait appeler
+`https://login.microsoftonline.com` directement par le navigateur (MSAL échange le code d'autorisation et renouvelle les jetons
+avec `fetch`), et un bundler ERC-4337 côté navigateur est également appelé depuis la page. La politique stricte bloque les deux,
+ce qui apparaît comme des erreurs CSP dans la console du navigateur. Les origines s'ajoutent sans reconstruire l'image :
+
+- **Docker Compose :** définir `ENTRA_AUTHORITY_ORIGIN` (par exemple `https://login.microsoftonline.com`) et, le cas échéant,
+  `BUNDLER_ORIGIN` dans `.env`. Ils sont transmis au conteneur sous le nom `CSP_CONNECT_EXTRA` (origines séparées par des espaces).
+- **Helm :** renseigner `frontendCustomer.csp.connectExtra` avec la liste des origines.
+
+Si les deux restent vides, la politique stricte par défaut s'applique. Après la modification, se connecter une fois et vérifier
+la console du navigateur pour les violations CSP.
+
+## Les portails sur un même nom d'hôte partagent le cookie de session
+
+Les deux portails utilisent le cookie de session `rw_session`, et les cookies ne sont pas limités par port. Si le portail
+opérateur et le portail client sont servis sous le **même nom d'hôte** (par exemple `localhost:44200` et `localhost:44201` dans
+la pile de démonstration), la connexion à l'un remplace la session de l'autre. Ouvrir un portail via `localhost` et l'autre via
+`127.0.0.1` (ou un nom `*.localhost`), ou utiliser des profils de navigateur distincts. Les déploiements de production utilisent
+des noms d'hôte distincts et ne sont pas concernés. Exiger des noms d'hôte distincts ou utiliser des noms de cookie par portail
+reste une question d'architecture ouverte (T8-04).

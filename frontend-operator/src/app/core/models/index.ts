@@ -677,10 +677,16 @@ export interface AuditEvent {
 }
 
 export interface ChainVerificationResult {
+  /** Effective verdict: false while a broken run is unacknowledged, and when no run exists (UNKNOWN). */
   valid: boolean;
   rowsChecked: number;
   firstBrokenSequenceNo?: number | null;
-  checkedAt: string;
+  /** Null when no verification has ever run. */
+  checkedAt: string | null;
+  reason?: string | null;
+  /** VALID, BROKEN (until a later valid run AND an acknowledgement) or UNKNOWN (no run recorded). */
+  status?: 'VALID' | 'BROKEN' | 'UNKNOWN';
+  verificationId?: string | null;
 }
 
 export interface OnboardingToken {

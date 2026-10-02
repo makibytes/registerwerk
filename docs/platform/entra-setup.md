@@ -219,3 +219,24 @@ These depend on tenant configuration and on Microsoft behaviour that is not full
   only in the user's *home* tenant.
 - Graph throttling under sustained `/two-factor/refresh` polling. The backend throttles per user,
   but tenant-wide limits still apply.
+
+## Content-Security-Policy for Entra sign-in
+
+The customer portal ships a strict `connect-src` (`'self'` and the Zama relayer). Entra sign-in makes the browser call
+`https://login.microsoftonline.com` directly (MSAL redeems the authorisation code and refreshes tokens with `fetch`), and a
+browser-side ERC-4337 bundler is called from the page as well. Both are blocked by the strict policy and show up as CSP errors
+in the browser console. Add the origins without rebuilding the image:
+
+- **Docker Compose:** set `ENTRA_AUTHORITY_ORIGIN` (for example `https://login.microsoftonline.com`) and, if used,
+  `BUNDLER_ORIGIN` in `.env`. They are passed to the container as `CSP_CONNECT_EXTRA` (space-separated origins).
+- **Helm:** set `frontendCustomer.csp.connectExtra` to the list of origins.
+
+Both blank keeps the strict default policy. After the change, sign in once and check the browser console for CSP violations.
+
+## Portals on one hostname share the session cookie
+
+Both portals use the session cookie `rw_session`, and cookies are not scoped by port. If the operator and customer portals are
+served from the **same hostname** (for example `localhost:44200` and `localhost:44201` in the demo stack), signing in to one
+replaces the session of the other. Open one portal through `localhost` and the other through `127.0.0.1` (or a `*.localhost`
+name), or use separate browser profiles. Production deployments use distinct hostnames and are not affected. Whether to require
+distinct hostnames or to use per-portal cookie names is an open architecture question (T8-04).

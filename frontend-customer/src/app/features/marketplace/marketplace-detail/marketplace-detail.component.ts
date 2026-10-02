@@ -5,6 +5,7 @@ import {
   OnInit,
   inject,
 } from '@angular/core';
+import { publisherMailto } from './mailto';
 import { DatePipe } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Clipboard } from '@angular/cdk/clipboard';
@@ -315,9 +316,11 @@ interface ManifestImage {
               @if (d.listing.contactEmail) {
                 <p class="field-label">Contact the publisher</p>
                 <p class="field-value">
-                  <a [href]="'mailto:' + d.listing.contactEmail + '?subject=Registerwerk dApp: ' + d.listing.name">
+                  @if (contactHref(d.listing.contactEmail, d.listing.name); as href) {
+                    <a [href]="href">{{ d.listing.contactEmail }}</a>
+                  } @else {
                     {{ d.listing.contactEmail }}
-                  </a>
+                  }
                 </p>
               }
               <p style="font-size:12px;color:var(--rw-text-muted)">
@@ -347,6 +350,8 @@ export class MarketplaceDetailComponent implements OnInit {
   private readonly clipboard = inject(Clipboard);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
+
+  contactHref(email: string | null, name: string): string | null { return publisherMailto(email, name); }
 
   readonly permissionColumns = ['permissionCode', 'rationale', 'claimTopics'];
 

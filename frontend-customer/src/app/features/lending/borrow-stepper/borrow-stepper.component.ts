@@ -127,6 +127,11 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
               <!-- ── Step 2: Connect wallet ───────────────────────────────────── -->
               <mat-step label="Connect wallet">
                 <div class="step-body">
+                  <p class="hint-text" role="note">
+                    Required network:
+                    @if (market.chainId) { <strong>{{ market.chainName ?? 'chain' }} (id {{ market.chainId }})</strong> — your wallet is asked to switch before each transaction. }
+                    @else { <strong>unknown</strong> — reload the page; transactions are refused until it is known. }
+                  </p>
                   @if (wallet.isConnected() && walletMatchesHolding) {
                     <p class="success-text">
                       <mat-icon>check_circle</mat-icon>
@@ -255,9 +260,10 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
     .summary-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--rw-border); border-radius: 8px; }
     .sponsor-toggle { display: flex; align-items: center; gap: 6px; }
     .info-icon { font-size: 15px; width: 15px; height: 15px; opacity: 0.6; cursor: help; }
-    .success-text { display: flex; align-items: center; gap: 6px; color: #059669; }
+    .success-text { display: flex; align-items: center; gap: 6px; color: var(--rw-text-success); }
     .success-text code, .error-text code { font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
-    .error-text { color: #dc2626; font-size: 13px; }
+    .error-text { color: var(--rw-text-danger); font-size: 13px; }
+    .hint-text { color: var(--rw-text-secondary); font-size: 12px; }
   `],
 })
 export class BorrowStepperComponent implements OnInit {
@@ -463,6 +469,7 @@ export class BorrowStepperComponent implements OnInit {
     this.cdr.markForCheck();
 
     try {
+      await this.wallet.ensureChain(this.market.chainId, this.market.chainName);
       const collateralAmount = BigInt(collateralHuman);
       const borrowAmount = parseUnits(String(borrowAmountHuman), this.loanTokenDecimals);
       const marketAddress = this.market.marketAddress as Address;

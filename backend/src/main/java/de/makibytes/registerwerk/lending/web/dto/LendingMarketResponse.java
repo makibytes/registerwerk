@@ -51,5 +51,9 @@ public record LendingMarketResponse(
         // such markets are not listed for customers).
         boolean bindingVerified,
         String bindingFailure,
-        boolean collateralShortfall
+        boolean collateralShortfall,
+        // Numeric EVM chain id + display name of the market's chain config (8A-02: the wallet layer must
+        // compare its connected chain with this). Null when the chain config row is gone.
+        Long chainId,
+        String chainName
 ) {}

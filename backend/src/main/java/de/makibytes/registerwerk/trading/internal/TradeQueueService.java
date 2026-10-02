@@ -78,6 +78,24 @@ public class TradeQueueService {
                 .toList();
     }
 
+    /**
+     * Read-only review list of historic FAILED trades that had a declared payment (8A-06). These are not
+     * resolvable (no PAYMENT_UNRESOLVED state), so the response reuses the unresolved-trade shape
+     * with {@code hoursUnresolved=0} / {@code aged=false}.
+     */
+    @Transactional(readOnly = true)
+    public List<UnresolvedTradeResponse> listHistoricFailed() {
+        return executionRepository.findFailedAfterDeclaredPayment().stream()
+                .map(e -> new UnresolvedTradeResponse(
+                        TradeResponses.execution(null, e),
+                        e.getBuyerEntityId(),
+                        e.getSellerEntityId(),
+                        0L,
+                        false,
+                        notesOf(e.getId())))
+                .toList();
+    }
+
     @Transactional(readOnly = true)
     public TimeoutBacklogResponse backlog() {
         Instant cutoff = timeoutCutoff();

@@ -17,7 +17,7 @@ import { RepoDeskService } from '../../core/api/repo-desk.service';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { AuthService } from '../../core/auth/auth.service';
 import { RepoCollateral, RepoCounterparty, RepoParticipation, RepoQuote, RepoRfq, RepoTrade } from '../../core/models';
-import { humanize, settlementLabel, SETTLEMENT_SELF_CONFIRMED } from './repo-desk.labels';
+import { CashPrincipalLine, humanize, openCashPrincipal, REPO_TERMINAL_STATES, settlementLabel, SETTLEMENT_SELF_CONFIRMED } from './repo-desk.labels';
 import { RepoTradePanelComponent } from './repo-trade-panel.component';
 
 interface RfqForm {
@@ -120,7 +120,9 @@ interface RfqForm {
           <div><span>{{ openRfqs }}</span><small>Open RFQs</small></div>
           <div><span>{{ actionableRfqs }}</span><small>Awaiting my action</small></div>
           <div><span>{{ activeTrades }}</span><small>Active trades</small></div>
-          <div><span>{{ fundingTotal | number:'1.0-0' }}</span><small>Cash principal</small></div>
+          @for (line of cashPrincipal; track line.role + line.currency) {
+            <div><span>{{ line.amount | number:'1.0-0' }} {{ line.currency }}</span><small>{{ line.role }} (open trades)</small></div>
+          }
         </section>
 
         <mat-tab-group animationDuration="180ms">
@@ -220,8 +222,9 @@ export class RepoDeskComponent implements OnInit {
   }
   get openRfqs(): number { return this.rfqs.filter(r => r.status === 'OPEN').length; }
   get actionableRfqs(): number { return this.rfqs.filter(r => (r.mine && r.quotes.some(q => q.status === 'ACTIVE')) || r.canQuote).length; }
-  get activeTrades(): number { return this.trades.filter(t => !['CLOSED','CANCELLED','DEFAULTED'].includes(t.status)).length; }
-  get fundingTotal(): number { return this.trades.reduce((sum, trade) => sum + trade.cashAmount, 0); }
+  get activeTrades(): number { return this.trades.filter(t => !REPO_TERMINAL_STATES.includes(t.status)).length; }
+  /** Open trades only, per role and currency - never one mixed number (8A-09). */
+  get cashPrincipal(): CashPrincipalLine[] { return openCashPrincipal(this.trades); }
   get formValid(): boolean { return !!(this.form.collateralAssetId && this.form.collateralQuantity && this.form.cashAmount && this.form.startDate && this.form.endDate && this.form.expiresAt && (this.form.visibility === 'BROADCAST' || this.form.targetEntityIds.length)); }
   visibilityChanged(): void { if (this.form.visibility === 'BROADCAST') this.form.targetEntityIds = []; }
   resetForm(): void { this.form = this.freshForm(); this.haircutPercent = 2; }

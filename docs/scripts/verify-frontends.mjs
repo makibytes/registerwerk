@@ -130,7 +130,8 @@ async function verifyCustomer() {
 
     await visit(page, customerUrl, '/repo-desk', 'Repo Desk');
     await page.locator('[aria-label="Repo Desk summary"]').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('[aria-label="Repo Desk summary"] > div').count(), 4);
+    // Cash principal is shown per role and currency over open trades only (P8A-09), so the tile count varies.
+    assert.ok(await page.locator('[aria-label="Repo Desk summary"] > div').count() >= 3, 'Repo Desk summary must render its KPI tiles');
     assert.ok(await page.locator('.rfq-panel').count() >= 2, 'Repo Desk must render the visible seeded RFQs');
     assert.ok(await page.getByText('New RFQ', { exact: true }).isVisible(), 'Repo Desk must expose RFQ creation');
     await assertVisualFoundation(page, 'customer Repo Desk');

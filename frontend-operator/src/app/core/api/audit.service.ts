@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 import { AuditEvent, AuditFilterParams, ChainVerificationResult, PageResponse } from '../models';
 
 export interface SigningKeyInfo {
@@ -92,5 +93,24 @@ export class AuditService {
 
   verifyChainNow(): Observable<ChainVerificationResult> {
     return this.http.post<ChainVerificationResult>(`${this.auditBase}/chain/verify`, {});
+  }
+
+  private ackQuery(note: string): string {
+    return note.trim() ? `?note=${encodeURIComponent(note.trim())}` : '';
+  }
+
+  /** Request path (with query) of the acknowledgement; the second approver's token is bound to exactly this. */
+  chainAckPath(id: string, note: string): string {
+    return `/api/v1/audit/verification/${encodeURIComponent(id)}/ack${this.ackQuery(note)}`;
+  }
+
+  /**
+   * Dual-control acknowledgement of a broken verification verdict (`AUDIT_CHAIN_VERIFICATION_ACK`, REGISTRY_ADMIN).
+   * The second approver's token must be bound to `POST` + {@link chainAckPath}.
+   */
+  acknowledgeChainVerification(id: string, note: string, tokens: DualControlTokens): Observable<void> {
+    return this.http.post<void>(
+      `${this.auditBase}/verification/${encodeURIComponent(id)}/ack${this.ackQuery(note)}`, {},
+      { headers: dualControlHeaders(tokens) });
   }
 }

@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, TemplateRef, ViewChild, inject
 } from '@angular/core';
+import { downloadBlob } from '../../../../core/utils/download.util';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -85,7 +86,7 @@ type DecisionMode = 'approve' | 'reject';
                   </button>
                 }
                 @if (r.status === 'APPROVED') {
-                  <button type="button" mat-stroked-button [disabled]="fulfilling.has(r.id)" (click)="fulfil(r)">
+                  <button type="button" mat-stroked-button [disabled]="fulfilling.has(r.id)" (click)="confirmFulfil(r)">
                     <mat-icon>picture_as_pdf</mat-icon>
                     {{ fulfilling.has(r.id) ? 'Preparing…' : 'Fulfil' }}
                   </button>
@@ -113,6 +114,20 @@ type DecisionMode = 'approve' | 'reject';
                 [disabled]="!decisionReason.trim()" (click)="submitDecision()">
           {{ decisionMode === 'approve' ? 'Approve' : 'Reject' }}
         </button>
+      </mat-dialog-actions>
+    </ng-template>
+
+    <ng-template #fulfilDialogTpl>
+      <h2 mat-dialog-title>Fulfil inspection request</h2>
+      <mat-dialog-content>
+        <p>
+          The extract can be downloaded <strong>exactly once</strong>. Keep the file: it cannot be issued
+          again. Continue?
+        </p>
+      </mat-dialog-content>
+      <mat-dialog-actions style="justify-content:flex-end;gap:8px">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-raised-button color="primary" [mat-dialog-close]="true">Fulfil and download</button>
       </mat-dialog-actions>
     </ng-template>
   `,
@@ -157,9 +172,9 @@ type DecisionMode = 'approve' | 'reject';
       width: fit-content;
     }
     .status-badge.requested { background: rgba(245,158,11,.15); color: #f59e0b; }
-    .status-badge.approved  { background: rgba(96,165,250,.15); color: #60a5fa; }
-    .status-badge.fulfilled { background: rgba(74,222,128,.15); color: #4ade80; }
-    .status-badge.rejected  { background: rgba(248,113,113,.15); color: #f87171; }
+    .status-badge.approved  { background: var(--rw-draft-bg); color: var(--rw-draft-fg); }
+    .status-badge.fulfilled { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+    .status-badge.rejected  { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
 
     .row-actions { display: flex; justify-content: flex-end; gap: 4px; }
   `],
@@ -167,6 +182,7 @@ type DecisionMode = 'approve' | 'reject';
 export class RegisterInspectionsComponent implements OnInit {
   @Input() assetId!: string;
   @ViewChild('decisionDialogTpl') decisionDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('fulfilDialogTpl') fulfilDialogTpl!: TemplateRef<unknown>;
 
   private readonly service = inject(RegisterInspectionService);
   private readonly authService = inject(AuthService);
@@ -230,19 +246,35 @@ export class RegisterInspectionsComponent implements OnInit {
     });
   }
 
+  /** The disclosure is one-shot server side, so it is only requested after an explicit confirmation. */
+  confirmFulfil(request: RegisterInspectionRequest): void {
+    this.dialog.open(this.fulfilDialogTpl, { width: '440px' }).afterClosed().subscribe((confirmed) => {
+      if (confirmed === true) this.fulfil(request);
+    });
+  }
+
+  /** The blob stays in the snackbar action closure (memory only), so a dropped click can be retried without re-fulfilling. */
+  private deliver(request: RegisterInspectionRequest, pdf: Blob): void {
+    const fileName = `registereinsicht-${request.id}.pdf`;
+    try {
+      downloadBlob(pdf, fileName);
+      this.snackBar
+        .open('Download started - keep the file; it cannot be issued again.', 'Download again', { duration: 20000 })
+        .onAction().subscribe(() => this.deliver(request, pdf));
+    } catch {
+      this.snackBar
+        .open('The browser did not start the download. The extract is held in this page only.', 'Download again', { duration: 30000 })
+        .onAction().subscribe(() => this.deliver(request, pdf));
+    }
+  }
+
   fulfil(request: RegisterInspectionRequest): void {
     this.fulfilling.add(request.id);
     this.cdr.markForCheck();
     this.service.fulfil(request.id).subscribe({
       next: (pdf) => {
-        const url = URL.createObjectURL(pdf);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `registereinsicht-${request.id}.pdf`;
-        link.click();
-        URL.revokeObjectURL(url);
         this.fulfilling.delete(request.id);
-        this.snackBar.open('Register extract disclosed. Disclosure hash recorded.', 'Dismiss', { duration: 5000 });
+        this.deliver(request, pdf);
         this.load();
       },
       error: (err) => {

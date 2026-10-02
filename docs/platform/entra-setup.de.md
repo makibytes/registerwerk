@@ -226,3 +226,26 @@ dokumentiert ist:
   zertifikatsbasierte Authentifizierung die Stärke nur im *Home*-Mandanten des Nutzers erfüllen.
 - Graph-Drosselung bei anhaltendem Polling von `/two-factor/refresh`. Das Backend drosselt pro
   Nutzer, aber mandantenweite Grenzwerte gelten weiterhin.
+
+## Content-Security-Policy für die Entra-Anmeldung
+
+Das Kundenportal liefert eine strikte `connect-src` aus (`'self'` und der Zama-Relayer). Die Entra-Anmeldung lässt den Browser
+`https://login.microsoftonline.com` direkt aufrufen (MSAL löst den Autorisierungscode ein und erneuert Token per `fetch`), und ein
+browserseitiger ERC-4337-Bundler wird ebenfalls von der Seite aus aufgerufen. Beides blockiert die strikte Richtlinie; es erscheint
+als CSP-Fehler in der Browserkonsole. Die Ursprünge lassen sich ohne neues Image ergänzen:
+
+- **Docker Compose:** `ENTRA_AUTHORITY_ORIGIN` (zum Beispiel `https://login.microsoftonline.com`) und gegebenenfalls
+  `BUNDLER_ORIGIN` in `.env` setzen. Sie gelangen als `CSP_CONNECT_EXTRA` (durch Leerzeichen getrennte Ursprünge) in den Container.
+- **Helm:** `frontendCustomer.csp.connectExtra` auf die Liste der Ursprünge setzen.
+
+Bleiben beide leer, gilt die strikte Standardrichtlinie. Nach der Änderung einmal anmelden und die Browserkonsole auf
+CSP-Verstöße prüfen.
+
+## Portale auf demselben Hostnamen teilen das Sitzungs-Cookie
+
+Beide Portale verwenden das Sitzungs-Cookie `rw_session`, und Cookies sind nicht an Ports gebunden. Werden Operator- und
+Kundenportal unter **demselben Hostnamen** ausgeliefert (zum Beispiel `localhost:44200` und `localhost:44201` im Demo-Stack),
+ersetzt die Anmeldung an einem Portal die Sitzung des anderen. Ein Portal über `localhost`, das andere über `127.0.0.1`
+(oder einen `*.localhost`-Namen) öffnen oder getrennte Browserprofile verwenden. Produktivumgebungen nutzen verschiedene
+Hostnamen und sind nicht betroffen. Ob getrennte Hostnamen verlangt oder portalspezifische Cookie-Namen verwendet werden, ist
+eine offene Architekturfrage (T8-04).

@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, TemplateRef, ViewChild, inject
 } from '@angular/core';
+import { fetchAllPages } from '../../../../core/utils/paging.util';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -43,6 +44,9 @@ type DecisionMode = 'allocate' | 'reject' | 'payment' | 'release';
           <p>No subscription orders for this asset yet.</p>
         </div>
       } @else {
+        @if (ordersTruncated) {
+          <p class="dimmed" role="status">Showing {{ orders.length }} of {{ ordersTotal }} orders (newest first).</p>
+        }
         <div class="so-table">
           <div class="so-row header">
             <span>Investor</span>
@@ -235,6 +239,8 @@ export class SubscriptionOrdersComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
 
   orders: SubscriptionOrder[] = [];
+  ordersTruncated = false;
+  ordersTotal = 0;
   loading = false;
 
   activeOrder: SubscriptionOrder | null = null;
@@ -251,9 +257,11 @@ export class SubscriptionOrdersComponent implements OnInit {
 
   load(): void {
     this.loading = true;
-    this.service.listForAsset(this.assetId, 0, 100).subscribe({
-      next: (page) => {
-        this.orders = page.content;
+    fetchAllPages((page, size) => this.service.listForAsset(this.assetId, page, size)).subscribe({
+      next: (res) => {
+        this.orders = [...res.items].sort((a, b) => (b.submittedAt ?? '').localeCompare(a.submittedAt ?? ''));
+        this.ordersTruncated = res.truncated;
+        this.ordersTotal = res.totalElements;
         this.loading = false;
         this.cdr.markForCheck();
       },

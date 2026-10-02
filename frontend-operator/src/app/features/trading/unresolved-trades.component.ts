@@ -7,6 +7,7 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
+import { downloadBlob } from '../../core/utils/download.util';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -112,6 +113,32 @@ const RESOLUTIONS: Record<UnresolvedResolution, ResolutionCopy> = {
       [actionsTemplate]="actions">
     </rw-data-table>
 
+    @if (historicFailed.length > 0 || historicFailedError) {
+      <section class="historic">
+        <h3>Historic failed trades with a declared payment</h3>
+        <p class="hint">Review only - not resolvable here. The units were not automatically released.</p>
+        @if (historicFailedError) {
+          <p class="hint" role="alert">The list could not be loaded.</p>
+        } @else {
+          <table class="historic-table">
+            <thead><tr><th>Trade</th><th>Asset</th><th>Amount</th><th>Payment reference</th><th>Declared at</th><th>Notes</th></tr></thead>
+            <tbody>
+              @for (h of historicFailed; track h.trade.id) {
+                <tr>
+                  <td>{{ h.trade.id }}</td>
+                  <td>{{ h.trade.assetName }} ({{ h.trade.assetNumber }})</td>
+                  <td>{{ h.trade.totalPrice | number:'1.0-2' }} {{ h.trade.currency ?? '(currency not recorded)' }}</td>
+                  <td>{{ h.trade.paymentReference ?? '—' }}</td>
+                  <td>{{ h.trade.paymentDeclaredAt ? (h.trade.paymentDeclaredAt | date:'short') : '—' }}</td>
+                  <td>@for (n of h.notes; track n.id) { <div>{{ n.text }}</div> } @empty { — }</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+      </section>
+    }
+
     <section class="export">
       <h3>Order history export</h3>
       <p class="hint">
@@ -211,6 +238,9 @@ const RESOLUTIONS: Record<UnresolvedResolution, ResolutionCopy> = {
     </ng-template>
   `,
   styles: [`
+    .historic { margin: 16px 0; }
+    .historic-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .historic-table th, .historic-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--rw-border); }
     .backlog { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
     .backlog > div { border: 1px solid var(--rw-border); border-radius: 8px; padding: 10px 12px; background: var(--rw-surface); }
     .backlog .warn { border-color: var(--rw-accent); }
@@ -244,6 +274,8 @@ export class UnresolvedTradesComponent implements OnInit {
   items: UnresolvedTrade[] = [];
   rows: (Record<string, unknown> & { source: UnresolvedTrade })[] = [];
   backlog: TimeoutBacklog | null = null;
+  historicFailed: UnresolvedTrade[] = [];
+  historicFailedError = false;
 
   selected: UnresolvedTrade | null = null;
   resolution: UnresolvedResolution = 'force-settle';
@@ -290,6 +322,10 @@ export class UnresolvedTradesComponent implements OnInit {
     this.service.backlog().subscribe({
       next: (backlog) => { this.backlog = backlog; this.cdr.markForCheck(); },
       error: () => { this.backlog = null; this.cdr.markForCheck(); },
+    });
+    this.service.listHistoricFailed().subscribe({
+      next: (items) => { this.historicFailed = items; this.historicFailedError = false; this.cdr.markForCheck(); },
+      error: () => { this.historicFailed = []; this.historicFailedError = true; this.cdr.markForCheck(); },
     });
   }
 
@@ -358,14 +394,7 @@ export class UnresolvedTradesComponent implements OnInit {
     this.service.orderHistoryCsv(this.exportFrom || undefined, this.exportTo || undefined).subscribe({
       next: (blob) => {
         this.exporting = false;
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = 'trading-order-history.csv';
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 0);
+        downloadBlob(blob, 'trading-order-history.csv');
         this.cdr.markForCheck();
       },
       error: (err) => {

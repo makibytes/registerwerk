@@ -24,13 +24,13 @@ describe('AssetService', () => {
         let result: unknown;
         service.getHolders('asset-1').subscribe(h => (result = h));
         const req = httpMock.expectOne(r => r.url === `${base}/asset-1/holders`);
-        expect(req.request.params.get('size')).toBe('1000');
+        expect(req.request.params.get('size')).toBe('200');
         req.flush({
             content: [
                 { id: 'h1', assetId: 'asset-1', investorId: 'i1', walletAddress: '0xAAA', whitelisted: true, nominalAmount: 750 },
                 { id: 'h2', assetId: 'asset-1', investorId: 'i2', walletAddress: null, whitelisted: null, nominalAmount: 250 },
             ],
-            totalElements: 2, totalPages: 1, page: 0, size: 1000,
+            totalElements: 2, totalPages: 1, page: 0, size: 200, last: true,
         });
         expect(result).toEqual([
             expect.objectContaining({ id: 'h1', address: '0xAAA', walletAddress: '0xAAA', balance: 750, percentage: 75 }),
@@ -202,5 +202,18 @@ describe('AssetService', () => {
         expect(req.request.method).toBe('POST');
         expect(req.request.body).toEqual(body);
         req.flush({});
+    });
+
+    it('getHoldersPaged() reads every page so percentages sum to 100 over the whole register', () => {
+        let result: { holders: { percentage: number }[]; truncated: boolean } | undefined;
+        service.getHoldersPaged('asset-1').subscribe(r => (result = r));
+        const row = (i: number) => ({ id: `h${i}`, assetId: 'asset-1', investorId: `i${i}`, walletAddress: `0x${i}`, whitelisted: true, nominalAmount: 1 });
+        httpMock.expectOne(r => r.url === `${base}/asset-1/holders` && r.params.get('page') === '0')
+            .flush({ content: Array.from({ length: 200 }, (_, i) => row(i)), totalElements: 250, last: false });
+        httpMock.expectOne(r => r.url === `${base}/asset-1/holders` && r.params.get('page') === '1')
+            .flush({ content: Array.from({ length: 50 }, (_, i) => row(200 + i)), totalElements: 250, last: true });
+        expect(result!.holders.length).toBe(250);
+        expect(result!.truncated).toBe(false);
+        expect(result!.holders.reduce((a, h) => a + h.percentage, 0)).toBeCloseTo(100);
     });
 });

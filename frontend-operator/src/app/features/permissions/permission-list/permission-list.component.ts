@@ -7,6 +7,7 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
+import { showActionError } from '../../../shared/utils/action-error';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
@@ -314,6 +315,7 @@ export class PermissionListComponent implements OnInit {
         this.chains = chains.filter((chain) => chain.chainType === 'EVM' && chain.enabled);
         this.cdr.markForCheck();
       },
+      error: (err) => showActionError(this.snackBar, 'The list of chains could not be loaded.', err),
     });
     this.dialog.open(this.issuerDialogTpl, { width: '520px' });
   }

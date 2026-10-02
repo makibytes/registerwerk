@@ -240,6 +240,32 @@ class LendingMarketServiceTest {
     }
 
     @Test
+    @DisplayName("8A-02: the market view carries the chain's numeric id and name; null-safe when the config is gone")
+    void viewCarriesChainIdAndName() {
+        LendingMarket market = registeredMarket(7500);
+        when(marketRepository.findById(market.getId())).thenReturn(Optional.of(market));
+        lenient().when(onchainReader.oracleQuoteToken("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(LOAN_TOKEN);
+        lenient().when(onchainReader.oracleMaxDeviationBps("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(BigInteger.valueOf(2000));
+        lenient().when(onchainReader.operatorOrg("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(OPERATOR_ORG);
+        lenient().when(onchainReader.treasury("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(TREASURY);
+        ChainConfig chain = new ChainConfig();
+        chain.setId(chainConfigId);
+        chain.setIdentifier("ETHEREUM_SEPOLIA");
+        chain.setDisplayName("Ethereum Sepolia");
+        chain.setChainId(11155111L);
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chain));
+
+        var view = service.getMarket(market.getId());
+        assertThat(view.chainId()).isEqualTo(11155111L);
+        assertThat(view.chainName()).isEqualTo("Ethereum Sepolia");
+
+        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.empty());
+        var gone = service.getMarket(market.getId());
+        assertThat(gone.chainId()).isNull();
+        assertThat(gone.chainName()).isNull();
+    }
+
+    @Test
     @DisplayName("5B-09: unverified markets are hidden from customers but visible to operators")
     void unverifiedMarketHiddenFromCustomers() {
         LendingMarket market = registeredMarket(7500);

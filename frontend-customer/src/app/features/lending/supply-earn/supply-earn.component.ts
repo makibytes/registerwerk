@@ -12,12 +12,15 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { PageHeaderComponent } from '@registerwerk/ui';
 import { LendingService } from '../../../core/api/lending.service';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
 import { LendingMarket, LendingSupplyPosition } from '../../../core/models';
-import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem';
+import { type Address } from 'viem';
+import { executeWithdraw } from '../../../core/lending/withdraw.flow';
+import { formatTokenAmountGrouped, parseTokenAmount } from '../../../core/lending/token-amount.util';
 
 /**
  * Lender side of the securities-backed lending facility — deliberately ungated (any stablecoin holder, no
@@ -40,6 +43,7 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
     MatSelectModule,
     MatProgressSpinnerModule,
     MatSnackBarModule,
+    MatTooltipModule,
     PageHeaderComponent,
   ],
   template: `
@@ -83,7 +87,7 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Amount</mat-label>
-              <input matInput type="number" min="0.000001" step="0.000001" [(ngModel)]="amount" />
+              <input matInput type="text" inputmode="decimal" autocomplete="off" [(ngModel)]="amountText" />
             </mat-form-field>
 
             @if (selectedMarket && !acceptsSupply(selectedMarket)) {
@@ -114,6 +118,10 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
               <button mat-stroked-button type="button" [disabled]="acting || !selectedMarketId || !isValidAmount() || !!positionsError" (click)="withdraw()">
                 @if (acting === 'withdraw') { Withdrawing… } @else { Withdraw }
               </button>
+              <button mat-stroked-button type="button" [disabled]="acting || !selectedMarketId || !!positionsError" (click)="withdraw(true)"
+                      matTooltip="Withdraws your claim as read on-chain just before the transaction. Interest accrues every second, so a few base units may remain; withdraw again to sweep them.">
+                Withdraw all
+              </button>
             </div>
           </mat-card-content>
         </mat-card>
@@ -140,7 +148,7 @@ import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem'
     .form-card { max-width: 480px; margin-bottom: 24px; }
     .full-width { width: 100%; }
     .action-row { display: flex; gap: 12px; margin-top: 8px; }
-    .error-text { color: #dc2626; font-size: 12.5px; }
+    .error-text { color: var(--rw-text-danger); font-size: 12.5px; }
     .hint-text { color: var(--rw-text-secondary); font-size: 12px; }
     .section-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
     .position-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
@@ -160,7 +168,7 @@ export class SupplyEarnComponent implements OnInit {
   markets: LendingMarket[] = [];
   positions: LendingSupplyPosition[] = [];
   selectedMarketId: string | null = null;
-  amount = 0;
+  amountText = '';
   acting: 'supply' | 'withdraw' | null = null;
   actionError: string | null = null;
   loadError = '';
@@ -217,9 +225,7 @@ export class SupplyEarnComponent implements OnInit {
   }
 
   formatUnits(raw: string, marketId = this.selectedMarketId): string {
-    const decimals = this.marketDecimals(marketId);
-    return Number(formatTokenUnits(BigInt(raw), decimals))
-      .toLocaleString(undefined, { maximumFractionDigits: decimals });
+    return formatTokenAmountGrouped(BigInt(raw), this.marketDecimals(marketId));
   }
 
   private shortHash(hash: string): string {
@@ -237,9 +243,11 @@ export class SupplyEarnComponent implements OnInit {
       if (!this.wallet.isConnected()) {
         await this.wallet.connect();
       }
+      await this.wallet.ensureChain(market.chainId, market.chainName);
       const marketAddress = market.marketAddress as Address;
       const loanToken = market.loanTokenAddress as Address;
       const amountUnits = this.amountUnits(market);
+      if (amountUnits === null || amountUnits <= 0n) throw new Error('Enter a valid amount.');
 
       await this.wallet.ensureAllowance(loanToken, marketAddress, amountUnits);
 
@@ -250,7 +258,7 @@ export class SupplyEarnComponent implements OnInit {
         args: [amountUnits],
       });
       await this.wallet.waitForTransaction(hash);
-      this.snackBar.open(`Supplied ${this.amount}. Tx: ${this.shortHash(hash)}`, 'Dismiss', { duration: 6000 });
+      this.snackBar.open(`Supplied ${this.amountText}. Tx: ${this.shortHash(hash)}`, 'Dismiss', { duration: 6000 });
       this.load();
     } catch (err: unknown) {
       this.actionError = err instanceof Error ? err.message : 'Supply failed.';
@@ -260,9 +268,9 @@ export class SupplyEarnComponent implements OnInit {
     }
   }
 
-  async withdraw(): Promise<void> {
+  async withdraw(all = false): Promise<void> {
     const market = this.markets.find((m) => m.id === this.selectedMarketId);
-    if (!market || this.acting || !this.isValidAmount()) return;
+    if (!market || this.acting || (!all && !this.isValidAmount())) return;
     this.acting = 'withdraw';
     this.actionError = null;
     this.cdr.markForCheck();
@@ -271,21 +279,23 @@ export class SupplyEarnComponent implements OnInit {
       if (!this.wallet.isConnected()) {
         await this.wallet.connect();
       }
-      const connectedWallet = this.wallet.address()?.toLowerCase();
+      const connectedWallet = this.wallet.address();
       const position = this.positions.find((candidate) =>
-        candidate.marketId === market.id && candidate.walletAddress.toLowerCase() === connectedWallet);
-      const amountUnits = this.amountUnits(market);
-      if (!position || amountUnits > BigInt(position.currentClaim)) {
+        candidate.marketId === market.id && candidate.walletAddress.toLowerCase() === connectedWallet?.toLowerCase());
+      if (!connectedWallet || !position) {
+        throw new Error('The connected wallet has no supply position in this market.');
+      }
+      const amountUnits = all ? null : this.amountUnits(market);
+      if (amountUnits !== null && amountUnits > BigInt(position.currentClaim)) {
         throw new Error('The withdrawal exceeds the connected wallet\'s current claim in this market.');
       }
-      const hash = await this.wallet.writeContract({
-        address: market.marketAddress as Address,
-        abi: repoMarketAbi,
-        functionName: 'withdraw',
-        args: [amountUnits],
-      });
-      await this.wallet.waitForTransaction(hash);
-      this.snackBar.open(`Withdrew ${this.amount}. Tx: ${this.shortHash(hash)}`, 'Dismiss', { duration: 6000 });
+      const result = await executeWithdraw(this.wallet, { market, owner: connectedWallet, all, amountUnits });
+      const decimals = this.marketDecimals(market.id);
+      const shown = formatTokenAmountGrouped(result.withdrawn, decimals);
+      const remainder = result.remainingClaim !== null && result.remainingClaim > 0n
+        ? ` ${result.remainingClaim.toString()} base units of accrued interest remain (seconds of accrual) - withdraw again to sweep.`
+        : '';
+      this.snackBar.open(`Withdrew ${shown}. Tx: ${this.shortHash(result.hash)}.${remainder}`, 'Dismiss', { duration: remainder ? 12000 : 6000 });
       this.load();
     } catch (err: unknown) {
       this.actionError = err instanceof Error ? err.message : 'Withdraw failed.';
@@ -297,19 +307,16 @@ export class SupplyEarnComponent implements OnInit {
 
   isValidAmount(): boolean {
     const market = this.markets.find((candidate) => candidate.id === this.selectedMarketId);
-    if (!market || !Number.isFinite(this.amount) || this.amount <= 0) return false;
-    try {
-      return this.amountUnits(market) > 0n;
-    } catch {
-      return false;
-    }
+    if (!market) return false;
+    const units = this.amountUnits(market);
+    return units !== null && units > 0n;
   }
 
   private marketDecimals(marketId: string | null): number {
     return this.markets.find((market) => market.id === marketId)?.loanTokenDecimals ?? 6;
   }
 
-  private amountUnits(market: LendingMarket): bigint {
-    return parseUnits(String(this.amount), market.loanTokenDecimals ?? 6);
+  private amountUnits(market: LendingMarket): bigint | null {
+    return parseTokenAmount(this.amountText, market.loanTokenDecimals ?? 6);
   }
 }

@@ -85,4 +85,15 @@ describe('AuditService', () => {
         expect(req.request.body).toEqual({});
         req.flush({ valid: true, rowsChecked: 100, checkedAt: '2026-08-07T00:00:00Z' });
     });
+
+    it('acknowledgeChainVerification() posts the ack with the dual-control headers and optional note', () => {
+        service.acknowledgeChainVerification('v-1', 'reviewed', { stepUpToken: 'su', dualControlToken: 'dc' }).subscribe();
+        const req = httpMock.expectOne(r => r.urlWithParams === `${auditBase}/verification/v-1/ack?note=reviewed`);
+        expect(req.request.method).toBe('POST');
+        expect(service.chainAckPath('v-1', 'reviewed')).toBe('/api/v1/audit/verification/v-1/ack?note=reviewed');
+        expect(service.chainAckPath('v-1', '  ')).toBe('/api/v1/audit/verification/v-1/ack');
+        expect(req.request.headers.get('Authorization')).toBe('Bearer su');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('dc');
+        req.flush(null);
+    });
 });

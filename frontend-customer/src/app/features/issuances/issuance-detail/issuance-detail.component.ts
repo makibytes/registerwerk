@@ -1,4 +1,6 @@
 import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
+import { corporateActionProgress } from '../../../core/utils/lifecycle.labels';
+import { fetchAllPages } from '../../../core/utils/paging.util';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -213,7 +215,8 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
         <mat-card class="section-card">
             <mat-card-header>
               <mat-card-title>Chain Deployments</mat-card-title>
-              <app-data-state-pill [status]="deploymentsState.status" />
+              <app-data-state-pill [status]="deploymentsState.status" [lastLoadedAt]="deploymentsState.lastLoadedAt" />
+              @if (deploymentsState.status === 'stale') { <button mat-button type="button" (click)="retryDeployments()">Retry</button> }
             </mat-card-header>
             <mat-card-content>
             @if (deploymentsState.status === 'error') {
@@ -304,7 +307,8 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
         <mat-card class="section-card">
           <mat-card-header>
             <mat-card-title>Corporate Actions</mat-card-title>
-            <app-data-state-pill [status]="corporateActionsState.status" />
+            <app-data-state-pill [status]="corporateActionsState.status" [lastLoadedAt]="corporateActionsState.lastLoadedAt" />
+            @if (corporateActionsState.status === 'stale') { <button mat-button type="button" (click)="loadCorporateActions()">Retry</button> }
           </mat-card-header>
           <mat-card-content>
             <button mat-stroked-button type="button" color="primary" style="margin-bottom:12px"
@@ -326,7 +330,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                   </ng-container>
                   <ng-container matColumnDef="status">
                     <th mat-header-cell *matHeaderCellDef>Status</th>
-                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.status) }}</td>
+                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.status) }}@if (a.heldOutstanding && (a.status === 'SETTLED' || a.status === 'CLOSED')) { <span class="held-badge">Some entitlements held</span> }</td>
                   </ng-container>
                   <ng-container matColumnDef="paymentDate">
                     <th mat-header-cell *matHeaderCellDef>Payment date</th>
@@ -668,8 +672,11 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
         <!-- ── Holders ───────────────────────────────────────────────────── -->
         <mat-card class="section-card">
           <mat-card-header>
-              <mat-card-title>Holders ({{ holders.length }})</mat-card-title>
-              <app-data-state-pill [status]="holdersState.status" />
+              <mat-card-title>Holders ({{ holders.length }}@if (holdersTruncated) { of {{ holdersTotal }}, partial })</mat-card-title>
+              <app-data-state-pill [status]="holdersState.status" [lastLoadedAt]="holdersState.lastLoadedAt" />
+              @if (holdersState.status === 'stale') {
+                <button mat-button type="button" (click)="retryHolders()">Retry</button>
+              }
             </mat-card-header>
           <mat-card-content>
             @if (holdersState.status === 'error') {
@@ -931,6 +938,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
       border: 1px solid var(--rw-text-danger); border-radius: 8px;
       background: var(--rw-rejected-bg); color: var(--rw-rejected-fg);
     }
+    .held-badge { margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
     .register-warning p { margin: 4px 0 0; font-size: 13px; }
     .register-warning-reason { display: block; margin-top: 4px; overflow-wrap: anywhere; }
     .bond-terms-grid {
@@ -1015,6 +1023,9 @@ export class IssuanceDetailComponent implements OnInit {
   downloadingRegisterExtract = false;
   deployments: AssetDeployment[] = [];
   holders: AssetHolder[] = [];
+  /** The holder list hit the page cap: it is partial and must be labelled so. */
+  holdersTruncated = false;
+  holdersTotal = 0;
   loading = true;
   assetId = '';
   loadError = '';
@@ -1188,9 +1199,11 @@ export class IssuanceDetailComponent implements OnInit {
 
   private loadHolders(assetId: string): void {
     this.holdersState = beginAsyncSection(this.holdersState);
-    this.issuanceService.getHolders(assetId, { size: 100 }).subscribe({
+    fetchAllPages((page, size) => this.issuanceService.getHolders(assetId, { page, size })).subscribe({
       next: (holders) => {
-        this.holders = holders.content;
+        this.holders = holders.items;
+        this.holdersTruncated = holders.truncated;
+        this.holdersTotal = holders.totalElements;
         this.holdersState = resolveAsyncSection(this.holdersState, null);
         this.cdr.markForCheck();
       },
@@ -1363,18 +1376,7 @@ export class IssuanceDetailComponent implements OnInit {
   }
 
   corporateActionProgress(a: CorporateActionView): string {
-    switch (a.status) {
-      case 'PROPOSED': return 'Awaiting operator review';
-      case 'REJECTED': return 'Rejected — submit a fresh proposal';
-      case 'CANCELLED': return 'Cancelled';
-      case 'SETTLED':
-      case 'CLOSED':
-        return a.settlementTxHash ? `${a.settlementTxHash.slice(0, 10)}…` : 'Settled off-chain';
-      default:
-        if (!a.issuerAttestedAt) return 'Awaiting your attestation';
-        if (!a.dualControlApprovedAt) return 'Attested — awaiting operator confirmation';
-        return 'Confirmed — awaiting settlement dispatch';
-    }
+    return corporateActionProgress(a, 'issuer');
   }
 
   loadCorporateActions(assetId: string = this.assetId): void {

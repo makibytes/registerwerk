@@ -85,9 +85,9 @@ const POLL_LIMIT = 60; // 5 minutes
         height: 15px;
       }
 
-      &.ok { background: #ECFDF5; color: #047857; }
-      &.warn { background: #FFFBEB; color: #B45309; }
-      &.info { background: #EFF6FF; color: #1D4ED8; }
+      &.ok { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+      &.warn { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
+      &.info { background: var(--rw-draft-bg); color: var(--rw-draft-fg); }
     }
 
     .body-text {
@@ -147,7 +147,7 @@ const POLL_LIMIT = 60; // 5 minutes
 
       &.primary {
         background: var(--rw-accent, #0D9488);
-        color: #FFFFFF;
+        color: var(--rw-accent-contrast);
       }
 
       &.secondary {
@@ -175,7 +175,7 @@ const POLL_LIMIT = 60; // 5 minutes
 
         &:last-child { border-bottom: none; }
 
-        mat-icon { color: #047857; font-size: 18px; width: 18px; height: 18px; }
+        mat-icon { color: var(--rw-text-success); font-size: 18px; width: 18px; height: 18px; }
       }
     }
 
@@ -198,8 +198,8 @@ const POLL_LIMIT = 60; // 5 minutes
       margin-top: 16px;
       padding: 12px 14px;
       border-radius: 8px;
-      background: #EFF6FF;
-      color: #1D4ED8;
+      background: var(--rw-draft-bg);
+      color: var(--rw-draft-fg);
       font-size: 13px;
       line-height: 1.5;
 

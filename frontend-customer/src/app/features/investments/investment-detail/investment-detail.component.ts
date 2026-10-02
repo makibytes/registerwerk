@@ -1,4 +1,5 @@
 import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
+import { bondStatusLabel, corporateActionProgress, couponNote, couponWindow } from '../../../core/utils/lifecycle.labels';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -277,7 +278,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                 <div><span class="bt-label">Day count</span><span class="bt-value">{{ formatEnum(bondTerms.dayCount) }}</span></div>
                 <div><span class="bt-label">Issue price</span><span class="bt-value">{{ bondTerms.issuePrice | percent:'1.0-2' }} of face value</span></div>
                 <div><span class="bt-label">Callable</span><span class="bt-value">{{ bondTerms.callable ? 'Yes' : 'No' }}</span></div>
-                <div><span class="bt-label">Status</span><span class="bt-value">{{ bondTerms.bondStatus === 'OVERDUE' ? 'Payment pending' : bondTerms.bondStatus }}</span></div>
+                <div><span class="bt-label">Status</span><span class="bt-value">{{ bondStatusText(bondTerms.bondStatus) }}</span></div>
               </div>
               @if (bondTerms.callable && bondTerms.callSchedule && bondTerms.callSchedule.length > 0) {
                 <div class="call-schedule">
@@ -291,7 +292,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
               }
               @if (upcomingCoupons.length > 0) {
                 <div class="call-schedule">
-                  <span class="bt-label">Upcoming coupons</span>
+                  <span class="bt-label">Coupons</span>
                   <ul class="call-schedule-list">
                     @for (c of upcomingCoupons; track c.periodNo) {
                       <li>
@@ -302,6 +303,9 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                           amount set when the reference rate is fixed
                         }
                         @if (c.recordDate) { <span class="coupon-record">(holders of record on {{ c.recordDate | date:'mediumDate' }})</span> }
+                        @if (couponStatusNote(c); as note) {
+                          <span class="coupon-badge" [class.coupon-badge-warn]="c.couponStatus === 'OVERDUE' || c.couponStatus === 'MISSED'">{{ note }}</span>
+                        }
                       </li>
                     }
                   </ul>
@@ -564,7 +568,8 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
         <mat-card class="section-card">
           <mat-card-header>
             <mat-card-title>Transfer History</mat-card-title>
-            <app-data-state-pill [status]="transferHistorySection.status" />
+            <app-data-state-pill [status]="transferHistorySection.status" [lastLoadedAt]="transferHistorySection.lastLoadedAt" />
+            @if (transferHistorySection.status === 'stale') { <button mat-button type="button" (click)="retryTransferHistory()">Retry</button> }
           </mat-card-header>
           <mat-card-content>
             @if (transferHistorySection.status === 'error') {
@@ -622,7 +627,8 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
         <mat-card class="section-card">
           <mat-card-header>
             <mat-card-title>Corporate Actions</mat-card-title>
-            <app-data-state-pill [status]="corporateActionsSection.status" />
+            <app-data-state-pill [status]="corporateActionsSection.status" [lastLoadedAt]="corporateActionsSection.lastLoadedAt" />
+            @if (corporateActionsSection.status === 'stale') { <button mat-button type="button" (click)="retryCorporateActions()">Retry</button> }
           </mat-card-header>
           <mat-card-content>
             @if (corporateActionsSection.status === 'error') {
@@ -639,7 +645,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                   </ng-container>
                   <ng-container matColumnDef="status">
                     <th mat-header-cell *matHeaderCellDef>Status</th>
-                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.status) }}</td>
+                    <td mat-cell *matCellDef="let a">{{ formatEnum(a.status) }}@if (a.heldOutstanding && (a.status === 'SETTLED' || a.status === 'CLOSED')) { <span class="held-badge">Some entitlements held</span> }</td>
                   </ng-container>
                   <ng-container matColumnDef="paymentDate">
                     <th mat-header-cell *matHeaderCellDef>Payment date</th>
@@ -728,6 +734,9 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     }
     .bond-terms-grid > div { display: flex; flex-direction: column; gap: 2px; }
     .bt-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--rw-text-secondary); }
+    .coupon-badge { margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: var(--rw-draft-bg); color: var(--rw-draft-fg); }
+    .coupon-badge-warn, .held-badge { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
+    .held-badge { margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11px; }
     .coupon-record { color: var(--rw-text-secondary); font-size: 12px; }
     .bt-value { font-size: 14px; color: var(--rw-text-primary); font-weight: 600; }
     .call-schedule { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
@@ -825,7 +834,7 @@ export class InvestmentDetailComponent implements OnInit {
   registerDocMeta: RegisterDocumentMeta | null = null;
   downloadingRegisterDoc = false;
   bondTerms: AssetBondTerms | null = null;
-  /** Next scheduled coupons (read-only, max. 4). */
+  /** Coupon window (read-only): every overdue/missed row, the next scheduled and the latest paid coupons. */
   upcomingCoupons: CouponScheduleEntry[] = [];
 
   @ViewChild('inspectionDialogTpl') inspectionDialogTpl!: TemplateRef<unknown>;
@@ -914,7 +923,7 @@ export class InvestmentDetailComponent implements OnInit {
         this.cdr.markForCheck();
         this.bondTermsService.getCouponSchedule(assetId).subscribe({
           next: (rows) => {
-            this.upcomingCoupons = rows.filter((r) => r.couponStatus === 'SCHEDULED' || r.couponStatus === 'OVERDUE').slice(0, 4);
+            this.upcomingCoupons = couponWindow(rows);
             this.cdr.markForCheck();
           },
           error: () => { /* schedule is supplementary; the terms card still renders */ },
@@ -968,19 +977,11 @@ export class InvestmentDetailComponent implements OnInit {
     if (this.record) this.loadCorporateActions(this.record.assetId);
   }
 
+  bondStatusText = bondStatusLabel;
+  couponStatusNote = (c: CouponScheduleEntry) => couponNote(c);
+
   corporateActionProgress(a: CorporateActionView): string {
-    switch (a.status) {
-      case 'PROPOSED': return 'Awaiting operator review';
-      case 'REJECTED': return 'Rejected';
-      case 'CANCELLED': return 'Cancelled';
-      case 'SETTLED':
-      case 'CLOSED':
-        return a.settlementTxHash ? `${a.settlementTxHash.slice(0, 10)}…` : 'Settled off-chain';
-      default:
-        if (!a.issuerAttestedAt) return 'Awaiting issuer attestation';
-        if (!a.dualControlApprovedAt) return 'Issuer attested — awaiting operator confirmation';
-        return 'Confirmed — awaiting settlement dispatch';
-    }
+    return corporateActionProgress(a, 'investor');
   }
 
   downloadCorporateActionConfirmation(a: CorporateActionView): void {
@@ -1203,6 +1204,7 @@ export class InvestmentDetailComponent implements OnInit {
       if (!userAddress) {
         throw new Error('Wallet not connected.');
       }
+      await this.walletService.ensureChain(ctx.chainId);
       const { handle, inputProof } = await this.fheService.encrypt64(
         ctx.contractAddress as `0x${string}`, userAddress, BigInt(amount), ctx.chainId);
       const txHash = await this.walletService.writeContract({

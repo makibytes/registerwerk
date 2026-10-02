@@ -124,7 +124,8 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
     public record MarketView(
             LendingMarket market, Jurisdiction jurisdiction, String collateralAssetName, String collateralIsin,
             Boolean micarApplicable, DefiInteropModel defiInteropModel, LendingMarketStatus effectiveStatus,
-            boolean riskParametersLegacy, String operatorOrg, String treasury, String pauseReason) {}
+            boolean riskParametersLegacy, String operatorOrg, String treasury, String pauseReason,
+            Long chainId, String chainName) {}
 
     /** On-chain facts about a market's risk construction and operating binding — see {@link MarketView}. */
     private record OnchainBinding(boolean riskParametersLegacy, String operatorOrg, String treasury) {}
@@ -485,9 +486,14 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
             LendingMarket market, Jurisdiction jurisdiction, String collateralAssetName, String collateralIsin,
             Boolean micarApplicable, DefiInteropModel defiInteropModel, LendingMarketStatus effectiveStatus,
             OnchainBinding binding) {
+        // Null-safe: a deleted chain config must not break the catalog (chainId/chainName stay null).
+        Optional<ChainConfig> chain = market.getChainConfigId() == null
+                ? Optional.empty() : chainConfigRepository.findById(market.getChainConfigId());
         return new MarketView(market, jurisdiction, collateralAssetName, collateralIsin, micarApplicable,
                 defiInteropModel, effectiveStatus, binding.riskParametersLegacy(), binding.operatorOrg(),
-                binding.treasury(), pauseReason(market, effectiveStatus));
+                binding.treasury(), pauseReason(market, effectiveStatus),
+                chain.map(ChainConfig::getChainId).orElse(null),
+                chain.map(c -> c.getDisplayName() != null ? c.getDisplayName() : c.getIdentifier()).orElse(null));
     }
 
     /**

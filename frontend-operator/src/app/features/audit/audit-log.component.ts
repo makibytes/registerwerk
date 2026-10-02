@@ -1,4 +1,5 @@
 import { ChangeDetectorRef, Component, OnInit, ViewChild, inject } from '@angular/core';
+import { downloadBlob } from '../../core/utils/download.util';
 import { FormsModule } from '@angular/forms';
 import { MatTableModule, MatTableDataSource } from '@angular/material/table';
 import { MatPaginatorModule, MatPaginator, PageEvent } from '@angular/material/paginator';
@@ -16,6 +17,10 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { DatePipe, JsonPipe } from '@angular/common';
 import { AuditService } from '../../core/api/audit.service';
 import { AuditEvent, ChainVerificationResult } from '../../core/models';
+import { AuthService } from '../../core/auth/auth.service';
+import { ChainVerdict, canAcknowledgeChain, chainVerdict } from '../../core/utils/chain-verdict';
+import { MatDialog } from '@angular/material/dialog';
+import { StepUpDialogComponent, StepUpDialogResult } from '../../shared/components/step-up/step-up-dialog.component';
 
 type ReportMode = 'all' | 'kyc-overrides';
 
@@ -125,16 +130,24 @@ type ReportMode = 'all' | 'kyc-overrides';
       }
     }
 
+    .chain-status-card .ack-note { width: 240px; }
+
     .chain-status-card.valid {
-      background: rgba(16, 185, 129, 0.08);
-      border: 1px solid rgba(16, 185, 129, 0.22);
-      mat-icon.status-icon { color: #10B981; }
+      background: var(--rw-approved-bg);
+      border: 1px solid color-mix(in srgb, var(--rw-approved-fg) 25%, transparent);
+      mat-icon.status-icon { color: var(--rw-text-success); }
     }
 
     .chain-status-card.broken {
-      background: rgba(220, 38, 38, 0.08);
-      border: 1px solid rgba(220, 38, 38, 0.25);
-      mat-icon.status-icon { color: #DC2626; }
+      background: var(--rw-rejected-bg);
+      border: 1px solid color-mix(in srgb, var(--rw-rejected-fg) 28%, transparent);
+      mat-icon.status-icon { color: var(--rw-text-danger); }
+    }
+
+    .chain-status-card.pending-ack {
+      background: var(--rw-pending-bg);
+      border: 1px solid color-mix(in srgb, var(--rw-pending-fg) 28%, transparent);
+      mat-icon.status-icon { color: var(--rw-text-warning); }
     }
 
     .chain-status-card.unknown {
@@ -173,27 +186,38 @@ type ReportMode = 'all' | 'kyc-overrides';
       </div>
     </div>
 
-    <div class="chain-status-card" [class.valid]="chainStatus?.valid === true"
-         [class.broken]="chainStatus?.valid === false"
-         [class.unknown]="!chainStatus">
+    <div class="chain-status-card" [class.valid]="verdict?.kind === 'valid'"
+         [class.broken]="verdict?.kind === 'broken'"
+         [class.pending-ack]="verdict?.kind === 'pending-ack'"
+         [class.unknown]="!verdict || verdict.kind === 'unknown'">
       <mat-icon class="status-icon">
-        {{ chainStatus == null ? 'help_outline' : chainStatus.valid ? 'verified' : 'gpp_bad' }}
+        {{ !verdict || verdict.kind === 'unknown' ? 'help_outline' : verdict.kind === 'valid' ? 'verified' : verdict.kind === 'pending-ack' ? 'pending_actions' : 'gpp_bad' }}
       </mat-icon>
-      <div class="chain-status-text">
+      <div class="chain-status-text" [attr.role]="verdict?.kind === 'broken' ? 'alert' : null">
         @if (chainStatusLoading) {
           Loading the latest hash-chain verification…
         } @else if (chainStatusError) {
           <strong>Hash-chain status unavailable.</strong> Verify again to retry the integrity check.
-        } @else if (chainStatus == null) {
+        } @else if (!verdict) {
           Hash-chain integrity has not been checked yet in this session.
-        } @else if (chainStatus.valid) {
-          <strong>Audit hash chain intact</strong> — {{ chainStatus.rowsChecked }} rows verified.
-          <div class="chain-status-detail">Last checked {{ chainStatus.checkedAt | date:'short' }}</div>
         } @else {
-          <strong>Audit hash chain BROKEN</strong> at sequence_no={{ chainStatus.firstBrokenSequenceNo }}.
-          <div class="chain-status-detail">{{ chainStatus.rowsChecked }} rows checked before failure — checked {{ chainStatus.checkedAt | date:'short' }}</div>
+          <strong>{{ verdict.title }}</strong>
+          @if (verdict.kind === 'valid') { — {{ verdict.detail }} } @else { {{ verdict.detail }} }
+          @if (chainStatus?.checkedAt) {
+            <div class="chain-status-detail">Last checked {{ chainStatus.checkedAt | date:'short' }}</div>
+          }
         }
       </div>
+      @if (canAcknowledge) {
+        <mat-form-field appearance="outline" subscriptSizing="dynamic" class="ack-note">
+          <mat-label>Acknowledgement note (optional)</mat-label>
+          <input matInput [(ngModel)]="ackNote" maxlength="500" />
+        </mat-form-field>
+        <button type="button" mat-stroked-button (click)="acknowledgeChain()" [disabled]="acknowledging">
+          <mat-icon>how_to_reg</mat-icon>
+          Acknowledge
+        </button>
+      }
       <button type="button" mat-stroked-button (click)="verifyChainNow()" [disabled]="verifyingChain">
         <mat-icon>{{ verifyingChain ? 'hourglass_empty' : 'refresh' }}</mat-icon>
         {{ verifyingChain ? 'Verifying…' : 'Verify now' }}
@@ -334,6 +358,8 @@ export class AuditLogComponent implements OnInit {
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly snackBar = inject(MatSnackBar);
   private readonly auditService = inject(AuditService);
+  private readonly auth = inject(AuthService);
+  private readonly dialog = inject(MatDialog);
 
   readonly displayedColumns = [
     'occurredAt', 'eventType', 'subjectType', 'subjectId', 'actorId', 'metadata',
@@ -358,6 +384,62 @@ export class AuditLogComponent implements OnInit {
   chainStatusLoading = true;
   chainStatusError = false;
   verifyingChain = false;
+  acknowledging = false;
+  ackNote = '';
+
+  get verdict(): ChainVerdict | null {
+    return this.chainStatus ? chainVerdict(this.chainStatus) : null;
+  }
+
+  get canAcknowledge(): boolean {
+    return canAcknowledgeChain(this.chainStatus, this.auth.hasRole('REGISTRY_ADMIN'));
+  }
+
+  /** Dual-control acknowledgement of a broken verdict: initiator's TOTP + a second approver's request-bound token. */
+  acknowledgeChain(): void {
+    const status = this.chainStatus;
+    if (!status?.verificationId || this.acknowledging) return;
+    const id = status.verificationId;
+    const note = this.ackNote;
+    const ref = this.dialog.open(StepUpDialogComponent, {
+      data: {
+        requireDualControl: true,
+        reason: 'Acknowledge a broken audit hash-chain verification',
+        action: 'AUDIT_CHAIN_VERIFICATION_ACK',
+        target: `POST ${this.auditService.chainAckPath(id, note)}`,
+      },
+      width: '500px',
+      disableClose: true,
+    });
+    ref.afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (!result?.stepUpToken || !result.dualControlToken) return;
+      this.acknowledging = true;
+      this.cdr.markForCheck();
+      this.auditService.acknowledgeChainVerification(id, note, {
+        stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken,
+      }).subscribe({
+        next: () => {
+          this.acknowledging = false;
+          this.snackBar.open('Acknowledged. The alert clears once a later run is clean.', 'Dismiss', { duration: 5000 });
+          this.reloadChainStatus();
+        },
+        error: (err) => {
+          this.acknowledging = false;
+          this.snackBar.open(
+            `${err?.error?.message ?? 'Acknowledgement failed.'} The approver token was consumed - obtain a new one before retrying.`,
+            'Dismiss', { duration: 8000 });
+          this.cdr.markForCheck();
+        },
+      });
+    });
+  }
+
+  private reloadChainStatus(): void {
+    this.auditService.chainStatus().subscribe({
+      next: (result) => { this.chainStatus = result; this.cdr.markForCheck(); },
+      error: () => { this.chainStatusError = true; this.cdr.markForCheck(); },
+    });
+  }
 
   @ViewChild(MatPaginator) paginator!: MatPaginator;
 
@@ -516,13 +598,6 @@ export class AuditLogComponent implements OnInit {
   }
 
   private download(blob: Blob, filename: string): void {
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadBlob(blob, filename);
   }
 }

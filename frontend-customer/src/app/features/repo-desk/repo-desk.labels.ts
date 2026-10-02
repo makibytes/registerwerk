@@ -1,4 +1,4 @@
-import { RepoDefaultGround, RepoSettlementMethod } from '../../core/models';
+import { RepoDefaultGround, RepoSettlementMethod, RepoTrade } from '../../core/models';
 
 /**
  * Registerwerk does not operate a settlement system for the repo desk: both legs are declared and confirmed by the
@@ -58,4 +58,26 @@ const GROUND_LABELS: Record<RepoDefaultGround, string> = {
 
 export function groundLabel(ground: RepoDefaultGround | string | null): string {
   return ground ? (GROUND_LABELS[ground as RepoDefaultGround] ?? humanize(ground)) : '';
+}
+
+/** Trade states in which no cash principal is outstanding any more. */
+export const REPO_TERMINAL_STATES: readonly string[] = ['CLOSED', 'CANCELLED', 'DEFAULTED'];
+
+export interface CashPrincipalLine { role: 'Borrowed' | 'Lent'; currency: string; amount: number }
+
+/**
+ * Outstanding cash principal of the OPEN trades only, split by the viewer's role (borrower/lender) and
+ * by currency; amounts in different currencies or roles are never added together (8A-09).
+ */
+export function openCashPrincipal(trades: readonly Pick<RepoTrade, 'status' | 'borrower' | 'cashCurrency' | 'cashAmount'>[]): CashPrincipalLine[] {
+  const sums = new Map<string, CashPrincipalLine>();
+  for (const t of trades) {
+    if (REPO_TERMINAL_STATES.includes(t.status)) continue;
+    const role = t.borrower ? 'Borrowed' : 'Lent';
+    const key = `${role}|${t.cashCurrency}`;
+    const line = sums.get(key) ?? { role, currency: t.cashCurrency, amount: 0 };
+    line.amount = Math.round((line.amount + t.cashAmount) * 100) / 100;
+    sums.set(key, line);
+  }
+  return [...sums.values()];
 }

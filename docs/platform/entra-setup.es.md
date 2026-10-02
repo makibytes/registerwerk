@@ -222,3 +222,26 @@ documentado:
   certificados solo satisfacen la fortaleza en el tenant *de origen* (home) del usuario.
 - La limitación (throttling) de Graph bajo sondeo sostenido de `/two-factor/refresh`. El backend
   limita por usuario, pero los límites de todo el tenant siguen aplicándose.
+
+## Content-Security-Policy para el inicio de sesión de Entra
+
+El portal de clientes se entrega con un `connect-src` estricto (`'self'` y el relayer de Zama). El inicio de sesión de Entra hace
+que el navegador llame directamente a `https://login.microsoftonline.com` (MSAL canjea el código de autorización y renueva los
+tokens con `fetch`), y un bundler ERC-4337 del lado del navegador también se llama desde la página. La política estricta bloquea
+ambos y aparece como errores de CSP en la consola del navegador. Los orígenes se añaden sin reconstruir la imagen:
+
+- **Docker Compose:** definir `ENTRA_AUTHORITY_ORIGIN` (por ejemplo `https://login.microsoftonline.com`) y, si se usa,
+  `BUNDLER_ORIGIN` en `.env`. Llegan al contenedor como `CSP_CONNECT_EXTRA` (orígenes separados por espacios).
+- **Helm:** definir `frontendCustomer.csp.connectExtra` con la lista de orígenes.
+
+Si ambos quedan vacíos, se mantiene la política estricta por defecto. Tras el cambio, iniciar sesión una vez y revisar la consola
+del navegador en busca de infracciones de CSP.
+
+## Los portales en el mismo nombre de host comparten la cookie de sesión
+
+Ambos portales usan la cookie de sesión `rw_session`, y las cookies no se limitan por puerto. Si el portal de operadores y el
+de clientes se sirven desde el **mismo nombre de host** (por ejemplo `localhost:44200` y `localhost:44201` en la pila de demo),
+iniciar sesión en uno sustituye la sesión del otro. Abrir un portal mediante `localhost` y el otro mediante `127.0.0.1` (o un
+nombre `*.localhost`), o usar perfiles de navegador distintos. Los despliegues de producción usan nombres de host distintos y
+no se ven afectados. Exigir nombres de host distintos o usar nombres de cookie por portal sigue siendo una cuestión de
+arquitectura abierta (T8-04).

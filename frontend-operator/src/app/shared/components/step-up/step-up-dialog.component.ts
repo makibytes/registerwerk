@@ -6,14 +6,13 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatDialog, MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatIconModule } from '@angular/material/icon';
 import { StepUpService } from '../../../core/api/step-up.service';
-import {
-  ApprovalTokenGeneratorDialogComponent,
-} from './approval-token-generator-dialog.component';
+import { buildApprovalRequestBlock } from '../../utils/approval-request';
 import { submitTotpForStepUpToken } from './step-up-totp-submit';
 
 export interface StepUpDialogData {
@@ -73,12 +72,12 @@ export interface StepUpDialogResult {
       gap: 12px;
       padding: 14px 16px;
       border-radius: 8px;
-      background: rgba(245, 158, 11, 0.10);
-      border: 1px solid rgba(245, 158, 11, 0.25);
+      background: var(--rw-pending-bg);
+      border: 1px solid color-mix(in srgb, var(--rw-pending-fg) 30%, transparent);
       margin-bottom: 20px;
 
       mat-icon {
-        color: #F59E0B;
+        color: var(--rw-accent);
         flex-shrink: 0;
         margin-top: 1px;
       }
@@ -110,8 +109,8 @@ export interface StepUpDialogResult {
       margin-bottom: 10px;
       padding: 10px 12px;
       border-radius: 6px;
-      background: rgba(59, 130, 246, 0.07);
-      border: 1px solid rgba(59, 130, 246, 0.18);
+      background: var(--rw-draft-bg);
+      border: 1px solid color-mix(in srgb, var(--rw-draft-fg) 25%, transparent);
     }
 
     .request-box {
@@ -139,7 +138,7 @@ export interface StepUpDialogResult {
 
     .error-msg {
       font-size: 12px;
-      color: #DC2626;
+      color: var(--rw-text-danger);
       margin-top: 8px;
       display: flex;
       align-items: center;
@@ -157,7 +156,7 @@ export interface StepUpDialogResult {
   `],
   template: `
     <h2 mat-dialog-title>
-      <mat-icon style="vertical-align:middle;margin-right:8px;color:#F59E0B">security</mat-icon>
+      <mat-icon style="vertical-align:middle;margin-right:8px;color:var(--rw-accent)">security</mat-icon>
       Step-Up Authentication Required
     </h2>
 
@@ -186,14 +185,18 @@ export interface StepUpDialogResult {
                autocomplete="one-time-code"
                maxlength="6"
                placeholder="123456"
+               [attr.aria-describedby]="errorMessage ? 'step-up-error' : null"
+               [attr.aria-invalid]="errorMessage ? 'true' : null"
                (keydown.enter)="submit()" />
       </mat-form-field>
 
       @if (data.requireDualControl) {
         <div class="section-label">Second approver</div>
         <div class="dual-control-note">
-          A second REGISTRY_ADMIN or COMPLIANCE_OFFICER must separately authenticate and paste
-          their scoped step-up token below. Both tokens must be from different users.
+          A second REGISTRY_ADMIN or COMPLIANCE_OFFICER must approve in <strong>their own signed-in
+          session</strong> (separate browser profile or device, page <em>Approvals</em>) and send you
+          their scoped token to paste below. Both tokens must be from different users; the approver's
+          token is single-use, valid for 5 minutes and bound to this exact request.
           @if (data.dualControlOptional) {
             Leave it empty only while fewer than two administrators have an authenticator enrolled (bootstrap).
           }
@@ -205,10 +208,15 @@ export interface StepUpDialogResult {
 {{ bodyText }}}</pre>
           </div>
         }
-        <button type="button" mat-button color="primary" class="generate-link" (click)="openTokenGenerator()">
-          <mat-icon>open_in_new</mat-icon>
-          Generate approver token…
+        <button type="button" mat-button color="primary" class="generate-link" (click)="copyApprovalRequest()"
+                [disabled]="!data.target">
+          <mat-icon>content_copy</mat-icon>
+          Copy approval request
         </button>
+        <div class="dual-control-note">
+          Send the copied request block to the second administrator. Never share a password or authenticator
+          seed, and do not keep tokens in shared chat history longer than needed.
+        </div>
         <mat-form-field class="full-width" appearance="outline">
           <mat-label>Second approver's step-up token (JWT)</mat-label>
           <mat-icon matPrefix>verified_user</mat-icon>
@@ -219,7 +227,7 @@ export interface StepUpDialogResult {
       }
 
       @if (errorMessage) {
-        <div class="error-msg">
+        <div class="error-msg" id="step-up-error" role="alert">
           <mat-icon>error</mat-icon>
           {{ errorMessage }}
         </div>
@@ -241,7 +249,7 @@ export class StepUpDialogComponent {
   protected readonly data = inject<StepUpDialogData>(MAT_DIALOG_DATA);
   private readonly dialogRef = inject(MatDialogRef<StepUpDialogComponent>);
   private readonly stepUpService = inject(StepUpService);
-  private readonly dialog = inject(MatDialog);
+  private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
 
   totpCode = '';
@@ -257,19 +265,21 @@ export class StepUpDialogComponent {
     this.dialogRef.close(undefined);
   }
 
-  openTokenGenerator(): void {
-    this.dialog
-      .open(ApprovalTokenGeneratorDialogComponent, {
-        width: '480px',
-        data: { action: this.data.action, target: this.data.target, targetBody: this.data.targetBody },
-      })
-      .afterClosed()
-      .subscribe((token: string | undefined) => {
-        if (token) {
-          this.approverToken = token;
-          this.cdr.markForCheck();
-        }
-      });
+  /** The exact request block the second approver pastes into the Approvals page. */
+  get approvalRequestBlock(): string | null {
+    if (!this.data.target) return null;
+    return buildApprovalRequestBlock({
+      action: this.data.action,
+      target: this.data.target,
+      targetBody: this.data.targetBody,
+    });
+  }
+
+  copyApprovalRequest(): void {
+    const block = this.approvalRequestBlock;
+    if (!block) return;
+    void navigator.clipboard.writeText(block);
+    this.snackBar.open('Approval request copied. Send it to the second administrator.', 'Dismiss', { duration: 3500 });
   }
 
   submit(): void {

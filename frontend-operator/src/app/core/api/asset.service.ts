@@ -1,4 +1,5 @@
 import { Injectable, inject } from '@angular/core';
+import { fetchAllPages } from '../utils/paging.util';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
@@ -76,9 +77,19 @@ export class AssetService {
    * plain array; map it to the display model and compute each holder's share of the listed total.
    */
   getHolders(assetId: string): Observable<AssetHolder[]> {
-    return this.http.get<PageResponse<HolderRegisterRow>>(`${this.base}/${assetId}/holders`, {
-      params: new HttpParams().set('size', '1000'),
-    }).pipe(map(page => AssetService.toHolders(page?.content ?? [])));
+    return this.getHoldersPaged(assetId).pipe(map(r => r.holders));
+  }
+
+  /**
+   * All register pages (the backend silently clamps `size` to 200). `truncated` = the page cap was hit: the
+   * rows are partial and their percentages (computed over the loaded rows only) are NOT shares of the register.
+   */
+  getHoldersPaged(assetId: string): Observable<{ holders: AssetHolder[]; truncated: boolean; total: number }> {
+    return fetchAllPages<HolderRegisterRow>((page, size) =>
+      this.http.get<PageResponse<HolderRegisterRow>>(`${this.base}/${assetId}/holders`, {
+        params: new HttpParams().set('page', page).set('size', size),
+      }),
+    ).pipe(map(r => ({ holders: AssetService.toHolders(r.items), truncated: r.truncated, total: r.totalElements })));
   }
 
   static toHolders(rows: HolderRegisterRow[]): AssetHolder[] {

@@ -82,6 +82,12 @@ public class TradingAdminController {
         return ResponseEntity.ok(queueService.listUnresolved());
     }
 
+    /** Read-only: historic FAILED trades with a declared payment (review only, not resolvable). */
+    @GetMapping("/historic-failed")
+    public ResponseEntity<List<UnresolvedTradeResponse>> historicFailed() {
+        return ResponseEntity.ok(queueService.listHistoricFailed());
+    }
+
     /** SRE report: what the next timeout run will move, plus historic FAILED-after-declared-payment candidates. */
     @GetMapping("/timeout-backlog")
     public ResponseEntity<TimeoutBacklogResponse> timeoutBacklog() {

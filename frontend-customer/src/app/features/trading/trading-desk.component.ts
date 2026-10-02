@@ -1,4 +1,5 @@
 import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
+import { PAYMENT_DISPUTED_TOAST, failedExplanation } from './trading-desk.labels';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { forkJoin, Observable, of } from 'rxjs';
@@ -1272,7 +1273,7 @@ export class TradingDeskComponent implements OnInit {
       next: () => {
         this.mutating = false;
         this.dialog.closeAll();
-        this.snackBar.open('Payment disputed — trade failed and units returned to your listing.', 'OK', { duration: 4500 });
+        this.snackBar.open(PAYMENT_DISPUTED_TOAST, 'OK', { duration: 6000 });
         this.reload();
       },
       error: (err) => {
@@ -1404,7 +1405,7 @@ export class TradingDeskComponent implements OnInit {
       case 'SETTLED':
         return trade.instantSettlement ? 'Settled in demo mode: the register moved with no cash leg.' : 'Settled: the register was updated after the seller confirmed receipt.';
       case 'FAILED':
-        return 'The trade did not go through. The units were released.';
+        return failedExplanation(trade);
       case 'CANCELLED':
         return 'Cancelled by the buyer before payment was declared.';
       case 'REFUNDED':

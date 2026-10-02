@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, type MockedObject, vi } fr
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { Router } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { of, Subject, throwError } from 'rxjs';
 import { HandoffComponent } from './handoff.component';
 import { AuthService } from '../../core/auth/auth.service';
 
@@ -72,6 +72,22 @@ describe('HandoffComponent', () => {
 
         expect(fixture.componentInstance.failed).toBe(true);
         expect(router.navigate).not.toHaveBeenCalled();
+    });
+
+    it('repaints the failure notice when the exchange fails asynchronously (no spinner left behind)', async () => {
+        window.location.hash = '#code=bad-tok&entityId=ent-1&entityName=Acme';
+        authService.supportsImpersonation.mockReturnValue(true);
+        const result = new Subject<never>();
+        authService.enterImpersonation.mockReturnValue(result);
+
+        const fixture = createComponent();
+        await fixture.whenStable();
+        expect(fixture.nativeElement.querySelector('mat-spinner')).not.toBeNull();
+
+        result.error(new Error('401'));
+        await fixture.whenStable();
+        expect(fixture.nativeElement.querySelector('mat-spinner')).toBeNull();
+        expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
     });
 
     it('shows a failure notice when the fragment carries no token', () => {

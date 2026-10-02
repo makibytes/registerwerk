@@ -463,6 +463,11 @@ frontendOperator:
 # calls go through Kong") — see files/frontend-customer-nginx.conf.tpl.
 frontendCustomer:
   enabled: true
+  # Extra Content-Security-Policy connect-src origins (equivalent of CSP_CONNECT_EXTRA in Compose). Required for
+  # Entra sign-in (MSAL fetches tokens from the authority) and for a browser-side bundler:
+  #   connectExtra: ["https://login.microsoftonline.com", "https://bundler.example.com"]
+  csp:
+    connectExtra: []
   replicaCount: 2
   image:
     repository: ghcr.io/makibytes/registerwerk/frontend-customer

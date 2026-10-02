@@ -69,6 +69,11 @@ export class TradingAdminService {
     return this.http.get<UnresolvedTrade[]>(`${this.base}/unresolved`);
   }
 
+  /** Read-only: historic FAILED trades after a declared payment. Review only; not resolvable here. */
+  listHistoricFailed(): Observable<UnresolvedTrade[]> {
+    return this.http.get<UnresolvedTrade[]>(`${this.base}/historic-failed`);
+  }
+
   backlog(): Observable<TimeoutBacklog> {
     return this.http.get<TimeoutBacklog>(`${this.base}/timeout-backlog`);
   }

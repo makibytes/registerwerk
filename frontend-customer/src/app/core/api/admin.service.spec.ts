@@ -55,4 +55,13 @@ describe('AdminService', () => {
             handoffUrl: 'http://x/admin/handoff#code=c',
         });
     });
+
+    it('stepUp() sends only code+method (an action without target is refused by the backend)', () => {
+        service.stepUp('123456', 'IMPERSONATE').subscribe();
+        const req = httpMock.expectOne(`${environment.apiUrl}/auth/step-up`);
+        expect(req.request.body).toEqual({ code: '123456', method: 'TOTP' });
+        expect('action' in req.request.body).toBe(false);
+        expect('target' in req.request.body).toBe(false);
+        req.flush({ stepUpToken: 'x' });
+    });
 });

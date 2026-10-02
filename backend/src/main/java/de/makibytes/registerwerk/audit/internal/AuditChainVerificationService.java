@@ -240,7 +240,22 @@ public class AuditChainVerificationService implements HealthIndicator {
         return sn.unknown() ? "UNKNOWN" : (sn.broken() ? "BROKEN" : "VALID");
     }
 
+    /**
+     * Id the acknowledge endpoint needs: the newest broken run still lacking an acknowledgement, else the
+     * latest run (a clean latest run with an unacknowledged earlier break must still be acknowledgeable).
+     */
     public UUID latestVerificationId() {
+        try {
+            var ids = jdbc.queryForList(
+                    "SELECT v.id FROM audit_chain_verification v WHERE NOT v.valid AND NOT EXISTS "
+                            + "(SELECT 1 FROM audit_chain_verification_ack a WHERE a.verification_id = v.id) "
+                            + "ORDER BY v.ran_at DESC, v.id LIMIT 1", UUID.class);
+            if (!ids.isEmpty()) {
+                return ids.get(0);
+            }
+        } catch (RuntimeException e) {
+            log.warn("Could not read unacknowledged audit verification: {}", e.toString());
+        }
         return snapshot().id();
     }
 

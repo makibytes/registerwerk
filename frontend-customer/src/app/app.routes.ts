@@ -93,6 +93,7 @@ export const routes: Routes = [
       },
       {
         path: 'webhooks',
+        canActivate: [roleGuard(['COMPANY_ADMIN'])],
         loadComponent: () => import('./features/webhooks/webhooks.component').then(m => m.WebhooksComponent)
       },
       {

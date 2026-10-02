@@ -60,6 +60,24 @@ class MeCorporateActionControllerTest {
     }
 
     @Test
+    @DisplayName("8A-08: the investor view exposes heldOutstanding")
+    void myCorporateActions_exposesHeldOutstanding() {
+        UUID assetId = UUID.randomUUID();
+        CorporateAction settled = new CorporateAction();
+        settled.setAssetId(assetId);
+        settled.setStatus(CorporateAction.Status.SETTLED);
+        settled.setHeldOutstanding(true);
+        CorporateAction plain = new CorporateAction();
+        plain.setAssetId(assetId);
+        plain.setStatus(CorporateAction.Status.SETTLED);
+        when(corporateActionService.findByAssetForHolder(assetId)).thenReturn(List.of(settled, plain));
+
+        List<CorporateActionView> body = controller.myCorporateActions(assetId).getBody();
+
+        assertThat(body).extracting(CorporateActionView::heldOutstanding).containsExactly(true, false);
+    }
+
+    @Test
     @DisplayName("myConfirmation returns 400 when the caller's entity id can't be resolved (no Jwt principal)")
     void myConfirmation_badRequestWhenNoEntityId() {
         ResponseEntity<byte[]> response = controller.myConfirmation(UUID.randomUUID(), authAs(null));

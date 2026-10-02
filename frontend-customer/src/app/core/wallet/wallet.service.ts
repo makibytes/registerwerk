@@ -27,6 +27,7 @@ export class WalletService {
 
   private walletClient: WalletClient | null = null;
   private publicClient: PublicClient | null = null;
+  private detachListeners: (() => void) | null = null;
 
   /** True if an EIP-1193 provider (e.g. `window.ethereum`) is present in this browser. */
   get isAvailable(): boolean {
@@ -56,6 +57,7 @@ export class WalletService {
       this.publicClient = createPublicClient({ transport: custom(injected) });
       this._address.set(address);
       this._chainId.set(chainId);
+      this.attachListeners(injected);
       return address;
     } catch (err: unknown) {
       const message = this.extractMessage(err, 'Wallet connection failed.');
@@ -67,10 +69,70 @@ export class WalletService {
   }
 
   disconnect(): void {
+    this.detachListeners?.();
+    this.detachListeners = null;
     this.walletClient = null;
     this.publicClient = null;
     this._address.set(null);
     this._chainId.set(null);
+  }
+
+  /**
+   * Keeps the signals honest when the user switches account or network inside the wallet. Without this the
+   * app would keep acting as the account / chain it saw at connect time.
+   */
+  private attachListeners(provider: unknown): void {
+    this.detachListeners?.();
+    const p = provider as {
+      on?: (event: string, handler: (arg: unknown) => void) => void;
+      removeListener?: (event: string, handler: (arg: unknown) => void) => void;
+    };
+    if (typeof p.on !== 'function') return;
+    const onAccounts = (accounts: unknown) => {
+      const next = Array.isArray(accounts) && typeof accounts[0] === 'string' ? (accounts[0] as Address) : null;
+      this._address.set(next);
+      if (next === null) {
+        this.walletClient = null;
+        this.publicClient = null;
+        this._chainId.set(null);
+      }
+    };
+    const onChain = (chainId: unknown) => {
+      const parsed = typeof chainId === 'string' ? Number.parseInt(chainId, chainId.startsWith('0x') ? 16 : 10) : Number(chainId);
+      this._chainId.set(Number.isFinite(parsed) ? parsed : null);
+    };
+    p.on('accountsChanged', onAccounts);
+    p.on('chainChanged', onChain);
+    this.detachListeners = () => {
+      p.removeListener?.('accountsChanged', onAccounts);
+      p.removeListener?.('chainChanged', onChain);
+    };
+  }
+
+  /**
+   * Fails closed unless the wallet is on `expectedChainId`: asks the wallet to switch, re-reads the chain id
+   * and throws a clear message when it is still elsewhere. An unknown expected chain (older cached market
+   * response) is refused rather than guessed. Call at the top of every on-chain action (8A-02).
+   */
+  async ensureChain(expectedChainId: number | null | undefined, chainName?: string | null): Promise<void> {
+    if (expectedChainId == null || !Number.isFinite(expectedChainId)) {
+      throw new Error('The network of this market is unknown. Reload the page and try again.');
+    }
+    const client = this.requireWalletClient();
+    const label = `${chainName ?? 'the required network'} (id ${expectedChainId})`;
+    let current = await client.getChainId();
+    if (current !== expectedChainId) {
+      try {
+        await client.switchChain({ id: expectedChainId });
+      } catch {
+        /* the wallet refused or does not know the chain; re-check below */
+      }
+      current = await client.getChainId();
+    }
+    this._chainId.set(current);
+    if (current !== expectedChainId) {
+      throw new Error(`Switch your wallet to ${label} to continue.`);
+    }
   }
 
   /** Signs a plain message (`personal_sign`) — e.g. the org-identity wallet-binding challenge. */

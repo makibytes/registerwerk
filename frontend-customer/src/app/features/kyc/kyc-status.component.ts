@@ -314,15 +314,15 @@ const ALL_DOC_TYPES = [
     .status-chip {
       font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
       text-transform: uppercase; letter-spacing: 0.3px;
-      &.compliant, &.status-approved { background: rgba(16,185,129,0.12); color: #10b981; }
-      &.incomplete, &.status-in-progress, &.status-not-started { background: rgba(245,158,11,0.12); color: #f59e0b; }
-      &.status-rejected, &.status-expired { background: rgba(239,68,68,0.12); color: #ef4444; }
+      &.compliant, &.status-approved { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+      &.incomplete, &.status-in-progress, &.status-not-started { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
+      &.status-rejected, &.status-expired { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
     }
 
     .decision-card {
       margin-bottom: 16px; border-left: 3px solid transparent;
-      &.rejected { border-left-color: #ef4444; }
-      &.approved { border-left-color: #10b981; }
+      &.rejected { border-left-color: var(--rw-text-danger); }
+      &.approved { border-left-color: var(--rw-text-success); }
     }
     .decision-row { display: flex; align-items: center; gap: 8px; }
     .decision-label { font-weight: 600; font-size: 13px; }
@@ -333,9 +333,9 @@ const ALL_DOC_TYPES = [
     .compliance-summary { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
     .chip {
       font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
-      &.missing { background: rgba(239,68,68,0.12); color: #ef4444; }
-      &.too-old { background: rgba(245,158,11,0.12); color: #f59e0b; }
-      &.expired { background: rgba(239,68,68,0.12); color: #ef4444; }
+      &.missing { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
+      &.too-old { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
+      &.expired { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
     }
 
     .checklist { display: flex; flex-direction: column; gap: 2px; }
@@ -344,14 +344,14 @@ const ALL_DOC_TYPES = [
       font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--rw-border);
     }
     .ci { font-size: 14px !important; flex-shrink: 0; }
-    .ci.ok { color: #10b981; }
-    .ci.warn { color: #f59e0b; }
-    .ci.err { color: #ef4444; }
+    .ci.ok { color: var(--rw-text-success); }
+    .ci.warn { color: var(--rw-text-warning); }
+    .ci.err { color: var(--rw-text-danger); }
     .ci.muted { color: var(--rw-text-muted); }
     .check-name { flex: 1; }
     .check-note { font-size: 11px; color: var(--rw-text-muted); }
-    .warn-text { color: #f59e0b !important; }
-    .err-text { color: #ef4444 !important; }
+    .warn-text { color: var(--rw-text-warning) !important; }
+    .err-text { color: var(--rw-text-danger) !important; }
 
     .quick-upload-btn { margin-left: auto; font-size: 11px; height: 24px; line-height: 24px; padding: 0 8px; }
     .upload-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
@@ -376,7 +376,7 @@ const ALL_DOC_TYPES = [
       padding: 10px 16px; border: 1px dashed var(--rw-border); border-radius: 4px;
       cursor: pointer; font-size: 13px; color: var(--rw-text-muted);
       &:hover { border-color: var(--rw-accent); }
-      &.has-file { border-color: #10b981; color: var(--rw-text-primary); }
+      &.has-file { border-color: var(--rw-text-success); color: var(--rw-text-primary); }
     }
     .inline-error { color: var(--rw-text-danger); font-size: 12px; margin: 8px 0 0; }
     .document-error { display: grid; justify-items: center; gap: 10px; padding: 40px 16px; color: var(--rw-text-secondary); text-align: center; }

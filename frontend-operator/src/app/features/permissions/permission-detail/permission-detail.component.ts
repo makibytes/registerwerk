@@ -7,6 +7,7 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
+import { showActionError } from '../../../shared/utils/action-error';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
@@ -216,6 +217,7 @@ export class PermissionDetailComponent implements OnInit {
         this.orgs = page.content;
         this.cdr.markForCheck();
       },
+      error: (err) => showActionError(this.snackBar, 'The list of organizations could not be loaded.', err),
     });
     this.dialog.open(this.grantDialogTpl, { width: '500px' });
   }

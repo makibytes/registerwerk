@@ -5,6 +5,7 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
+import { fetchAllPages } from '../../../core/utils/paging.util';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -76,11 +77,17 @@ interface Filters {
         </div>
       } @else {
 
+        @if (truncated) {
+          <p class="partial-banner" role="status">
+            Showing {{ allRecords.length }} of {{ serverTotal }} holdings; totals below cover only the loaded holdings.
+          </p>
+        }
+
         <!-- ── KPI Summary ─────────────────────────────────────────────────── -->
         <div class="kpi-bar">
           <div class="kpi-item">
             <span class="kpi-value">{{ totalNominal | number:'1.0-0' }} {{ totalNominalCurrency ?? '' }}</span>
-            <span class="kpi-label">Total Invested</span>
+            <span class="kpi-label">Total Invested@if (truncated) { (partial) }</span>
           </div>
           <div class="kpi-divider"></div>
           <div class="kpi-item">
@@ -309,6 +316,7 @@ interface Filters {
       gap: 16px;
     }
     .kpi-item { display: flex; flex-direction: column; align-items: center; min-width: 100px; }
+    .partial-banner { margin: 0 0 12px; font-size: 12.5px; color: var(--rw-text-warning); }
     .kpi-value { font-size: 26px; font-weight: 700; letter-spacing: -0.4px; color: var(--rw-text-primary); }
     .kpi-label { font-size: 11px; color: var(--rw-text-muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
     .kpi-divider { width: 1px; height: 40px; background: var(--rw-border); flex-shrink: 0; }
@@ -402,6 +410,10 @@ export class InvestmentListComponent implements OnInit {
 
   // ── Computed analytics ─────────────────────────────────────────────────────
 
+  /** True when the page cap was hit: totals are then labelled partial. */
+  truncated = false;
+  serverTotal = 0;
+
   get totalNominal(): number {
     return this.allRecords.reduce((s, r) => s + r.nominalAmount, 0);
   }
@@ -489,12 +501,13 @@ export class InvestmentListComponent implements OnInit {
   load(): void {
     this.loading = true;
     this.loadError = false;
-    this.investmentService
-      .getMyInvestments({ page: 0, size: 200, sort: 'acquisitionDate,desc' })
+    fetchAllPages((page, size) => this.investmentService.getMyInvestments({ page, size, sort: 'acquisitionDate,desc' }))
       .subscribe({
         next: (res) => {
-          this.allRecords = res.content;
-          this.dataSource.data = res.content;
+          this.allRecords = res.items;
+          this.truncated = res.truncated;
+          this.serverTotal = res.totalElements;
+          this.dataSource.data = res.items;
           this.dataSource.filterPredicate = this.buildFilterPredicate();
           this.loading = false;
           this.cdr.markForCheck();

@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../../core/auth/auth.service';
@@ -81,6 +81,7 @@ import { AuthService } from '../../core/auth/auth.service';
 export class HandoffComponent implements OnInit {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   /**
    * Shown instead of silently bouncing to /login. The backend already refuses to mint an
@@ -109,7 +110,7 @@ export class HandoffComponent implements OnInit {
     if (code && entityId) {
       this.auth.enterImpersonation(code, entityId, entityName).subscribe({
         next: () => this.router.navigate(['/dashboard']),
-        error: () => { this.failed = true; },
+        error: () => { this.failed = true; this.cdr.markForCheck(); },
       });
     } else {
       this.failed = true;

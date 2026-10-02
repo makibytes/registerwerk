@@ -670,6 +670,10 @@ services:
       args:
         BUILD_CONFIG: ${FRONTEND_BUILD_ENV:-production}
     logging: *default-logging
+    environment:
+      # Extra CSP connect-src origins. Entra sign-in (ENTRA_ENABLED=true) needs the authority origin; a browser-side
+      # bundler needs its origin. Both blank = the strict default policy.
+      CSP_CONNECT_EXTRA: "${ENTRA_AUTHORITY_ORIGIN:-} ${BUNDLER_ORIGIN:-}"
     depends_on:
       kong:
         condition: service_healthy

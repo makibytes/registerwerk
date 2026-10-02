@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, TemplateRef, ViewChild, inject
 } from '@angular/core';
+import { downloadBlob } from '../../../../core/utils/download.util';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -339,12 +340,7 @@ export class PortfolioMigrationComponent implements OnInit {
     this.cdr.markForCheck();
     this.service.export(migration.id).subscribe({
       next: (json) => {
-        const url = URL.createObjectURL(json);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `portfolio-migration-${migration.id}.json`;
-        link.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(json, `portfolio-migration-${migration.id}.json`);
         this.exporting.delete(migration.id);
         this.snackBar.open('Data package exported.', 'Dismiss', { duration: 5000 });
         this.load();

@@ -1,4 +1,5 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
+import { downloadBlob } from '../../core/utils/download.util';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
@@ -233,9 +234,7 @@ export class WalletsListComponent implements OnInit {
       if (!r) return;
       this.walletService.exportKeystore(wallet.id, r.password).subscribe({
         next: blob => {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a'); a.href = url; a.download = `wallet-${wallet.name}.json`; a.click();
-          URL.revokeObjectURL(url);
+          downloadBlob(blob, `wallet-${wallet.name}.json`);
           this.snackBar.open('Keystore exported', 'OK', { duration: 2500 });
         },
         error: () => this.snackBar.open('Export failed', 'OK', { duration: 3000 }),

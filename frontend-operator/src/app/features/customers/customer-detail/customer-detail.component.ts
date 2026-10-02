@@ -1,4 +1,6 @@
 import { ChangeDetectorRef, Component, ElementRef, OnInit, inject, Input, ViewChild } from '@angular/core';
+import { downloadBlob } from '../../../core/utils/download.util';
+import { showActionError } from '../../../shared/utils/action-error';
 import { Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -391,6 +393,8 @@ interface OnchainIdentityView {
                       <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--rw-approved-bg);color:var(--rw-approved-fg)">APPROVED</span>
                     } @else if (getJurisdictionStatus(jur) === 'REJECTED') {
                       <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--rw-rejected-bg);color:var(--rw-rejected-fg)">REJECTED</span>
+                    } @else if (getJurisdictionStatus(jur) === 'UNKNOWN') {
+                      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--rw-surface-soft, var(--rw-surface));color:var(--rw-text-muted);border:1px solid var(--rw-border)">Unknown (could not be loaded)</span>
                     } @else {
                       <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--rw-pending-bg);color:var(--rw-pending-fg)">PENDING</span>
                     }
@@ -1071,6 +1075,8 @@ export class CustomerDetailComponent implements OnInit {
   // ── Jurisdiction KYC ──────────────────────────────────────────────────────
   readonly allJurisdictions: Jurisdiction[] = ['DE_EWPG', 'LU_CSSF', 'FR_AMF', 'LI_TVTG'];
   jurisdictionApprovals: KycJurisdictionApproval[] = [];
+  /** The approvals could not be loaded: statuses read "Unknown", not a misleading PENDING. */
+  jurisdictionApprovalsFailed = false;
   complianceByJurisdiction: Partial<Record<Jurisdiction, KycComplianceResponse>> = {};
   jurActionLoading: Partial<Record<Jurisdiction, boolean>> = {};
 
@@ -1323,17 +1329,20 @@ export class CustomerDetailComponent implements OnInit {
 
   loadJurisdictionApprovals(): void {
     this.kycService.getJurisdictionApprovals(this.id).subscribe({
-      next: (approvals) => { this.jurisdictionApprovals = approvals; this.cdr.markForCheck(); },
+      next: (approvals) => { this.jurisdictionApprovals = approvals; this.jurisdictionApprovalsFailed = false; this.cdr.markForCheck(); },
+      error: () => { this.jurisdictionApprovalsFailed = true; this.cdr.markForCheck(); },
     });
   }
 
   loadCompliance(jurisdiction: Jurisdiction): void {
     this.kycService.getCompliance(this.id, jurisdiction).subscribe({
       next: (result) => { this.complianceByJurisdiction = { ...this.complianceByJurisdiction, [jurisdiction]: result }; this.cdr.markForCheck(); },
+      error: (err) => this.showActionError(`Compliance for ${jurisdiction} could not be loaded.`, err),
     });
   }
 
   getJurisdictionStatus(jur: Jurisdiction): string {
+    if (this.jurisdictionApprovalsFailed) return 'UNKNOWN';
     return this.jurisdictionApprovals.find(a => a.jurisdiction === jur)?.status ?? 'PENDING';
   }
 
@@ -1704,19 +1713,12 @@ export class CustomerDetailComponent implements OnInit {
     this.router.navigate(['/customers']);
   }
 
-  private showActionError(fallback: string, error: { error?: { message?: string } }): void {
-    this.snackBar.open(error?.error?.message ?? fallback, 'Dismiss', { duration: 6000 });
+  private showActionError(fallback: string, error: unknown): void {
+    showActionError(this.snackBar, fallback, error);
     this.cdr.markForCheck();
   }
 }
 
 function triggerBlobDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  downloadBlob(blob, filename);
 }

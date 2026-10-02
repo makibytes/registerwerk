@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit, Template
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError } from 'rxjs/operators';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatCardModule } from '@angular/material/card';
@@ -18,6 +18,8 @@ import { downloadBlob } from '../../core/utils/download.util';
 import { FormsModule } from '@angular/forms';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { CurrencyTotal, IndicativeMark, indicativeMark, nominalTotalsByCurrency } from '../../core/lending/portfolio.util';
+import { fetchAllPages } from '../../core/utils/paging.util';
 import { Chain, LendingMarket, RegisterDocumentMeta, SellableHolding } from '../../core/models';
 import { ChainLendingCapability, lendingCapabilityFor } from '../../core/lending/chain-capabilities';
 import { PlatformCapabilitiesService } from '../../core/feature/platform-capabilities';
@@ -34,8 +36,8 @@ interface PositionRow {
   chain: Chain | null;
   sellable: boolean;
   market: LendingMarket | null;
-  marketValue: number | null;
-  pricedVia: string | null;
+  /** Indicative oracle mark; never summed into a headline (see 8X-01). */
+  mark: IndicativeMark | null;
   capability: ChainLendingCapability;
   registerDoc: RegisterDocumentMeta | null;
 }
@@ -87,17 +89,19 @@ interface PositionRow {
       <div class="summary-row">
         <mat-card class="summary-card">
           <mat-card-content>
-            <div class="summary-value">
-              {{ portfolioValue | number:'1.0-2' }}
-              @if (portfolioCurrency) { <span class="summary-currency">{{ portfolioCurrency }}</span> }
-            </div>
+            @for (t of nominalTotals; track t.currency) {
+              <div class="summary-value">
+                {{ t.total | number:'1.0-2' }}
+                @if (t.currency) { <span class="summary-currency">{{ t.currency }}</span> }
+              </div>
+            } @empty {
+              <div class="summary-value">0</div>
+            }
             <div class="summary-label">
-              Portfolio value
+              Nominal total@if (partialHoldings) { (partial) }
               <mat-icon
                 class="info-icon"
-                [matTooltip]="portfolioCurrency
-                  ? 'Sum of nominal amount for every holding; priced live via its repo/lending market where one exists, nominal otherwise.'
-                  : 'Sum of nominal amount for every holding — shown without a currency because holdings span more than one currency (or none is set on the underlying asset yet), so this total cannot be added meaningfully. Priced live via repo/lending market where one exists, nominal otherwise.'">
+                matTooltip="Sum of the nominal amounts of your holdings, per currency; currencies are never added together. Market prices are shown per holding as an indicative mark and are not part of this total.">
                 info_outline
               </mat-icon>
             </div>
@@ -116,6 +120,12 @@ interface PositionRow {
           </mat-card-content>
         </mat-card>
       </div>
+      @if (partialHoldings) {
+        <p class="partial-warning" role="status">
+          <mat-icon>info_outline</mat-icon>
+          Showing {{ rows.length }} of {{ serverTotal }} holdings; totals cover only the loaded holdings.
+        </p>
+      }
       @if (partialDataWarning) {
         <p class="partial-warning" role="status">
           <mat-icon>info_outline</mat-icon>
@@ -237,9 +247,11 @@ export class PositionsComponent implements OnInit {
 
   state: AsyncSectionStatus = 'pending';
   rows: PositionRow[] = [];
-  portfolioValue = 0;
-  /** Null when holdings span more than one currency (or none is set) — see the tooltip. */
-  portfolioCurrency: string | null = null;
+  /** Nominal totals per currency; a single mixed-currency number is never shown. */
+  nominalTotals: CurrencyTotal[] = [];
+  /** The page cap was hit: rows/totals cover only part of the holdings. */
+  partialHoldings = false;
+  serverTotal = 0;
   pledgeableCount = 0;
   partialDataWarning = false;
   downloadingStatement = false;
@@ -262,14 +274,11 @@ export class PositionsComponent implements OnInit {
       type: 'number',
     },
     {
-      key: 'marketValue',
-      header: 'Market value',
-      cell: (r: PositionRow) => {
-        const ccy = r.currency ? ` ${r.currency}` : '';
-        return r.marketValue !== null
-          ? `${r.marketValue.toLocaleString()}${ccy} (${r.pricedVia})`
-          : `${r.nominalAmount}${ccy} (nominal only)`;
-      },
+      key: 'mark',
+      header: 'Indicative mark',
+      cell: (r: PositionRow) => r.mark
+        ? `${r.mark.display} ${r.mark.currency ?? ''} (oracle, as of ${r.mark.asOf})`
+        : 'Not available',
     },
     {
       key: 'whitelisted',
@@ -288,9 +297,8 @@ export class PositionsComponent implements OnInit {
     this.rows = [];
     this.partialDataWarning = false;
     forkJoin({
-      investments: this.investmentService.getMyInvestments({ page: 0, size: 200 }).pipe(
-        map((page) => page.content),
-      ),
+      investments: fetchAllPages((page, size) =>
+        this.investmentService.getMyInvestments({ page, size, sort: 'acquisitionDate,desc' })),
       sellable: this.tradingService.listSellableHoldings().pipe(
         catchError(() => { this.partialDataWarning = true; return of<SellableHolding[]>([]); }),
       ),
@@ -303,7 +311,10 @@ export class PositionsComponent implements OnInit {
         catchError(() => { this.partialDataWarning = true; return of<RegisterDocumentMeta[]>([]); }),
       ),
     }).subscribe({
-      next: ({ investments, sellable, markets, registerDocs }) => {
+      next: ({ investments: investmentPages, sellable, markets, registerDocs }) => {
+        const investments = investmentPages.items;
+        this.partialHoldings = investmentPages.truncated;
+        this.serverTotal = investmentPages.totalElements;
         const sellableHolderIds = new Set(sellable.map((s) => s.holderId));
         const marketByAssetId = new Map(markets.filter((m) => m.collateralAssetId).map((m) => [m.collateralAssetId as string, m]));
         const registerDocByAssetId = new Map(registerDocs.map((d) => [d.assetId, d]));
@@ -322,16 +333,14 @@ export class PositionsComponent implements OnInit {
             chain: inv.chain,
             sellable: sellableHolderIds.has(inv.id),
             market,
-            marketValue: null,
-            pricedVia: market?.collateralAssetName ?? null,
+            mark: null,
             capability: lendingCapabilityFor(inv.chain),
             registerDoc: registerDocByAssetId.get(inv.assetId) ?? null,
           } satisfies PositionRow;
         });
 
         this.pledgeableCount = this.rows.filter((r) => r.market).length;
-        this.portfolioValue = this.rows.reduce((sum, r) => sum + (r.marketValue ?? r.nominalAmount), 0);
-        this.portfolioCurrency = this.uniformCurrency();
+        this.nominalTotals = nominalTotalsByCurrency(this.rows);
         this.state = 'ready';
         this.cdr.markForCheck();
         this.priceMatchedRows();
@@ -344,26 +353,18 @@ export class PositionsComponent implements OnInit {
     });
   }
 
-  /** The shared currency across every row, or null if holdings span more than one (or none is set). */
-  private uniformCurrency(): string | null {
-    if (this.rows.length === 0) return null;
-    const first = this.rows[0].currency;
-    return first !== null && this.rows.every((r) => r.currency === first) ? first : null;
-  }
-
   /** Best-effort live price for rows with a matching active lending market — see the header tooltip. */
   private priceMatchedRows(): void {
     const priced = this.rows.filter((r) => r.market);
     if (priced.length === 0) return;
 
     priced.forEach((row) => {
+      // Collateral units are whole numbers: send an integer string, never a double's repr (1e21 -> "1e+21").
+      if (!Number.isSafeInteger(row.nominalAmount)) return;
       this.lendingService.quote(row.market!.id, String(row.nominalAmount)).subscribe({
         next: (quote) => {
-          const pricePerUnit = Number(quote.pricePerUnit) / 1e6; // stablecoin legs are 6-decimal in the demo catalog
-          row.marketValue = row.nominalAmount * pricePerUnit;
-          row.pricedVia = row.market!.collateralAssetName ?? 'lending market';
+          row.mark = indicativeMark(row.nominalAmount, quote, row.market!);
           this.rows = [...this.rows];
-          this.portfolioValue = this.rows.reduce((sum, r) => sum + (r.marketValue ?? r.nominalAmount), 0);
           this.cdr.markForCheck();
         },
         error: () => {

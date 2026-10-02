@@ -155,10 +155,12 @@ const { operatorUrl } = environment;
           <mat-icon>support_agent</mat-icon>
           <span>Support</span>
         </button>
-        <button type="button" mat-menu-item routerLink="/webhooks">
-          <mat-icon>webhook</mat-icon>
-          <span>Webhooks</span>
-        </button>
+        @if (canManageWebhooks) {
+          <button type="button" mat-menu-item routerLink="/webhooks">
+            <mat-icon>webhook</mat-icon>
+            <span>Webhooks</span>
+          </button>
+        }
         <button type="button" mat-menu-item (click)="logout()">
           <mat-icon>logout</mat-icon>
           <span>Sign out</span>
@@ -607,6 +609,8 @@ export class NavComponent implements OnInit {
   userEmail: string | null = null;
   isImpersonating = false;
   canImpersonate = false;
+  /** Webhook management is COMPANY_ADMIN-only on the backend; hide the entry otherwise. */
+  canManageWebhooks = false;
   impersonationEntityName = '';
   impersonationReadOnly = false;
   mobileMenuOpen = false;
@@ -633,6 +637,7 @@ export class NavComponent implements OnInit {
     this.userEmail = this.auth.getUserEmail();
     this.isImpersonating = this.auth.isImpersonating();
     this.canImpersonate = this.auth.hasRole('REGISTRY_ADMIN');
+    this.canManageWebhooks = this.auth.hasRole('COMPANY_ADMIN');
     this.impersonationReadOnly = this.auth.isImpersonationReadOnly();
     const meta = this.auth.getImpersonationMeta();
     this.impersonationEntityName = meta?.entityName ?? '';

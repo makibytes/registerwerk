@@ -33,7 +33,9 @@ public record CorporateActionView(
         Instant issuerAttestedAt,
         Instant dualControlApprovedAt,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        // SETTLED but some entitlements are still held (e.g. screening/compliance holds): not fully paid out.
+        boolean heldOutstanding
 ) {
     public static CorporateActionView of(CorporateAction ca) {
         return new CorporateActionView(
@@ -42,7 +44,7 @@ public record CorporateActionView(
                 ca.getRatioNumerator(), ca.getRatioDenominator(), ca.getAmountPerUnit(), ca.getTotalAmount(),
                 ca.getCurrency(), ca.getSettlementTxHash(), ca.getSettledAt(),
                 ca.getIssuerAttestedAt(), ca.getDualControlApprovedAt(),
-                ca.getCreatedAt(), ca.getUpdatedAt()
+                ca.getCreatedAt(), ca.getUpdatedAt(), ca.isHeldOutstanding()
         );
     }
 }

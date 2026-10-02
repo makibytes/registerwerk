@@ -1,4 +1,5 @@
 import { ChangeDetectorRef, Component, OnInit, Input, ViewChild, inject } from '@angular/core';
+import { downloadBlob } from '../../../core/utils/download.util';
 import { Router } from '@angular/router';
 import { MatTabGroup, MatTabsModule } from '@angular/material/tabs';
 import { MatCardModule } from '@angular/material/card';
@@ -450,6 +451,9 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
             @if (holdersLoading) {
               <div class="spinner-wrap"><mat-spinner diameter="32" /></div>
             } @else {
+              @if (holdersTruncated) {
+                <p role="status" style="font-size:13px;color:var(--rw-text-warning)">Showing {{ holders.length }} of {{ holdersTotal }} holders; shares are not computed.</p>
+              }
               <table mat-table [dataSource]="holders">
                 <ng-container matColumnDef="address">
                   <th mat-header-cell *matHeaderCellDef>Address</th>
@@ -463,7 +467,7 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                 </ng-container>
                 <ng-container matColumnDef="percentage">
                   <th mat-header-cell *matHeaderCellDef>% of Supply</th>
-                  <td mat-cell *matCellDef="let h">{{ h.percentage | number:'1.2-2' }}%</td>
+                  <td mat-cell *matCellDef="let h">{{ holdersTruncated ? '-' : (h.percentage | number:'1.2-2') + '%' }}</td>
                 </ng-container>
                 <tr mat-header-row *matHeaderRowDef="holderColumns"></tr>
                 <tr mat-row *matRowDef="let row; columns: holderColumns;"></tr>
@@ -749,6 +753,9 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                   }
                 </div>
 
+                @if (effectiveGasPolicy && gasOnchainUnavailable) {
+                  <div role="status" style="margin-bottom:20px;font-size:13px;color:var(--rw-text-secondary)">On-chain paymaster status is unavailable (could not be loaded).</div>
+                }
                 @if (effectiveGasPolicy && gasOnchain) {
                   <div style="margin-bottom:20px;padding:12px 16px;border:1px solid var(--rw-border);border-radius:var(--rw-radius);background:var(--rw-surface);font-size:13px">
                     <div style="font-weight:500;margin-bottom:8px">On-chain (EwpgPaymaster)</div>
@@ -824,6 +831,9 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
             <div class="tab-content">
               <app-nav-strike [deploymentId]="primaryDeploymentId" />
               <mat-divider style="margin:20px 0" />
+              @if (vaultNavUnavailable) {
+                <p role="status" style="font-size:13px;color:var(--rw-text-secondary)">Latest NAV strike unavailable (could not be loaded).</p>
+              }
               <app-vault-requests [deploymentId]="primaryDeploymentId" [latestNav]="latestVaultNav" />
             </div>
           </mat-tab>
@@ -1287,6 +1297,9 @@ export class AssetDetailComponent implements OnInit {
   asset: Asset | null = null;
   deployments: AssetDeployment[] = [];
   holders: AssetHolder[] = [];
+  /** Page cap hit: the list is partial and percentages are not register shares. */
+  holdersTruncated = false;
+  holdersTotal = 0;
 
   readonly deploymentColumns = ['chain', 'network', 'contractAddress', 'deploymentStatus', 'deployedAt'];
   readonly holderColumns = ['address', 'balance', 'percentage'];
@@ -1322,6 +1335,7 @@ export class AssetDetailComponent implements OnInit {
   gasSponsor: GasSponsor = 'ISSUER';
   gasMonthlyCapEth: number | null = 0.1;
   gasOnchain: GasSponsorshipOnchainStatus | null = null;
+  gasOnchainUnavailable = false;
 
   // ── ERC-3643 state ────────────────────────────────────────────────────────
   get isErc3643(): boolean {
@@ -1353,11 +1367,20 @@ export class AssetDetailComponent implements OnInit {
 
   // ── Vault (ERC-4626 / ERC-7540) state ────────────────────────────────────
   latestVaultNav: number | null = null;
+  /** The NAV strikes could not be loaded (not merely absent). */
+  vaultNavUnavailable = false;
 
   private loadLatestVaultNav(deploymentId: string): void {
     this.vaultService.getNavStrikes(deploymentId).subscribe({
       next: (strikes) => {
         this.latestVaultNav = strikes[0]?.navPerShare ?? null;
+        this.vaultNavUnavailable = false;
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        // 404 = no strike recorded yet: not an error. Anything else is surfaced instead of reading as "no NAV".
+        this.latestVaultNav = null;
+        this.vaultNavUnavailable = err?.status !== 404;
         this.cdr.markForCheck();
       },
     });
@@ -1466,7 +1489,12 @@ export class AssetDetailComponent implements OnInit {
     this.gasOnchain = null;
     if (!this.effectiveGasPolicy) return;
     this.gasSponsorshipService.getOnchainStatus(this.id, deploymentId).subscribe({
-      next: (status) => { this.gasOnchain = status; this.cdr.markForCheck(); },
+      next: (status) => { this.gasOnchain = status; this.gasOnchainUnavailable = false; this.cdr.markForCheck(); },
+      error: (err) => {
+        this.gasOnchain = null;
+        this.gasOnchainUnavailable = err?.status !== 404;
+        this.cdr.markForCheck();
+      },
     });
   }
 
@@ -1907,8 +1935,11 @@ export class AssetDetailComponent implements OnInit {
 
   loadHolders(): void {
     this.holdersLoading = true;
-    this.assetService.getHolders(this.id).subscribe({
-      next: (h) => { this.holders = h; this.holdersLoading = false; this.cdr.markForCheck(); },
+    this.assetService.getHoldersPaged(this.id).subscribe({
+      next: (r) => {
+        this.holders = r.holders; this.holdersTruncated = r.truncated; this.holdersTotal = r.total;
+        this.holdersLoading = false; this.cdr.markForCheck();
+      },
       error: () => { this.holdersLoading = false; this.cdr.markForCheck(); },
     });
   }
@@ -2172,13 +2203,6 @@ export class AssetDetailComponent implements OnInit {
   }
 
   private download(blob: Blob, filename: string): void {
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadBlob(blob, filename);
   }
 }

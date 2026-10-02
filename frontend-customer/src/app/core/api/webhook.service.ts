@@ -31,10 +31,14 @@ export class WebhookService {
     return this.http.post<WebhookSubscription>(`${this.base}/${id}/rotate-secret`, {}, { headers });
   }
 
-  /** Exchanges an authenticator code for a step-up token scoped to `action` (built-in sign-in only). */
-  stepUp(totpCode: string, action: string): Observable<{ stepUpToken: string }> {
+  /**
+   * Exchanges an authenticator code for the initiator's own step-up token (built-in sign-in only). The
+   * `action` parameter is intentionally not sent: the backend treats an action as a second-approver
+   * request and then demands a bound `target`, which the initiator's own token never has (8B-01).
+   */
+  stepUp(totpCode: string, _action?: string): Observable<{ stepUpToken: string }> {
     return this.http.post<{ stepUpToken: string }>(`${environment.apiUrl}/auth/step-up`,
-      { code: totpCode, method: 'TOTP', action });
+      { code: totpCode, method: 'TOTP' });
   }
 
   delete(id: string): Observable<void> {

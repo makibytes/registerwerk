@@ -19,7 +19,11 @@ FROM nginx:1.30.4-alpine
 # near that, and the process list it produced made an unrelated CPU problem look like an nginx one.
 RUN sed -i 's/^worker_processes.*/worker_processes 2;/' /etc/nginx/nginx.conf
 COPY --from=builder /app/frontend-customer/dist/registerwerk-customer/browser /usr/share/nginx/html
-COPY frontend-customer/nginx.conf /etc/nginx/conf.d/default.conf
+# Rendered to conf.d/default.conf at container start by the nginx image's envsubst step (only variables that exist
+# in the environment are substituted, so nginx's own $host/$uri/... are untouched).
+COPY frontend-customer/nginx.conf.template /etc/nginx/templates/default.conf.template
+# Extra connect-src origins (space-separated), e.g. https://login.microsoftonline.com for Entra sign-in. Empty = strict.
+ENV CSP_CONNECT_EXTRA=""
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
     CMD wget -q -O- http://127.0.0.1/healthz >/dev/null || exit 1

@@ -20,7 +20,10 @@ import {
   trexIdentityRegistryAbi,
 } from '../../../core/wallet/abi/repo-market.abi';
 import { LendingMarket, LendingPosition } from '../../../core/models';
-import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem';
+import { formatUnits as formatTokenUnits, type Address } from 'viem';
+import { fullRepayRequest } from '../../../core/lending/token-amount.util';
+import { executeRepay } from '../../../core/lending/repay.flow';
+import { formatTokenAmount, formatTokenAmountGrouped, parseTokenAmount } from '../../../core/lending/token-amount.util';
 
 interface LoanRow extends LendingPosition {
   marketLabel: string;
@@ -127,11 +130,19 @@ interface LoanRow extends LendingPosition {
         <h2 mat-dialog-title>Repay loan</h2>
         <mat-dialog-content>
           <p>Outstanding debt: {{ formatDebt(data.row) }}</p>
-          <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Amount to repay</mat-label>
-            <input matInput type="number" [min]="minimumAmount(data.row)" [step]="minimumAmount(data.row)"
-                   [max]="outstandingAmount(data.row)" [(ngModel)]="repayAmount" />
-          </mat-form-field>
+          <mat-checkbox [(ngModel)]="repayFull" [disabled]="repaying">Repay in full</mat-checkbox>
+          @if (repayFull) {
+            <p class="hint-text">
+              You will pay at most {{ fullRepayCap(data.row) }} (the current debt plus a safety margin for interest
+              accruing until the transaction is mined). Only the actual debt is taken; the unused allowance is reset
+              to 0 afterwards.
+            </p>
+          } @else {
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Amount to repay</mat-label>
+              <input matInput type="text" inputmode="decimal" autocomplete="off" [(ngModel)]="repayAmountText" />
+            </mat-form-field>
+          }
           @if (collateralReleaseBlocker) {
             <p class="warning-text" role="status">
               <mat-icon>info_outline</mat-icon>
@@ -153,7 +164,7 @@ interface LoanRow extends LendingPosition {
         </mat-dialog-content>
         <mat-dialog-actions align="end">
           <button mat-button type="button" [mat-dialog-close]="null" [disabled]="repaying">Cancel</button>
-          <button mat-flat-button color="primary" type="button" [disabled]="repaying || repayAmount <= 0" (click)="confirmRepay(data.row)">
+          <button mat-flat-button color="primary" type="button" [disabled]="repaying || (!repayFull && !repayAmountText)" (click)="confirmRepay(data.row)">
             @if (repaying) { Repaying… } @else { Repay }
           </button>
         </mat-dialog-actions>
@@ -190,7 +201,7 @@ interface LoanRow extends LendingPosition {
   `,
   styles: [`
     .full-width { width: 100%; margin-top: 8px; }
-    .error-text { color: #dc2626; font-size: 12.5px; }
+    .error-text { color: var(--rw-text-danger); font-size: 12.5px; }
     .warning-text { display: flex; align-items: center; gap: 7px; color: var(--rw-text-warning); font-size: 12px; }
     .warning-text mat-icon { font-size: 16px; height: 16px; width: 16px; flex-shrink: 0; }
     .hint-text { color: var(--rw-text-secondary); font-size: 12px; }
@@ -207,7 +218,8 @@ export class OpenLoansComponent implements OnInit {
 
   state: AsyncSectionStatus = 'pending';
   rows: LoanRow[] = [];
-  repayAmount = 0;
+  repayAmountText = '';
+  repayFull = true;
   repaying = false;
   repayError: string | null = null;
   /** Why the collateral token would refuse to return collateral to this wallet, if it would. */
@@ -300,22 +312,26 @@ export class OpenLoansComponent implements OnInit {
     return this.marketsById.get(row.marketId)?.loanTokenDecimals ?? 6;
   }
 
+  /** Exact (bigint-based) display; never goes through Number. */
   formatDebt(row: LoanRow): string {
+    return formatTokenAmountGrouped(BigInt(row.currentDebt), this.loanTokenDecimals(row));
+  }
+
+  outstandingUnits(row: LoanRow): bigint {
+    return BigInt(row.currentDebt);
+  }
+
+  /** Upper bound shown for a full repayment: what the transaction will request/approve. */
+  fullRepayCap(row: LoanRow): string {
+    const market = this.marketsById.get(row.marketId);
     const decimals = this.loanTokenDecimals(row);
-    return Number(formatTokenUnits(BigInt(row.currentDebt), decimals))
-      .toLocaleString(undefined, { maximumFractionDigits: decimals });
-  }
-
-  outstandingAmount(row: LoanRow): number {
-    return Number(formatTokenUnits(BigInt(row.currentDebt), this.loanTokenDecimals(row)));
-  }
-
-  minimumAmount(row: LoanRow): number {
-    return 10 ** -this.loanTokenDecimals(row);
+    const cap = fullRepayRequest(this.outstandingUnits(row), market ?? {});
+    return formatTokenAmountGrouped(cap, decimals);
   }
 
   openRepay(row: LoanRow, template: TemplateRef<{ $implicit: LoanRow }>): void {
-    this.repayAmount = this.outstandingAmount(row);
+    this.repayFull = true;
+    this.repayAmountText = formatTokenAmount(this.outstandingUnits(row), this.loanTokenDecimals(row));
     this.repayError = null;
     this.collateralReleaseBlocker = null;
     this.repayKeepCollateral = false;
@@ -362,6 +378,7 @@ export class OpenLoansComponent implements OnInit {
       if (this.wallet.address()?.toLowerCase() !== row.walletAddress.toLowerCase()) {
         throw new Error(`Connect the wallet that owns this position (${row.walletAddress}) before claiming.`);
       }
+      await this.wallet.ensureChain(market.chainId, market.chainName);
       const hash = await this.wallet.writeContract({
         address: market.marketAddress as Address,
         abi: repoMarketAbi,
@@ -450,6 +467,7 @@ export class OpenLoansComponent implements OnInit {
       if (this.wallet.address()?.toLowerCase() !== row.walletAddress.toLowerCase()) {
         throw new Error(`Connect the wallet that owns this position (${row.walletAddress}) before claiming.`);
       }
+      await this.wallet.ensureChain(market.chainId, market.chainName);
       const blocker = await this.collateralReleaseBlockerFor(
         market.collateralTokenAddress as Address,
         row.walletAddress as Address,
@@ -508,6 +526,7 @@ export class OpenLoansComponent implements OnInit {
       if (walletAddress?.toLowerCase() !== row.walletAddress.toLowerCase()) {
         throw new Error(`Connect the wallet that owns this loan (${row.walletAddress}).`);
       }
+      await this.wallet.ensureChain(market.chainId, market.chainName);
       const marketAddress = market.marketAddress as Address;
       const amount = BigInt(this.collateralAmount);
       if (this.collateralAction === 'add') {
@@ -538,13 +557,15 @@ export class OpenLoansComponent implements OnInit {
 
   async confirmRepay(row: LoanRow): Promise<void> {
     const market = this.marketsById.get(row.marketId);
-    const outstanding = this.outstandingAmount(row);
     if (!market) {
       this.repayError = this.marketsLoadFailed ? 'Market details are unavailable. Reload the page and try again.' : 'Market not found.';
       return;
     }
-    if (!Number.isFinite(this.repayAmount) || this.repayAmount <= 0 || this.repayAmount > outstanding) {
-      this.repayError = `Enter an amount between 0 and ${outstanding.toLocaleString()}.`;
+    const outstanding = this.outstandingUnits(row);
+    const decimals = this.loanTokenDecimals(row);
+    const amountUnits = this.repayFull ? null : parseTokenAmount(this.repayAmountText, decimals);
+    if (!this.repayFull && (amountUnits === null || amountUnits <= 0n || amountUnits > outstanding)) {
+      this.repayError = `Enter an amount between 0 and ${formatTokenAmountGrouped(outstanding, decimals)} (at most ${decimals} decimals).`;
       return;
     }
     this.repaying = true;
@@ -558,25 +579,34 @@ export class OpenLoansComponent implements OnInit {
       if (this.wallet.address()?.toLowerCase() !== row.walletAddress.toLowerCase()) {
         throw new Error(`Connect the wallet that owns this loan (${row.walletAddress}) before repaying.`);
       }
+      await this.wallet.ensureChain(market.chainId, market.chainName);
       // The wallet may only have been connected just now, so the dialog could not check yet.
       // Stop and let the user confirm the debt-only option instead of sending a doomed repay.
       if (!this.collateralReleaseBlocker && await this.detectCollateralReleaseBlocker(row)) {
         return;
       }
-      const repayAmountUnits = parseUnits(String(this.repayAmount), this.loanTokenDecimals(row));
       const debtOnly = this.collateralReleaseBlocker !== null && this.repayKeepCollateral;
-      // repay and repayDebtOnly both pull the loan token from the borrower (5D-01): approve the exact
-      // amount entered (the contract pulls at most that) before the call, or it reverts on allowance.
-      await this.wallet.ensureAllowance(market.loanTokenAddress as Address, market.marketAddress as Address, repayAmountUnits);
-      const hash = await this.wallet.writeContract({
-        address: market.marketAddress as Address,
-        abi: repoMarketAbi,
-        functionName: debtOnly ? 'repayDebtOnly' : 'repay',
-        args: [repayAmountUnits],
+      const result = await executeRepay(this.wallet, {
+        market,
+        borrower: row.walletAddress as Address,
+        snapshotDebt: outstanding,
+        full: this.repayFull,
+        amountUnits,
+        debtOnly,
       });
-      await this.wallet.waitForTransaction(hash);
+      const hash = result.hash;
       this.dialog.closeAll();
-      this.snackBar.open(`Repaid ${this.repayAmount}. Tx: ${hash.slice(0, 10)}…${hash.slice(-6)}`, 'Dismiss', { duration: 6000 });
+      const tx = `Tx: ${hash.slice(0, 10)}…${hash.slice(-6)}`;
+      if (this.repayFull && result.residualDebt !== null && result.residualDebt > 0n) {
+        this.snackBar.open(
+          `Repayment sent, but residual debt of ${formatTokenAmountGrouped(result.residualDebt, decimals)} remains and the collateral is still pledged. Repay again to close the loan. ${tx}`,
+          'Dismiss',
+          { duration: 12000 },
+        );
+      } else {
+        const paid = this.repayFull ? 'in full' : this.repayAmountText;
+        this.snackBar.open(`Repaid ${paid}. ${tx}`, 'Dismiss', { duration: 6000 });
+      }
       this.load();
     } catch (err: unknown) {
       this.repayError = err instanceof Error ? err.message : 'Repay failed.';

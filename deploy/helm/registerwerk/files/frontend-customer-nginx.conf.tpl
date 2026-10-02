@@ -54,8 +54,10 @@ server {
     # style-src allows 'unsafe-inline' because Angular's [style.x] bindings set inline style
     # attributes at runtime. The Zama browser SDK compiles WebAssembly and talks directly to its
     # Sepolia relayer; 'wasm-unsafe-eval' enables only Wasm compilation (not JavaScript eval), and
-    # connect-src is restricted to that exact service. Fonts are bundled into the image.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://relayer.testnet.zama.org; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    # connect-src is restricted to that exact service plus frontendCustomer.csp.connectExtra (the Compose path's
+    # CSP_CONNECT_EXTRA): add https://login.microsoftonline.com for Entra sign-in and the bundler origin when used.
+    # Fonts are bundled into the image.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://relayer.testnet.zama.org{{ range .Values.frontendCustomer.csp.connectExtra }} {{ . }}{{ end }}; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
 
     location = /healthz {
         access_log off;
@@ -92,7 +94,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://relayer.testnet.zama.org; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://relayer.testnet.zama.org{{ range .Values.frontendCustomer.csp.connectExtra }} {{ . }}{{ end }}; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
         access_log off;
         try_files $uri =404;
     }
@@ -108,7 +110,7 @@ server {
         add_header X-Frame-Options "DENY" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://relayer.testnet.zama.org; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://relayer.testnet.zama.org{{ range .Values.frontendCustomer.csp.connectExtra }} {{ . }}{{ end }}; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
     }
 
     # Angular routing — serve index.html for all non-asset requests

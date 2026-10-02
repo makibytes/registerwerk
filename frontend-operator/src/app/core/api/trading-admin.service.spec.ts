@@ -42,4 +42,11 @@ describe('TradingAdminService', () => {
     expect(req.request.params.get('to')).toBe('2026-03-31T23:59:59.000Z');
     req.flush(new Blob());
   });
+
+  it('listHistoricFailed() reads the review-only list', () => {
+    let out: unknown[] = [];
+    service.listHistoricFailed().subscribe((r) => (out = r));
+    http.expectOne(`${base}/historic-failed`).flush([{ trade: { id: 't1' }, notes: [] }]);
+    expect(out.length).toBe(1);
+  });
 });

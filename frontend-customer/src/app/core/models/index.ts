@@ -76,7 +76,7 @@ export type CorporateActionType =
 /** PROPOSED/REJECTED are the issuer-proposal pre-states for issuer-initiated types (DIVIDEND,
  *  SPLIT, CALL). System-raised COUPON/REDEMPTION skip PROPOSED and start at ANNOUNCED. */
 export type CorporateActionStatus =
-  | 'PROPOSED' | 'ANNOUNCED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT'
+  | 'PROPOSED' | 'ANNOUNCED' | 'SNAPSHOT_BLOCKED' | 'RECORD_DATE_SET' | 'COMPUTED' | 'AWAITING_SETTLEMENT'
   | 'SETTLED' | 'CLOSED' | 'CANCELLED' | 'REJECTED';
 
 /** Issuer/investor-facing projection — `corporateactions.web.dto.CorporateActionView`.
@@ -102,6 +102,8 @@ export interface CorporateActionView {
   dualControlApprovedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Settled, but some entitlements are still held back (older responses omit the field). */
+  heldOutstanding?: boolean;
 }
 
 export interface RegisterDocumentMeta {
@@ -1004,6 +1006,9 @@ export type LendingPositionStatus = 'OPEN' | 'CLOSED' | 'LIQUIDATED';
 export interface LendingMarket {
   id: string;
   chainConfigId: string;
+  /** EVM chain id and display name of the market's chain; absent on older cached responses (actions then fail closed). */
+  chainId?: number | null;
+  chainName?: string | null;
   marketAddress: string;
   vaultAddress: string | null;
   collateralAssetId: string | null;

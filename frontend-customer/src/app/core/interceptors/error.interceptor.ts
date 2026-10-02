@@ -23,6 +23,19 @@ function extractClaimsChallenge(err: HttpErrorResponse): string | null {
 }
 
 /**
+ * 401s on these endpoints are an answer to the caller, not an expired session: a wrong password
+ * on login, a spent impersonation code, or the boot-time "am I signed in?" probe. They are
+ * rethrown untouched so the caller can show its inline message; redirecting would toast
+ * "session could not be authenticated" and burn the one-shot redirect guard (8B-09).
+ */
+const AUTH_PROBE_SUFFIXES = ['/public/auth/login', '/public/auth/impersonate', '/auth/session'];
+
+function isAuthProbe(url: string): boolean {
+  const path = url.split(/[?#]/)[0];
+  return AUTH_PROBE_SUFFIXES.some(suffix => path.endsWith(suffix));
+}
+
+/**
  * Global HTTP error handler:
  *  401 with a claims challenge → re-authenticates for the required auth context
  *  401 otherwise               → clears auth and redirects to /login
@@ -40,6 +53,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
     catchError(err => {
       switch (err.status) {
         case HttpStatusCode.Unauthorized: {
+          if (isAuthProbe(req.url)) break;
           // A 401 carrying an OAuth2 claims challenge is not a rejected session — it means the
           // action needs a Conditional Access authentication context the current token lacks.
           // Signing the user out here would turn every step-up into an apparent logout.

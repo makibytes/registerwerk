@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, inject } from '@angular/core';
+import { APPROVER_TOKEN_CONSUMED, showActionError } from '../../../../shared/utils/action-error';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -127,6 +129,7 @@ export class SolanaAdminComponent {
   private readonly service = inject(SolanaAdminService);
   private readonly txService = inject(TransactionService);
   private readonly dialog = inject(MatDialog);
+  private readonly snackBar = inject(MatSnackBar);
   private readonly cdr = inject(ChangeDetectorRef);
 
   transferForm = { fromTokenAccount: '', toTokenAccount: '', toOwnerWallet: '', amount: '', decimals: 6, legalBasis: '' };
@@ -154,6 +157,7 @@ export class SolanaAdminComponent {
           this.transferForm = { fromTokenAccount: '', toTokenAccount: '', toOwnerWallet: '', amount: '', decimals: 6, legalBasis: '' };
           this.cdr.markForCheck();
         },
+        error: (err) => this.fail('Forced transfer failed.', err, true),
       });
     });
   }
@@ -179,6 +183,7 @@ export class SolanaAdminComponent {
           this.burnForm = { tokenAccount: '', amount: '', decimals: 6, legalBasis: '' };
           this.cdr.markForCheck();
         },
+        error: (err) => this.fail('Force burn failed.', err, true),
       });
     });
   }
@@ -190,6 +195,7 @@ export class SolanaAdminComponent {
         this.freezeAccount = '';
         this.cdr.markForCheck();
       },
+      error: (err) => this.fail('Freeze failed.', err),
     });
   }
 
@@ -200,6 +206,12 @@ export class SolanaAdminComponent {
         this.freezeAccount = '';
         this.cdr.markForCheck();
       },
+      error: (err) => this.fail('Thaw failed.', err),
     });
+  }
+
+  private fail(fallback: string, err: unknown, dualControl = false): void {
+    showActionError(this.snackBar, fallback, err, dualControl ? APPROVER_TOKEN_CONSUMED : '');
+    this.cdr.markForCheck();
   }
 }

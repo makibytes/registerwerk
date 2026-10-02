@@ -52,11 +52,11 @@ describe('IssuanceService', () => {
         req.flush({ txId: 'tx-1' });
     });
 
-    it('stepUp() requests a token scoped to the action', () => {
+    it('stepUp() sends only code+method (no action: an action without target is refused)', () => {
         service.stepUp('123456', 'ISSUER_BURN_EWG26').subscribe();
 
         const req = httpMock.expectOne(`${environment.apiUrl}/auth/step-up`);
-        expect(req.request.body).toEqual({ code: '123456', method: 'TOTP', action: 'ISSUER_BURN_EWG26' });
+        expect(req.request.body).toEqual({ code: '123456', method: 'TOTP' });
         req.flush({ stepUpToken: 'x' });
     });
 });

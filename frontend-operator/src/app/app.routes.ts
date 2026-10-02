@@ -87,6 +87,15 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'approvals',
+        canActivate: [roleGuard],
+        data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
+        loadComponent: () =>
+          import('./features/approvals/approvals.component').then(
+            (m) => m.ApprovalsComponent
+          ),
+      },
+      {
         path: 'organizations',
         canActivate: [roleGuard],
         data: { roles: ['REGISTRY_ADMIN'] },

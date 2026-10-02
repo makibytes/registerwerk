@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { MatSnackBar, MatSnackBarRef, TextOnlySnackBar } from '@angular/material/snack-bar';
-import { Observable, interval, switchMap, take, tap, finalize, Subject, takeUntil } from 'rxjs';
+import { Observable, interval, switchMap, take, tap, finalize, Subject, takeUntil, catchError, of } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
 export interface TxRecord {
@@ -61,6 +61,8 @@ export interface TxSubmissionResponse {
 const POLL_INTERVAL_MS = 4_000;
 /** 4s x 150 = 10 minutes. Past that a transaction is not "pending", it is stuck. */
 const MAX_POLL_ATTEMPTS = 150;
+/** ~20 s of consecutive failed polls ends tracking with an explicit "status unknown" message. */
+const MAX_CONSECUTIVE_POLL_FAILURES = 5;
 
 @Injectable({ providedIn: 'root' })
 export class TransactionService {
@@ -114,38 +116,72 @@ export class TransactionService {
   track(txId: string, label: string): void {
     if (this.activePolls.has(txId)) return;
 
-    const pendingRef: MatSnackBarRef<TextOnlySnackBar> = this.snackBar.open(
+    const openPending = (): MatSnackBarRef<TextOnlySnackBar> => this.snackBar.open(
       `⏳ ${label}: submitting…`, '', { duration: 0, panelClass: 'tx-pending' }
     );
+    let pendingRef = openPending();
+    let dismissedByUs = false;
+    let displaced = false;
+    const watchDisplacement = (ref: MatSnackBarRef<TextOnlySnackBar>) =>
+      ref.afterDismissed().subscribe(() => { if (!dismissedByUs) displaced = true; });
+    watchDisplacement(pendingRef);
+    const dismissPending = () => { dismissedByUs = true; pendingRef.dismiss(); };
+
     const stop$ = new Subject<void>();
     this.activePolls.add(txId);
+    let consecutiveFailures = 0;
 
     interval(POLL_INTERVAL_MS).pipe(
       take(MAX_POLL_ATTEMPTS),
-      switchMap(() => this.getTransaction(txId)),
+      // One failed poll (blip, 5xx, expired token refresh) must not end tracking: the transaction is
+      // still on its way. Failures are counted and only a run of them ends it, with an explicit message.
+      switchMap(() => this.getTransaction(txId).pipe(
+        catchError(() => of(null)),
+      )),
       tap(tx => {
-        if (tx.status !== 'PENDING') {
-          stop$.next();
-          pendingRef.dismiss();
-
-          if (tx.status === 'SUCCESS') {
-            this.snackBar.open(`✅ ${label} confirmed (block ${tx.blockNumber})`, 'OK', {
-              duration: 8000, panelClass: 'tx-success'
-            });
-          } else if (tx.status === 'TIMEOUT') {
-            this.snackBar.open(`⏱️ ${label}: not yet mined — it may still execute. Check the transaction console before retrying.`, 'Close', {
-              duration: 0, panelClass: 'tx-pending'
-            });
-          } else if (tx.status === 'REPLACED') {
-            this.snackBar.open(`↪ ${label} was replaced on chain (${tx.errorMessage ?? 'another transaction used the nonce'})`, 'Close', {
-              duration: 0, panelClass: 'tx-error'
-            });
-          } else {
-            const msg = tx.errorMessage ?? tx.status;
-            this.snackBar.open(`❌ ${label} failed: ${msg}`, 'Close', {
-              duration: 0, panelClass: 'tx-error'
-            });
+        if (tx === null) {
+          consecutiveFailures++;
+          if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+            stop$.next();
+            dismissPending();
+            this.snackBar.open(
+              `❓ ${label}: status unknown - check the Transactions page before resubmitting.`,
+              'Close', { duration: 0, panelClass: 'tx-error' }
+            );
           }
+          return;
+        }
+        consecutiveFailures = 0;
+        if (tx.status === 'PENDING') {
+          // Another snackbar (e.g. "submitted") replaced the pending toast: bring it back.
+          if (displaced) {
+            displaced = false;
+            dismissedByUs = false;
+            pendingRef = openPending();
+            watchDisplacement(pendingRef);
+          }
+          return;
+        }
+        stop$.next();
+        dismissPending();
+
+        if (tx.status === 'SUCCESS') {
+          this.snackBar.open(`✅ ${label} confirmed (block ${tx.blockNumber})`, 'OK', {
+            duration: 8000, panelClass: 'tx-success'
+          });
+        } else if (tx.status === 'TIMEOUT') {
+          this.snackBar.open(`⏱️ ${label}: not yet mined — it may still execute. Check the transaction console before retrying.`, 'Close', {
+            duration: 0, panelClass: 'tx-pending'
+          });
+        } else if (tx.status === 'REPLACED') {
+          this.snackBar.open(`↪ ${label} was replaced on chain (${tx.errorMessage ?? 'another transaction used the nonce'})`, 'Close', {
+            duration: 0, panelClass: 'tx-error'
+          });
+        } else {
+          const msg = tx.errorMessage ?? tx.status;
+          this.snackBar.open(`❌ ${label} failed: ${msg}`, 'Close', {
+            duration: 0, panelClass: 'tx-error'
+          });
         }
       }),
       takeUntil(stop$),
@@ -157,15 +193,14 @@ export class TransactionService {
       // take() completing without the status ever leaving PENDING means we gave up watching, not
       // that the transaction failed — say so rather than leaving a spinner up forever.
       complete: () => {
-        if (pendingRef.instance) {
-          pendingRef.dismiss();
+        if (!dismissedByUs) {
+          dismissPending();
           this.snackBar.open(
             `⏱️ ${label}: still pending after ${(POLL_INTERVAL_MS * MAX_POLL_ATTEMPTS) / 60_000} minutes — check the transaction list for the final status.`,
             'OK', { duration: 10000, panelClass: 'tx-pending' }
           );
         }
       },
-      error: () => { stop$.next(); pendingRef.dismiss(); },
     });
   }
 }

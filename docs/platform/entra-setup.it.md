@@ -206,3 +206,25 @@ Microsoft documenta che FIDO2, Windows Hello e l'autenticazione basata su certif
 forza solo nel tenant *home* dell'utente.
 - Throttling di Graph in caso di polling sostenuto su `/two-factor/refresh`. Il backend applica un throttling per
 utente, ma restano comunque in vigore i limiti a livello di tenant.
+
+## Content-Security-Policy per l'accesso con Entra
+
+Il portale clienti fornisce un `connect-src` restrittivo (`'self'` e il relayer Zama). L'accesso con Entra fa chiamare al browser
+direttamente `https://login.microsoftonline.com` (MSAL riscatta il codice di autorizzazione e rinnova i token con `fetch`), e
+anche un bundler ERC-4337 lato browser viene chiamato dalla pagina. La policy restrittiva blocca entrambi e compare come errore
+CSP nella console del browser. Le origini si aggiungono senza ricostruire l'immagine:
+
+- **Docker Compose:** impostare `ENTRA_AUTHORITY_ORIGIN` (ad esempio `https://login.microsoftonline.com`) e, se usato,
+  `BUNDLER_ORIGIN` in `.env`. Raggiungono il container come `CSP_CONNECT_EXTRA` (origini separate da spazi).
+- **Helm:** impostare `frontendCustomer.csp.connectExtra` con l'elenco delle origini.
+
+Se entrambi restano vuoti vale la policy restrittiva predefinita. Dopo la modifica, accedere una volta e controllare nella
+console del browser la presenza di violazioni CSP.
+
+## I portali sullo stesso hostname condividono il cookie di sessione
+
+Entrambi i portali usano il cookie di sessione `rw_session` e i cookie non sono limitati dalla porta. Se il portale operatori e
+il portale clienti sono serviti dallo **stesso hostname** (ad esempio `localhost:44200` e `localhost:44201` nello stack demo),
+l'accesso a uno sostituisce la sessione dell'altro. Aprire un portale tramite `localhost` e l'altro tramite `127.0.0.1` (o un
+nome `*.localhost`), oppure usare profili del browser separati. Gli ambienti di produzione usano hostname distinti e non sono
+interessati. Richiedere hostname distinti o usare nomi di cookie per portale resta una questione di architettura aperta (T8-04).

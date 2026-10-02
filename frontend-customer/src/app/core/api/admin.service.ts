@@ -57,9 +57,9 @@ export class AdminService {
   }
 
   /** Exchanges an authenticator code for a step-up token (built-in sign-in). */
-  stepUp(totpCode: string, action: string): Observable<{ stepUpToken: string }> {
+  stepUp(totpCode: string, _action?: string): Observable<{ stepUpToken: string }> {
     return this.http.post<{ stepUpToken: string }>(`${environment.apiUrl}/auth/step-up`,
-      { code: totpCode, method: 'TOTP', action });
+      { code: totpCode, method: 'TOTP' });
   }
 }
 

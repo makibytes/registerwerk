@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, TemplateRef, ViewChild, inject
 } from '@angular/core';
+import { downloadBlob } from '../../../../core/utils/download.util';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -361,12 +362,7 @@ export class RegisterTransferComponent implements OnInit {
     this.cdr.markForCheck();
     this.service.export(transfer.id).subscribe({
       next: (json) => {
-        const url = URL.createObjectURL(json);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `register-transfer-${transfer.id}.json`;
-        link.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(json, `register-transfer-${transfer.id}.json`);
         this.exporting.delete(transfer.id);
         this.snackBar.open('§20 eWpRV data package exported.', 'Dismiss', { duration: 5000 });
         this.load();

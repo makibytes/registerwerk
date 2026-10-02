@@ -7,7 +7,7 @@ import { AsyncSectionStatus } from '../async-section';
   template: `
     @if (status !== 'ready') {
       <span class="data-state-pill" [class]="'data-state-pill status-' + status">
-        {{ label }}
+        {{ label }}@if (status === 'stale' && lastLoadedAt) { <span class="as-of">as of {{ asOf }}</span> }
       </span>
     }
   `,
@@ -31,25 +31,42 @@ import { AsyncSectionStatus } from '../async-section';
     }
 
     .status-updating {
-      background: rgba(59, 130, 246, 0.12);
-      color: #2563EB;
-      border-color: rgba(59, 130, 246, 0.24);
+      background: var(--rw-draft-bg);
+      color: var(--rw-draft-fg);
+      border-color: color-mix(in srgb, var(--rw-draft-fg) 24%, transparent);
+    }
+
+    .status-stale {
+      background: var(--rw-pending-bg);
+      color: var(--rw-pending-fg);
+      border-color: color-mix(in srgb, var(--rw-pending-fg) 30%, transparent);
     }
 
     .status-error {
-      background: rgba(239, 68, 68, 0.12);
-      color: #DC2626;
-      border-color: rgba(239, 68, 68, 0.24);
+      background: var(--rw-rejected-bg);
+      color: var(--rw-rejected-fg);
+      border-color: color-mix(in srgb, var(--rw-rejected-fg) 24%, transparent);
     }
+
+    .as-of { margin-left: 6px; text-transform: none; letter-spacing: 0; font-weight: 500; }
   `],
 })
 export class DataStatePillComponent {
   @Input({ required: true }) status: AsyncSectionStatus = 'ready';
+  /** Epoch millis of the last successful load; shown as "as of HH:mm" on the stale pill. */
+  @Input() lastLoadedAt?: number;
+
+  get asOf(): string {
+    return this.lastLoadedAt == null
+      ? ''
+      : new Date(this.lastLoadedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 
   get label(): string {
     switch (this.status) {
       case 'pending':  return 'Pending';
       case 'updating': return 'Updating';
+      case 'stale':    return 'Stale - refresh failed';
       case 'error':    return 'Unavailable';
       default:         return '';
     }

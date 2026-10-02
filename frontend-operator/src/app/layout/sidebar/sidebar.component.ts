@@ -274,6 +274,7 @@ export class SidebarComponent {
         { label: 'Reporting', icon: 'assessment', route: '/compliance/reporting', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'DSAR Erasure', icon: 'person_off', route: '/compliance/dsar', roles: ['REGISTRY_ADMIN'] },
         { label: 'Support Tickets', icon: 'support_agent', route: '/compliance/support-tickets', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
+        { label: 'Approvals', icon: 'how_to_reg', route: '/approvals', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'Audit Log', icon: 'receipt_long', route: '/audit', roles: ['REGISTRY_ADMIN', 'AUDIT'] },
       ],
     },

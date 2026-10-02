@@ -102,7 +102,7 @@ public class LendingMarketController {
                 market.getPriceOracleAddress(), view.effectiveStatus(), view.jurisdiction(), view.micarApplicable(),
                 view.defiInteropModel(), market.getCreatedAt(), view.riskParametersLegacy(), view.operatorOrg(),
                 view.treasury(), view.pauseReason(), market.isBindingVerified(), market.getBindingFailure(),
-                market.isCollateralShortfall());
+                market.isCollateralShortfall(), view.chainId(), view.chainName());
     }
 
     /** 5B-09: re-verify all registered markets against the chain; mismatches are flagged, not deleted. */
