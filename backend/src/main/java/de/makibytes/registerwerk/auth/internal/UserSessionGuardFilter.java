@@ -41,6 +41,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 class UserSessionGuardFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(UserSessionGuardFilter.class);
+    static final String REASON_DUAL_CONTROL_TOKEN = "dual_control_token";
 
     private final SessionStateService state;
     private final MeterRegistry meters;
@@ -66,6 +67,14 @@ class UserSessionGuardFilter extends OncePerRequestFilter {
             meters.counter("registerwerk_session_rejections_total", "reason", reason).increment();
             log.info("Session rejected: reason={} sub={} path={}", reason, jwtAuth.getToken().getSubject(),
                     request.getRequestURI());
+            if (REASON_DUAL_CONTROL_TOKEN.equals(reason)) {
+                // Authentic but not a credential for this purpose: 403, not a "log in again" 401.
+                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                response.setContentType("application/json");
+                response.getWriter().write(
+                        "{\"status\":403,\"message\":\"A dual-control approver token is not a session token\"}");
+                return;
+            }
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setHeader("WWW-Authenticate",
                     "Bearer error=\"invalid_token\", error_description=\"session no longer valid\"");
@@ -76,6 +85,12 @@ class UserSessionGuardFilter extends OncePerRequestFilter {
 
     /** @return a short metric-safe reason, or null when the session is acceptable */
     String rejectionReason(Jwt jwt) {
+        // C1: a second approver's token authenticates nobody - it is valid only in X-Dual-Control-Token,
+        // where StepUpTokenValidator reads it. Checked first, whatever the account state or endpoint.
+        if (JwtMintingService.LOCAL_ISSUER.equals(jwt.getClaimAsString("iss"))
+                && JwtMintingService.isDualControlApproverToken(jwt)) {
+            return REASON_DUAL_CONTROL_TOKEN;
+        }
         UUID userId = parse(jwt.getSubject());
         if (userId == null) {
             return rejectUnknownUsers ? "unknown_user" : null;

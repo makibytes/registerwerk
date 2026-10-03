@@ -117,11 +117,12 @@ public class AssetService {
     /** Statuses in which ISIN, currency, size, denomination and dates are fixed (approved terms). */
     private static final java.util.Set<AssetStatus> TERMS_LOCKED = java.util.EnumSet.of(
             AssetStatus.APPROVED, AssetStatus.ISSUED, AssetStatus.SUSPENDED,
-            AssetStatus.REDEEMED, AssetStatus.TRANSFER_PENDING, AssetStatus.TRANSFERRED_OUT);
+            AssetStatus.REDEMPTION_PENDING, AssetStatus.REDEEMED, AssetStatus.TRANSFER_PENDING,
+            AssetStatus.TRANSFERRED_OUT);
     /** Min. investment / max. holding stay editable up to issuance (subscription set-up), not after. */
     private static final java.util.Set<AssetStatus> INVESTMENT_LIMITS_LOCKED = java.util.EnumSet.of(
-            AssetStatus.ISSUED, AssetStatus.SUSPENDED, AssetStatus.REDEEMED, AssetStatus.TRANSFER_PENDING,
-            AssetStatus.TRANSFERRED_OUT);
+            AssetStatus.ISSUED, AssetStatus.SUSPENDED, AssetStatus.REDEMPTION_PENDING, AssetStatus.REDEEMED,
+            AssetStatus.TRANSFER_PENDING, AssetStatus.TRANSFERRED_OUT);
 
     /**
      * T3-10: once approved, the economic terms investors rely on can no longer be edited through

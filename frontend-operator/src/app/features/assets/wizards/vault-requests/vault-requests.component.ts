@@ -554,6 +554,7 @@ export class VaultRequestsComponent implements OnInit {
         reason: `Force-cancel vault request #${req.requestId} to ${body.to}`,
         action: 'VAULT_REQUEST_FORCE_CANCEL',
         target: `POST /api/v1/deployments/${this.deploymentId}/vault-requests/${req.requestId}/force-cancel`,
+        targetBody: body,
       },
       width: '500px',
       disableClose: true,

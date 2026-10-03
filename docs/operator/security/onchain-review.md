@@ -93,8 +93,11 @@ patched into deployed markets.
 The reviewed `DvpSettlement` derives trade ids from the locker (`lockAsset`/`lockPayment` take a
 `clientRef` and return the id), requires the counterparty's expected terms hash on
 `settle(tradeId, expectedTermsHash)`, refuses to settle with a frozen party, and adds
-`forceCancel(tradeId, to, legalBasis)` for legal-order releases. The ABI is not compatible with the
-old deployment, so integrators must switch clients at the same time.
+`forceCancel(tradeId, to, legalBasis)` for releases to the trade's own parties, plus a separate
+`LEGAL_ORDER_ROLE` path (`proposeForceCancel`, two-day timelock, `executeForceCancel`) for any other
+destination named in a legal order; grant that role to a different key or multisig than the operator
+wallet. The ABI is not compatible with the old deployment, so integrators must switch clients at the
+same time.
 
 1. Deploy the new contract (`script/DeployExampleDapps.s.sol`) and announce its address.
 2. Update `registerwerk.contracts.dvp-settlement.<chain>`, the `erc7573-dvp` payment rail's chain

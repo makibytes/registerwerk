@@ -200,12 +200,20 @@ export class ForceGrantsComponent implements OnInit {
   submitCreate(): void {
     this.dialog.closeAll();
 
+    const request = {
+      entityId: this.form.entityId,
+      walletAddress: this.form.walletAddress,
+      chainConfigId: this.form.chainConfigId || undefined,
+      legalBasis: this.form.legalBasis,
+      expiresAt: this.form.expiresAt || undefined,
+    };
     const ref = this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Grant ASSET_TOKEN_ADMIN on asset ${this.assetId} to entity ${this.form.entityId}`,
         action: 'ASSET_TOKEN_ADMIN_GRANT',
         target: `POST /api/v1/assets/${this.assetId}/token-admin-grants`,
+        targetBody: request,
       },
       width: '500px',
       disableClose: true,
@@ -214,13 +222,7 @@ export class ForceGrantsComponent implements OnInit {
     ref.afterClosed().subscribe((result) => {
       if (!result) return;
 
-      this.service.grantForAsset(this.assetId, {
-        entityId: this.form.entityId,
-        walletAddress: this.form.walletAddress,
-        chainConfigId: this.form.chainConfigId || undefined,
-        legalBasis: this.form.legalBasis,
-        expiresAt: this.form.expiresAt || undefined,
-      }, result.stepUpToken, result.dualControlToken!).subscribe({
+      this.service.grantForAsset(this.assetId, request, result.stepUpToken, result.dualControlToken!).subscribe({
         next: (grant) => {
           this.grants = [grant, ...this.grants];
           this.cdr.markForCheck();
@@ -232,12 +234,17 @@ export class ForceGrantsComponent implements OnInit {
   }
 
   revoke(grant: TokenAdminGrant): void {
+    // The reason is part of what the approver binds, so it is asked for before the step-up dialog.
+    const reason = prompt('Revocation reason (required for audit trail):');
+    if (!reason) return;
+
     const ref = this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Revoke ASSET_TOKEN_ADMIN grant ${grant.id}`,
         action: 'ASSET_TOKEN_ADMIN_REVOKE',
         target: `POST /api/v1/assets/${this.assetId}/token-admin-grants/${grant.id}/revoke`,
+        targetBody: { reason },
       },
       width: '500px',
       disableClose: true,
@@ -245,9 +252,6 @@ export class ForceGrantsComponent implements OnInit {
 
     ref.afterClosed().subscribe((result) => {
       if (!result) return;
-
-      const reason = prompt('Revocation reason (required for audit trail):');
-      if (!reason) return;
 
       this.revoking.add(grant.id);
       this.service.revokeForAsset(this.assetId, grant.id, reason, result.stepUpToken, result.dualControlToken!).subscribe({

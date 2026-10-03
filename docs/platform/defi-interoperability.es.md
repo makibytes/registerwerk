@@ -235,6 +235,25 @@ abajo.
   prestatario (`surplusOf`) y se paga mediante `claimLiquidationSurplus()`; no es liquidez del
   pool. La página de cliente **Mis préstamos** muestra el excedente reclamable con una acción de
   reclamación.
+- **Precio de liquidación: bonificación sobre la deuda cerrada, tope de repago estricto.** La
+  bonificación se cobra sobre la deuda realmente cerrada. Mientras las unidades vendidas valgan
+  menos que la deuda, el liquidador paga su valor a la marca menos la bonificación; cuando la
+  unidad (o las unidades) valen más que toda la deuda, se cierra la deuda entera y el liquidador
+  paga el valor de las unidades menos `bonus × deuda`, y el prestatario recibe el resto como
+  `surplusOf`. `maxRepayAmount` es un tope estricto de lo que se cobra al liquidador: si el
+  redondeo hacia arriba lo superase se vende una unidad menos, y si incluso una unidad cuesta más,
+  `liquidate` revierte con `LiquidationExceedsMaxRepay(required, maxRepayAmount)` indicando el
+  importe a autorizar. Los bots y las interfaces deben pasar `maxRepayAmount ≥ required`:
+  `liquidate(borrower, debt)` ya no cierra una posición en una sola llamada cuando la unidad final
+  vale más que la deuda.
+- **Ventana de oráculo deslizante, sin reanclaje.** `RegisterwerkNavOracle` ya no reancla su
+  ventana de desviación a la marca actual cuando la ventana transcurre, lo que permitía a una
+  clave de feed encadenar un movimiento a través del límite (por ejemplo 100 → 80 justo antes y 80
+  → 64 justo después). Conserva además los extremos de la ventana anterior
+  (`carriedBandOf(asset)`) y comprueba cada push frente a ambas, de modo que dos marcas ordinarias
+  separadas como máximo una ventana permanecen dentro de `maxDeviationBps`. Una marca se recuerda
+  entre una y dos ventanas, nunca indefinidamente, por lo que una deriva lenta a lo largo de
+  muchas ventanas sigue aceptándose; `pushPriceWithOverride` borra la banda arrastrada.
 - **Administración vinculada a la instancia.** Cada mercado guarda `operatorOrg` (la org de la
   wallet que llamó a `EwpgRepoMarketFactory.createMarket`) y una `treasury` inmutable.
   `setReserveFactor`, `setBorrowPaused` y `withdrawReserves` requieren `repo-markets.configure`;

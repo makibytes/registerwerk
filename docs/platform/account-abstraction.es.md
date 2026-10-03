@@ -138,6 +138,16 @@ configuran por cadena en `registerwerk.paymaster.addresses` (`PAYMASTER_<CHAIN>_
   `unlockStake()`: sin stake, los bundlers públicos descartan el paymaster, por lo que otro titular
   de `paymaster.configure` no puede iniciar el unstake.
 
+!!! note "Org operadora y permisos de patrocinador"
+    El paymaster se construye con `(oracle, entryPoint, operatorOrg)`. `paymaster.configure` (el
+    interruptor de apagado, el tope por org, el disparo de `withdrawPolicy` y la gestión del stake
+    descritos arriba) solo funciona para carteras de esa `operatorOrg`; una org ajena con el mismo
+    permiso no puede administrar una política ni el stake. `registerPolicy` y `addStake` están
+    limitados igual: `registerPolicy` exige el permiso `paymaster.register-policy` a través de la
+    org del llamante, que el operador concede a cada patrocinador (su propia org y las de los
+    emisores), de modo que una cartera no aprobada por el operador no puede registrar ni ocupar un
+    id de política publicado.
+
 **Interfaz del operador.** La página de detalle de activo de `frontend-operator` tiene una pestaña
 **Gas Sponsorship** por despliegue (definir/eliminar una excepción propia del despliegue). La
 página de detalle de cliente tiene una para emisores (definir el valor por defecto del emisor que
@@ -182,17 +192,18 @@ Despliegue:
    inseguro: cualquier miembro podía gastar cualquier política, el precio del gas no tenía límite y
    un bundle podía gastar de más. **Deje de financiarlo ya.** No tiene función de retirada, así que
    ninguna opción de financiación apunta ya a él.
-2. Despliegue el nuevo `EwpgPaymaster`. Llame a `addStake` desde el monedero del operador y
+2. Despliegue el nuevo `EwpgPaymaster` con su `operatorOrg` (`PAYMASTER_OPERATOR_ORG` en `DeployLiquidityDapps.s.sol`, por defecto la org del desplegador). Llame a `addStake` desde el monedero del operador y
    configure `registerwerk.paymaster.addresses.<chain>` y la clave del firmante de vales.
-3. Cada financiador llama a `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` con el
+3. El operador concede `paymaster.register-policy` a cada org patrocinadora (la suya y las de los emisores) y `paymaster.configure` solo a la org operadora. Cada financiador llama entonces a `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` con el
    presupuesto.
 4. Registre por cadena el ETH que quede en el paymaster antiguo (`EntryPoint.balanceOf(old)`) como
    **saldo varado**. Solo puede consumirse mediante operaciones patrocinadas, lo que no debe hacerse
    dados los defectos anteriores.
 
-Limitación conocida: `registerPolicy` asigna un id de política al primero que lo registra. Quien se
-adelante al registro (front-running) puede bloquear ese id, aunque no puede tomar fondos. El
-financiador registra entonces la política con un nuevo id de fila.
+Limitación conocida: `registerPolicy` asigna un id de política al primer patrocinador aprobado que
+lo registra. Un patrocinador que se adelante al registro (front-running) puede bloquear ese id,
+aunque no puede tomar fondos; el financiador registra entonces la política con un nuevo id de
+fila. Las carteras sin `paymaster.register-policy` ya no pueden hacerlo.
 
 ## `EwpgPasskeyAccount` — firmantes con clave de acceso para minoristas { #ewpgpasskeyaccount-passkey-signers-for-retail }
 

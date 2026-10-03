@@ -99,4 +99,19 @@ describe('LoginComponent', () => {
         expect(fixture.componentInstance.loading).toBe(false);
         expect(router.navigate).not.toHaveBeenCalled();
     });
+
+    it('submit() tells the user how long to wait when the login throttle answers 429', () => {
+        authServiceSpy.loginWithCredentials.mockReturnValue(throwError(() => ({
+            status: 429, headers: { get: (n: string) => (n === 'Retry-After' ? '12' : null) },
+            error: { message: 'Too many login attempts. Try again later.' },
+        })));
+        const fixture = createComponent();
+        const snack = vi.spyOn(fixture.componentInstance['snackBar'], 'open');
+        fixture.componentInstance.form.setValue({ email: 'admin@example.com', password: 'wrong' });
+
+        fixture.componentInstance.submit();
+
+        expect(snack).toHaveBeenCalledWith('Too many sign-in attempts. Please try again in 12 seconds.', 'Dismiss', { duration: 5000 });
+        expect(fixture.componentInstance.loading).toBe(false);
+    });
 });

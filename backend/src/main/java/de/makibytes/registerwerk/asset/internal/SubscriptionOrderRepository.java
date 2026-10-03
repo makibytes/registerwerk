@@ -32,24 +32,48 @@ public interface SubscriptionOrderRepository extends JpaRepository<SubscriptionO
         where o.assetId = :assetId and o.status in (
             de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.ALLOCATED,
             de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.PAYMENT_CONFIRMED,
+            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.SETTLEMENT_PENDING,
+            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.SETTLEMENT_FAILED,
             de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.SETTLED,
             de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.CONFIRMED)
         """)
     BigDecimal sumAllocated(@Param("assetId") UUID assetId);
 
     /**
-     * The investor's allocations that are not (yet) in the register: ALLOCATED and PAYMENT_CONFIRMED.
-     * Added to the active holding for the holding-cap check, so parallel allocations cannot each pass
-     * the cap on their own (T3-08).
+     * The investor's allocations that are not (yet) in the register: ALLOCATED, PAYMENT_CONFIRMED and - Wave 0b C7 -
+     * SETTLEMENT_PENDING / SETTLEMENT_FAILED (the mint is in flight or must be retried: the units are not in the
+     * holding yet but are spoken for). Added to the active holding for the holding-cap check, so parallel
+     * allocations cannot each pass the cap on their own (T3-08).
      */
     @Query("""
         select coalesce(sum(o.allocatedAmount), 0) from SubscriptionOrder o
         where o.assetId = :assetId and o.investorEntityId = :investorEntityId and o.status in (
             de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.ALLOCATED,
-            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.PAYMENT_CONFIRMED)
+            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.PAYMENT_CONFIRMED,
+            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.SETTLEMENT_PENDING,
+            de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.SETTLEMENT_FAILED)
         """)
     BigDecimal sumOpenAllocatedForInvestor(@Param("assetId") UUID assetId,
                                            @Param("investorEntityId") UUID investorEntityId);
+
+    /**
+     * C7: mints this investor has in flight on the asset (SETTLEMENT_PENDING) other than {@code excludeOrderId}.
+     * Not in the active holding yet, so the settle-time holding-cap check must add them.
+     */
+    @Query("""
+        select coalesce(sum(o.allocatedAmount), 0) from SubscriptionOrder o
+        where o.assetId = :assetId and o.investorEntityId = :investorEntityId and o.id <> :excludeOrderId
+          and o.status = de.makibytes.registerwerk.asset.internal.SubscriptionOrder.Status.SETTLEMENT_PENDING
+        """)
+    BigDecimal sumPendingSettlementForInvestor(@Param("assetId") UUID assetId,
+                                               @Param("investorEntityId") UUID investorEntityId,
+                                               @Param("excludeOrderId") UUID excludeOrderId);
+
+    List<SubscriptionOrder> findByStatusOrderBySubmittedAtAsc(SubscriptionOrder.Status status);
+
+    java.util.Optional<SubscriptionOrder> findBySettlementTxId(UUID settlementTxId);
+
+    long countByStatus(SubscriptionOrder.Status status);
 
     @Query("""
         select o from SubscriptionOrder o

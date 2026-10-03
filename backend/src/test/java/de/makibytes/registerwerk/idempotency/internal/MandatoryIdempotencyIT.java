@@ -73,10 +73,10 @@ class MandatoryIdempotencyIT {
         de.makibytes.registerwerk.auth.api.AppUser approver = new de.makibytes.registerwerk.auth.api.AppUser();
         approver.setEmail("approver-" + UUID.randomUUID() + "@test.local");
         UUID approverId = appUserRepository.save(approver).getId();
-        h.set("X-Dual-Control-Token",
-                TestJwt.dualControl(SECRET, approverId, "Payment rail creation", "POST", "/api/v1/payment-rails", "REGISTRY_ADMIN"));
         String body = "{\"code\":\"" + code + "\",\"displayName\":\"Rail\",\"railType\":\"OFFCHAIN_SEPA\",\"currency\":\"EUR\","
                 + "\"emtFlag\":false,\"redemptionAtPar\":false}";
+        h.set("X-Dual-Control-Token", TestJwt.dualControlWithBody(SECRET, approverId, "Payment rail creation", "POST",
+                "/api/v1/payment-rails", body, "REGISTRY_ADMIN"));
         return rest.exchange("http://localhost:" + port + "/api/v1/payment-rails", HttpMethod.POST,
                 new HttpEntity<>(body, h), String.class);
     }

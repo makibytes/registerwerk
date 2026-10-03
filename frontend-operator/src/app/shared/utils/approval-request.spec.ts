@@ -27,4 +27,40 @@ describe('approval request block', () => {
     expect(lines[1].value).toBe('POST');
     expect(lines[2].value).toBe('/api/v1/assets/a1/deployments/d1/issuer/mint');
   });
+
+  // C2: what the approver reviews is what the backend binds (DualControlTarget.canonicalJson).
+  describe('canonical request (C2)', () => {
+    it('shows the body exactly as it is bound: keys sorted, no whitespace, plain decimals', () => {
+      const lines = describeApprovalRequest({
+        action: 'KYC_APPROVE', target: 'POST /api/v1/entities/e1/kyc/approve',
+        targetBody: { overrideNote: 'ok', expiresAt: '2030-01-01', n: 1.50 },
+      });
+      expect(lines.find(l => l.label === 'Body')?.value).toBe('{"expiresAt":"2030-01-01","n":1.5,"overrideNote":"ok"}');
+    });
+
+    it('refuses a pasted block with a repeated key: two parsers would disagree on the value', () => {
+      const dupBody = parseApprovalRequestBlock('{"action":"A","target":"POST /api/v1/x","targetBody":{"amount":"1","amount":"999"}}');
+      expect(dupBody.error).toMatch(/repeated|duplicate/i);
+      const dupTop = parseApprovalRequestBlock('{"action":"A","action":"B","target":"POST /api/v1/x"}');
+      expect(dupTop.error).toMatch(/repeated|duplicate/i);
+    });
+
+    it('refuses a number the browser cannot represent exactly - amounts travel as strings', () => {
+      const lossy = parseApprovalRequestBlock('{"action":"A","target":"POST /api/v1/x","targetBody":{"amount":12345678901234567890}}');
+      expect(lossy.error).toMatch(/exact|string/i);
+      const fine = parseApprovalRequestBlock('{"action":"A","target":"POST /api/v1/x","targetBody":{"amount":"12345678901234567890","n":100.50}}');
+      expect(fine.request?.targetBody).toEqual({ amount: '12345678901234567890', n: 100.5 });
+    });
+
+    it('refuses a target whose query repeats a parameter (the backend cannot bind it)', () => {
+      expect(parseApprovalRequestBlock('{"action":"A","target":"POST /api/v1/x?a=1&a=2"}').error).toMatch(/repeated|twice|duplicate/i);
+      expect(parseApprovalRequestBlock('{"action":"A","target":"POST /api/v1/x?a=1&b=2"}').request).toBeTruthy();
+    });
+
+    it('the copied block carries the body in canonical form, so the approver pastes what the backend binds', () => {
+      const block = buildApprovalRequestBlock({ action: 'A', target: 'POST /api/v1/x', targetBody: { b: 1, a: 'x' } });
+      expect(block).toContain('"targetBody": {"a":"x","b":1}');
+      expect(parseApprovalRequestBlock(block).request?.targetBody).toEqual({ a: 'x', b: 1 });
+    });
+  });
 });

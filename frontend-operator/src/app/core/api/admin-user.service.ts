@@ -169,7 +169,10 @@ export class AdminUserService {
       reinstatementReason ? { reinstatementReason } : {}, { headers: userAdminHeaders(tokens) });
   }
 
-  /** Step-up; `reason` is mandatory in Entra mode and always recorded. */
+  /**
+   * Step-up; `reason` is mandatory in Entra mode and always recorded. Disabling an operator/gated account also needs
+   * an approver (`OPERATOR_USER_DISABLE`) outside the bootstrap phase.
+   */
   disableUser(userId: string, tokens: UserAdminTokens, reason?: string): Observable<OperatorUser> {
     return this.http.post<OperatorUser>(`${this.base}/users/${userId}/disable`,
       reason ? { reason } : {}, { headers: userAdminHeaders(tokens) });

@@ -145,6 +145,19 @@ export const repoMarketAbi = [
     inputs: [],
     outputs: [{ type: 'uint256' }],
   },
+  /**
+   * `liquidate(borrower, maxRepayAmount)` is a hard cap: when even the smallest whole-unit sale would
+   * cost more than `maxRepayAmount`, the call reverts naming the amount (loan-token base units) the
+   * liquidator must authorise at least. Declared so viem decodes it; WalletService words it.
+   */
+  {
+    type: 'error',
+    name: 'LiquidationExceedsMaxRepay',
+    inputs: [
+      { name: 'required', type: 'uint256' },
+      { name: 'maxRepayAmount', type: 'uint256' },
+    ],
+  },
   {
     type: 'function',
     name: 'lltvBps',

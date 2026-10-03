@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.asset.events.AssetIssuedEvent;
 import de.makibytes.registerwerk.asset.events.AssetSuspendedEvent;
 import de.makibytes.registerwerk.asset.events.AssetReactivatedEvent;
 import de.makibytes.registerwerk.asset.events.AssetRedeemedEvent;
+import de.makibytes.registerwerk.asset.events.AssetRedemptionCompletedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
@@ -20,6 +21,8 @@ import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.deployment.api.HolderKind;
 import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
 import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
+import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.RegisterUnits;
 import de.makibytes.registerwerk.deployment.api.BondStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +39,7 @@ import java.util.UUID;
  * <pre>
  *   DRAFT → PENDING_APPROVAL → APPROVED → ISSUED ⇄ SUSPENDED
  *                           ↘ DRAFT (rejected)  ↓      ↓
- *                                             REDEEMED ┘
+ *                                   REDEMPTION_PENDING ┘ → REDEEMED (once every burn is final, Wave 0b C7)
  * </pre>
  */
 @Service
@@ -51,6 +54,7 @@ public class AssetLifecycleService {
     private final AssetHolderRepository holderRepository;
     private final RedemptionReadinessPort redemptionReadiness;
     private final org.springframework.beans.factory.ObjectProvider<de.makibytes.registerwerk.asset.api.RedemptionBlocker> redemptionBlockers;
+    private final AssetDeploymentRepository deploymentRepository;
 
     public AssetLifecycleService(
             AssetRepository assetRepository,
@@ -58,13 +62,15 @@ public class AssetLifecycleService {
             AssetBondTermsRepository bondTermsRepository,
             AssetHolderRepository holderRepository,
             RedemptionReadinessPort redemptionReadiness,
-            org.springframework.beans.factory.ObjectProvider<de.makibytes.registerwerk.asset.api.RedemptionBlocker> redemptionBlockers) {
+            org.springframework.beans.factory.ObjectProvider<de.makibytes.registerwerk.asset.api.RedemptionBlocker> redemptionBlockers,
+            AssetDeploymentRepository deploymentRepository) {
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
         this.bondTermsRepository = bondTermsRepository;
         this.holderRepository = holderRepository;
         this.redemptionReadiness = redemptionReadiness;
         this.redemptionBlockers = redemptionBlockers;
+        this.deploymentRepository = deploymentRepository;
     }
 
     /** Submits a DRAFT asset for approval → PENDING_APPROVAL. */
@@ -140,10 +146,19 @@ public class AssetLifecycleService {
     }
 
     /**
-     * Redeems an ISSUED or SUSPENDED asset → REDEEMED. Publishes {@link AssetRedeemedEvent},
-     * which {@link AssetRedemptionListener} uses to dispatch the actual on-chain burn/retire for
-     * standards it can automate — this method itself only owns the DB status transition and,
-     * for bonds, reconciling {@link BondStatus}.
+     * Starts the redemption of an ISSUED or SUSPENDED asset → {@code REDEMPTION_PENDING}. Publishes
+     * {@link AssetRedeemedEvent}, which {@link AssetRedemptionListener} uses to dispatch the actual on-chain
+     * burn/retire for standards it can automate; this method itself only owns the DB status transition and, for
+     * bonds, reconciling {@link BondStatus}.
+     *
+     * <p>Wave 0b C7: the asset is REDEEMED only once every burn the redemption dispatched is final (final receipt plus
+     * the indexed BURN transfer) - see {@link #completeRedemption}. Burns are submitted, not done, when the event is
+     * handled; flipping the asset on submission left a REDEEMED asset with live tokens whenever a burn reverted.
+     * Calling this again while the asset is REDEMPTION_PENDING resumes it (same audited, step-up + 4-eyes endpoint):
+     * burns that failed are re-dispatched, burns already submitted or confirmed never are.
+     *
+     * <p>C5: refused (409) on a deployment whose token does not count in whole units - the burn amounts are the
+     * register's raw base units.
      *
      * <p>T3-01: redemption burns every holder, so it must never run ahead of the payout. The
      * endpoint is REGISTRY_ADMIN + step-up + 4-eyes; this method refuses (409) while
@@ -161,13 +176,15 @@ public class AssetLifecycleService {
     public void redeem(UUID assetId, String legalBasis, String reference, UUID actorId, UUID dualControlApproverId) {
         Asset asset = assetRepository.findById(assetId)
             .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
-        if (asset.getStatus() != AssetStatus.ISSUED && asset.getStatus() != AssetStatus.SUSPENDED) {
+        boolean resume = asset.getStatus() == AssetStatus.REDEMPTION_PENDING;
+        if (!resume && asset.getStatus() != AssetStatus.ISSUED && asset.getStatus() != AssetStatus.SUSPENDED) {
             throw new InvalidStateTransitionException("Asset",
                 asset.getStatus().name(), AssetStatus.REDEEMED.name());
         }
         if (legalBasis == null || legalBasis.isBlank() || reference == null || reference.isBlank()) {
             throw new IllegalArgumentException("Redemption requires a legal basis and a reference.");
         }
+        RegisterUnits.requireWholeUnits(deploymentRepository, assetId, "Asset redemption");
         if (redemptionReadiness.hasOpenCorporateAction(assetId)) {
             throw new IllegalStateException("Asset " + assetId + " has a corporate action in progress — "
                     + "settle or cancel it before redeeming.");
@@ -200,7 +217,7 @@ public class AssetLifecycleService {
             }
             retirementActionId = retirement.get().corporateActionId();
         }
-        asset.setStatus(AssetStatus.REDEEMED);
+        asset.setStatus(AssetStatus.REDEMPTION_PENDING);
         assetRepository.save(asset);
 
         // Asset.status and AssetBondTerms.bondStatus were two independent fields with no
@@ -217,7 +234,27 @@ public class AssetLifecycleService {
 
         eventPublisher.publishEvent(new AssetRedeemedEvent(assetId, actorId, "REGISTRY_ADMIN",
                 legalBasis.trim(), reference.trim(), dualControlApproverId, retirementActionId));
-        log.info("Asset redeemed: id={}", assetId);
+        log.info("Asset redemption {}: id={} (REDEMPTION_PENDING until every burn is final)",
+                resume ? "resumed" : "started", assetId);
+    }
+
+    /**
+     * Wave 0b C7: REDEMPTION_PENDING → REDEEMED, called by the redemption listener / burn finalizer when there is
+     * nothing left to burn or every burn is confirmed. Idempotent: anything but REDEMPTION_PENDING is left alone.
+     *
+     * @return true when this call completed the redemption
+     */
+    @CacheEvict(value = "assets", key = "#assetId")
+    public boolean completeRedemption(UUID assetId, int burns) {
+        Asset asset = assetRepository.findById(assetId).orElse(null);
+        if (asset == null || asset.getStatus() != AssetStatus.REDEMPTION_PENDING) {
+            return false;
+        }
+        asset.setStatus(AssetStatus.REDEEMED);
+        assetRepository.save(asset);
+        eventPublisher.publishEvent(new AssetRedemptionCompletedEvent(assetId, burns));
+        log.info("Asset redeemed: id={} (all {} burn(s) final)", assetId, burns);
+        return true;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

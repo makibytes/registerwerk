@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ContractFunctionExecutionError, ContractFunctionRevertedError, encodeErrorResult } from 'viem';
 import type { Address, Hash } from 'viem';
+import { repoMarketAbi } from './abi/repo-market.abi';
 import { WalletService } from './wallet.service';
 
 const OWNER = '0x1111111111111111111111111111111111111111' as Address;
@@ -129,5 +131,46 @@ describe('WalletService chain/account tracking', () => {
     const action = async () => { await service.ensureChain(137, 'Polygon'); await service.writeContract({ address: TOKEN, abi: [], functionName: 'approve' }); };
     await expect(action()).rejects.toThrow('Switch your wallet');
     expect(write).not.toHaveBeenCalled();
+  });
+});
+
+describe('WalletService.writeContract revert wording', () => {
+  const MARKET = '0x4444444444444444444444444444444444444444' as Address;
+
+  /** A real viem revert for `liquidate`, decoded against the shipped ABI (as simulateContract throws it). */
+  function liquidateRevert(required: bigint, max: bigint, abi: readonly unknown[] = repoMarketAbi): Error {
+    const data = encodeErrorResult({ abi: repoMarketAbi, errorName: 'LiquidationExceedsMaxRepay', args: [required, max] });
+    const cause = new ContractFunctionRevertedError({ abi: abi as never, data, functionName: 'liquidate' });
+    return new ContractFunctionExecutionError(cause, {
+      abi: abi as never, functionName: 'liquidate', args: [OWNER, max], contractAddress: MARKET,
+    });
+  }
+
+  function serviceFailingWith(err: Error): WalletService {
+    const service = new WalletService();
+    (service as unknown as { _address: { set(v: Address): void } })._address.set(OWNER);
+    (service as unknown as { walletClient: unknown }).walletClient = { writeContract: vi.fn() };
+    (service as unknown as { publicClient: unknown }).publicClient = { simulateContract: vi.fn().mockRejectedValue(err) };
+    return service;
+  }
+
+  it('explains LiquidationExceedsMaxRepay with the amount the liquidator must authorise', async () => {
+    const service = serviceFailingWith(liquidateRevert(81_500_000_000n, 35_000_000_000n));
+    await expect(
+      service.writeContract({ address: MARKET, abi: repoMarketAbi, functionName: 'liquidate', args: [OWNER, 35_000_000_000n] }),
+    ).rejects.toThrow(/at least 81500000000 .*maximum repay amount of 35000000000 .*Raise the maximum to at least 81500000000/);
+  });
+
+  it('leaves other reverts on viem\'s own message', async () => {
+    const service = serviceFailingWith(new Error('execution reverted: nope'));
+    await expect(
+      service.writeContract({ address: MARKET, abi: repoMarketAbi, functionName: 'liquidate', args: [OWNER, 1n] }),
+    ).rejects.toThrow('execution reverted: nope');
+  });
+
+  it('the shipped market ABI declares the error (viem decodes it by name)', () => {
+    const decoded = liquidateRevert(7n, 3n).cause as ContractFunctionRevertedError;
+    expect(decoded.data?.errorName).toBe('LiquidationExceedsMaxRepay');
+    expect(decoded.data?.args).toEqual([7n, 3n]);
   });
 });

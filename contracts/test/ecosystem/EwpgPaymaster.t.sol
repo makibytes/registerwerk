@@ -43,6 +43,7 @@ contract EwpgPaymasterTest is Test {
     EcosystemTrustedIssuersRegistry tir;
     PermissionOracle oracle;
     MockOnchainId orgId;
+    MockOnchainId issuerOrgId;
     MockClaimIssuer kycIssuer;
     EntryPoint ep;
     EwpgPaymaster pm;
@@ -71,14 +72,14 @@ contract EwpgPaymasterTest is Test {
         tir = new EcosystemTrustedIssuersRegistry(operator);
         oracle = new PermissionOracle(operator, orgRegistry, permissions, tir);
         ep = new EntryPoint();
-        pm = new EwpgPaymaster(oracle, OzIEntryPoint(address(ep)));
+        orgId = new MockOnchainId(); // the paymaster's operator org
+        pm = new EwpgPaymaster(oracle, OzIEntryPoint(address(ep)), address(orgId));
 
         acctA = new AcceptAllAccount();
         acctB = new AcceptAllAccount();
         mallory = new AcceptAllAccount();
         voucherSigner = vm.addr(SIGNER_PK);
 
-        orgId = new MockOnchainId();
         kycIssuer = new MockClaimIssuer();
         vm.startPrank(operator);
         orgRegistry.registerOrg(address(orgId), 276);
@@ -89,6 +90,11 @@ contract EwpgPaymasterTest is Test {
         orgRegistry.addMember(address(orgId), address(acctB), roles, "");
         orgRegistry.addMember(address(orgId), address(mallory), roles, "");
         permissions.grantToOrg(address(orgId), pm.CONFIGURE());
+        // The issuer funds its policy: an approved sponsor (register-policy) of its own org.
+        issuerOrgId = new MockOnchainId();
+        orgRegistry.registerOrg(address(issuerOrgId), 276);
+        orgRegistry.addMember(address(issuerOrgId), issuerTreasury, roles, "");
+        permissions.grantToOrg(address(issuerOrgId), pm.REGISTER_POLICY());
         uint256[] memory topics = new uint256[](1);
         topics[0] = pm.TOPIC_KYC();
         tir.addTrustedIssuer(address(kycIssuer), topics);
@@ -375,7 +381,7 @@ contract EwpgPaymasterTest is Test {
     }
 
     function test_registerPolicy_guards() public {
-        vm.prank(stranger);
+        vm.startPrank(issuerTreasury);
         vm.expectRevert(abi.encodeWithSelector(EwpgPaymaster.PolicyAlreadyRegistered.selector, POLICY));
         pm.registerPolicy(POLICY, stranger, 1 ether);
 
@@ -383,6 +389,62 @@ contract EwpgPaymasterTest is Test {
         pm.registerPolicy(keccak256("p2"), address(0), 1 ether);
         vm.expectRevert(EwpgPaymaster.ZeroOrgCap.selector);
         pm.registerPolicy(keccak256("p2"), voucherSigner, 0);
+        vm.stopPrank();
+    }
+
+    /// @notice H12: registering needs `paymaster.register-policy` via the caller's org — an
+    ///         unbound wallet, and a member of an org without the grant, are both refused.
+    function test_registerPolicy_requiresRegisterPolicyPermission() public {
+        bytes32 id = keccak256("p3");
+        bytes32 permission = pm.REGISTER_POLICY();
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, stranger, permission));
+        pm.registerPolicy(id, voucherSigner, 1 ether);
+
+        // The operator org holds only paymaster.configure — not the right to open sponsor policies.
+        vm.prank(configurer);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, configurer, permission));
+        pm.registerPolicy(id, voucherSigner, 1 ether);
+
+        vm.prank(issuerTreasury);
+        pm.registerPolicy(id, voucherSigner, 1 ether);
+        assertEq(pm.funder(id), issuerTreasury);
+    }
+
+    /// @notice H12: the `paymaster.configure` safety valve is bound to the operator org, exactly like
+    ///         `RegisterwerkGated.requiresOrgPermission` on every other instance-bound dApp.
+    function test_foreignOrgConfigureHolder_isRefusedWithTheOperatingOrgError() public {
+        address foreign = _foreignConfigurer();
+        vm.deal(foreign, 1 ether);
+
+        vm.startPrank(foreign);
+        vm.expectRevert(abi.encodeWithSelector(EwpgPaymaster.NotPolicyAdmin.selector, POLICY, foreign));
+        pm.setPolicyActive(POLICY, false);
+        vm.expectRevert(abi.encodeWithSelector(EwpgPaymaster.NotPolicyAdmin.selector, POLICY, foreign));
+        pm.setOrgBudgetCap(POLICY, 1);
+        vm.expectRevert(abi.encodeWithSelector(EwpgPaymaster.NotPolicyAdmin.selector, POLICY, foreign));
+        pm.withdrawPolicy(POLICY, 1 ether);
+        vm.expectRevert(
+            abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, foreign, address(orgId))
+        );
+        pm.addStake{value: 1 ether}(1 days);
+        vm.stopPrank();
+    }
+
+    /// @notice The stake funder's de-stake path is also org-bound for the safety-valve caller.
+    function test_withdrawStake_foreignOrgConfigureHolderCannotRedirectOrWithdraw() public {
+        vm.deal(configurer, 1 ether);
+        vm.prank(configurer);
+        pm.addStake{value: 1 ether}(1 days);
+        vm.prank(configurer);
+        pm.unlockStake();
+        vm.warp(block.timestamp + 1 days + 1);
+
+        address foreign = _foreignConfigurer();
+        vm.prank(foreign);
+        vm.expectRevert(abi.encodeWithSelector(EwpgPaymaster.NotStakeAdmin.selector, foreign));
+        pm.withdrawStake();
     }
 
     function test_addStake_makesPaymasterStaked_andWithdrawPaysStakeFunder() public {
@@ -429,8 +491,90 @@ contract EwpgPaymasterTest is Test {
         vm.deal(stranger, 1 ether);
         bytes32 configure = pm.CONFIGURE();
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, stranger, configure));
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.WrongOperatingOrg.selector, stranger, address(orgId)));
         pm.addStake{value: 1 ether}(1 days);
+
+        // A member of the operator org without the grant is refused on the permission itself.
+        address bareMember = address(0xBA5E);
+        vm.startPrank(operator);
+        bytes32[] memory roles = new bytes32[](1);
+        roles[0] = keccak256("TRADER");
+        MockOnchainId bareOrg = new MockOnchainId();
+        orgRegistry.registerOrg(address(bareOrg), 276);
+        orgRegistry.addMember(address(bareOrg), bareMember, roles, "");
+        vm.stopPrank();
+        EwpgPaymaster bound = new EwpgPaymaster(oracle, OzIEntryPoint(address(ep)), address(bareOrg));
+        vm.deal(bareMember, 1 ether);
+        vm.prank(bareMember);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkGated.PermissionDenied.selector, bareMember, configure));
+        bound.addStake{value: 1 ether}(1 days);
+    }
+
+    // ── H12: org-bound admin + no policy-id squatting + KYC claim check ─────────────────────────
+
+    /// @dev A wallet in a *different* org that also holds the org-wide `paymaster.configure` grant —
+    ///      e.g. any issuer the operator once granted it to. It must not reach this paymaster's
+    ///      operator-only functions.
+    function _foreignConfigurer() internal returns (address wallet) {
+        wallet = address(0xF0E16);
+        MockOnchainId foreignOrg = new MockOnchainId();
+        vm.startPrank(operator);
+        orgRegistry.registerOrg(address(foreignOrg), 276);
+        bytes32[] memory roles = new bytes32[](1);
+        roles[0] = keccak256("TRADER");
+        orgRegistry.addMember(address(foreignOrg), wallet, roles, "");
+        permissions.grantToOrg(address(foreignOrg), pm.CONFIGURE());
+        vm.stopPrank();
+    }
+
+    /// @notice H12 (red-first): the `paymaster.configure` safety valve was unbound — a holder in any
+    ///         org could deactivate another sponsor's policy, change its cap or trigger its refund.
+    function test_foreignOrgConfigureHolder_cannotAdministerAPolicy() public {
+        address foreign = _foreignConfigurer();
+
+        vm.startPrank(foreign);
+        try pm.setPolicyActive(POLICY, false) {} catch {}
+        try pm.setOrgBudgetCap(POLICY, 1) {} catch {}
+        try pm.withdrawPolicy(POLICY, 1 ether) {} catch {}
+        vm.stopPrank();
+
+        assertTrue(pm.policyActive(POLICY), "a foreign org's configure holder deactivated the policy");
+        assertEq(pm.orgBudgetCap(POLICY), 5 ether, "a foreign org's configure holder changed the cap");
+        assertEq(pm.policyBalance(POLICY), 10 ether, "a foreign org's configure holder withdrew budget");
+    }
+
+    function test_foreignOrgConfigureHolder_cannotStakeOrUnstake() public {
+        address foreign = _foreignConfigurer();
+        vm.deal(foreign, 1 ether);
+        vm.prank(foreign);
+        try pm.addStake{value: 1 ether}(1 days) {} catch {}
+        assertEq(pm.stakeFunder(), address(0), "a foreign org's configure holder became the stake funder");
+    }
+
+    /// @notice H12 (red-first): anyone could register an unregistered policy id — including one whose
+    ///         id the real funder had already published (the backend shows `keccak256(policyRowId)`),
+    ///         front-running it with their own signer and locking the funder out.
+    function test_registerPolicy_cannotBeSquattedByAWalletWithoutThePermission() public {
+        bytes32 victimPolicy = keccak256("policy-row-victim");
+        address squatter = address(0x5A7);
+        vm.deal(squatter, 1 ether);
+
+        vm.prank(squatter);
+        try pm.registerPolicy(victimPolicy, squatter, 1 ether) {} catch {}
+
+        assertEq(pm.funder(victimPolicy), address(0), "an unpermissioned wallet squatted the policy id");
+    }
+
+    /// @notice Restores `revertsWithoutKycClaim`, removed with the pre-voucher paymaster in phase 2: a
+    ///         member whose org no longer carries a valid KYC claim is not sponsored.
+    function test_org_withoutValidKycClaim_isNotSponsored() public {
+        kycIssuer.setValid(false);
+        PackedUserOperation memory op = _signed(_op(address(acctA), 0, 100_000, 2 gwei));
+        vm.expectRevert(_aa33(abi.encodeWithSelector(EwpgPaymaster.NotVerifiedMember.selector, address(acctA))));
+        _handle(op);
+
+        kycIssuer.setValid(true);
+        _handle(_signed(_op(address(acctA), 0, 100_000, 2 gwei))); // sponsored again once the claim is valid
     }
 
     /// Cross-language vector: `GasSponsorshipVoucherDigestTest` (backend) pins the same value,

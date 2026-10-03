@@ -39,9 +39,12 @@ Das Backend stellt KYC-/AML-Claims über einen ONCHAINID-`ClaimIssuer`-**Vertrag
 cd contracts
 REGISTRY_WALLET_PRIVATE_KEY=$REGISTRY_SIGNER_KEY \
   forge script script/DeployClaimIssuer.s.sol --rpc-url $RPC_URL --broadcast
-# Logs "ClaimIssuer : 0x…"; CLAIM_ISSUER_MANAGEMENT_KEY overrides the management key
-# (default: the broadcasting wallet, which must be the backend's registry signer).
+# Logs "ClaimIssuer : 0x…". The MANAGEMENT key is the broadcasting wallet, i.e. the
+# backend's registry signer (default); CLAIM_ISSUER_MANAGEMENT_KEY is an optional override.
 ```
+
+!!! warning "Management-Schlüssel = Hot-Signing-Key (Standard)"
+    Im Standard signiert der Register-Signer Claims und kontrolliert zugleich den Schlüsselsatz des ClaimIssuers (`addKey`/`removeKey`) sowie dessen Upgrades; das Backend benötigt MANAGEMENT-Rechte, um `revokeClaimBySignature` aufzurufen. Behandeln Sie den Register-Signer als hochwertigen Schlüssel (in Produktion KMS-/HSM-gestützt). `CLAIM_ISSUER_MANAGEMENT_KEY` kann stattdessen einen separaten Cold- oder Multisig-Schlüssel benennen; dieser muss dann `addKey(keccak256(abi.encode(registrySigner)), 3, 1)` ausführen, damit der Signer Claims signieren kann, und ein Widerruf durch das Backend revertiert, solange der Signer keinen MANAGEMENT-Schlüssel (Purpose 1) hält – Claims müssen dann über den Management-Schlüssel widerrufen werden.
 
 Setzen Sie `CLAIM_ISSUER_<CHAIN>` (zum Beispiel `CLAIM_ISSUER_ETH_TESTNET`, gebunden an `registerwerk.contracts.claim-issuer.<chain>`) und starten Sie das Backend neu. Ohne diesen Wert weist das Backend die Claim-Ausstellung und die Bereitstellung von T-REX-Suiten auf dieser Chain ab (Fail-Closed), statt Transaktionen zu senden, die revertieren würden. Vor jedem `addClaim` prüft es außerdem, dass der Signer einen Schlüssel auf dem ClaimIssuer hält.
 

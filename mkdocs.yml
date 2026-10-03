@@ -202,6 +202,7 @@ plugins:
             Audit log: Prüfprotokoll
             REST API overview: REST-API-Überblick
             Webhooks: Webhooks
+            Register units: Register-Einheiten
             Account abstraction: Account Abstraction
             DeFi interoperability: DeFi-Interoperabilität
             dApp development & marketplace: dApp-Entwicklung und Marktplatz
@@ -339,6 +340,7 @@ plugins:
             Audit log: Piste d'audit
             REST API overview: Aperçu de l'API REST
             Webhooks: Webhooks
+            Register units: Unités du registre
             Account abstraction: Abstraction de compte
             DeFi interoperability: Interopérabilité DeFi
             dApp development & marketplace: Développement de dApp et place de marché
@@ -476,6 +478,7 @@ plugins:
             Audit log: Registro di controllo
             REST API overview: Panoramica dell'API REST
             Webhooks: Webhooks
+            Register units: Unità del registro
             Account abstraction: Account abstraction
             DeFi interoperability: Interoperabilità DeFi
             dApp development & marketplace: Sviluppo di dApp e marketplace
@@ -613,6 +616,7 @@ plugins:
             Audit log: Registro de auditoría
             REST API overview: Visión general de la API REST
             Webhooks: Webhooks
+            Register units: Unidades del registro
             Account abstraction: Abstracción de cuentas
             DeFi interoperability: Interoperabilidad DeFi
             dApp development & marketplace: Desarrollo de dApps y mercado
@@ -848,6 +852,7 @@ nav:
       - Audit log: platform/audit-log.md
       - REST API overview: platform/api.md
       - Webhooks: platform/webhooks.md
+      - Register units: platform/register-units.md
       - Account abstraction: platform/account-abstraction.md
       - DeFi interoperability: platform/defi-interoperability.md
       - dApp development & marketplace: platform/dapp-development.md

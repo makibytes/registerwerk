@@ -120,6 +120,32 @@ groups:
           summary: "Corporate-action entitlement snapshot refused"
           description: "{{ $value }} corporate action(s) are SNAPSHOT_BLOCKED — record date reached on a register that is not reconciled. Coupons/redemptions will not compute until the register is fixed."
 
+      # ── Outcome-based settlement (Wave 0b C7) ─────────────────────────────
+      # Live counts from the DB. A paid subscription whose mint reverted, or a redemption whose burn reverted, is
+      # not an incident the user can see: the investor has paid and holds nothing / the asset is REDEEMED-pending
+      # with live tokens. Both stay visible until an operator retries (settle again / resume redemption).
+      - alert: SubscriptionSettlementFailed
+        expr: |
+          registerwerk_subscription_settlement_failed{job="registerwerk-backend"} > 0
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Subscription mint failed after payment"
+          description: "{{ $value }} paid subscription order(s) are SETTLEMENT_FAILED: the mint reverted or was replaced, the investor has paid and holds no units. Settle the order again, or release it and refund."
+
+      - alert: AssetRedemptionBurnFailed
+        expr: |
+          registerwerk_asset_redemption_burn_failed{job="registerwerk-backend"} > 0
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Redemption burn failed"
+          description: "{{ $value }} redemption burn(s) are FAILED: the asset stays REDEMPTION_PENDING with live tokens on chain. Resume the redemption to re-dispatch the failed burns."
+
       # ── KYC lapse → on-chain propagation (T2-19) ──────────────────────────
       # Live count of kyc_chain_propagation rows in FAILED: a KYC expiry/rejection whose OrgRegistry
       # suspension or claim revocation keeps failing, so the entity may still pass on-chain gates.

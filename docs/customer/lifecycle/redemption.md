@@ -58,7 +58,7 @@ stateDiagram-v2
     PROPOSED --> REJECTED: operator rejects
     ANNOUNCED --> RECORD_DATE_SET
     RECORD_DATE_SET --> COMPUTED: snapshot taken
-    COMPUTED --> AWAITING_SETTLEMENT: issuer attests + operator confirms
+    COMPUTED --> AWAITING_SETTLEMENT: issuer attests + operator confirms (the computed amounts)
     AWAITING_SETTLEMENT --> SETTLED: paid
     SETTLED --> CLOSED
     ANNOUNCED --> CANCELLED
@@ -68,7 +68,7 @@ stateDiagram-v2
 
 Coupons and redemptions are **system-raised** — created automatically from the payment schedule or the maturity date, rather than being remembered by a human, and start life `ANNOUNCED`. Dividends, splits, and early calls are **issuer-proposed**: the issuer submits one starting `PROPOSED`, and it only joins the register (`ANNOUNCED`) once an operator has reviewed and approved it — or is discarded permanently (`REJECTED`) if not.
 
-`COMPUTED` → `AWAITING_SETTLEMENT` needs sign-off from **two separate parties**, whichever way the action was raised: the issuer attests that the underlying obligation is actually ready — the cash for a coupon or dividend, the mechanics for a split or call — and then an operator confirms the register/on-chain side. The commonest catastrophic error in securities administration is paying the wrong list, and having two organisations, not two colleagues from one, sign off makes it far harder to happen unnoticed. Attesting is a normal authenticated action; only the operator's confirmation is [step-up](../../compliance/step-up-mfa.md) gated. If the issuer never attests, an operator can override the requirement — permanently and separately logged as an exception, never indistinguishable from a genuine attestation.
+`COMPUTED` → `AWAITING_SETTLEMENT` needs sign-off from **two separate parties**, whichever way the action was raised: the issuer attests that the underlying obligation is actually ready — the cash for a coupon or dividend, the mechanics for a split or call — and then an operator confirms the register/on-chain side. The commonest catastrophic error in securities administration is paying the wrong list, and having two organisations, not two colleagues from one, sign off makes it far harder to happen unnoticed. Both sign-offs cover the **computed amounts**: they are only possible once the action is `COMPUTED`, each is bound to a fingerprint (digest) of the entries, the total and the rounding residual, and a re-computation voids them — the payout starts only when both valid signatures match the amounts as they stand. At payout every holder is checked again (entity active, KYC valid, no sanctions hit, no Sperrvermerk): an ineligible holder is **held** — recorded with the reason, an operator task, never paid — while all other holders are paid; a registry-side hold (blocked snapshot, frozen register, a hold the system placed) is never presented as the issuer's non-payment, so it does not turn a coupon `OVERDUE`/`MISSED` or a bond `OVERDUE`/`DEFAULTED`. Attesting is a normal authenticated action; only the operator's confirmation is [step-up](../../compliance/step-up-mfa.md) gated. If the issuer never attests, an operator can override the requirement — permanently and separately logged as an exception, never indistinguishable from a genuine attestation.
 
 ### The types Registerwerk models
 
@@ -115,14 +115,15 @@ Mechanically this is a corporate action of type `REDEMPTION`, raised automatical
 1. The record-date snapshot is taken.
 2. Each holder's entitlement is their nominal at face value.
 3. The issuer attests and an operator confirms; payment settles.
-4. The tokens are **burned** — destroyed on-chain, supply returns to zero.
-5. The asset moves to `REDEEMED`.
+4. The asset moves to `REDEMPTION_PENDING` and the tokens are **burned** — destroyed on-chain. Each holder is burned the lesser of their current balance and their nominal at the record date (the units the redemption paid for), spread over every deployment of the asset; every burn goes through the durable outbox and is recorded once per wallet and deployment, so a repeat never burns twice.
+5. When every burn is final (final receipt and the indexed burn transfer) the asset moves to `REDEEMED`. A burn that reverted leaves it `REDEMPTION_PENDING` with an operator alert; redeeming again resumes it and re-dispatches only the failed burns.
 
 ```mermaid
 stateDiagram-v2
     direction LR
-    ISSUED --> REDEEMED: redeem
-    SUSPENDED --> REDEEMED: redeem
+    ISSUED --> REDEMPTION_PENDING: redeem
+    SUSPENDED --> REDEMPTION_PENDING: redeem
+    REDEMPTION_PENDING --> REDEEMED: every burn final
     REDEEMED --> [*]
 ```
 

@@ -10,12 +10,14 @@ import de.makibytes.registerwerk.asset.events.SubscriptionOrderLapsedEvent;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderPaymentConfirmedEvent;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderReleasedEvent;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderSettledEvent;
+import de.makibytes.registerwerk.asset.events.SubscriptionOrderSettlementSubmittedEvent;
 import de.makibytes.registerwerk.blockchain.api.TokenAdminPort;
 import de.makibytes.registerwerk.customer.api.ClientCategory;
 import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
 import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
+import de.makibytes.registerwerk.deployment.api.RegisterUnits;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.deployment.api.schedule.Target2Calendar;
 import de.makibytes.registerwerk.erc3643.api.Erc3643MintPort;
@@ -192,6 +194,8 @@ public class SubscriptionOrderService {
         Asset asset = assetRepository.findByIdForUpdate(order.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", order.getAssetId()));
         RegisterFreezeGuard.requireOpen(asset, "Subscription allocation");
+        // C5: units are committed here and minted at settlement as-is - only on a whole-unit token.
+        RegisterUnits.requireWholeUnits(deploymentRepository, order.getAssetId(), "Subscription allocation");
         if (order.getStatus() != SubscriptionOrder.Status.SUBMITTED) {
             throw new InvalidStateTransitionException("SubscriptionOrder", order.getStatus().name(), "ALLOCATED");
         }
@@ -391,8 +395,16 @@ public class SubscriptionOrderService {
     /**
      * Settles a paid order: re-runs the compliance gates that trade settlement applies (asset open,
      * finality, KYC, sanctions screening, Sperrvermerk, target market, holding cap) and then issues the
-     * units — a mint where the asset has a confirmed deployment (the holder sync credits the register from
-     * the transfer), a direct register credit otherwise. Everything is checked before anything is written.
+     * units. Everything is checked before anything is written.
+     *
+     * <p>Wave 0b C7: on an asset with a confirmed deployment the mint is only SUBMITTED here - through the durable
+     * outbox, which persists the signed transaction in this database transaction and broadcasts only AFTER it
+     * commits, so a failed commit can never leave a mint on the chain (and a retry never double-mints). The order
+     * becomes {@code SETTLEMENT_PENDING}, not SETTLED: {@link SubscriptionSettlementFinalizer} settles it once the
+     * mint is final and its MINT transfer is indexed as FINALIZED, and moves it to {@code SETTLEMENT_FAILED}
+     * (retryable - call this method again) when the mint definitively did not happen. A pending order cannot be
+     * settled again, so a lost response can never produce a second mint. An asset without a deployment has no chain
+     * to wait for: the register is credited directly and the order is SETTLED.
      */
     public SubscriptionOrder settle(UUID orderId, UUID actorId, String actorRole) {
         SubscriptionOrder order = repository.findByIdForUpdate(orderId)
@@ -400,13 +412,16 @@ public class SubscriptionOrderService {
         Asset asset = assetRepository.findByIdForUpdate(order.getAssetId())
                 .orElseThrow(() -> new EntityNotFoundException("Asset", order.getAssetId()));
         RegisterFreezeGuard.requireOpen(asset, "Subscription settlement");
-        if (order.getStatus() != SubscriptionOrder.Status.PAYMENT_CONFIRMED) {
+        if (order.getStatus() != SubscriptionOrder.Status.PAYMENT_CONFIRMED
+                && order.getStatus() != SubscriptionOrder.Status.SETTLEMENT_FAILED) {
             throw new InvalidStateTransitionException("SubscriptionOrder", order.getStatus().name(), "SETTLED");
         }
         if (!ORDERABLE_STATUSES.contains(asset.getStatus())) {
             throw new InvalidStateTransitionException(
                     "Asset is not open for subscription settlement (status=" + asset.getStatus() + ")");
         }
+        // C5: the mint sends `allocated` as raw base units - refuse before anything is written on any other token.
+        RegisterUnits.requireWholeUnits(deploymentRepository, asset.getId(), "Subscription settlement");
         finalityGate.require(GatedOperation.SUBSCRIPTION_ORDER_ALLOCATE, asset.getId(),
                 asset.getTokenStandard(), FinalityLevel.FINALIZED);
         UUID investorId = order.getInvestorEntityId();
@@ -421,9 +436,15 @@ public class SubscriptionOrderService {
         requireEligibleForTargetMarket(asset, investorId);
         BigDecimal allocated = order.getAllocatedAmount();
         BigDecimal maxHolding = investorLimitService.effectiveMaxHolding(asset, investorId);
-        if (maxHolding != null && activeHolding(order).add(allocated).compareTo(maxHolding) > 0) {
-            throw new ComplianceGateException("Settling would take investor " + investorId
-                    + "'s holding above its maximum of " + maxHolding);
+        if (maxHolding != null) {
+            // C7: mints still in flight are not in the active holding yet, but they will be - count them.
+            BigDecimal inFlight = repository.sumPendingSettlementForInvestor(asset.getId(), investorId, orderId);
+            BigDecimal projected = activeHolding(order).add(inFlight != null ? inFlight : BigDecimal.ZERO).add(allocated);
+            if (projected.compareTo(maxHolding) > 0) {
+                throw new ComplianceGateException("Settling would take investor " + investorId
+                        + "'s holding above its maximum of " + maxHolding + " (holds " + activeHolding(order)
+                        + ", " + (inFlight != null ? inFlight : BigDecimal.ZERO) + " more in flight)");
+            }
         }
 
         AssetDeployment deployment = deploymentRepository.findByAssetId(asset.getId()).stream()
@@ -454,11 +475,6 @@ public class SubscriptionOrderService {
                     consumer, actorId, actorRole, orderId).getId();
         }
 
-        order.setStatus(SubscriptionOrder.Status.SETTLED);
-        order.setSettledAt(Instant.now());
-        order.setResultingHolderId(holderId);
-        order.setSettlementTxId(txId);
-        SubscriptionOrder saved = repository.save(order);
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("assetId", asset.getId());
         details.put("holderId", holderId);
@@ -466,8 +482,24 @@ public class SubscriptionOrderService {
         details.put("investorEntityId", investorId);
         details.put("onchainMint", deployment != null);
         if (txId != null) details.put("mintTxId", txId);
+        order.setResultingHolderId(holderId);
+        order.setSettlementTxId(txId);
+        order.setSettlementFailedAt(null);
+        order.setSettlementFailureReason(null);
+        if (deployment != null) {
+            // C7: submitted, not issued. The finalizer settles it on a final receipt plus the indexed MINT transfer.
+            order.setStatus(SubscriptionOrder.Status.SETTLEMENT_PENDING);
+            SubscriptionOrder saved = repository.save(order);
+            events.publishEvent(new SubscriptionOrderSettlementSubmittedEvent(orderId, actorId, actorRole, details));
+            log.info("Subscription order settlement submitted: id={} holderId={} mintTx={} (SETTLEMENT_PENDING)",
+                    orderId, holderId, txId);
+            return saved;
+        }
+        order.setStatus(SubscriptionOrder.Status.SETTLED);
+        order.setSettledAt(Instant.now());
+        SubscriptionOrder saved = repository.save(order);
         events.publishEvent(new SubscriptionOrderSettledEvent(orderId, actorId, actorRole, details));
-        log.info("Subscription order settled: id={} holderId={} mint={}", orderId, holderId, deployment != null);
+        log.info("Subscription order settled: id={} holderId={} (register credit)", orderId, holderId);
         return saved;
     }
 
@@ -501,10 +533,13 @@ public class SubscriptionOrderService {
         SubscriptionOrder order = repository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new EntityNotFoundException("SubscriptionOrder", orderId));
         if (order.getStatus() != SubscriptionOrder.Status.ALLOCATED
-                && order.getStatus() != SubscriptionOrder.Status.PAYMENT_CONFIRMED) {
+                && order.getStatus() != SubscriptionOrder.Status.PAYMENT_CONFIRMED
+                && order.getStatus() != SubscriptionOrder.Status.SETTLEMENT_FAILED) {
+            // not SETTLEMENT_PENDING: a mint is in flight and may still execute
             throw new InvalidStateTransitionException("SubscriptionOrder", order.getStatus().name(), "RELEASED");
         }
-        if (order.getStatus() == SubscriptionOrder.Status.PAYMENT_CONFIRMED && order.getPaidAmount() != null) {
+        if ((order.getStatus() == SubscriptionOrder.Status.PAYMENT_CONFIRMED
+                || order.getStatus() == SubscriptionOrder.Status.SETTLEMENT_FAILED) && order.getPaidAmount() != null) {
             order.setRefundDue(order.getPaidAmount());
         }
         order.setStatus(SubscriptionOrder.Status.RELEASED);

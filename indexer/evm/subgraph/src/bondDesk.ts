@@ -6,6 +6,7 @@ import {
   DeskUnpaused as DeskUnpausedEvent,
   CouponWithheld as CouponWithheldEvent,
   WithheldReleased as WithheldReleasedEvent,
+  WithheldCouponClaimed as WithheldCouponClaimedEvent,
   ForcedRedemption as ForcedRedemptionEvent,
 } from '../generated/EwpgBondDesk/EwpgBondDesk'
 import { BondDeskEvent } from '../generated/schema'
@@ -84,9 +85,25 @@ export function handleDeskUnpaused(event: DeskUnpausedEvent): void {
   e.save()
 }
 
-/** A frozen holder's coupon was withheld in the treasury instead of paid; no cash moved. */
+/**
+ * The frozen units' share of a holder's coupon was withheld into the desk's own escrow (all of it for
+ * a frozen address); the rest of that holder's coupon is a COUPON_PAID event of the same transaction.
+ */
 export function handleCouponWithheld(event: CouponWithheldEvent): void {
   let e = newEvent(event.address, event.transaction.hash.toHexString(), event.logIndex.toString(), 'COUPON_WITHHELD')
+  e.actor = event.params.holder
+  e.period = event.params.period
+  e.paidOrPrincipal = event.params.amount
+  e.blockNumber = event.block.number
+  e.blockTimestamp = event.block.timestamp
+  e.transactionHash = event.transaction.hash
+  e.logIndex = event.logIndex
+  e.save()
+}
+
+/** A holder claimed its withheld coupon from the desk's escrow once nothing of its holding was frozen. */
+export function handleWithheldCouponClaimed(event: WithheldCouponClaimedEvent): void {
+  let e = newEvent(event.address, event.transaction.hash.toHexString(), event.logIndex.toString(), 'WITHHELD_CLAIMED')
   e.actor = event.params.holder
   e.period = event.params.period
   e.paidOrPrincipal = event.params.amount

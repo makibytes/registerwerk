@@ -102,18 +102,18 @@ class IssuerCorporateActionControllerTest {
         UUID assetId = UUID.randomUUID();
         UUID actionId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();
-        IssuerAttestationRequest request = new IssuerAttestationRequest("SEPA-REF-1", true);
+        IssuerAttestationRequest request = new IssuerAttestationRequest("SEPA-REF-1", true, "digest-1");
         CorporateAction attested = new CorporateAction();
         attested.setAssetId(assetId);
         attested.setStatus(CorporateAction.Status.ANNOUNCED);
-        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), eq("SEPA-REF-1"), eq(actorId), any(), eq(false)))
+        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), eq("SEPA-REF-1"), eq(actorId), any(), eq(false), eq("digest-1")))
                 .thenReturn(attested);
 
         ResponseEntity<de.makibytes.registerwerk.corporateactions.web.dto.CorporateActionView> response =
                 controller.attestSettlement(assetId, actionId, request, authAs(actorId));
 
         assertThat(response.getBody()).isNotNull();
-        verify(service).attestSettlementAsIssuer(assetId, actionId, "SEPA-REF-1", actorId, "ISSUER", false);
+        verify(service).attestSettlementAsIssuer(assetId, actionId, "SEPA-REF-1", actorId, "ISSUER", false, "digest-1");
     }
 
     private static Authentication adminAuth(boolean impersonating) {
@@ -133,11 +133,11 @@ class IssuerCorporateActionControllerTest {
     void operatorCannotAttestAsIssuer() {
         UUID assetId = UUID.randomUUID();
         UUID actionId = UUID.randomUUID();
-        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), any(), any(), any(), eq(true)))
+        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), any(), any(), any(), eq(true), any()))
                 .thenThrow(new org.springframework.security.access.AccessDeniedException("operators"));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.attestSettlement(assetId, actionId,
-                new IssuerAttestationRequest("ref", true), adminAuth(false)))
+                new IssuerAttestationRequest("ref", true, null), adminAuth(false)))
                 .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
     }
 
@@ -146,11 +146,11 @@ class IssuerCorporateActionControllerTest {
     void impersonatingAdminCannotAttest() {
         UUID assetId = UUID.randomUUID();
         UUID actionId = UUID.randomUUID();
-        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), any(), any(), any(), eq(true)))
+        when(service.attestSettlementAsIssuer(eq(assetId), eq(actionId), any(), any(), any(), eq(true), any()))
                 .thenThrow(new org.springframework.security.access.AccessDeniedException("operators"));
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.attestSettlement(assetId, actionId,
-                new IssuerAttestationRequest("ref", true), adminAuth(true)))
+                new IssuerAttestationRequest("ref", true, null), adminAuth(true)))
                 .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
     }
 

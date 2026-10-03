@@ -1,7 +1,9 @@
 package de.makibytes.registerwerk.asset.api;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -40,7 +42,14 @@ public interface RedemptionReadinessPort {
      * @param corporateActionId  the settled REDEMPTION/CALL action
      * @param paidWallets        normalised wallets whose entry is PAYABLE and settled — the only
      *                           holders whose tokens redemption may burn
+     * @param nominalAtRecord    per paid wallet, the units it held at the record date — the units the redemption
+     *                           actually paid for (Wave 0b C7): the burn is capped at it, so units the wallet bought
+     *                           after the record date are never destroyed unpaid
      */
-    record SettledRetirement(UUID corporateActionId, Set<String> paidWallets) {
+    record SettledRetirement(UUID corporateActionId, Set<String> paidWallets, Map<String, BigDecimal> nominalAtRecord) {
+
+        public SettledRetirement(UUID corporateActionId, Set<String> paidWallets) {
+            this(corporateActionId, paidWallets, Map.of());
+        }
     }
 }

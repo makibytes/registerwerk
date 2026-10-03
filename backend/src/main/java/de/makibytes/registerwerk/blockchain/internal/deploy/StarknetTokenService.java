@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.internal.deploy;
 
+import de.makibytes.registerwerk.deployment.api.RegisterUnits;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -61,6 +62,9 @@ import de.makibytes.registerwerk.finality.api.ChainSubmissionExecutor;
 public class StarknetTokenService {
 
     private static final Logger log = LoggerFactory.getLogger(StarknetTokenService.class);
+
+    /** {@code value_decimals} the ERC-3525 constructor is deployed with. */
+    public static final int ERC3525_VALUE_DECIMALS = RegisterUnits.WHOLE_UNIT_DECIMALS;
 
     /**
      * Result of a Cairo token deployment. {@code contractAddress} is the UDC-precomputed
@@ -600,7 +604,7 @@ public class StarknetTokenService {
         String symbol = "RWB" + assetId.toString().substring(0, 4).toUpperCase();
         BigInteger nameFelt   = shortStringToFelt(name);
         BigInteger symbolFelt = shortStringToFelt(symbol);
-        BigInteger decimalsFelt = BigInteger.valueOf(18);
+        BigInteger decimalsFelt = BigInteger.valueOf(ERC3525_VALUE_DECIMALS);
 
         // Encode assetId as a Cairo u256 (low: u128, high: u128): combine the UUID into one
         // unsigned 128-bit BigInteger, then split with the same mask convention

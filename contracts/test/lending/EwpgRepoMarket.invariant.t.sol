@@ -124,6 +124,15 @@ contract EwpgRepoMarketInvariantTest is Test {
         assertGe(loanToken.balanceOf(address(market)), market.totalSurplus());
     }
 
+    /// @notice H2: whole-unit rounding must never make a liquidator pay more than the
+    ///         `maxRepayAmount` it passed, and its discount is the bonus on the debt closed — not
+    ///         on the whole unit's value (the handler funds half of the liquidators with slack so
+    ///         an overcharge is observable instead of reverting).
+    function invariant_liquidatorNeverPaysMoreThanMaxRepay() public view {
+        assertEq(handler.maxLiquidatorOverpay(), 0, "a liquidator was charged more than maxRepayAmount");
+        assertEq(handler.bonusMispricedCount(), 0, "liquidator discount differs from bonus x debt closed");
+    }
+
     /// @notice Debt is never left without collateral backing it: collateral only leaves a
     ///         position with outstanding debt via {liquidate} (which writes off any debt left
     ///         once collateral is exhausted) or via LTV-checked paths. {claimCollateral} and the

@@ -268,6 +268,10 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
           @if (asset.status === 'ISSUED' || asset.status === 'SUSPENDED') {
             <button type="button" mat-stroked-button color="warn" (click)="redeem()">Redeem</button>
           }
+          @if (asset.status === 'REDEMPTION_PENDING') {
+            <button type="button" mat-stroked-button color="warn" (click)="redeem()"
+                    matTooltip="The burns are not all final yet. Resuming re-dispatches burns that failed; burns already submitted or confirmed are never repeated.">Resume redemption</button>
+          }
           <button type="button" mat-stroked-button (click)="edit()">
             <mat-icon>edit</mat-icon>
             Edit
@@ -769,7 +773,10 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                       <span style="color:var(--rw-rejected-fg)">Could not read the paymaster: {{ gasOnchain.error }}</span>
                     } @else if (!gasOnchain.registered) {
                       <span style="color:var(--rw-pending-fg)">Policy not registered on chain yet. The funder must call
-                        <code>registerPolicy</code> with id <code style="word-break:break-all">{{ gasOnchain.policyId }}</code>.</span>
+                        <code>registerPolicy</code> with id <code style="word-break:break-all">{{ gasOnchain.policyId }}</code>
+                        from a wallet whose organisation holds the <code>paymaster.register-policy</code> permission
+                        (grant it to the funder's organisation first; <code>paymaster.configure</code> is for the operator
+                        organisation only).</span>
                     } @else {
                       <div style="display:grid;grid-template-columns:max-content 1fr;gap:4px 16px">
                         <span style="color:var(--rw-text-secondary)">Status</span>
@@ -786,7 +793,7 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                         <code style="word-break:break-all">{{ gasOnchain.signer }}</code>
                       </div>
                       @if (gasOnchain.active && !effectiveGasPolicy.active) {
-                        <p style="margin:8px 0 0;color:var(--rw-pending-fg)">Deactivated here, still active on chain — the funder or an operator wallet should call <code>setPolicyActive(policyId, false)</code>.</p>
+                        <p style="margin:8px 0 0;color:var(--rw-pending-fg)">Deactivated here, still active on chain — the funder or an operator-organisation wallet holding <code>paymaster.configure</code> should call <code>setPolicyActive(policyId, false)</code>.</p>
                       }
                     }
                   </div>
@@ -2097,7 +2104,7 @@ export class AssetDetailComponent implements OnInit {
     if (!file) return;
     this.tsUploading = true;
     // On an issued asset the public term sheet can only be replaced by an approved amendment.
-    const issued = !!this.asset && ['ISSUED', 'SUSPENDED', 'REDEEMED'].includes(this.asset.status);
+    const issued = !!this.asset && ['ISSUED', 'SUSPENDED', 'REDEMPTION_PENDING', 'REDEEMED'].includes(this.asset.status);
     if (issued) {
       this.tsUploading = false;
       this.withDualControl('TERM_SHEET_AMENDMENT', `Amend the term sheet of ${this.asset?.name ?? 'this asset'}`, (tokens) => {

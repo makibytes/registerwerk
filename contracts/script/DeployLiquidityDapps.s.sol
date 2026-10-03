@@ -31,12 +31,17 @@ import "../src/examples/MockStablecoin.sol";
 ///           REPO_FACILITY_OPERATOR_ORG  (org operating the facility; default the deployer
 ///                                        wallet's org — setCollateralConfig/updatePrice are
 ///                                        bound to it, see EwpgRepoFacility.operatorOrg)
+///           PAYMASTER_OPERATOR_ORG      (org operating the paymaster; default the deployer
+///                                        wallet's org — its `paymaster.configure` holders
+///                                        are the only ones with safety-valve/stake reach,
+///                                        see EwpgPaymaster.operatorOrg)
 ///           PAYMASTER_ENTRYPOINT        (address, default the canonical ERC-4337
 ///                                        EntryPoint v0.8 singleton,
 ///                                        `ERC4337Utils.ENTRYPOINT_V08`)
 ///           PAYMASTER_STAKE_WEI         (default 0 = skip; when > 0, stakes that amount in
 ///                                        the EntryPoint via `paymaster.addStake` — needs
-///                                        `paymaster.configure` on the deployer's org.
+///                                        `paymaster.configure` on the paymaster's operator org
+///                                        and the deployer wallet bound to it.
 ///                                        ERC-7562 requires a staked paymaster because
 ///                                        voucher validation writes reservations)
 ///           PAYMASTER_UNSTAKE_DELAY     (seconds, default 86400; only used with a stake)
@@ -50,7 +55,8 @@ import "../src/examples/MockStablecoin.sol";
 ///         (token's compliance module, operator-only) and call its own
 ///         `setCollateralConfig` (operator-only) before any pledge can succeed; fund
 ///         {EwpgPaymaster}'s sponsorship policies via
-///         `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` (payable; top
+///         `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` (payable, from a wallet
+///         whose org holds `paymaster.register-policy`; top
 ///         up later with `fundSponsorship`) before sponsored transactions can be relayed, and
 ///         configure the backend with `PAYMASTER_<CHAIN>` plus the voucher signer key
 ///         (`REGISTERWERK_PAYMASTER_VOUCHER_SIGNER_KEY`); and anchor both dApps in the marketplace via the
@@ -77,7 +83,8 @@ contract DeployLiquidityDapps is Script {
 
         // Sponsored (ERC-4337) transactions: operator- or issuer-funded gas policies.
         address entryPointAddress = vm.envOr("PAYMASTER_ENTRYPOINT", address(ERC4337Utils.ENTRYPOINT_V08));
-        EwpgPaymaster paymaster = new EwpgPaymaster(oracle, IEntryPoint(entryPointAddress));
+        address paymasterOrg = vm.envOr("PAYMASTER_OPERATOR_ORG", oracle.orgOf(vm.addr(deployerKey)));
+        EwpgPaymaster paymaster = new EwpgPaymaster(oracle, IEntryPoint(entryPointAddress), paymasterOrg);
 
         // Optional EntryPoint stake (ERC-7562: a paymaster whose validation writes storage
         // must be staked). Skipped by default so a plain deploy needs no extra ETH.
@@ -93,10 +100,12 @@ contract DeployLiquidityDapps is Script {
         console.log("  -> payment token         :", paymentToken);
         console.log("  -> operator org          :", facilityOrg);
         console.log("EwpgPaymaster              :", address(paymaster));
+        console.log("  -> operator org          :", paymasterOrg);
         console.log("  -> EntryPoint            :", entryPointAddress);
         console.log("  -> EntryPoint stake (wei):", stakeWei);
         console.log("Next: set PAYMASTER_<CHAIN> to the paymaster address and");
         console.log("      REGISTERWERK_PAYMASTER_VOUCHER_SIGNER_KEY to the voucher key, then");
-        console.log("      registerPolicy(keccak256(policyRowId), voucherSigner, orgCap).");
+        console.log("      registerPolicy(keccak256(policyRowId), voucherSigner, orgCap) from a wallet whose org");
+        console.log("      holds paymaster.register-policy.");
     }
 }

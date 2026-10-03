@@ -783,6 +783,7 @@ export class DoraDashboardComponent implements OnInit {
         reason: `Close major incident "${incident.title}"`,
         action: 'DORA_INCIDENT_CLOSE',
         target: `PATCH /api/v1/dora/incidents/${id}/status`,
+        targetBody: body,
       }).subscribe(result => { if (result) finish(result.stepUpToken, result.dualControlToken); });
     } else {
       finish();
@@ -806,6 +807,7 @@ export class DoraDashboardComponent implements OnInit {
       reason: `Reclassify "${incident.title}" as ${body.severity}`,
       action: 'DORA_INCIDENT_DOWNGRADE',
       target: `POST /api/v1/dora/incidents/${incident.id}/classify`,
+      targetBody: body,
     }).subscribe(result => {
       if (!result) return;
       this.doraService.classifyIncident(incident.id, body, result.stepUpToken, result.dualControlToken).subscribe({

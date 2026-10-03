@@ -50,6 +50,8 @@ import java.util.UUID;
 @Component
 public class StepUpTokenIssuer {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(StepUpTokenIssuer.class);
+
     private static final int STEP_UP_TTL_SECONDS = 600;
     private static final int TOTP_WINDOW = 1;     // ±1 step = ±30s tolerance
     private static final int TOTP_STEP_SECONDS = 30;
@@ -113,11 +115,11 @@ public class StepUpTokenIssuer {
                 throw new AccessDeniedException(
                         "A dual-control approval must name the request it approves ('target': 'METHOD /path').");
             }
-            String canonicalBody = null;
-            if (dualControl.bindsBody(action)) {
-                canonicalBody = targetBody == null || targetBody.isNull() ? "" : DualControlTarget.canonicalJson(targetBody);
-            }
             try {
+                String canonicalBody = null;
+                if (dualControl.bindsBody(action)) {
+                    canonicalBody = targetBody == null || targetBody.isNull() ? "" : DualControlTarget.canonicalJson(targetBody);
+                }
                 targetDigest = DualControlTarget.digestOfTarget(target, canonicalBody);
             } catch (IllegalArgumentException e) {
                 throw new AccessDeniedException(e.getMessage());
@@ -140,7 +142,11 @@ public class StepUpTokenIssuer {
         claims.put("email", user.getEmail());
         long ttl = STEP_UP_TTL_SECONDS;
         if (approval) {
-            claims.put("stepup_scope", action);
+            // C1: an approval is for the X-Dual-Control-Token header only. The marker and the dedicated
+            // audience make every Bearer-accepting layer refuse it, so it can never authenticate a caller.
+            claims.put(JwtMintingService.CLAIM_USE, JwtMintingService.USE_DUAL_CONTROL);
+            claims.put("aud", java.util.List.of(JwtMintingService.DUAL_CONTROL_AUDIENCE));
+            claims.put(JwtMintingService.CLAIM_STEPUP_SCOPE, action);
             if (targetDigest != null) {
                 claims.put("stepup_target", targetDigest);
             }
@@ -173,14 +179,15 @@ public class StepUpTokenIssuer {
             throw new AccessDeniedException(
                     "Second factor for this account is managed by your identity provider.");
         }
-        if (state.isLocked(userId)) {
+        // The attempt is reserved before the password is compared, so parallel guesses share one budget.
+        if (!state.reserveAttempt(userId)) {
             throw new AccessDeniedException("Too many failed attempts. Try again later.");
         }
         if (currentPassword == null || currentPassword.isEmpty() || user.getPasswordHash() == null
                 || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
-            state.recordFailure(userId);
             throw new AccessDeniedException("Current password is required to enrol an authenticator.");
         }
+        state.releaseAttempt(userId);
         if (user.isTotpEnabled()) {
             throw new AccessDeniedException(
                     "TOTP is already enrolled for this account. Disenrol before re-enrolling.");
@@ -261,18 +268,31 @@ public class StepUpTokenIssuer {
 
     /**
      * Verifies {@code code} against the user's secret and consumes its time step in the shared state.
-     * Wrong codes and replays count towards the lockout.
+     *
+     * <p>The attempt is <em>reserved first</em> ({@link TotpStateRepository#reserveAttempt}): the counter is
+     * advanced and the lock decided in one row-locked statement before the code is looked at, so N parallel
+     * guesses can compare at most {@code MAX_ATTEMPTS} codes in total instead of N. A success resets the
+     * counter ({@code acceptStep}); a wrong code or a replay simply keeps the reservation.
      */
     private void verifyAndAdvance(AppUser user, String code) {
         UUID userId = user.getId();
         if (code == null || !code.matches("\\d{6}")) {
             throw new AccessDeniedException("Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
         }
-        if (state.isLocked(userId)) {
+        if (!state.reserveAttempt(userId)) {
             throw new AccessDeniedException("Too many failed step-up attempts. Try again later.");
         }
-        String stored = user.getTotpSecret();
-        String secret = secrets.decrypt(userId, stored);
+        String secret;
+        try {
+            secret = secrets.decrypt(userId, user.getTotpSecret());
+        } catch (IllegalStateException e) {
+            // A secret that is not envelope ciphertext: never use it as-is (H14). TotpSecretMigration moves
+            // plaintext rows at startup; a row that is still plaintext needs an operator reset.
+            log.error("TOTP secret of user {} cannot be read (not envelope-encrypted or undecryptable)", userId);
+            throw new AccessDeniedException(
+                    "Step-up is unavailable for this account: its authenticator secret is not stored securely. "
+                    + "An administrator must reset the authenticator enrolment.");
+        }
         long currentStep = Instant.now().getEpochSecond() / TOTP_STEP_SECONDS;
         long matched = -1;
         for (int delta = -TOTP_WINDOW; delta <= TOTP_WINDOW; delta++) {
@@ -281,19 +301,11 @@ public class StepUpTokenIssuer {
             }
         }
         if (matched < 0) {
-            state.recordFailure(userId);
             throw new AccessDeniedException("Invalid TOTP code. Check your authenticator app's time sync.");
         }
         if (!state.acceptStep(userId, matched)) {
             // RFC 6238 §5.2: a code at or before the last accepted step is a replay.
-            state.recordFailure(userId);
             throw new AccessDeniedException("This TOTP code was already used. Wait for the next code.");
-        }
-        if (!secrets.isEncrypted(stored)) {
-            // Lazy migration of a pre-V35 plaintext secret.
-            user.setTotpSecret(secrets.encrypt(userId, secret));
-            user.setTotpSecretKid(secrets.kid());
-            userRepository.save(user);
         }
     }
 

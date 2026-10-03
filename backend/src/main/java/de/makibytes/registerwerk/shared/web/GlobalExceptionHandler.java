@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidCredentialsException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.shared.LoginDisabledException;
+import de.makibytes.registerwerk.shared.LoginThrottledException;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.shared.TransientChainException;
 import de.makibytes.registerwerk.shared.api.ErrorResponse;
@@ -74,6 +75,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException ex, HttpServletRequest request) {
         return buildResponse(HttpStatus.UNAUTHORIZED, ex.getMessage(), request.getRequestURI());
+    }
+
+    /** Brute-force throttle (C4): 429 + Retry-After, identical for known and unknown accounts. */
+    @ExceptionHandler(LoginThrottledException.class)
+    public ResponseEntity<ErrorResponse> handleLoginThrottled(LoginThrottledException ex, HttpServletRequest request) {
+        ErrorResponse body = new ErrorResponse(HttpStatus.TOO_MANY_REQUESTS.value(), ex.getMessage(),
+                Instant.now(), request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.retryAfterSeconds()))
+                .body(body);
     }
 
     @ExceptionHandler(LoginDisabledException.class)

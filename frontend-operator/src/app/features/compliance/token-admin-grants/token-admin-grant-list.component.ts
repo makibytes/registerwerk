@@ -181,12 +181,19 @@ export class TokenAdminGrantListComponent {
   submitCreate(): void {
     this.dialog.closeAll();
 
+    const request = {
+      walletAddress: this.form.walletAddress,
+      chainConfigId: this.form.chainConfigId,
+      legalBasis: this.form.legalBasis,
+      expiresAt: this.form.expiresAt || undefined,
+    };
     const ref = this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Grant entity-wide ASSET_TOKEN_ADMIN to entity ${this.entityId}`,
         action: 'ASSET_TOKEN_ADMIN_GRANT_ENTITY_WIDE',
         target: `POST /api/v1/entities/${this.entityId}/token-admin-grants`,
+        targetBody: request,
       },
       width: '500px',
       disableClose: true,
@@ -195,12 +202,7 @@ export class TokenAdminGrantListComponent {
     ref.afterClosed().subscribe((result) => {
       if (!result) return;
 
-      this.service.grantForEntity(this.entityId, {
-        walletAddress: this.form.walletAddress,
-        chainConfigId: this.form.chainConfigId,
-        legalBasis: this.form.legalBasis,
-        expiresAt: this.form.expiresAt || undefined,
-      }, result.stepUpToken, result.dualControlToken!).subscribe({
+      this.service.grantForEntity(this.entityId, request, result.stepUpToken, result.dualControlToken!).subscribe({
         next: (grant) => {
           this.grants = [grant, ...this.grants];
           this.cdr.markForCheck();
@@ -212,12 +214,17 @@ export class TokenAdminGrantListComponent {
   }
 
   revoke(grant: TokenAdminGrant): void {
+    // The reason is part of what the approver binds, so it is asked for before the step-up dialog.
+    const reason = prompt('Revocation reason (required for audit trail):');
+    if (!reason) return;
+
     const ref = this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Revoke entity-wide ASSET_TOKEN_ADMIN grant ${grant.id}`,
         action: 'ASSET_TOKEN_ADMIN_REVOKE',
         target: `POST /api/v1/entities/${this.entityId}/token-admin-grants/${grant.id}/revoke`,
+        targetBody: { reason },
       },
       width: '500px',
       disableClose: true,
@@ -225,9 +232,6 @@ export class TokenAdminGrantListComponent {
 
     ref.afterClosed().subscribe((result) => {
       if (!result) return;
-
-      const reason = prompt('Revocation reason (required for audit trail):');
-      if (!reason) return;
 
       this.service.revokeForEntity(this.entityId, grant.id, reason, result.stepUpToken, result.dualControlToken!).subscribe({
         next: () => {

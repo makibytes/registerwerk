@@ -18,6 +18,26 @@ contract MockUSDC7540 is ERC20 {
     }
 }
 
+/// @dev USDC-like token that burns 1% of every transfer (the "fee-on-transfer" class).
+contract FeeOnTransferToken7540 is ERC20 {
+    constructor() ERC20("Fee Token", "FEE") {
+        _mint(msg.sender, 10_000_000e6);
+    }
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        if (from != address(0) && to != address(0)) {
+            uint256 fee = value / 100;
+            super._update(from, address(0), fee);
+            value -= fee;
+        }
+        super._update(from, to, value);
+    }
+}
+
 contract EwpgERC7540Test is Test {
     EwpgERC7540 vault;
     MockUSDC7540 usdc;
@@ -437,6 +457,103 @@ contract EwpgERC7540Test is Test {
         vm.stopPrank();
         assertEq(usdc.balanceOf(payer), 500e6, "refund goes back to the payer");
         assertEq(usdc.balanceOf(bob), bobBefore, "no relay to the owner");
+    }
+
+    // ── H15: deposit cap, received-amount accounting, frozen operator ────────────────────
+
+    /// @notice H15 (red-first): `setDepositCap` used to be dead on the async vault — `maxDeposit` is 0
+    ///         for the (disabled) synchronous path and {requestDeposit} never looked at the cap.
+    function test_requestDeposit_enforcesTheDepositCap() public {
+        vm.prank(registry);
+        vault.setDepositCap(1_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.expectRevert("EwpgERC7540: deposit cap exceeded");
+        vault.requestDeposit(1_001e6, alice, alice);
+        vault.requestDeposit(1_000e6, alice, alice); // exactly the cap fits
+        vm.stopPrank();
+        assertEq(vault.maxRequestDeposit(alice), 0);
+    }
+
+    /// @notice The cap counts pending requests, not just settled assets — otherwise N investors could
+    ///         each request the whole headroom before the operator fulfils any of them.
+    function test_depositCap_countsPendingRequestsAndFrees_onCancelAndFulfilment() public {
+        vm.prank(registry);
+        vault.setDepositCap(1_000e6);
+        vm.startPrank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        uint256 first = vault.requestDeposit(600e6, alice, alice);
+        vm.stopPrank();
+        assertEq(vault.maxRequestDeposit(bob), 400e6);
+
+        vm.startPrank(bob);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.expectRevert("EwpgERC7540: deposit cap exceeded");
+        vault.requestDeposit(401e6, bob, bob);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        vault.cancelDepositRequest(first);
+        assertEq(vault.maxRequestDeposit(bob), 1_000e6, "cancelled escrow frees the headroom");
+
+        // A fulfilled request moves from pending to settled assets: the headroom stays consumed.
+        vm.prank(registry);
+        vault.setNavPerShare(1e18, block.timestamp, bytes32(0));
+        vm.prank(bob);
+        uint256 second = vault.requestDeposit(700e6, bob, bob);
+        vm.prank(registry);
+        vault.fulfillDepositRequest(second);
+        assertEq(vault.maxRequestDeposit(alice), 300e6);
+    }
+
+    function test_depositCap_zeroMeansUnlimited() public view {
+        assertEq(vault.maxRequestDeposit(alice), type(uint256).max);
+    }
+
+    /// @notice H15 (red-first): the request, the pending escrow and the shares minted at fulfilment
+    ///         were booked from the *requested* amount. With a fee-on-transfer underlying that
+    ///         mints shares for cash the vault never received.
+    function test_requestDeposit_booksTheReceivedAmountForAFeeOnTransferUnderlying() public {
+        FeeOnTransferToken7540 feeToken = new FeeOnTransferToken7540();
+        vm.startPrank(registry);
+        EwpgERC7540 feeVault = new EwpgERC7540(feeToken, "Fee Fund", "FF", registry, ASSET_ID);
+        feeVault.whitelist(alice);
+        feeVault.setNavPerShare(1e18, block.timestamp, bytes32(0));
+        vm.stopPrank();
+        feeToken.transfer(alice, 100_000e6);
+
+        vm.startPrank(alice);
+        feeToken.approve(address(feeVault), type(uint256).max);
+        uint256 id = feeVault.requestDeposit(1_000e6, alice, alice);
+        vm.stopPrank();
+
+        (uint256 booked,,,) = feeVault.depositRequest(id);
+        assertEq(feeToken.balanceOf(address(feeVault)), 990e6, "the vault received the amount net of the fee");
+        assertEq(booked, 990e6, "request booked at the requested, not the received, amount");
+        assertEq(feeVault.pendingDepositAssets(), 990e6);
+
+        vm.prank(registry);
+        feeVault.fulfillDepositRequest(id);
+        assertEq(feeVault.balanceOf(alice), 990e6, "no shares for cash that never arrived");
+        assertEq(feeVault.totalAssets(), feeToken.balanceOf(address(feeVault)));
+    }
+
+    /// @notice H15 (red-first): a delegate that was frozen after receiving a share allowance could still
+    ///         lock the owner's shares into a redemption request.
+    function test_requestRedeem_revertsForAFrozenOperator() public {
+        _depositFor(alice, 1000e6);
+        uint256 aliceShares = vault.balanceOf(alice);
+        address delegate = makeAddr("delegate");
+        vm.prank(alice);
+        vault.approve(delegate, aliceShares);
+        vm.prank(registry);
+        vault.freezeAddress(delegate, "sanctions");
+
+        vm.prank(delegate);
+        vm.expectRevert("EwpgERC7540: caller is frozen");
+        vault.requestRedeem(aliceShares, alice, alice);
+        assertEq(vault.balanceOf(alice), aliceShares, "owner's shares untouched");
     }
 
     // ── Helpers for regression tests ──────────────────────────────────────────

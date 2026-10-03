@@ -55,7 +55,8 @@ class StepUpEnforcementAspectTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(true);
         StepUpEnforcer enforcer = new StepUpEnforcer(new StepUpPolicy(authProperties, entraProperties));
         DualControlService dualControl = new DualControlService(validator, enforcer, new DualControlProperties(),
-                tokenUse, mock(de.makibytes.registerwerk.auth.api.AppUserRepository.class), publisher,
+                tokenUse, mock(de.makibytes.registerwerk.auth.api.AppUserRepository.class),
+                mock(DualControlBootstrapLatch.class), publisher,
                 mock(org.springframework.transaction.PlatformTransactionManager.class));
         aspect = new StepUpEnforcementAspect(enforcer, dualControl);
     }
@@ -296,6 +297,7 @@ class StepUpEnforcementAspectTest {
     private static void bindRequest() {
         var req = new org.springframework.mock.web.MockHttpServletRequest("POST", "/api/v1/x");
         req.addHeader("X-Dual-Control-Token", "dc-token");
+        req.setAttribute(DualControlBodyCachingFilter.CACHED_BODY_ATTRIBUTE, new byte[0]); // every reason binds the (empty) body
         org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
                 new org.springframework.web.context.request.ServletRequestAttributes(req));
     }

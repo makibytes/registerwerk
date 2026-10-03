@@ -135,21 +135,23 @@ export class InviteUserDialogComponent implements OnInit {
     this.error = '';
     // Operator accounts and administrative roles are gated: step-up plus a second approver (outside bootstrap).
     const gated = isGatedOperatorAccount(this.selectedRoles, this.selectedEntityId || null);
+    const request = {
+      email: this.email,
+      name: this.fullName,
+      legalEntityId: this.selectedEntityId || null,
+      roles: this.selectedRoles,
+    };
     openStepUp(this.dialog, {
       requireDualControl: gated, dualControlOptional: true,
       reason: `Invite ${this.email}`,
       action: 'OPERATOR_USER_INVITE',
       target: 'POST /api/v1/admin/users',
+      targetBody: request,
     }).subscribe(tokens => {
       if (!tokens) return;
       this.saving = true;
       this.cdr.markForCheck();
-      this.adminUserService.inviteUser({
-        email: this.email,
-        name: this.fullName,
-        legalEntityId: this.selectedEntityId || null,
-        roles: this.selectedRoles,
-      }, tokens).subscribe({
+      this.adminUserService.inviteUser(request, tokens).subscribe({
         next: (user) => this.dialogRef.close(user),
         error: (err) => {
           this.saving = false;

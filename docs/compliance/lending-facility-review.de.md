@@ -65,6 +65,17 @@ Dies ersetzt die Parameterhinweise unten, wo sie abweichen.
   `liquidationGracePeriodSeconds`) ist je Aufruf auf einen Close Factor von 50 % begrenzt.
 - **Ganze Einheiten.** Liquidationen verkaufen ganze Sicherheitseinheiten, aufgerundet; der Teil
   der Zahlung über der Schuld steht dem Kreditnehmer als abrufbarer Barüberschuss zu.
+- **Liquidationspreis.** Der Bonus wird auf die tatsächlich geschlossene Schuld erhoben (eine
+  Einheit, die mehr wert ist als die Schuld, schließt sie, und der Kreditnehmer erhält den Rest
+  als Überschuss), und `maxRepayAmount` ist eine harte Obergrenze: Würde Aufrunden sie
+  überschreiten, wird eine Einheit weniger verkauft, andernfalls revertiert `liquidate` mit
+  `LiquidationExceedsMaxRepay(required, maxRepayAmount)`. Liquidatoren müssen `maxRepayAmount ≥
+  required` übergeben.
+- **Gleitendes Oracle-Fenster.** Das Abweichungsfenster verankert sich nach Ablauf nicht mehr auf
+  der aktuellen Marke neu. Die Extrema des vorherigen Fensters werden ein bis zwei Fenster lang
+  übernommen (`carriedBandOf`), sodass zwei Marken im Abstand von höchstens einem Fenster nie mehr
+  als `maxDeviationBps` voneinander abweichen; `pushPriceWithOverride` löscht das übernommene
+  Band.
 - **Abstimmung (Befund 5).** `reconcileCollateral` erfordert jetzt `repo-markets.reconcile`,
   gehalten von der Betreiber-Org des Markts, und ist durch die tatsächlich beobachtet aus dem
   Markt abgeflossenen Sicherheiten begrenzt. Die Marktkonfiguration verwendet

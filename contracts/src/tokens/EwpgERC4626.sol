@@ -85,7 +85,7 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
         _depositCap = newCap;
     }
 
-    function depositCap() external view returns (uint256) {
+    function depositCap() public view returns (uint256) {
         return _depositCap;
     }
 

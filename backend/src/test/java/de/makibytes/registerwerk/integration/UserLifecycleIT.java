@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -100,6 +101,24 @@ class UserLifecycleIT {
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * The bootstrap latch is one-way in production (C3); these tests each start from a fresh installation, so
+     * they re-open it the only way possible - bypassing the table's own triggers.
+     */
+    @BeforeEach
+    void freshInstallation() {
+        jdbc.execute("ALTER TABLE dual_control_bootstrap DISABLE TRIGGER USER");
+        try {
+            jdbc.update("UPDATE dual_control_bootstrap SET completed_at = NULL");
+        } finally {
+            jdbc.execute("ALTER TABLE dual_control_bootstrap ENABLE TRIGGER USER");
+        }
+    }
+
+    private static String json(Object body) {
+        return tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(body);
+    }
 
     private AppUser newUser(AppUserRole... roles) {
         AppUser u = new AppUser();
@@ -349,13 +368,13 @@ class UserLifecycleIT {
                     .as("step-up alone is not enough").isEqualTo(HttpStatus.FORBIDDEN);
             assertThat(users.findByEmailIgnoreCase(email)).isEmpty();
 
-            String wrongTarget = TestJwt.dualControl(SECRET, approver.getId(), "OPERATOR_USER_INVITE", "POST",
-                    "/api/v1/admin/users/" + UUID.randomUUID() + "/enable", "REGISTRY_ADMIN");
+            String wrongTarget = TestJwt.dualControlWithBody(SECRET, approver.getId(), "OPERATOR_USER_INVITE", "POST",
+                    "/api/v1/admin/users/" + UUID.randomUUID() + "/enable", json(body), "REGISTRY_ADMIN");
             assertThat(postWithApproval(stepUp(session), "/api/v1/admin/users", body, wrongTarget).getStatusCode())
                     .isEqualTo(HttpStatus.FORBIDDEN);
 
-            String approval = TestJwt.dualControl(SECRET, approver.getId(), "OPERATOR_USER_INVITE", "POST",
-                    "/api/v1/admin/users", "REGISTRY_ADMIN");
+            String approval = TestJwt.dualControlWithBody(SECRET, approver.getId(), "OPERATOR_USER_INVITE", "POST",
+                    "/api/v1/admin/users", json(body), "REGISTRY_ADMIN");
             assertThat(postWithApproval(stepUp(session), "/api/v1/admin/users", body, approval).getStatusCode())
                     .isEqualTo(HttpStatus.OK);
             assertThat(recorded.stream(OperatorUserInvitedEvent.class)
@@ -392,8 +411,8 @@ class UserLifecycleIT {
         assertThat(postWithApproval(stepUp(session), path, body, null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(users.findById(auditor.getId()).orElseThrow().isEnabled()).isFalse();
 
-        String approval = TestJwt.dualControl(SECRET, approver.getId(), "OPERATOR_USER_REINSTATE", "POST", path,
-                "REGISTRY_ADMIN");
+        String approval = TestJwt.dualControlWithBody(SECRET, approver.getId(), "OPERATOR_USER_REINSTATE", "POST", path,
+                json(body), "REGISTRY_ADMIN");
         assertThat(postWithApproval(stepUp(session), path, body, approval).getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(users.findById(auditor.getId()).orElseThrow().isEnabled()).isTrue();
     }

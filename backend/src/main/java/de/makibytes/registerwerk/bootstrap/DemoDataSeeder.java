@@ -1445,6 +1445,9 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered, de.makibytes.
         d.setDeployedByTx(tx.length() > 66 ? tx.substring(0, 66) : tx);
         d.setDeployedAt(deployedAt);
         d.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        // C5: record the decimals a deployment of this standard gets from the deployers (0 for the register tokens).
+        d.setTokenDecimals(de.makibytes.registerwerk.deployment.api.RegisterUnits.deployedDecimals(
+                assets.findById(assetId).map(Asset::getTokenStandard).orElse(null)));
         return deployments.save(d);
     }
 

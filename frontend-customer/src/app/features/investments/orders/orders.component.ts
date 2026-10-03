@@ -130,6 +130,12 @@ import { AddressComponent } from '../../../shared/components/address.component';
                 @if (o.status === 'PAYMENT_CONFIRMED') {
                   <span class="order-note">Payment received — your issuer is entering the position on the register.</span>
                 }
+                @if (o.status === 'SETTLEMENT_PENDING') {
+                  <span class="order-note">Payment received — your units are being issued; the position appears on the register once the issuance is final.</span>
+                }
+                @if (o.status === 'SETTLEMENT_FAILED') {
+                  <span class="order-note warn">Payment received — issuing your units did not succeed. Your issuer has been alerted and will retry or refund you.</span>
+                }
                 @if (o.status === 'SETTLED') {
                   <span class="order-note">Settled — the position is on the register.
                     @if (o.refundDue && o.refundDue > 0) { A refund of {{ o.refundDue | number:'1.2-2' }} {{ o.paymentCurrency }} is due to you. }

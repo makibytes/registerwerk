@@ -79,15 +79,16 @@ class CorporateActionSettlementWriter {
     void markSettled(UUID corporateActionId, String txHash, UUID actorId, String actorRole) {
         corporateActionRepository.findById(corporateActionId).ifPresentOrElse(ca -> {
             ca.setStatus(CorporateAction.Status.SETTLED);
+            ca.setSettlementHoldReason(null);
             ca.setSettlementTxHash(txHash);
             ca.setSettledAt(Instant.now());
             corporateActionRepository.save(ca);
 
             Instant settledAt = Instant.now();
             entryRepository.findByCorporateActionId(corporateActionId).forEach(entry -> {
-                // T2-18: a nominee-pool entry is held until PARK-T2-18 decides who is entitled —
-                // it must not be recorded as paid (nor count as realized income downstream).
-                if (entry.getPayoutStatus() == CorporateActionEntry.PayoutStatus.HELD_LOOK_THROUGH) {
+                // T2-18 / H6: a held entry (nominee pool awaiting PARK-T2-18, or a holder that failed the eligibility
+                // gate at payout time) must not be recorded as paid, nor count as realized income downstream.
+                if (entry.getPayoutStatus() != CorporateActionEntry.PayoutStatus.PAYABLE) {
                     return;
                 }
                 entry.setSettlementTxHash(txHash);

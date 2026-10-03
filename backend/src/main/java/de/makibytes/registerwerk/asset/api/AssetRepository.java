@@ -22,6 +22,9 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
 
     Page<Asset> findByStatus(AssetStatus status, Pageable pageable);
 
+    /** Every asset in one status (Wave 0b C7: the redemption sweep over REDEMPTION_PENDING). */
+    java.util.List<Asset> findByStatus(AssetStatus status);
+
     Page<Asset> findByIssuerIdAndStatus(UUID issuerId, AssetStatus status, Pageable pageable);
 
     /** T3-08: serialises allocation/settlement (issue-size + holding-cap checks) per asset. */

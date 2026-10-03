@@ -81,6 +81,7 @@ class StepUpHardeningIT {
     @Autowired LoginAttemptLimiter limiter;
     @Autowired TotpSecretStore secretStore;
     @Autowired TotpSecretMigration migration;
+    @Autowired StepUpTokenIssuer issuer;
     @LocalServerPort int port;
 
     @BeforeEach
@@ -246,11 +247,76 @@ class StepUpHardeningIT {
         assertThat(replicaB.acceptStep(user.getId(), 999)).as("an earlier step is a replay too").isFalse();
         assertThat(replicaB.acceptStep(user.getId(), 1001)).isTrue();
 
+        // The attempt budget is shared too: reservations on either replica draw from the same counter.
         for (int i = 0; i < TotpStateRepository.MAX_ATTEMPTS; i++) {
-            (i % 2 == 0 ? replicaA : replicaB).recordFailure(user.getId());
+            assertThat((i % 2 == 0 ? replicaA : replicaB).reserveAttempt(user.getId())).isTrue();
         }
         assertThat(replicaA.isLocked(user.getId())).isTrue();
         assertThat(replicaB.isLocked(user.getId())).isTrue();
+        assertThat(replicaA.reserveAttempt(user.getId())).as("locked: nothing more is granted").isFalse();
+        assertThat(replicaB.reserveAttempt(user.getId())).isFalse();
+
+        // reservations are deterministic under contention: exactly MAX_ATTEMPTS of 30 parallel callers get one
+        AppUser contended = newUser("contended", true);
+        java.util.concurrent.atomic.AtomicInteger granted = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.stream.IntStream.range(0, 30).parallel().forEach(i -> {
+            if ((i % 2 == 0 ? replicaA : replicaB).reserveAttempt(contended.getId())) {
+                granted.incrementAndGet();
+            }
+        });
+        assertThat(granted.get()).isEqualTo(TotpStateRepository.MAX_ATTEMPTS);
+    }
+
+    @Test
+    @DisplayName("C4/H14: parallel wrong guesses cannot exceed the attempt limit - the attempt is reserved before the code is checked")
+    void parallelGuessesAreBoundedByTheLockout() throws Exception {
+        AppUser user = newUser("guesser", true);
+        String secret = StepUpTokenIssuer.generateBase32Secret();
+        jdbc.update("UPDATE app_user SET totp_secret = ?, totp_enabled = true WHERE id = ?",
+                secretStore.encrypt(user.getId(), secret), user.getId());
+        long step = Instant.now().getEpochSecond() / 30;
+        Set<String> valid = Set.of(StepUpTokenIssuer.generateTotp(secret, step - 1),
+                StepUpTokenIssuer.generateTotp(secret, step), StepUpTokenIssuer.generateTotp(secret, step + 1));
+
+        int parallel = 40;
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(parallel);
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+        java.util.List<java.util.concurrent.Future<String>> results = new java.util.ArrayList<>();
+        try {
+            for (int i = 0; i < parallel; i++) {
+                String guess = String.format("%06d", 100_000 + i * 7);
+                if (valid.contains(guess)) {
+                    guess = "999999";
+                }
+                String code = guess;
+                results.add(executor.submit(() -> {
+                    go.await();
+                    try {
+                        issuer.issueAfterVerification(user.getId(), code, "TOTP");
+                        return "ACCEPTED";
+                    } catch (org.springframework.security.access.AccessDeniedException e) {
+                        return e.getMessage();
+                    }
+                }));
+            }
+            go.countDown();
+            int verified = 0;
+            for (java.util.concurrent.Future<String> f : results) {
+                String outcome = f.get(60, java.util.concurrent.TimeUnit.SECONDS);
+                assertThat(outcome).isNotEqualTo("ACCEPTED");
+                if (outcome.startsWith("Invalid TOTP code. Check")) {
+                    verified++;
+                }
+            }
+            assertThat(verified).as("guesses that were actually compared with the secret")
+                    .isLessThanOrEqualTo(TotpStateRepository.MAX_ATTEMPTS);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(jdbc.queryForObject("SELECT failed_attempts FROM totp_state WHERE user_id = ?", Integer.class, user.getId()))
+                .isLessThanOrEqualTo(TotpStateRepository.MAX_ATTEMPTS);
+        assertThat(jdbc.queryForObject("SELECT locked_until > now() FROM totp_state WHERE user_id = ?", Boolean.class,
+                user.getId())).isTrue();
     }
 
     @Test
@@ -283,30 +349,33 @@ class StepUpHardeningIT {
 
     @Test
     @DisplayName("6-10: five failures from IP A lock the pair for A only - the real user still logs in from IP B")
-    void lockIsPerAccountAndSource() {
+    void lockIsPerAccountAndSource() throws Exception {
         AppUser user = newUser("victim", true);
         for (int i = 0; i < 5; i++) {
             assertThat(login(user.getEmail(), "wrong", "198.51.100.1").getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
         assertThat(login(user.getEmail(), PASSWORD, "198.51.100.1").getStatusCode())
-                .as("locked pair, even with the right password").isEqualTo(HttpStatus.UNAUTHORIZED);
+                .as("locked pair, even with the right password").isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        Thread.sleep(1_200); // the account-wide delay after five failures (1 s) is not a lock
         assertThat(login(user.getEmail(), PASSWORD, "198.51.100.2").getStatusCode())
                 .as("the legitimate user from another address is not locked out").isEqualTo(HttpStatus.OK);
     }
 
     @Test
-    @DisplayName("6-10: failures from many addresses only delay the account (1 s), they never lock it")
+    @DisplayName("6-10: failures from many addresses only delay the account (a short 'retry after'), they never lock it")
     void distributedFailuresOnlyDelay() {
         AppUser user = newUser("distributed", true);
         for (int i = 0; i < 6; i++) {
             limiter.recordFailure(user.getEmail(), "192.0.2." + (10 + i));
         }
         LoginAttemptLimiter.Decision d = limiter.check(user.getEmail(), "192.0.2.99");
-        assertThat(d.blocked()).isFalse();
-        assertThat(d.delayMillis()).isGreaterThanOrEqualTo(1000);
-        long t0 = System.nanoTime();
+        assertThat(d.blocked()).isTrue();
+        assertThat(d.retryAfterSeconds()).isBetween(1L, 5L);
+        // The wait is over once the delay since the last failure has passed; the account was never locked.
+        jdbc.update("UPDATE login_attempt SET updated_at = now() - interval '10 seconds' WHERE login_key = ?",
+                "a|" + user.getEmail().toLowerCase());
+        assertThat(limiter.check(user.getEmail(), "192.0.2.99").blocked()).isFalse();
         assertThat(login(user.getEmail(), PASSWORD, "192.0.2.99").getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat((System.nanoTime() - t0) / 1_000_000).isGreaterThanOrEqualTo(1000);
     }
 
     @Test
@@ -318,7 +387,7 @@ class StepUpHardeningIT {
                     .isEqualTo(HttpStatus.UNAUTHORIZED);
         }
         assertThat(login(real.getEmail(), PASSWORD, "203.0.113.77").getStatusCode())
-                .as("the spraying address is refused").isEqualTo(HttpStatus.UNAUTHORIZED);
+                .as("the spraying address is refused").isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(login(real.getEmail(), PASSWORD, "203.0.113.78").getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
@@ -334,6 +403,7 @@ class StepUpHardeningIT {
 
         jdbc.update("UPDATE login_attempt SET locked_until = now() - interval '1 second' WHERE login_key = ?",
                 "p|" + email + "|" + ip);
+        jdbc.update("UPDATE login_attempt SET updated_at = now() - interval '1 minute' WHERE login_key = ?", "a|" + email);
         assertThat(limiter.check(email, ip).blocked()).isFalse();
         for (int i = 0; i < 5; i++) limiter.recordFailure(email, ip);
         double second = lockSeconds(email, ip);

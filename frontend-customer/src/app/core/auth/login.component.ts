@@ -369,11 +369,27 @@ export class LoginComponent {
       },
       error: (err: HttpErrorResponse) => {
         this.loading = false;
-        this.errorMessage = err.status === 0 || err.status >= 500
-          ? 'The sign-in service is unavailable. Please try again shortly.'
-          : 'Invalid credentials. Please check your email and password.';
+        this.errorMessage = signInErrorMessage(err);
         this.cdr.markForCheck();
       },
     });
   }
+}
+
+/**
+ * The message for a failed built-in sign-in. 429 is the brute-force throttle (the same answer for known and
+ * unknown accounts), with the wait in `Retry-After` seconds.
+ */
+export function signInErrorMessage(err: Pick<HttpErrorResponse, 'status' | 'headers'>): string {
+  if (err.status === 429) {
+    const seconds = Number(err.headers?.get('Retry-After'));
+    if (Number.isFinite(seconds) && seconds > 0) {
+      const wait = seconds >= 90 ? `${Math.ceil(seconds / 60)} minutes` : `${Math.ceil(seconds)} seconds`;
+      return `Too many sign-in attempts. Please try again in ${wait}.`;
+    }
+    return 'Too many sign-in attempts. Please try again later.';
+  }
+  return err.status === 0 || err.status >= 500
+    ? 'The sign-in service is unavailable. Please try again shortly.'
+    : 'Invalid credentials. Please check your email and password.';
 }

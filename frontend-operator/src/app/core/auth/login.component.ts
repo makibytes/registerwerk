@@ -343,10 +343,14 @@ export class LoginComponent {
         this.loading = false;
         this.router.navigate(['/dashboard']);
       },
-      error: (err: { error?: { message?: string } }) => {
+      error: (err: { status?: number; headers?: { get(name: string): string | null }; error?: { message?: string } }) => {
         this.loading = false;
         this.cdr.markForCheck();
-        this.snackBar.open(err?.error?.message ?? 'Login failed. Please try again.', 'Dismiss', { duration: 5000 });
+        const wait = Number(err?.headers?.get('Retry-After'));
+        const message = err?.status === 429
+          ? `Too many sign-in attempts. Please try again in ${wait > 0 ? Math.ceil(wait) + ' seconds' : 'a moment'}.`
+          : err?.error?.message ?? 'Login failed. Please try again.';
+        this.snackBar.open(message, 'Dismiss', { duration: 5000 });
       },
     });
   }

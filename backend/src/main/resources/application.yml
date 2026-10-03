@@ -563,9 +563,17 @@ registerwerk:
         window-seconds: 300
         # Reasons whose target binding is enforced; "*" = all. Exists only to roll back a bad deploy.
         bind-target-reasons: "*"
-        # Reasons whose approval additionally binds the canonical JSON request body (amounts and
-        # destinations are part of what the approver reviewed).
-        bind-body-reasons: ISSUER_MINT,ISSUER_BURN_EWG26,ISSUER_FORCED_TRANSFER_EWG24,ISSUER_FORCED_APPROVE_OVERRIDE,FORCED_TRANSFER_EWG24,FORCE_BURN_EWG26,FORCED_APPROVE_OVERRIDE,ERC3525_FORCED_VALUE_TRANSFER_EWG24
+        # Reasons whose approval additionally binds the canonical JSON request body (amounts, destinations and
+        # override notes are part of what the approver reviewed). "*" = every reason: a body the approver did
+        # not see must not be changeable afterwards.
+        bind-body-reasons: "*"
+        # Explicit opt-out. Method, path and query stay bound for these reasons; only the body is not. Keep this
+        # list short - every entry weakens the four-eyes check:
+        #  * payload that is not JSON and so has no canonical form an approver could reproduce: a multipart
+        #    upload (term sheet, keystore) and a CSV import (its content is bound through the diffDigest query);
+        #  * payload that IS secret key material or a keystore password, which must never be copied into an
+        #    approval request that travels to a second person: raw key import, keystore export.
+        body-opt-out-reasons: TERM_SHEET_AMENDMENT,WALLET_IMPORT_KEYSTORE,CASP_REGISTER_IMPORT,WALLET_IMPORT_RAW,WALLET_KEYSTORE_EXPORT
         max-body-bytes: 1048576
       entra:
         # Conditional Access authentication context (c1–c99) required for step-up-protected

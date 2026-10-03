@@ -94,18 +94,25 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
                   </button>
                 }
                 @if (isPreSettlement(a)) {
-                  @if (!a.issuerAttestedAt) {
-                    <button type="button" mat-stroked-button [disabled]="busy.has(a.id)"
-                            matTooltip="Audited escape hatch for an issuer who never logs in to attest"
-                            (click)="overrideAttestation(a)">
-                      <mat-icon>person_off</mat-icon> Override attestation
-                    </button>
-                  } @else if (!a.dualControlApproverId && a.status !== 'SNAPSHOT_BLOCKED') {
-                    <button type="button" mat-stroked-button color="warn" [disabled]="busy.has(a.id)"
-                            matTooltip="Requires step-up authentication"
-                            (click)="confirmSettlement(a)">
-                      <mat-icon>gavel</mat-icon> Confirm settlement
-                    </button>
+                  @if (a.status === 'COMPUTED') {
+                    @if (!a.issuerAttestedAt) {
+                      <button type="button" mat-stroked-button [disabled]="busy.has(a.id)"
+                              matTooltip="Audited escape hatch for an issuer who never logs in to attest; binds the computed amounts (digest)"
+                              (click)="overrideAttestation(a)">
+                        <mat-icon>person_off</mat-icon> Override attestation
+                      </button>
+                    } @else if (!a.dualControlApproverId) {
+                      <button type="button" mat-stroked-button color="warn" [disabled]="busy.has(a.id)"
+                              matTooltip="Requires step-up authentication; confirms the computed amounts the issuer attested"
+                              (click)="confirmSettlement(a)">
+                        <mat-icon>gavel</mat-icon> Confirm settlement
+                      </button>
+                    }
+                  } @else {
+                    <span class="dimmed small"
+                          matTooltip="The issuer attestation and the operator confirmation cover the computed amounts, so they open once the entitlements are COMPUTED.">
+                      sign-off opens once COMPUTED
+                    </span>
                   }
                   <button type="button" mat-icon-button matTooltip="Cancel this corporate action" [disabled]="busy.has(a.id)"
                           (click)="cancel(a)">
@@ -284,7 +291,7 @@ export class CorporateActionsComponent implements OnInit {
   confirmSettlement(a: CorporateAction): void {
     this.withStepUp(`Confirm settlement of ${a.actionType} corporate action (${a.id})`, 'CORPORATE_ACTION_SETTLEMENT_CONFIRMATION', (token) => {
       this.busy.add(a.id);
-      this.corporateActionsService.confirmSettlement(a.id, token).subscribe({
+      this.corporateActionsService.confirmSettlement(a.id, token, a.payoutDigest).subscribe({
         next: () => { this.snackBar.open('Settlement confirmed.', 'Dismiss', { duration: 6000 }); this.busy.delete(a.id); this.load(); },
         error: (err) => this.onActionError(a.id, err, 'Failed to confirm settlement. Check step-up authentication.'),
       });
@@ -312,6 +319,7 @@ export class CorporateActionsComponent implements OnInit {
         reason: `Manually mark ${a.actionType} corporate action (${a.id}) as settled`,
         action: 'CORPORATE_ACTION_MANUAL_SETTLEMENT',
         target: `POST /api/v1/corporate-actions/${a.id}/mark-settled`,
+        targetBody: { reference },
       },
       width: '500px',
       disableClose: true,
@@ -335,6 +343,7 @@ export class CorporateActionsComponent implements OnInit {
         reason: `Cancel ${a.actionType} corporate action (${a.id})`,
         action: 'CORPORATE_ACTION_CANCELLATION',
         target: `POST /api/v1/corporate-actions/${a.id}/cancel`,
+        targetBody: { reason },
       },
       width: '500px',
       disableClose: true,

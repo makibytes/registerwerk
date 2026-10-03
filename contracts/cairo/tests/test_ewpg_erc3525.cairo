@@ -497,3 +497,58 @@ fn test_approve_value_while_paused_reverts() {
     start_cheat_caller_address(address, investor_a());
     token.approve_value(token_id, investor_b(), 1_u256);
 }
+
+// ── H15: revoking a delegate (value 0) is never restricted ─────────────────────
+
+/// Mirrors the Solidity `approve(…, 0)` fix: a holder whose position is frozen/paused (e.g.
+/// because a delegate's key was compromised) must still be able to cancel that delegate's
+/// allowance, or it would be spendable again once the restriction is lifted.
+#[test]
+fn test_approve_value_zero_revokes_while_token_frozen() {
+    let (token, admin, address) = deploy_token();
+    let token_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(token_id, investor_b(), 300_u256);
+    stop_cheat_caller_address(address);
+    start_cheat_caller_address(address, registry());
+    admin.freeze_token(token_id, 'stolen-key');
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(token_id, investor_b(), 0_u256);
+    stop_cheat_caller_address(address);
+    assert!(token.allowance(token_id, investor_b()) == 0_u256, "revoked while token frozen");
+}
+
+#[test]
+fn test_approve_value_zero_revokes_while_owner_frozen_and_paused() {
+    let (token, admin, address) = deploy_token();
+    let token_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(token_id, investor_b(), 300_u256);
+    stop_cheat_caller_address(address);
+    start_cheat_caller_address(address, registry());
+    admin.freeze_address(investor_a(), 'GwG40');
+    admin.freeze_address(investor_b(), 'sanctions');
+    admin.pause();
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_a());
+    token.approve_value(token_id, investor_b(), 0_u256);
+    stop_cheat_caller_address(address);
+    assert!(token.allowance(token_id, investor_b()) == 0_u256, "revoked while frozen and paused");
+}
+
+/// Only the holder may revoke, and a non-zero value stays restricted.
+#[test]
+#[should_panic(expected: "EwpgERC3525: caller is not the owner")]
+fn test_approve_value_zero_still_requires_the_owner() {
+    let (token, admin, address) = deploy_token();
+    let token_id = mint_as_registry(admin, address, investor_a(), slot_2026(), 1000_u256);
+    start_cheat_caller_address(address, registry());
+    admin.freeze_token(token_id, 'GwG40');
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, investor_b());
+    token.approve_value(token_id, investor_b(), 0_u256);
+}

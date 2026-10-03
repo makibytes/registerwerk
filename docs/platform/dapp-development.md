@@ -211,7 +211,16 @@ that only echoes what the locker stored. If the stored terms differ, `settle` re
 `TermsMismatch` and moves nothing. `settle` also reverts `PartyFrozen` while the asset token (if
 it answers `isFrozen(address)`, as T-REX does) reports the seller or buyer frozen; the escrow then
 stays in place until the freeze is lifted, the trade is cancelled, or the operator releases it
-under a legal order with `forceCancel(tradeId, to, legalBasis)` (event `TradeForceCancelled`).
+with `forceCancel(tradeId, to, legalBasis)` (event `TradeForceCancelled`).
+
+!!! note "Legal-order releases"
+    `forceCancel` (operator role) can only return the escrow to the trade's own parties, the locker
+    or the counterparty. A destination outside the trade, named by a legal order, needs the separate
+    `LEGAL_ORDER_ROLE`, which is not granted at deployment (give it to a different key or multisig
+    than the operator wallet): `proposeForceCancel` (event `ForceCancelProposed`), then a two-day
+    timelock (`LEGAL_ORDER_DELAY`), then `executeForceCancel`. A proposal can be withdrawn with
+    `withdrawForceCancel` (event `ForceCancelWithdrawn`), and settling or cancelling the trade
+    moots it.
 
 ## Publication workflow
 
@@ -299,7 +308,7 @@ tests, and a `README`. They are examples rather than approved product templates,
 | dApp | Slug | Showcases |
 |---|---|---|
 | **Boardroom Governance** | `boardroom` | The permission-management framework in full: propose/vote/tally gated by permissions + ONCHAINID claims (KYC, Accreditation), and the **role-restriction / org-admin delegation** flow on `boardroom.tally`. |
-| **eWpG Bond Desk** | `bond-desk` | An ERC-3643/T-REX technical example with a configured token payment leg. `subscribe` performs payment transfer and minting in one transaction; `payCoupon`/`redeem` exercise time/idempotency controls. This is not a legally classified bond, verified payment arrangement, or proof of legal settlement. |
+| **eWpG Bond Desk** | `bond-desk` | An ERC-3643/T-REX technical example with a configured token payment leg. `subscribe` performs payment transfer and minting in one transaction; `payCoupon`/`redeem` exercise time/idempotency controls. A short first (stub) coupon period is pro-rated by day count; for a holder with frozen units only that share is withheld into a desk escrow (the rest is paid at once) and the holder claims it with `claimWithheldCoupon` once nothing is frozen. This is not a legally classified bond, verified payment arrangement, or proof of legal settlement. |
 | **eWpG Repo & Lending Facility** | `repo-facility` | A collateralized-lending technical example with an open stablecoin-lender side and contract-gated borrower side. Production use is blocked pending legal characterization, custody/control, liquidation, oracle, insolvency, eligibility, and security approval. Token identity checks alone do not make liquidation compliant. See [DeFi Interoperability](./defi-interoperability.md#ewpgrepofacility-the-primary-exit-liquidity-mechanism). |
 
 | | Path |

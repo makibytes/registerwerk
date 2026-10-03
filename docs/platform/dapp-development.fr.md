@@ -221,6 +221,15 @@ signale le vendeur ou l'acheteur comme gelé ; le séquestre reste alors en plac
 gel, l'annulation de l'opération ou sa libération par l'opérateur en vertu d'une décision légale via
 `forceCancel(tradeId, to, legalBasis)` (événement `TradeForceCancelled`).
 
+!!! note "Libérations sur décision légale"
+    `forceCancel` (rôle opérateur) ne peut restituer le séquestre qu'aux parties de l'opération, le
+    déposant ou la contrepartie. Une destination extérieure à l'opération, désignée par une décision
+    légale, exige le rôle distinct `LEGAL_ORDER_ROLE`, non attribué au déploiement (attribuez-le à
+    une clé ou un multisig différent du portefeuille de l'opérateur) : `proposeForceCancel`
+    (événement `ForceCancelProposed`), puis un délai de deux jours (`LEGAL_ORDER_DELAY`), puis
+    `executeForceCancel`. Une proposition peut être retirée avec `withdrawForceCancel` (événement
+    `ForceCancelWithdrawn`) ; le règlement ou l'annulation de l'opération la rend sans objet.
+
 ## Flux de publication { #publication-workflow }
 
 1. **Prérequis :** votre entreprise est enregistrée comme organisation on-chain (côté opérateur)
@@ -313,7 +322,7 @@ sont semés comme fiches de démonstration `PUBLISHED` sur la marketplace par
 | dApp | Slug | Illustre |
 |---|---|---|
 | **Boardroom Governance** | `boardroom` | Le cadre de gestion des permissions dans son intégralité : proposer/voter/dépouiller conditionné par des permissions + des claims ONCHAINID (KYC, Accréditation), et le flux **restriction par rôle / délégation par l'administrateur d'organisation** sur `boardroom.tally`. |
-| **eWpG Bond Desk** | `bond-desk` | Un exemple technique ERC-3643/T-REX avec une jambe de paiement en jeton configurée. `subscribe` effectue le transfert de paiement et l'émission (mint) en une seule transaction ; `payCoupon`/`redeem` exercent des contrôles de délai et d'idempotence. Ce n'est ni une obligation légalement qualifiée, ni un dispositif de paiement vérifié, ni une preuve de règlement légal. |
+| **eWpG Bond Desk** | `bond-desk` | Un exemple technique ERC-3643/T-REX avec une jambe de paiement en jeton configurée. `subscribe` effectue le transfert de paiement et l'émission (mint) en une seule transaction ; `payCoupon`/`redeem` exercent des contrôles de délai et d'idempotence. Une courte première période de coupon (stub) est calculée au prorata des jours ; pour un détenteur ayant des unités gelées, seule leur part est retenue dans un séquestre du desk (le reste est payé immédiatement) et le détenteur la réclame avec `claimWithheldCoupon` dès que plus rien n'est gelé. Ce n'est ni une obligation légalement qualifiée, ni un dispositif de paiement vérifié, ni une preuve de règlement légal. |
 | **eWpG Repo & Lending Facility** | `repo-facility` | Un exemple technique de prêt garanti, avec un côté prêteur en stablecoin ouvert et un côté emprunteur soumis au contrat. L'usage en production est bloqué en attendant la qualification juridique, la garde/le contrôle, la réalisation de la garantie, l'oracle, l'insolvabilité, l'éligibilité et l'approbation en matière de sécurité. Les contrôles d'identité du jeton ne suffisent pas, à eux seuls, à rendre la réalisation de la garantie conforme. Voir [Interopérabilité DeFi](./defi-interoperability.md#ewpgrepofacility-the-primary-exit-liquidity-mechanism). |
 
 | | Chemin |

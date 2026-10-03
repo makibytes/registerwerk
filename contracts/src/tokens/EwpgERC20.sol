@@ -38,6 +38,17 @@ contract EwpgERC20 is ERC20, Ownable, EwpgCompliance, EwpgDocumentManagement {
         assetId = _assetId;
     }
 
+    // ── Units ─────────────────────────────────────────────────────────────────
+
+    /// @notice Register units are WHOLE units: one token is one unit of the security (Wave 0b C5).
+    ///         The registry's amounts (holder nominal, indexed transfer values, coupon / redemption
+    ///         maths, trading quantities) are raw token base units, and `EwpgRepoMarket` only accepts
+    ///         collateral with `decimals() == 0`. A security token with the OpenZeppelin default of 18
+    ///         decimals would make every one of those amounts wrong by a factor of 1e18.
+    function decimals() public pure override returns (uint8) {
+        return 0;
+    }
+
     // ── Standard issuance ─────────────────────────────────────────────────────
 
     /// @notice Mint tokens to a whitelisted address. Only callable by the registry wallet.

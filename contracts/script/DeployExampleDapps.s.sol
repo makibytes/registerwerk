@@ -32,7 +32,8 @@ import "../src/settlement/DvpSettlement.sol";
 ///                                      intervals; the schedule is anchored on maturity —
 ///                                      the final coupon falls due exactly at maturity and
 ///                                      the first period absorbs any remainder as a short
-///                                      stub, so the mined block's later timestamp is fine)
+///                                      stub, so the mined block's later timestamp is fine;
+///                                      the stub's coupon is pro-rated by day count)
 ///           BOND_DESK_OPERATOR_ORG    (address of the issuer org operating the desk; default
 ///                                      the deployer wallet's org — every desk function is
 ///                                      bound to this org, see EwpgBondDesk.operatorOrg)

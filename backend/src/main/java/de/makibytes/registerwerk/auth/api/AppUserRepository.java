@@ -4,9 +4,11 @@ import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -15,6 +17,16 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID>, JpaSpec
 
     @Query("select u from AppUser u where lower(u.email) = lower(:email)")
     Optional<AppUser> findByEmailIgnoreCase(@Param("email") String email);
+
+    /**
+     * Records the login time without writing the rest of the row: the login holds no transaction, so a
+     * detached entity written back after the BCrypt work would overwrite a role change, a disable or a
+     * session revocation made in the meantime.
+     */
+    @Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("update AppUser u set u.lastLoginAt = :at where u.id = :id")
+    int touchLastLogin(@Param("id") UUID id, @Param("at") Instant at);
 
     /** Primary lookup for an Entra principal: the token's {@code oid} is stable, its email is not. */
     Optional<AppUser> findByEntraObjectId(UUID entraObjectId);

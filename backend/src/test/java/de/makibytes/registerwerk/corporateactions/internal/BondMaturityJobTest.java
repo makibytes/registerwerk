@@ -44,10 +44,13 @@ class BondMaturityJobTest {
     @Mock private CorporateActionRepository corporateActionRepository;
     @Mock private CorporateActionService corporateActionService;
     @Mock private AssetRepository assetRepository;
+    @Mock private de.makibytes.registerwerk.customer.api.EntityTaskPort entityTasks;
+    @Mock private org.springframework.context.ApplicationEventPublisher events;
 
     private BondMaturityJob jobOn(LocalDate today) {
         return new BondMaturityJob(bondTermsRepository, corporateActionRepository, corporateActionService,
-                assetRepository, CorporateActionTestSupport.registerClockAt(today));
+                assetRepository, CorporateActionTestSupport.registerClockAt(today),
+                CorporateActionTestSupport.directTransactions(), entityTasks, events);
     }
 
     private AssetBondTerms terms(BondStatus status) {
@@ -58,6 +61,7 @@ class BondMaturityJobTest {
         t.setFaceValue(new BigDecimal("1000"));
         t.setCurrencyIso("EUR");
         when(bondTermsRepository.findByBondStatus(status)).thenReturn(List.of(t));
+        when(bondTermsRepository.findById(t.getAssetId())).thenReturn(Optional.of(t));
         return t;
     }
 
@@ -178,5 +182,121 @@ class BondMaturityJobTest {
         jobOn(LocalDate.of(2025, 6, 24)).processMaturitiesAndDefaults();
 
         verify(corporateActionService, never()).announce(any());
+    }
+
+    // ── Wave 0b H6: registry-side blocks are never escalated ───────────────────
+
+    private CorporateAction blockedRedemption(CorporateAction.Status status) {
+        CorporateAction ca = unsettledRedemption(MATURITY);
+        org.springframework.test.util.ReflectionTestUtils.setField(ca, "id", UUID.randomUUID());
+        ca.setStatus(status);
+        return ca;
+    }
+
+    @Test
+    @DisplayName("H6: a redemption parked as SNAPSHOT_BLOCKED stays blocked - not OVERDUE, not DEFAULTED, even long past the grace period")
+    void snapshotBlockedRedemptionIsNeverEscalated() {
+        AssetBondTerms t = terms(BondStatus.MATURED);
+        when(corporateActionRepository.existsActiveRedemptionForAsset(t.getAssetId())).thenReturn(true);
+        CorporateAction blocked = blockedRedemption(CorporateAction.Status.SNAPSHOT_BLOCKED);
+        blocked.setSnapshotBlockedReason("holder sync BLOCKED, unmapped wallets: [0xabc]");
+        when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of(blocked));
+        Asset asset = new Asset();
+        asset.setIssuerId(UUID.randomUUID());
+        asset.setStatus(AssetStatus.ISSUED);
+        when(assetRepository.findById(t.getAssetId())).thenReturn(Optional.of(asset));
+        when(entityTasks.open(any(), any(), any(), any(), any())).thenReturn(true);
+
+        jobOn(MATURITY.plusDays(90)).processMaturitiesAndDefaults();
+
+        assertThat(t.getBondStatus()).isEqualTo(BondStatus.MATURED);
+        verify(bondTermsRepository, never()).save(t);
+        verify(entityTasks).open(org.mockito.ArgumentMatchers.eq(asset.getIssuerId()),
+                org.mockito.ArgumentMatchers.eq(CorporateActionBlocks.TASK_REDEMPTION_BLOCKED),
+                org.mockito.ArgumentMatchers.eq(blocked.getId().toString()), any(), any());
+        ArgumentCaptor<de.makibytes.registerwerk.corporateactions.api.BondRedemptionBlockedEvent> event =
+                ArgumentCaptor.forClass(de.makibytes.registerwerk.corporateactions.api.BondRedemptionBlockedEvent.class);
+        verify(events).publishEvent(event.capture());
+        assertThat(event.getValue().cause()).contains("snapshot is blocked");
+    }
+
+    @Test
+    @DisplayName("H6: a redemption the system holds back (Sperrvermerk / finality hold) is not escalated either")
+    void settlementHeldRedemptionIsNeverEscalated() {
+        AssetBondTerms t = terms(BondStatus.MATURED);
+        when(corporateActionRepository.existsActiveRedemptionForAsset(t.getAssetId())).thenReturn(true);
+        CorporateAction held = blockedRedemption(CorporateAction.Status.COMPUTED);
+        held.setSettlementHoldReason("an on-ledger call cannot exclude 1 ineligible holder");
+        when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of(held));
+
+        jobOn(MATURITY.plusDays(90)).processMaturitiesAndDefaults();
+
+        assertThat(t.getBondStatus()).isEqualTo(BondStatus.MATURED);
+    }
+
+    @Test
+    @DisplayName("H6: a frozen / handed-over register is a registry-side block - the bond is not defaulted for it")
+    void frozenRegisterRedemptionIsNeverEscalated() {
+        AssetBondTerms t = terms(BondStatus.MATURED);
+        when(corporateActionRepository.existsActiveRedemptionForAsset(t.getAssetId())).thenReturn(true);
+        CorporateAction pending = blockedRedemption(CorporateAction.Status.COMPUTED);
+        when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of(pending));
+        Asset frozen = new Asset();
+        frozen.setStatus(AssetStatus.TRANSFER_PENDING);
+        when(assetRepository.findById(t.getAssetId())).thenReturn(Optional.of(frozen));
+
+        jobOn(MATURITY.plusDays(90)).processMaturitiesAndDefaults();
+
+        assertThat(t.getBondStatus()).isEqualTo(BondStatus.MATURED);
+    }
+
+    @Test
+    @DisplayName("H6: a redemption that only waits for the issuer / operator sign-off still escalates as before")
+    void issuerSideRedemptionIsStillEscalated() {
+        AssetBondTerms t = terms(BondStatus.MATURED);
+        when(corporateActionRepository.existsActiveRedemptionForAsset(t.getAssetId())).thenReturn(true);
+        CorporateAction waiting = blockedRedemption(CorporateAction.Status.COMPUTED);
+        CorporateAction blocked = blockedRedemption(CorporateAction.Status.SNAPSHOT_BLOCKED);
+        blocked.setSnapshotBlockedReason("x");
+        when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of(waiting, blocked));
+
+        jobOn(MATURITY.plusDays(90)).processMaturitiesAndDefaults();
+
+        assertThat(t.getBondStatus()).isEqualTo(BondStatus.DEFAULTED);
+    }
+
+    // ── Wave 0b H8: one transaction per bond ───────────────────────────────────
+
+    @Test
+    @DisplayName("H8: a bond whose evaluation fails rolls back only itself; the next bond is still transitioned and committed")
+    void oneFailingBondDoesNotRollBackTheOthers() {
+        org.springframework.transaction.PlatformTransactionManager manager =
+                org.mockito.Mockito.mock(org.springframework.transaction.PlatformTransactionManager.class);
+        AssetBondTerms broken = new AssetBondTerms();
+        broken.setAssetId(UUID.randomUUID());
+        broken.setBondStatus(BondStatus.ACTIVE);
+        broken.setMaturityDate(MATURITY);
+        AssetBondTerms fine = new AssetBondTerms();
+        fine.setAssetId(UUID.randomUUID());
+        fine.setBondStatus(BondStatus.ACTIVE);
+        fine.setMaturityDate(MATURITY);
+        when(bondTermsRepository.findMaturedButNotTransitioned(any())).thenReturn(List.of(broken, fine));
+        when(bondTermsRepository.findById(broken.getAssetId())).thenReturn(Optional.of(broken));
+        when(bondTermsRepository.findById(fine.getAssetId())).thenReturn(Optional.of(fine));
+        when(corporateActionRepository.existsSettledCallForAsset(broken.getAssetId()))
+                .thenThrow(new IllegalStateException("db hiccup"));
+        BondMaturityJob job = new BondMaturityJob(bondTermsRepository, corporateActionRepository, corporateActionService,
+                assetRepository, CorporateActionTestSupport.registerClockAt(MATURITY),
+                new de.makibytes.registerwerk.shared.IsolatedTransactionExecutor(manager), entityTasks, events);
+
+        job.processMaturitiesAndDefaults();
+
+        assertThat(broken.getBondStatus()).isEqualTo(BondStatus.ACTIVE);
+        assertThat(fine.getBondStatus()).isEqualTo(BondStatus.MATURED);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(manager);
+        order.verify(manager).getTransaction(any());
+        order.verify(manager).rollback(any());
+        order.verify(manager).getTransaction(any());
+        order.verify(manager).commit(any());
     }
 }

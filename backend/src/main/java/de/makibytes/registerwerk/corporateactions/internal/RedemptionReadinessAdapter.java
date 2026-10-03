@@ -9,10 +9,12 @@ import de.makibytes.registerwerk.shared.AddressNormalizer;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -65,7 +67,13 @@ class RedemptionReadinessAdapter implements RedemptionReadinessPort {
                     .map(e -> AddressNormalizer.normalize(e.getWalletAddress()))
                     .filter(Objects::nonNull)
                     .collect(Collectors.toUnmodifiableSet());
-            return Optional.of(new SettledRetirement(ca.getId(), paid));
+            Map<String, BigDecimal> nominalAtRecord = entries.stream()
+                    .filter(e -> e.getSettledAt() != null)
+                    .filter(e -> e.getPayoutStatus() == CorporateActionEntry.PayoutStatus.PAYABLE)
+                    .filter(e -> AddressNormalizer.normalize(e.getWalletAddress()) != null && e.getNominalAtRecord() != null)
+                    .collect(Collectors.toUnmodifiableMap(e -> AddressNormalizer.normalize(e.getWalletAddress()),
+                            CorporateActionEntry::getNominalAtRecord, BigDecimal::add));
+            return Optional.of(new SettledRetirement(ca.getId(), paid, nominalAtRecord));
         }
         return Optional.empty();
     }

@@ -78,13 +78,31 @@ public final class EnvelopeCipher {
     }
 
     /**
-     * Decrypts a stored value. A value without the {@code enc:} prefix is a legacy plaintext row and
-     * is returned as-is, so callers can migrate lazily.
+     * Decrypts a stored value. A value without the {@code enc:} prefix is <em>refused</em>: it is either
+     * corruption or a secret still sitting in plaintext, and silently accepting it would keep a plaintext
+     * column working forever (H14). Backfilling a column that predates the envelope is the job of a
+     * dedicated startup migration that reads the raw value itself, not of the read path.
+     *
+     * @throws IllegalStateException when {@code stored} is not an envelope value or does not decrypt
      */
     public String decrypt(String stored, String aad) {
         if (!isEncrypted(stored)) {
-            return stored;
+            throw new IllegalStateException(
+                    "Stored value is not envelope-encrypted (no '" + PREFIX + "' prefix); refusing to use it as a secret");
         }
+        return openEnvelope(stored, aad);
+    }
+
+    /**
+     * Like {@link #decrypt} but returns a value without the {@code enc:} prefix unchanged. Only for a column
+     * that still has a documented, startup-migrated plaintext backfill window (webhook signing secrets);
+     * every new user of this class calls {@link #decrypt}.
+     */
+    public String decryptAllowingLegacyPlaintext(String stored, String aad) {
+        return isEncrypted(stored) ? openEnvelope(stored, aad) : stored;
+    }
+
+    private String openEnvelope(String stored, String aad) {
         byte[] dek = null;
         try {
             ByteBuffer in = ByteBuffer.wrap(Base64.getDecoder().decode(stored.substring(PREFIX.length())));

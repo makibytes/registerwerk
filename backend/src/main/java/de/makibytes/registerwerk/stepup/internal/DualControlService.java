@@ -43,17 +43,20 @@ class DualControlService implements DualControlGate {
     private final DualControlProperties properties;
     private final DualControlTokenUseRepository tokenUse;
     private final AppUserRepository users;
+    private final DualControlBootstrapLatch bootstrapLatch;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionTemplate tx;
 
     DualControlService(StepUpTokenValidator validator, StepUpEnforcer enforcer, DualControlProperties properties,
                        DualControlTokenUseRepository tokenUse, AppUserRepository users,
+                       DualControlBootstrapLatch bootstrapLatch,
                        ApplicationEventPublisher eventPublisher, PlatformTransactionManager txManager) {
         this.validator = validator;
         this.enforcer = enforcer;
         this.properties = properties;
         this.tokenUse = tokenUse;
         this.users = users;
+        this.bootstrapLatch = bootstrapLatch;
         this.eventPublisher = eventPublisher;
         this.tx = new TransactionTemplate(txManager);
     }
@@ -90,7 +93,8 @@ class DualControlService implements DualControlGate {
                 approval.approverId(), requestId, reason, request.getMethod(), request.getRequestURI(),
                 enforcer.mode().name(), approval.jti(), approval.targetDigest());
         tx.executeWithoutResult(status -> {
-            if (approval.jti() != null && !tokenUse.tryConsume(approval.jti(), approval.approverId(),
+            // Single use is unconditional: the validator guarantees a jti even while target binding is rolled back.
+            if (!tokenUse.tryConsume(approval.jti(), approval.approverId(),
                     initiatorId != null ? initiatorId : UUID.fromString(initiator.getSubject()), reason,
                     approval.targetDigest(), approval.expiresAt())) {
                 log.warn("Dual-control approval replay refused: approver={} action={} jti={}",
@@ -118,8 +122,10 @@ class DualControlService implements DualControlGate {
         HttpServletRequest request = currentRequest();
         Jwt jwt = currentJwt();
         enforcer.enforce(jwt, reason, GATE_MAX_AGE_MINUTES);
-        long enrolled = users.countEnabledTotpEnrolledUsersWithRole(AppUserRole.REGISTRY_ADMIN);
-        if (enrolled < 2) {
+        // C3: the bootstrap exception ends for good once two enabled, enrolled administrators have existed -
+        // counting them now is not enough, or disabling a colleague would bring it back.
+        if (!bootstrapLatch.isComplete()) {
+            long enrolled = users.countEnabledTotpEnrolledUsersWithRole(AppUserRole.REGISTRY_ADMIN);
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             UUID requestId = UUID.randomUUID();
             tx.executeWithoutResult(status -> eventPublisher.publishEvent(new DualControlBootstrapUsedEvent(
@@ -146,21 +152,29 @@ class DualControlService implements DualControlGate {
         String canonicalBody = null;
         if (properties.bindsBody(reason)) {
             Object cached = request.getAttribute(DualControlBodyCachingFilter.CACHED_BODY_ATTRIBUTE);
-            if (!(cached instanceof byte[] bytes)) {
+            if (cached instanceof byte[] bytes) {
+                String json = new String(bytes, StandardCharsets.UTF_8);
+                try {
+                    canonicalBody = json.isBlank() ? "" : DualControlTarget.canonicalJson(json);
+                } catch (IllegalArgumentException e) {
+                    throw new AccessDeniedException(
+                            "The request body is not valid, unambiguous JSON (repeated keys and unrepresentable numbers are refused).");
+                }
+            } else if (!DualControlBodyCachingFilter.carriesBody(request.getMethod())) {
+                canonicalBody = ""; // a GET has no body to change; the approver binds the empty body
+            } else {
                 throw new AccessDeniedException(
                         "This approval is bound to the request body, which is unavailable (body too large?).");
-            }
-            String json = new String(bytes, StandardCharsets.UTF_8);
-            try {
-                canonicalBody = json.isBlank() ? "" : DualControlTarget.canonicalJson(json);
-            } catch (IllegalArgumentException e) {
-                throw new AccessDeniedException("The request body is not valid JSON.");
             }
         }
         String uri = request.getRequestURI();
         String context = request.getContextPath();
         String path = context != null && !context.isEmpty() && uri.startsWith(context) ? uri.substring(context.length()) : uri;
-        return DualControlTarget.digest(request.getMethod(), path, request.getQueryString(), canonicalBody);
+        try {
+            return DualControlTarget.digest(request.getMethod(), path, request.getQueryString(), canonicalBody);
+        } catch (IllegalArgumentException e) {
+            throw new AccessDeniedException("The request cannot be bound to an approval: " + e.getMessage());
+        }
     }
 
     private static HttpServletRequest currentRequest() {

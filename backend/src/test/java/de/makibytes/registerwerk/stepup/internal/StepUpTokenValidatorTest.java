@@ -57,6 +57,9 @@ class StepUpTokenValidatorTest {
                 .subject(approverId.toString())
                 .claim("roles", List.of("REGISTRY_ADMIN"))
                 .claim("acr", "stepup")
+                .claim("use", "dual_control")
+                .audience(List.of("registerwerk-dual-control"))
+                .claim("jti", "jti-fixture")
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(600));
         if (scope != null) {
@@ -117,6 +120,9 @@ class StepUpTokenValidatorTest {
                 .subject(approverId.toString())
                 .claim("roles", List.of("COMPLIANCE_OFFICER"))
                 .claim("acr", "stepup")
+                .claim("use", "dual_control")
+                .audience(List.of("registerwerk-dual-control"))
+                .claim("jti", "jti-fixture")
                 .claim("stepup_scope", "FORCE_BURN")
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(600))
@@ -187,6 +193,10 @@ class StepUpTokenValidatorTest {
     // ── Target binding and single-use handle (K3, 6-08) ──────────────────────────
 
     private Jwt boundJwt(String targetDigest, String jti) {
+        return boundJwt(targetDigest, jti, true);
+    }
+
+    private Jwt boundJwt(String targetDigest, String jti, boolean marked) {
         var builder = Jwt.withTokenValue("raw-token")
                 .header("alg", "HS256")
                 .subject(approverId.toString())
@@ -195,6 +205,9 @@ class StepUpTokenValidatorTest {
                 .claim("stepup_scope", "FORCE_BURN")
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(300));
+        if (marked) {
+            builder.claim("use", "dual_control").audience(List.of("registerwerk-dual-control"));
+        }
         if (targetDigest != null) {
             builder.claim("stepup_target", targetDigest);
         }
@@ -256,6 +269,8 @@ class StepUpTokenValidatorTest {
                 .subject(approverId.toString())
                 .claim("roles", List.of("REGISTRY_ADMIN"))
                 .claim("acr", "stepup")
+                .claim("use", "dual_control")
+                .audience(List.of("registerwerk-dual-control"))
                 .claim("stepup_scope", "FORCE_BURN")
                 .claim("stepup_target", "digest-A")
                 .claim("jti", "jti-1")
@@ -267,5 +282,88 @@ class StepUpTokenValidatorTest {
         assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", "digest-A"))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining("expired");
+    }
+
+    // ── C1: only a token minted as a dual-control approval is one ─────────────────
+
+    private Jwt markedJwt(String targetDigest, String jti, String use, List<String> audience) {
+        var builder = Jwt.withTokenValue("raw-token")
+                .header("alg", "HS256")
+                .subject(approverId.toString())
+                .claim("roles", List.of("REGISTRY_ADMIN"))
+                .claim("acr", "stepup")
+                .claim("stepup_scope", "FORCE_BURN")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(300));
+        if (targetDigest != null) {
+            builder.claim("stepup_target", targetDigest);
+        }
+        if (jti != null) {
+            builder.claim("jti", jti);
+        }
+        if (use != null) {
+            builder.claim("use", use);
+        }
+        if (audience != null) {
+            builder.audience(audience);
+        }
+        return builder.build();
+    }
+
+    @Test
+    @DisplayName("C1: rejects a scoped, bound token that does not carry the dual-control marker")
+    void rejects_tokenWithoutDualControlMarker() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(boundJwt("digest-A", "jti-1", false));
+        org.mockito.Mockito.lenient().when(appUserRepository.findById(approverId)).thenReturn(Optional.of(enabledAdmin()));
+
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", "digest-A"))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("dual-control approval");
+    }
+
+    @Test
+    @DisplayName("C1: rejects a token minted for another use (session) even when it carries every approval claim")
+    void rejects_tokenOfAnotherUse() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(
+                markedJwt("digest-A", "jti-1", "session", List.of("registerwerk-dual-control")));
+        org.mockito.Mockito.lenient().when(appUserRepository.findById(approverId)).thenReturn(Optional.of(enabledAdmin()));
+
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", "digest-A"))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("C1: rejects a marked token that is not addressed to the dual-control audience")
+    void rejects_tokenWithoutDualControlAudience() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(markedJwt("digest-A", "jti-1", "dual_control", List.of("somebody-else")));
+        org.mockito.Mockito.lenient().when(appUserRepository.findById(approverId)).thenReturn(Optional.of(enabledAdmin()));
+
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", "digest-A"))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("C2: single use stays on when target binding is rolled back - the jti is still handed out for consumption")
+    void singleUseSurvivesTargetBindingRollback() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(
+                markedJwt(null, "jti-r", "dual_control", List.of("registerwerk-dual-control")));
+        when(appUserRepository.findById(approverId)).thenReturn(Optional.of(enabledAdmin()));
+
+        StepUpTokenValidator.Approval approval =
+                validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null);
+
+        org.assertj.core.api.Assertions.assertThat(approval.jti()).isEqualTo("jti-r");
+    }
+
+    @Test
+    @DisplayName("C2: a token without an id is refused even when target binding is rolled back")
+    void rejects_missingJtiWithoutTargetBinding() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(
+                markedJwt(null, null, "dual_control", List.of("registerwerk-dual-control")));
+        org.mockito.Mockito.lenient().when(appUserRepository.findById(approverId)).thenReturn(Optional.of(enabledAdmin()));
+
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("no id");
     }
 }

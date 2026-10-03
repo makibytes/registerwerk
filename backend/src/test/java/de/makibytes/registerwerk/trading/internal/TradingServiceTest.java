@@ -260,6 +260,49 @@ class TradingServiceTest {
         verify(eventPublisher).publishEvent(any(TradeListingCreatedEvent.class));
     }
 
+    private static de.makibytes.registerwerk.deployment.api.AssetDeployment confirmedDeployment(Integer decimals) {
+        var d = new de.makibytes.registerwerk.deployment.api.AssetDeployment();
+        d.setId(UUID.randomUUID());
+        d.setAssetId(ASSET_ID);
+        d.setDeploymentStatus(de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.CONFIRMED);
+        d.setTokenDecimals(decimals);
+        return d;
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("C5: createListing on an asset deployed with decimals != 0 is refused even when off-chain settlement on deployed assets is enabled")
+    void createListing_refusedOnFractionalDeployment() {
+        tradingProperties.setOffchainSettlementOnDeployedAssets(true);
+        AssetHolder holder = sellerHolder(BigDecimal.TEN);
+        when(assetHolderRepository.findActiveByIdForUpdate(HOLDER_ID)).thenReturn(Optional.of(holder));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        when(assetDeploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of(confirmedDeployment(18)));
+        CreateTradeListingRequest req = new CreateTradeListingRequest(
+                HOLDER_ID, BigDecimal.valueOf(5), BigDecimal.TEN, false, List.of(PaymentOption.OFFCHAIN_SEPA));
+
+        assertThatThrownBy(() -> service.createListing(SELLER, UUID.randomUUID(), req))
+                .isInstanceOf(de.makibytes.registerwerk.shared.RegisterUnitsException.class)
+                .hasMessageContaining("Trading")
+                .hasMessageContaining("decimals=18");
+        verify(tradeListingRepository, never()).save(any());
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("C5: a whole-unit (decimals=0) deployment can still be listed when off-chain settlement on deployed assets is enabled")
+    void createListing_allowedOnWholeUnitDeployment() {
+        tradingProperties.setOffchainSettlementOnDeployedAssets(true);
+        AssetHolder holder = sellerHolder(BigDecimal.TEN);
+        when(assetHolderRepository.findActiveByIdForUpdate(HOLDER_ID)).thenReturn(Optional.of(holder));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        when(assetDeploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of(confirmedDeployment(0)));
+        CreateTradeListingRequest req = new CreateTradeListingRequest(
+                HOLDER_ID, BigDecimal.valueOf(5), BigDecimal.TEN, false, List.of(PaymentOption.OFFCHAIN_SEPA));
+
+        var response = service.createListing(SELLER, UUID.randomUUID(), req);
+
+        assertThat(response.quantityAvailable()).isEqualByComparingTo("5");
+    }
+
     @Test
     @org.junit.jupiter.api.DisplayName("createListing refuses to list a holding under an active lockup (Track 5-2)")
     void createListing_refusesWhenSellerIsLockedUp() {
@@ -646,6 +689,7 @@ class TradingServiceTest {
     private void givenConfirmedDeployment() {
         de.makibytes.registerwerk.deployment.api.AssetDeployment d = new de.makibytes.registerwerk.deployment.api.AssetDeployment();
         d.setDeploymentStatus(de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.CONFIRMED);
+        d.setTokenDecimals(0); // whole-unit token: the only thing left to refuse is the off-chain settlement itself
         when(assetDeploymentRepository.findByAssetId(ASSET_ID)).thenReturn(List.of(d));
     }
 

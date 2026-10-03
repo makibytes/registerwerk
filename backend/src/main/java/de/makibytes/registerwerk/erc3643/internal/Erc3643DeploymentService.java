@@ -726,6 +726,9 @@ public class Erc3643DeploymentService {
 
     private static final String ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
+    /** Decimals of a new T-REX token: the register counts whole units (see {@code RegisterUnits}). */
+    static final int TOKEN_DECIMALS = de.makibytes.registerwerk.deployment.api.RegisterUnits.WHOLE_UNIT_DECIMALS;
+
     /**
      * Builds the {@code deployEwpgSuite(bytes32, string, TokenDetails, ClaimDetails)} call.
      *
@@ -748,7 +751,7 @@ public class Erc3643DeploymentService {
                 new Address(ownerAddress),
                 new Utf8String(name),
                 new Utf8String(symbol),
-                new Uint8(java.math.BigInteger.valueOf(18)),
+                new Uint8(java.math.BigInteger.valueOf(TOKEN_DECIMALS)), // C5: whole-unit register token
                 new Address(ZERO_ADDRESS),                               // IRS: zero = deploy new
                 new Address(ZERO_ADDRESS),                               // ONCHAINID: zero = deploy new
                 new DynamicArray<>(Address.class, new Address(ownerAddress)), // irAgents

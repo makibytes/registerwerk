@@ -79,10 +79,27 @@ contract EwpgRepoMarketHandler is Test {
         try market.withdraw(amount) {} catch {}
     }
 
+    /// @dev The borrow is sized against the market's real origination cap at the current mark
+    ///      (half to all of it) and the pool is topped up when short — otherwise nearly every call
+    ///      reverts at the LTV/liquidity check, positions never get close to their liquidation
+    ///      threshold, and {liquidate} (the part of the market the invariants most need to cover)
+    ///      is never reached.
     function pledgeAndBorrow(uint256 borrowerSeed, uint256 collateralAmount, uint256 borrowAmount) public {
         address borrower = borrowers[borrowerSeed % borrowers.length];
-        collateralAmount = bound(collateralAmount, 1, 500);
-        borrowAmount = bound(borrowAmount, 1, 100_000e6);
+        // A quarter of the positions are a single indivisible unit worth more than their debt once
+        // the mark drops — the whole-unit liquidation regime (surplus to the borrower).
+        collateralAmount = collateralAmount % 4 == 0 ? 1 : bound(collateralAmount, 1, 500);
+        (uint256 price,) = navOracle.price(address(collateralToken));
+        uint256 maxBorrow = collateralAmount * price * market.maxLtvBps() / 10_000;
+        borrowAmount = bound(borrowAmount, maxBorrow / 2 + 1, maxBorrow);
+        if (market.availableLiquidity() < borrowAmount) {
+            address funder = _lender(borrowerSeed);
+            loanToken.mint(funder, borrowAmount);
+            vm.startPrank(funder);
+            loanToken.approve(address(market), type(uint256).max);
+            try market.supply(borrowAmount) {} catch {}
+            vm.stopPrank();
+        }
         collateralToken.mint(borrower, collateralAmount);
         vm.startPrank(borrower);
         collateralToken.approve(address(market), type(uint256).max);
@@ -130,19 +147,47 @@ contract EwpgRepoMarketHandler is Test {
         try market.claimLiquidationSurplus() {} catch {}
     }
 
+    /// @dev Largest amount by which a successful {liquidate} charged its caller above the
+    ///      `maxRepayAmount` it passed (H2). Must stay zero — see
+    ///      `invariant_liquidatorNeverPaysMoreThanMaxRepay`.
+    uint256 public maxLiquidatorOverpay;
+    /// @dev Number of successful liquidations whose liquidator discount (collateral value received
+    ///      less cash paid) differed from `bonus × debt closed` by more than rounding (H2).
+    uint256 public bonusMispricedCount;
+    /// @dev Successful liquidations, and how many of them sold a unit worth more than the debt it
+    ///      closed (the whole-unit surplus regime) — evidence that the run exercised H2 at all.
+    uint256 public liquidationCount;
+    uint256 public surplusLiquidationCount;
+
     function liquidate(uint256 borrowerSeed, uint256 liquidatorSeed, uint256 maxRepayAmount) public {
         address borrower = borrowers[borrowerSeed % borrowers.length];
         uint256 debt = market.debtOf(borrower);
         if (debt == 0) return;
         address liquidatorAddr = _liquidator(liquidatorSeed);
-        maxRepayAmount = bound(maxRepayAmount, 1, debt);
-        // Whole units are sold rounded up, so the payment can exceed the request by up to one
-        // unit's (discounted) price.
         (uint256 price,) = navOracle.price(address(collateralToken));
-        loanToken.mint(liquidatorAddr, maxRepayAmount + price);
+        // The payment can exceed the debt closed by up to one unit's value (the unit is sold whole
+        // and the rest is the borrower's surplus), so liquidators authorise up to `debt + price`.
+        maxRepayAmount = maxRepayAmount % 3 == 0 ? debt + price : bound(maxRepayAmount, 1, debt + price);
+        // Half of the calls fund the liquidator with exactly `maxRepayAmount`; the other half give
+        // it slack so that an overcharge cannot hide behind a failed transfer (the previous
+        // `maxRepayAmount + price` funding made a one-unit overpay invisible) — the spend is
+        // measured below and any excess over `maxRepayAmount` trips the invariant.
+        uint256 funding = liquidatorSeed % 2 == 0 ? maxRepayAmount : 2 * maxRepayAmount + price;
+        deal(address(loanToken), liquidatorAddr, funding, true);
         vm.startPrank(liquidatorAddr);
         loanToken.approve(address(market), type(uint256).max);
-        try market.liquidate(borrower, maxRepayAmount) {} catch {}
+        try market.liquidate(borrower, maxRepayAmount) returns (uint256 repaid, uint256 seized) {
+            uint256 spent = funding - loanToken.balanceOf(liquidatorAddr);
+            if (spent > maxRepayAmount && spent - maxRepayAmount > maxLiquidatorOverpay) {
+                maxLiquidatorOverpay = spent - maxRepayAmount;
+            }
+            uint256 discount = seized * price - spent;
+            uint256 expectedBonus = repaid * market.liquidationBonusBps() / 10_000;
+            uint256 diff = discount > expectedBonus ? discount - expectedBonus : expectedBonus - discount;
+            if (diff > 2) bonusMispricedCount++;
+            liquidationCount++;
+            if (spent > repaid) surplusLiquidationCount++;
+        } catch {}
         vm.stopPrank();
     }
 
@@ -164,6 +209,21 @@ contract EwpgRepoMarketHandler is Test {
     function warp(uint256 secondsElapsed) public {
         secondsElapsed = bound(secondsElapsed, 0, 30 days);
         vm.warp(block.timestamp + secondsElapsed);
+    }
+
+    /// @dev Fully-levered borrow, an ordinary-cap price drop, then a liquidation — the sequence a
+    ///      purely random walk over the other actions almost never produces within 20 calls, so
+    ///      without it the invariants would hold vacuously over {liquidate}.
+    function leveragedBorrowCrashAndLiquidate(
+        uint256 borrowerSeed,
+        uint256 liquidatorSeed,
+        uint256 collateralAmount,
+        uint256 crashBps,
+        uint256 maxRepayAmount
+    ) external {
+        pledgeAndBorrow(borrowerSeed, collateralAmount, type(uint256).max);
+        pushPrice(1, crashBps);
+        liquidate(borrowerSeed, liquidatorSeed, maxRepayAmount);
     }
 
     function borrowerCount() external view returns (uint256) {

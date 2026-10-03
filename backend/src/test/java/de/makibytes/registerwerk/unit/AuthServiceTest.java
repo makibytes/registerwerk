@@ -60,7 +60,6 @@ class AuthServiceTest {
         when(users.findByEmailIgnoreCase("admin@local")).thenReturn(Optional.of(user));
         when(encoder.matches("secret", "hash")).thenReturn(true);
         when(minter.mint(user)).thenReturn("jwt-token");
-        when(users.save(any())).thenReturn(user);
 
         LoginResult result = service.login("admin@local", "secret", "10.0.0.1");
 
@@ -76,12 +75,13 @@ class AuthServiceTest {
         when(users.findByEmailIgnoreCase(anyString())).thenReturn(Optional.of(user));
         when(encoder.matches(anyString(), anyString())).thenReturn(true);
         when(minter.mint(any())).thenReturn("token");
-        when(users.save(any())).thenReturn(user);
 
         service.login("admin@local", "secret", "10.0.0.1");
 
         assertThat(user.getLastLoginAt()).isNotNull();
-        verify(users).save(user);
+        // Only the login timestamp is written - the user was read before the BCrypt work, in another transaction.
+        verify(users).touchLastLogin(org.mockito.ArgumentMatchers.eq(user.getId()), any());
+        verify(users, org.mockito.Mockito.never()).save(any());
     }
 
     @Test
@@ -173,7 +173,6 @@ class AuthServiceTest {
         when(encoder.matches("wrong", "hash")).thenReturn(false);
         when(encoder.matches("secret", "hash")).thenReturn(true);
         when(minter.mint(user)).thenReturn("jwt-token");
-        when(users.save(any())).thenReturn(user);
 
         for (int i = 0; i < 4; i++) {
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.login("admin@local", "wrong", "10.0.0.1"))
@@ -188,31 +187,38 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("K3 6-10: a blocked (account, source) pair is refused before any password work")
+    @DisplayName("K3 6-10 / C4: a throttled (account, source) pair is answered with a retry-after before any password work")
     void blockedPair_refusedWithoutPasswordWork() {
-        when(attemptLimiter.check("admin@local", "10.0.0.1")).thenReturn(new LoginAttemptLimiter.Decision(true, 0));
+        when(attemptLimiter.check("admin@local", "10.0.0.1")).thenReturn(LoginAttemptLimiter.Decision.refuseFor(42.2));
 
         assertThatThrownBy(() -> service.login("admin@local", "secret", "10.0.0.1"))
-                .isInstanceOf(InvalidCredentialsException.class);
+                .isInstanceOf(de.makibytes.registerwerk.shared.LoginThrottledException.class)
+                .extracting(e -> ((de.makibytes.registerwerk.shared.LoginThrottledException) e).retryAfterSeconds())
+                .isEqualTo(43L);
 
         org.mockito.Mockito.verifyNoInteractions(encoder, users);
     }
 
     @Test
-    @DisplayName("K3 6-10: progressive delay applies to known and unknown e-mails alike")
-    void progressiveDelay_isUniform() {
-        java.util.List<Long> delays = new java.util.ArrayList<>();
-        service.setDelayer(delays::add);
-        when(attemptLimiter.check(anyString(), anyString())).thenReturn(new LoginAttemptLimiter.Decision(false, 2000));
-        when(users.findByEmailIgnoreCase("ghost@local")).thenReturn(Optional.empty());
-        AppUser user = buildUser();
-        when(users.findByEmailIgnoreCase("admin@local")).thenReturn(Optional.of(user));
-        when(encoder.matches(anyString(), anyString())).thenReturn(false);
+    @DisplayName("C4: the throttle is uniform for known and unknown e-mails and the request thread never waits on it")
+    void throttle_isUniformAndDoesNotSleep() {
+        when(attemptLimiter.check(anyString(), anyString())).thenReturn(LoginAttemptLimiter.Decision.refuseFor(2));
 
-        assertThatThrownBy(() -> service.login("ghost@local", "x", "10.0.0.1")).isInstanceOf(InvalidCredentialsException.class);
-        assertThatThrownBy(() -> service.login("admin@local", "x", "10.0.0.1")).isInstanceOf(InvalidCredentialsException.class);
+        long start = System.nanoTime();
+        assertThatThrownBy(() -> service.login("ghost@local", "x", "10.0.0.1"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.LoginThrottledException.class);
+        assertThatThrownBy(() -> service.login("admin@local", "x", "10.0.0.1"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.LoginThrottledException.class);
+        assertThat((System.nanoTime() - start) / 1_000_000).as("no Thread.sleep on the request thread").isLessThan(500);
+        org.mockito.Mockito.verifyNoInteractions(users);
+    }
 
-        assertThat(delays).containsExactly(2000L, 2000L);
+    @Test
+    @DisplayName("C4: login holds no database transaction - a transaction would pin a pooled connection through the BCrypt work and any wait")
+    void loginHoldsNoTransaction() throws Exception {
+        assertThat(AuthService.class.getAnnotation(org.springframework.transaction.annotation.Transactional.class)).isNull();
+        assertThat(AuthService.class.getMethod("login", String.class, String.class, String.class)
+                .getAnnotation(org.springframework.transaction.annotation.Transactional.class)).isNull();
     }
 
     @Test

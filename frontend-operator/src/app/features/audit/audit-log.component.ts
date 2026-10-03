@@ -407,6 +407,7 @@ export class AuditLogComponent implements OnInit {
         reason: 'Acknowledge a broken audit hash-chain verification',
         action: 'AUDIT_CHAIN_VERIFICATION_ACK',
         target: `POST ${this.auditService.chainAckPath(id, note)}`,
+        targetBody: {},
       },
       width: '500px',
       disableClose: true,

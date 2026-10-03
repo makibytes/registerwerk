@@ -105,6 +105,17 @@ public class GraphNodeClient {
             }
             """;
 
+    /** Separate from {@link #META_QUERY} on purpose: {@code block.timestamp} does not exist on older graph-node
+     *  versions, and a query that names an unknown field fails as a whole - that must never take the head / hash
+     *  query the finality classification depends on down with it. */
+    private static final String META_TIMESTAMP_QUERY = """
+            query {
+              _meta {
+                block { number timestamp }
+              }
+            }
+            """;
+
     private static final String META_AT_BLOCK_QUERY = """
             query($number: Int!) {
               _meta(block: { number: $number }) {
@@ -379,6 +390,33 @@ public class GraphNodeClient {
         }
 
         return parseMetaResponse(chain.getIdentifier(), responseBody);
+    }
+
+    /**
+     * The block time of the subgraph's indexed head (H7), best effort: empty when the node does not report a
+     * timestamp or the query fails. Callers must treat empty as "no evidence", never as "fresh".
+     */
+    public Optional<java.time.Instant> fetchHeadBlockTime(ChainConfig chain) {
+        if (chain.getGraphNodeUrl() == null || chain.getGraphSubgraphName() == null) {
+            return Optional.empty();
+        }
+        try {
+            String body = postGraphQl(chain, Map.of("query", META_TIMESTAMP_QUERY));
+            if (body == null || body.isBlank()) {
+                return Optional.empty();
+            }
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode errors = root.path("errors");
+            if (errors.isArray() && !errors.isEmpty()) {
+                return Optional.empty();
+            }
+            JsonNode ts = root.path("data").path("_meta").path("block").path("timestamp");
+            return ts.isNumber() && ts.asLong() > 0
+                    ? Optional.of(java.time.Instant.ofEpochSecond(ts.asLong())) : Optional.empty();
+        } catch (RuntimeException e) {
+            log.debug("No head block time from Graph Node for chain {}: {}", chain.getIdentifier(), e.getMessage());
+            return Optional.empty();
+        }
     }
 
     private Optional<BlockMeta> parseMetaResponse(String chainIdentifier, String responseBody) {

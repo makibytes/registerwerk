@@ -12,7 +12,10 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionProposalApp
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionProposalRejectedEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionProposedEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionPayoutHeldEvent;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementBlockedEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementRequestedEvent;
+import de.makibytes.registerwerk.corporateactions.api.CorporateActionSignOffVoidedEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionSnapshotBlockedEvent;
 import de.makibytes.registerwerk.corporateactions.web.dto.ProposeCorporateActionRequest;
 import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
@@ -25,7 +28,9 @@ import de.makibytes.registerwerk.finality.api.FinalityDecision;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.finality.api.GatedOperation;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
+import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
+import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.RegisterClock;
 import org.slf4j.Logger;
@@ -35,15 +40,19 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.access.AccessDeniedException;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Currency;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -88,7 +97,9 @@ public class CorporateActionService {
     private final AssetCouponPaymentRepository couponPaymentRepository;
     private final CorporateActionProposalValidator proposalValidator;
     private final ApplicationEventPublisher events;
-    private final HolderBlockGate holderBlockGate;
+    private final PartyEligibilityGate partyGate;
+    private final EntityTaskPort entityTasks;
+    private final IsolatedTransactionExecutor isolated;
     private final FinalityGate finalityGate;
     private final RegisterFreshnessGate registerFreshnessGate;
     private final AssetBondTermsRepository bondTermsRepository;
@@ -101,11 +112,13 @@ public class CorporateActionService {
                             AssetCouponPaymentRepository couponPaymentRepository,
                             CorporateActionProposalValidator proposalValidator,
                             ApplicationEventPublisher events,
-                            HolderBlockGate holderBlockGate,
+                            PartyEligibilityGate partyGate,
+                            EntityTaskPort entityTasks,
                             FinalityGate finalityGate,
                             RegisterFreshnessGate registerFreshnessGate,
                             AssetBondTermsRepository bondTermsRepository,
-                            RegisterClock registerClock) {
+                            RegisterClock registerClock,
+                            IsolatedTransactionExecutor isolated) {
         this.repository = repository;
         this.entryRepository = entryRepository;
         this.positionResolver = positionResolver;
@@ -113,7 +126,9 @@ public class CorporateActionService {
         this.couponPaymentRepository = couponPaymentRepository;
         this.proposalValidator = proposalValidator;
         this.events = events;
-        this.holderBlockGate = holderBlockGate;
+        this.partyGate = partyGate;
+        this.entityTasks = entityTasks;
+        this.isolated = isolated;
         this.finalityGate = finalityGate;
         this.registerFreshnessGate = registerFreshnessGate;
         this.bondTermsRepository = bondTermsRepository;
@@ -245,8 +260,11 @@ public class CorporateActionService {
 
     /**
      * Issuer attestation — the first of the two required parties before settlement can be
-     * confirmed. Refuses on a terminal or unreviewed status; no step-up (see this class's
-     * javadoc for why — {@code frontend-customer} has no step-up UI today).
+     * confirmed. Wave 0b C6: the attestation covers the <em>computed amounts</em>, so it is only possible
+     * once the action is {@code COMPUTED} (never while ANNOUNCED / SNAPSHOT_BLOCKED, when there is nothing to
+     * attest) and it is bound to the digest of (entries, total, rounding residual) the issuer attested; a later
+     * re-snapshot voids it. No step-up (see this class's javadoc for why — {@code frontend-customer} has no
+     * step-up UI today).
      *
      * <p>T3-12: refused (403) when {@code callerIsOperator} — a REGISTRY_ADMIN, or an admin
      * impersonating the issuer. Operators attest only through the audited, step-up-gated
@@ -254,32 +272,46 @@ public class CorporateActionService {
      */
     public CorporateAction attestSettlementAsIssuer(UUID assetId, UUID corporateActionId, String attestationReference,
                                                     UUID actorId, String actorRole, boolean callerIsOperator) {
+        return attestSettlementAsIssuer(assetId, corporateActionId, attestationReference, actorId, actorRole,
+                callerIsOperator, null);
+    }
+
+    /** @param expectedPayoutDigest the digest the attester reviewed (optional); a different current digest means
+     *                              the amounts were re-computed since, and the attestation is refused (409) */
+    public CorporateAction attestSettlementAsIssuer(UUID assetId, UUID corporateActionId, String attestationReference,
+                                                    UUID actorId, String actorRole, boolean callerIsOperator,
+                                                    String expectedPayoutDigest) {
         if (callerIsOperator) {
             throw new AccessDeniedException("Operators cannot attest as the issuer — use the operator "
                     + "override-attestation (step-up, reason, separately audited) instead.");
         }
-        CorporateAction ca = requireAttestable(corporateActionId);
+        CorporateAction ca = requireSignable(corporateActionId);
         requireBelongsToAsset(ca, assetId);
+        String digest = requireCurrentPayoutDigest(ca, expectedPayoutDigest);
         ca.setIssuerAttestedBy(actorId);
         ca.setIssuerAttestedAt(Instant.now());
         ca.setIssuerAttestationRef(attestationReference);
+        ca.setIssuerAttestedDigest(digest);
         CorporateAction saved = repository.save(ca);
 
         events.publishEvent(new CorporateActionIssuerAttestedEvent(corporateActionId, actorId, actorRole, attestationReference));
-        log.info("Corporate action issuer-attested: id={} attester={}", corporateActionId, actorId);
+        log.info("Corporate action issuer-attested: id={} attester={} digest={}", corporateActionId, actorId, digest);
         return saved;
     }
 
     /**
      * Operator override of the issuer-attestation requirement — the escape hatch for an issuer
      * who never logs in to attest. Always a distinct, separately-audited event from a genuine
-     * attestation (see {@link CorporateActionIssuerAttestationOverriddenEvent}'s javadoc).
+     * attestation (see {@link CorporateActionIssuerAttestationOverriddenEvent}'s javadoc). Bound to the computed
+     * amounts exactly like the issuer's own attestation (C6).
      */
     public CorporateAction overrideIssuerAttestation(UUID corporateActionId, String reason, UUID actorId, String actorRole) {
-        CorporateAction ca = requireAttestable(corporateActionId);
+        CorporateAction ca = requireSignable(corporateActionId);
+        String digest = requireCurrentPayoutDigest(ca, null);
         ca.setIssuerAttestedBy(actorId);
         ca.setIssuerAttestedAt(Instant.now());
         ca.setIssuerAttestationRef("OPERATOR_OVERRIDE: " + reason);
+        ca.setIssuerAttestedDigest(digest);
         CorporateAction saved = repository.save(ca);
 
         events.publishEvent(new CorporateActionIssuerAttestationOverriddenEvent(corporateActionId, actorId, actorRole, reason));
@@ -288,27 +320,85 @@ public class CorporateActionService {
         return saved;
     }
 
-    private CorporateAction requireAttestable(UUID corporateActionId) {
+    /** C6: a sign-off covers computed amounts, so only a COMPUTED action can be signed (not even by an operator). */
+    private CorporateAction requireSignable(UUID corporateActionId) {
         CorporateAction ca = repository.findById(corporateActionId)
                 .orElseThrow(() -> new EntityNotFoundException("CorporateAction", corporateActionId));
-        if (ca.getStatus() == CorporateAction.Status.SETTLED || ca.getStatus() == CorporateAction.Status.CLOSED
-                || ca.getStatus() == CorporateAction.Status.CANCELLED || ca.getStatus() == CorporateAction.Status.PROPOSED
-                || ca.getStatus() == CorporateAction.Status.REJECTED) {
-            throw new IllegalStateException("Corporate action " + corporateActionId + " is not attestable (status=" + ca.getStatus() + ")");
+        if (ca.getStatus() != CorporateAction.Status.COMPUTED) {
+            throw new IllegalStateException("Corporate action " + corporateActionId + " is not COMPUTED (status="
+                    + ca.getStatus() + ") — the issuer attestation and the operator confirmation cover the computed "
+                    + "amounts, so they are only possible once the entitlements have been computed.");
         }
         return ca;
     }
 
     /**
-     * Operator confirmation — the second of the two required parties. Refused while the issuer
-     * half is missing (issuer-first ordering, see this class's javadoc), and while the confirmer
-     * is the same actor as the attester. Gated on {@link GatedOperation#CORPORATE_ACTION_SETTLEMENT_CONFIRM}
-     * immediately before the write — {@code currentLevel} is passed as {@code FINALIZED}
-     * unconditionally, the same reasoning {@code RegisterTransferService} uses: entitlements are
-     * computed from {@code AssetHolder.nominalAmount}, which {@code HolderDataService} only ever
-     * populates from FINALIZED transfers.
+     * The digest of the entitlements as they stand now. Refuses (409) when they no longer equal the digest stored at
+     * compute time (somebody changed an entry after the snapshot) or the digest the signer reviewed.
+     */
+    private String requireCurrentPayoutDigest(CorporateAction ca, String expectedPayoutDigest) {
+        String current = currentPayoutDigest(ca);
+        if (ca.getPayoutDigest() == null || !ca.getPayoutDigest().equals(current)) {
+            throw new IllegalStateException("The computed entitlements of corporate action " + ca.getId()
+                    + " changed since they were computed (stored digest " + ca.getPayoutDigest() + ", current "
+                    + current + ") — a re-snapshot is required before anybody can sign them off.");
+        }
+        if (expectedPayoutDigest != null && !expectedPayoutDigest.equalsIgnoreCase(current)) {
+            throw new IllegalStateException("Payout digest mismatch for corporate action " + ca.getId()
+                    + ": the amounts were re-computed after you reviewed them (reviewed " + expectedPayoutDigest
+                    + ", current " + current + ") — review the current amounts and sign again.");
+        }
+        return current;
+    }
+
+    private String currentPayoutDigest(CorporateAction ca) {
+        return CorporateActionPayoutDigest.of(ca, entryRepository.findByCorporateActionId(ca.getId()));
+    }
+
+    /**
+     * Voids an earlier attestation and/or confirmation (C6): the amounts were re-snapshotted, or no longer match the
+     * digest the parties signed. Audited; the payout does not start until both sign the amounts as they now are.
+     *
+     * @return true when there was a sign-off to void
+     */
+    private boolean voidSignOffs(CorporateAction ca, String reason) {
+        boolean issuer = ca.getIssuerAttestedAt() != null || ca.getIssuerAttestedBy() != null
+                || ca.getIssuerAttestedDigest() != null;
+        boolean operator = ca.getDualControlApprovedAt() != null || ca.getDualControlApproverId() != null
+                || ca.getOperatorConfirmedDigest() != null;
+        if (!issuer && !operator) {
+            return false;
+        }
+        ca.setIssuerAttestedBy(null);
+        ca.setIssuerAttestedAt(null);
+        ca.setIssuerAttestationRef(null);
+        ca.setIssuerAttestedDigest(null);
+        ca.setDualControlApproverId(null);
+        ca.setDualControlApprovedAt(null);
+        ca.setOperatorConfirmedDigest(null);
+        repository.save(ca);
+        events.publishEvent(new CorporateActionSignOffVoidedEvent(ca.getId(), reason, issuer, operator));
+        log.warn("Corporate action {} sign-off voided ({}): issuerHadAttested={} operatorHadConfirmed={}",
+                ca.getId(), reason, issuer, operator);
+        return true;
+    }
+
+    /**
+     * Operator confirmation — the second of the two required parties. Refused unless the action is {@code COMPUTED}
+     * (C6), while the issuer half is missing (issuer-first ordering, see this class's javadoc) or covers other amounts
+     * than the ones now computed, and while the confirmer is the same actor as the attester. Gated on
+     * {@link GatedOperation#CORPORATE_ACTION_SETTLEMENT_CONFIRM} immediately before the write —
+     * {@code currentLevel} is passed as {@code FINALIZED} unconditionally, the same reasoning
+     * {@code RegisterTransferService} uses: entitlements are computed from {@code AssetHolder.nominalAmount}, which
+     * {@code HolderDataService} only ever populates from FINALIZED transfers.
      */
     public CorporateAction confirmSettlementAsOperator(UUID corporateActionId, UUID actorId, String actorRole) {
+        return confirmSettlementAsOperator(corporateActionId, actorId, actorRole, null);
+    }
+
+    /** @param expectedPayoutDigest the digest the operator reviewed (optional), see {@link #attestSettlementAsIssuer} */
+    public CorporateAction confirmSettlementAsOperator(UUID corporateActionId, UUID actorId, String actorRole,
+                                                       String expectedPayoutDigest) {
         CorporateAction ca = repository.findById(corporateActionId)
                 .orElseThrow(() -> new EntityNotFoundException("CorporateAction", corporateActionId));
         if (ca.getStatus() == CorporateAction.Status.SETTLED || ca.getStatus() == CorporateAction.Status.CLOSED
@@ -316,6 +406,12 @@ public class CorporateActionService {
             throw new IllegalStateException("Corporate action " + corporateActionId + " is already " + ca.getStatus());
         }
         registerFreshnessGate.requireRegisterOpen(ca.getAssetId(), "Corporate action settlement confirmation");
+        if (ca.getStatus() != CorporateAction.Status.COMPUTED) {
+            throw new IllegalStateException("Corporate action " + corporateActionId + " is not COMPUTED (status="
+                    + ca.getStatus() + (ca.getStatus() == CorporateAction.Status.SNAPSHOT_BLOCKED
+                    ? ": " + ca.getSnapshotBlockedReason() : "") + ") — the operator confirmation covers the "
+                    + "computed amounts, so it is only possible once the entitlements have been computed.");
+        }
         if (ca.getIssuerAttestedAt() == null) {
             throw new IllegalStateException(
                     "Corporate action " + corporateActionId + " has not been attested by its issuer yet — "
@@ -325,9 +421,11 @@ public class CorporateActionService {
             throw new IllegalArgumentException(
                     "Operator confirmer must be a different actor than whoever attested as issuer.");
         }
-        if (ca.getStatus() == CorporateAction.Status.SNAPSHOT_BLOCKED) {
-            throw new IllegalStateException("Corporate action " + corporateActionId
-                    + " has no entitlement snapshot yet (SNAPSHOT_BLOCKED): " + ca.getSnapshotBlockedReason());
+        String digest = requireCurrentPayoutDigest(ca, expectedPayoutDigest);
+        if (!digest.equals(ca.getIssuerAttestedDigest())) {
+            throw new IllegalStateException("The issuer attestation of corporate action " + corporateActionId
+                    + " covers other amounts than the ones now computed (attested digest "
+                    + ca.getIssuerAttestedDigest() + ", current " + digest + ") — the issuer must attest again.");
         }
         // T2-18: no settlement approval on a register that is not reconciled with the chain. A
         // record date still in the future is enforced by the snapshot itself, so only BLOCKED counts then.
@@ -343,11 +441,12 @@ public class CorporateActionService {
 
         ca.setDualControlApproverId(actorId);
         ca.setDualControlApprovedAt(Instant.now());
+        ca.setOperatorConfirmedDigest(digest);
         CorporateAction saved = repository.save(ca);
 
         events.publishEvent(new CorporateActionOperatorConfirmedEvent(
                 corporateActionId, actorId, actorRole, ca.getIssuerAttestedBy()));
-        log.info("Corporate action operator-confirmed: id={} confirmer={}", corporateActionId, actorId);
+        log.info("Corporate action operator-confirmed: id={} confirmer={} digest={}", corporateActionId, actorId, digest);
         return saved;
     }
 
@@ -370,7 +469,8 @@ public class CorporateActionService {
                     "Corporate action " + corporateActionId + " is not AWAITING_SETTLEMENT (status=" + ca.getStatus() + ")");
         }
         registerFreshnessGate.requireRegisterOpen(ca.getAssetId(), "Manual corporate action settlement");
-        requireNoBlockedEntitledHolders(ca);
+        // H6: a holder that is not (or no longer) eligible is held, not paid - the others are recorded as paid.
+        holdIneligibleEntries(ca);
         finalityGate.require(GatedOperation.CORPORATE_ACTION_SETTLEMENT_CONFIRM, ca.getAssetId(),
                 resolveTokenStandard(corporateActionId), FinalityLevel.FINALIZED);
         settlementWriter.markSettled(corporateActionId, reference, actorId, actorRole);
@@ -412,59 +512,121 @@ public class CorporateActionService {
     /** Daily job: transition ANNOUNCED → RECORD_DATE_SET → COMPUTED once the record date is over,
      *  dispatch settlement when due, close out actions that finished settling, and flag overdue
      *  coupons. 06:00 register time — after CouponPaymentJob (05:30) and BondMaturityJob (05:45),
-     *  so actions they raise the same morning are processed in this run (T3-05). */
+     *  so actions they raise the same morning are processed in this run (T3-05).
+     *
+     *  <p>H8: the job itself holds NO transaction. Every item runs in its own {@code REQUIRES_NEW} transaction
+     *  ({@link IsolatedTransactionExecutor}, the {@code TradeTimeoutProcessor} pattern), re-loaded by id so it sees
+     *  committed state: one failing action rolls back only itself, never the day's other snapshots and settlements. */
     @SchedulerLock(name = "corporateActionDailyTransitions", lockAtMostFor = "PT30M")
     @Scheduled(cron = "0 0 6 * * *", zone = "${registerwerk.register.time-zone:Europe/Berlin}")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void processDailyTransitions() {
         LocalDate today = registerClock.today();
 
-        List<CorporateAction> ready = repository.findReadyToCompute(today);
-        for (CorporateAction ca : ready) {
-            try {
-                if (registerFreshnessGate.isRegisterFrozen(ca.getAssetId())) {
-                    log.warn("Corporate action {} not advanced: register of asset {} is frozen/transferred (T3-07)",
-                            ca.getId(), ca.getAssetId());
-                    continue;
-                }
-                // T2-18 (SRE veto: no silent refusal): a register that is BLOCKED or not reconciled
-                // since the record date must not be snapshotted; the action is parked visibly as
-                // SNAPSHOT_BLOCKED (audited, metric + alert) and retried on the next run.
-                Optional<String> registerBlocked = registerFreshnessGate.blockedReason(ca.getAssetId(), ca.getRecordDate());
-                if (registerBlocked.isPresent()) {
-                    markSnapshotBlocked(ca, registerBlocked.get());
-                    continue;
-                }
-                snapshotEntriesAndCompute(ca);
-            } catch (Exception e) {
-                log.error("Failed to advance corporate action {}: {}", ca.getId(), e.getMessage());
-            }
+        for (UUID id : idsOf(repository.findReadyToCompute(today))) {
+            runItem("advance", id, () -> advanceOne(id));
         }
-
-        List<CorporateAction> due = repository.findDueForSettlement(today);
-        for (CorporateAction ca : due) {
-            try {
-                if (registerFreshnessGate.isRegisterFrozen(ca.getAssetId())) {
-                    log.warn("Corporate action {} settlement skipped: register of asset {} is frozen/transferred (T3-07)",
-                            ca.getId(), ca.getAssetId());
-                    continue;
-                }
-                if (ca.getIssuerAttestedAt() == null || ca.getDualControlApproverId() == null) {
-                    log.warn("Corporate action {} is due for settlement (paymentDate={}) but is missing {} — "
-                                    + "skipping until both parties have signed off.",
-                            ca.getId(), ca.getPaymentDate(),
-                            ca.getIssuerAttestedAt() == null && ca.getDualControlApproverId() == null
-                                    ? "both the issuer attestation and the operator confirmation"
-                                    : ca.getIssuerAttestedAt() == null ? "the issuer attestation" : "the operator confirmation");
-                    continue;
-                }
-                settle(ca);
-            } catch (Exception e) {
-                log.error("Settlement failed for corporate action {}: {}", ca.getId(), e.getMessage());
-            }
+        for (UUID id : idsOf(repository.findDueForSettlement(today))) {
+            runItem("settle", id, () -> settleOne(id));
         }
+        for (UUID id : idsOf(repository.findByStatus(CorporateAction.Status.SETTLED))) {
+            runItem("close", id, () -> closeOne(id));
+        }
+        for (UUID id : idsOf(repository.findOverdueCoupons(today))) {
+            runItem("coupon-overdue", id, () -> flagOverdueCoupon(id, today));
+        }
+    }
 
-        closeSettledActions();
-        markOverdueAndMissedCoupons(today);
+    private static List<UUID> idsOf(List<CorporateAction> actions) {
+        return actions.stream().map(CorporateAction::getId).toList();
+    }
+
+    private void runItem(String step, UUID corporateActionId, IsolatedTransactionExecutor.Work work) {
+        try {
+            isolated.run(work);
+        } catch (Exception e) {
+            log.error("Corporate action {} step '{}' failed (its own transaction was rolled back; the other "
+                    + "actions are unaffected): {}", corporateActionId, step, e.getMessage(), e);
+        }
+    }
+
+    /** One ANNOUNCED / SNAPSHOT_BLOCKED action whose record date is over: snapshot it, or park it visibly. */
+    private void advanceOne(UUID id) {
+        CorporateAction ca = repository.findById(id).orElse(null);
+        if (ca == null || (ca.getStatus() != CorporateAction.Status.ANNOUNCED
+                && ca.getStatus() != CorporateAction.Status.SNAPSHOT_BLOCKED)) {
+            return; // moved on (or cancelled) since the scan
+        }
+        if (registerFreshnessGate.isRegisterFrozen(ca.getAssetId())) {
+            log.warn("Corporate action {} not advanced: register of asset {} is frozen/transferred (T3-07)",
+                    ca.getId(), ca.getAssetId());
+            return;
+        }
+        // T2-18 (SRE veto: no silent refusal): a register that is BLOCKED or not reconciled
+        // since the record date must not be snapshotted; the action is parked visibly as
+        // SNAPSHOT_BLOCKED (audited, metric + alert) and retried on the next run.
+        Optional<String> registerBlocked = registerFreshnessGate.blockedReason(ca.getAssetId(), ca.getRecordDate());
+        if (registerBlocked.isPresent()) {
+            markSnapshotBlocked(ca, registerBlocked.get());
+            return;
+        }
+        snapshotEntriesAndCompute(ca);
+    }
+
+    /**
+     * One COMPUTED action whose payment date has come. Starts the payout only when BOTH parties have signed the
+     * amounts as they are now (C6): a sign-off that carries another digest than the entries do (re-snapshot, an
+     * entry changed, or a sign-off given before amounts were bound) is voided, audited, and nothing is paid.
+     */
+    private void settleOne(UUID id) {
+        CorporateAction ca = repository.findById(id).orElse(null);
+        if (ca == null || ca.getStatus() != CorporateAction.Status.COMPUTED) {
+            return; // moved on since the scan (the scan already selected on the payment date)
+        }
+        if (registerFreshnessGate.isRegisterFrozen(ca.getAssetId())) {
+            log.warn("Corporate action {} settlement skipped: register of asset {} is frozen/transferred (T3-07)",
+                    ca.getId(), ca.getAssetId());
+            return;
+        }
+        if (ca.getIssuerAttestedAt() == null || ca.getDualControlApproverId() == null) {
+            log.warn("Corporate action {} is due for settlement (paymentDate={}) but is missing {} — "
+                            + "skipping until both parties have signed off.",
+                    ca.getId(), ca.getPaymentDate(),
+                    ca.getIssuerAttestedAt() == null && ca.getDualControlApproverId() == null
+                            ? "both the issuer attestation and the operator confirmation"
+                            : ca.getIssuerAttestedAt() == null ? "the issuer attestation" : "the operator confirmation");
+            return;
+        }
+        String current = currentPayoutDigest(ca);
+        if (!current.equals(ca.getPayoutDigest()) || !current.equals(ca.getIssuerAttestedDigest())
+                || !current.equals(ca.getOperatorConfirmedDigest())) {
+            voidSignOffs(ca, "the signed payout digest does not match the entitlements as they are now (current "
+                    + current + ", computed " + ca.getPayoutDigest() + ", issuer " + ca.getIssuerAttestedDigest()
+                    + ", operator " + ca.getOperatorConfirmedDigest() + ")");
+            return;
+        }
+        settle(ca);
+    }
+
+    private void closeOne(UUID id) {
+        CorporateAction ca = repository.findById(id).orElse(null);
+        if (ca == null || ca.getStatus() != CorporateAction.Status.SETTLED) {
+            return;
+        }
+        if (entryRepository.existsHeldWithEntitlement(ca.getId())) {
+            if (!ca.isHeldOutstanding()) {
+                ca.setHeldOutstanding(true);
+                ca.setNotes((ca.getNotes() != null ? ca.getNotes() + " | " : "")
+                        + "held entitlements outstanding (nominee pool PARK-T2-18, or holders held by the "
+                        + "eligibility gate - see the entries)");
+                repository.save(ca);
+                log.warn("Corporate action {} not closed: held entitlements are unresolved", ca.getId());
+            }
+            return;
+        }
+        ca.setStatus(CorporateAction.Status.CLOSED);
+        repository.save(ca);
+        log.info("Corporate action closed: id={}", ca.getId());
     }
 
     private void markSnapshotBlocked(CorporateAction ca, String reason) {
@@ -484,29 +646,45 @@ public class CorporateActionService {
      * (operator-visible; customers see "payment pending"); only once the bond's interest grace
      * period ({@code interestGraceDays}, default 30) has also passed is it {@code MISSED}. Before,
      * it was MISSED the morning after the payment date — publicly, and for every coupon.
+     *
+     * <p>H6: a coupon whose action the SYSTEM is holding back (snapshot blocked, register frozen, settlement held)
+     * is neither OVERDUE nor MISSED: that would present a registry-side delay as the issuer's non-payment.
      */
-    private void markOverdueAndMissedCoupons(LocalDate today) {
-        for (CorporateAction overdue : repository.findOverdueCoupons(today)) {
-            couponPaymentRepository.findById(overdue.getCouponPaymentId()).ifPresent(payment -> {
-                if (payment.getCouponStatus() != CouponStatus.SCHEDULED && payment.getCouponStatus() != CouponStatus.OVERDUE) {
-                    return;
-                }
-                int grace = bondTermsRepository.findById(payment.getAssetId())
-                        .map(AssetBondTerms::getInterestGraceDays).orElse(0);
-                if (today.isAfter(overdue.getPaymentDate().plusDays(grace))) {
-                    payment.setCouponStatus(CouponStatus.MISSED);
-                    couponPaymentRepository.save(payment);
-                    log.warn("Coupon missed: paymentId={} assetId={} paymentDate={} — unsettled after the {}-day grace period",
-                            payment.getId(), payment.getAssetId(), overdue.getPaymentDate(), grace);
-                } else if (payment.getCouponStatus() == CouponStatus.SCHEDULED) {
-                    payment.setCouponStatus(CouponStatus.OVERDUE);
-                    couponPaymentRepository.save(payment);
-                    log.warn("Coupon overdue: paymentId={} assetId={} paymentDate={} (grace until {})",
-                            payment.getId(), payment.getAssetId(), overdue.getPaymentDate(),
-                            overdue.getPaymentDate().plusDays(grace));
-                }
-            });
+    private void flagOverdueCoupon(UUID corporateActionId, LocalDate today) {
+        CorporateAction overdue = repository.findById(corporateActionId).orElse(null);
+        if (overdue == null || overdue.getCouponPaymentId() == null || overdue.getPaymentDate() == null
+                || overdue.getStatus() == CorporateAction.Status.SETTLED
+                || overdue.getStatus() == CorporateAction.Status.CLOSED
+                || overdue.getStatus() == CorporateAction.Status.CANCELLED
+                || !overdue.getPaymentDate().isBefore(today)) {
+            return;
         }
+        Optional<String> systemBlock = CorporateActionBlocks.systemBlockCause(overdue,
+                registerFreshnessGate.isRegisterFrozen(overdue.getAssetId()));
+        if (systemBlock.isPresent()) {
+            log.warn("Coupon of corporate action {} is past its payment date but NOT flagged overdue/missed: {}",
+                    overdue.getId(), systemBlock.get());
+            return;
+        }
+        couponPaymentRepository.findById(overdue.getCouponPaymentId()).ifPresent(payment -> {
+            if (payment.getCouponStatus() != CouponStatus.SCHEDULED && payment.getCouponStatus() != CouponStatus.OVERDUE) {
+                return;
+            }
+            int grace = bondTermsRepository.findById(payment.getAssetId())
+                    .map(AssetBondTerms::getInterestGraceDays).orElse(0);
+            if (today.isAfter(overdue.getPaymentDate().plusDays(grace))) {
+                payment.setCouponStatus(CouponStatus.MISSED);
+                couponPaymentRepository.save(payment);
+                log.warn("Coupon missed: paymentId={} assetId={} paymentDate={} — unsettled after the {}-day grace period",
+                        payment.getId(), payment.getAssetId(), overdue.getPaymentDate(), grace);
+            } else if (payment.getCouponStatus() == CouponStatus.SCHEDULED) {
+                payment.setCouponStatus(CouponStatus.OVERDUE);
+                couponPaymentRepository.save(payment);
+                log.warn("Coupon overdue: paymentId={} assetId={} paymentDate={} (grace until {})",
+                        payment.getId(), payment.getAssetId(), overdue.getPaymentDate(),
+                        overdue.getPaymentDate().plusDays(grace));
+            }
+        });
     }
 
     /**
@@ -540,6 +718,7 @@ public class CorporateActionService {
             return;
         }
         ca.setSnapshotBlockedReason(null);
+        ca.setSettlementHoldReason(null);
         ca.setStatus(CorporateAction.Status.RECORD_DATE_SET);
         for (String note : resolution.notes()) {
             ca.setNotes((ca.getNotes() != null ? ca.getNotes() + " | " : "") + note);
@@ -551,6 +730,7 @@ public class CorporateActionService {
         int minorUnits = minorUnits(ca.getCurrency());
         BigDecimal total = BigDecimal.ZERO;
         BigDecimal unroundedTotal = BigDecimal.ZERO;
+        List<CorporateActionEntry> snapshot = new ArrayList<>();
 
         for (RecordDatePositionResolver.Position position : resolution.positions()) {
             CorporateActionEntry entry = new CorporateActionEntry();
@@ -573,6 +753,7 @@ public class CorporateActionService {
                 }
             }
             entryRepository.save(entry);
+            snapshot.add(entry);
         }
 
         if (amountPerUnit != null) {
@@ -580,6 +761,9 @@ public class CorporateActionService {
             ca.setRoundingResidual(unroundedTotal.subtract(total));
         }
         ca.setStatus(CorporateAction.Status.COMPUTED);
+        // C6: fingerprint of what will be paid; (re)computing voids whatever was signed on earlier amounts.
+        ca.setPayoutDigest(CorporateActionPayoutDigest.of(ca, snapshot));
+        voidSignOffs(ca, "the entitlements were (re)computed at the record-date snapshot");
         repository.save(ca);
         log.info("Corporate action computed: id={} entries={} totalAmount={} roundingResidual={}", ca.getId(),
                 resolution.positions().size(), ca.getTotalAmount(), ca.getRoundingResidual());
@@ -598,49 +782,45 @@ public class CorporateActionService {
         }
     }
 
-    /**
-     * Closes out SETTLED actions — the terminal transition to {@code CLOSED}. An action closes
-     * as soon as it is observed SETTLED; no further reconciliation window is designed today.
-     *
-     * <p>T3-02: except while a nominee-pool (HELD_LOOK_THROUGH) entry still carries a non-zero
-     * entitlement — settlement skipped it and nothing resolves it yet (PARK-T2-18), so closing
-     * would bury it. Such an action stays SETTLED, flagged {@code heldOutstanding} (counted by
-     * {@code registerwerk_corporate_action_held_outstanding}, shown as a chip to operators).
-     */
-    private void closeSettledActions() {
-        for (CorporateAction ca : repository.findByStatus(CorporateAction.Status.SETTLED)) {
-            if (entryRepository.existsHeldWithEntitlement(ca.getId())) {
-                if (!ca.isHeldOutstanding()) {
-                    ca.setHeldOutstanding(true);
-                    ca.setNotes((ca.getNotes() != null ? ca.getNotes() + " | " : "")
-                            + "held look-through entitlements outstanding (PARK-T2-18)");
-                    repository.save(ca);
-                    log.warn("Corporate action {} not closed: nominee-pool entitlements are held and unresolved "
-                            + "(PARK-T2-18)", ca.getId());
-                }
-                continue;
-            }
-            ca.setStatus(CorporateAction.Status.CLOSED);
-            repository.save(ca);
-            log.info("Corporate action closed: id={}", ca.getId());
-        }
+    private TokenStandard resolveTokenStandard(UUID corporateActionId) {
+        String standard = repository.findTokenStandardByCorpAction(corporateActionId);
+        return standard != null ? TokenStandard.valueOf(standard) : null;
     }
 
     /**
-     * @see FinalityGate — the cron path must {@code check}-and-skip, never {@code require} (an
-     *      uncaught {@code FinalityNotReachedException} would fail the whole daily run, not just
-     *      this one row). A blocked action simply stays COMPUTED and is re-evaluated on the next
-     *      run, same as the existing Sperrvermerk hold below.
+     * Starts the payout of a COMPUTED action whose two sign-offs are valid. {@link FinalityGate}: the cron path must
+     * {@code check}-and-skip, never {@code require} (an uncaught {@code FinalityNotReachedException} would fail this
+     * action's transaction every day); a blocked action stays COMPUTED and is re-evaluated on the next run.
+     *
+     * <p>H6: eligible holders are paid individually. Every entitled holder goes through {@link PartyEligibilityGate}
+     * (entity status, KYC incl. expiry, screening, Sperrvermerk); one that fails is HELD_BLOCKED (reason recorded,
+     * audited, operator task) while all others proceed. Canton's {@code payCoupon}/{@code redeem} is a single
+     * aggregate on-ledger call across all holders and cannot exclude one: there an ineligible holder holds the WHOLE
+     * action back - visibly (settlement-hold reason, audited event, operator task) and without being escalated to
+     * OVERDUE/DEFAULTED/MISSED - until the cause is resolved.
      */
     private void settle(CorporateAction ca) {
+        TokenStandard standard = resolveTokenStandard(ca.getId());
         FinalityDecision decision = finalityGate.check(GatedOperation.CORPORATE_ACTION_SETTLEMENT_CONFIRM,
-                ca.getAssetId(), resolveTokenStandard(ca.getId()), FinalityLevel.FINALIZED);
+                ca.getAssetId(), standard, FinalityLevel.FINALIZED);
         if (decision instanceof FinalityDecision.Blocked blocked) {
             log.warn("Corporate action {} settlement held: {} (reason={})", ca.getId(), blocked.explanation(), blocked.reason());
+            holdSettlement(ca, "finality: " + blocked.explanation());
             return;
         }
         log.info("Settling corporate action: id={} type={} assetId={}", ca.getId(), ca.getActionType(), ca.getAssetId());
-        requireNoBlockedEntitledHolders(ca);
+        List<CorporateActionEntry> ineligible = ineligibleEntries(ca);
+        boolean aggregate = standard != null && standard.name().startsWith("DAML");
+        if (aggregate && !ineligible.isEmpty()) {
+            holdSettlement(ca, "an on-ledger " + standard + " call pays every holder at once and cannot exclude "
+                    + ineligible.size() + " ineligible holder(s): " + describe(ineligible));
+            openPayoutHeldTasks(ca, ineligible);
+            return;
+        }
+        if (!ineligible.isEmpty()) {
+            markHeld(ca, ineligible);
+        }
+        ca.setSettlementHoldReason(null);
         ca.setStatus(CorporateAction.Status.AWAITING_SETTLEMENT);
         repository.save(ca);
         // Dispatch is handled by CorporateActionSettlementListener in the blockchain module,
@@ -648,34 +828,74 @@ public class CorporateActionService {
         events.publishEvent(new CorporateActionSettlementRequestedEvent(ca.getId(), ca.getAssetId(), ca.getActionType()));
     }
 
-    private TokenStandard resolveTokenStandard(UUID corporateActionId) {
-        String standard = repository.findTokenStandardByCorpAction(corporateActionId);
-        return standard != null ? TokenStandard.valueOf(standard) : null;
+    private void holdSettlement(CorporateAction ca, String reason) {
+        boolean changed = !Objects.equals(reason, ca.getSettlementHoldReason());
+        ca.setSettlementHoldReason(reason);
+        repository.save(ca);
+        if (changed) {
+            events.publishEvent(new CorporateActionSettlementBlockedEvent(ca.getId(), reason));
+        }
+        log.warn("Corporate action {} settlement HELD by the system (stays COMPUTED, not escalated): {}", ca.getId(), reason);
     }
 
-    /**
-     * Fail-closed §16 eWpG Sperrvermerk check across every entitled holder before a corporate
-     * action's payment is dispatched, via {@link HolderBlockGate} — a legally blocked holder
-     * must not receive its computed entitlement's payout. Checked here (settlement-dispatch
-     * time), not in {@link #snapshotEntriesAndCompute} — a Sperrvermerk restricts
-     * disposal/payment, not the register's accurate record of legal entitlement at record date,
-     * so entitlement computation itself is unaffected.
-     *
-     * <p>Canton's {@code payCoupon}/{@code redeem} is a single aggregate on-ledger call across
-     * all holders of a bond, not a per-holder transfer — it cannot surgically exclude one
-     * blocked holder's share. If ANY entitled holder is blocked, the ENTIRE settlement is held
-     * for operator review rather than partially dispatched; the action simply stays COMPUTED
-     * and is re-evaluated by the next daily run once the block is lifted (or an operator
-     * otherwise resolves it) — no separate "blocked" status is needed for this.
-     */
-    private void requireNoBlockedEntitledHolders(CorporateAction ca) {
+    /** Manual settlement path: hold the entries that are not eligible now; the rest is recorded as paid. */
+    private void holdIneligibleEntries(CorporateAction ca) {
+        List<CorporateActionEntry> ineligible = ineligibleEntries(ca);
+        if (!ineligible.isEmpty()) {
+            markHeld(ca, ineligible);
+        }
+    }
+
+    /** PAYABLE entries with a non-zero entitlement whose holder fails the party-eligibility gate now. */
+    private List<CorporateActionEntry> ineligibleEntries(CorporateAction ca) {
+        List<CorporateActionEntry> result = new ArrayList<>();
         for (CorporateActionEntry entry : entryRepository.findByCorporateActionId(ca.getId())) {
-            if (holderBlockGate.isBlocked(entry.getInvestorId(), entry.getWalletAddress())) {
-                throw new de.makibytes.registerwerk.shared.ComplianceGateException(
-                        "Corporate action " + ca.getId() + " has an entitled holder (investor="
-                        + entry.getInvestorId() + ") subject to an active §16 eWpG Sperrvermerk "
-                        + "(legal block) — settlement refused until resolved.");
+            if (entry.getPayoutStatus() != CorporateActionEntry.PayoutStatus.PAYABLE
+                    || entry.getEntitlementAmount() == null || entry.getEntitlementAmount().signum() == 0) {
+                continue;
+            }
+            List<String> reasons = partyGate.check(entry.getInvestorId(), entry.getWalletAddress());
+            if (!reasons.isEmpty()) {
+                entry.setHeldReason("the entity " + String.join("; ", reasons));
+                result.add(entry);
             }
         }
+        return result;
+    }
+
+    private void markHeld(CorporateAction ca, List<CorporateActionEntry> ineligible) {
+        List<Map<String, Object>> held = new ArrayList<>();
+        for (CorporateActionEntry entry : ineligible) {
+            entry.setPayoutStatus(CorporateActionEntry.PayoutStatus.HELD_BLOCKED);
+            entryRepository.save(entry);
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("assetHolderId", String.valueOf(entry.getAssetHolderId()));
+            m.put("investorId", String.valueOf(entry.getInvestorId()));
+            m.put("walletAddress", String.valueOf(entry.getWalletAddress()));
+            m.put("entitlementAmount", entry.getEntitlementAmount().toPlainString());
+            m.put("reason", entry.getHeldReason());
+            held.add(m);
+        }
+        events.publishEvent(new CorporateActionPayoutHeldEvent(ca.getId(), ca.getAssetId(), held));
+        openPayoutHeldTasks(ca, ineligible);
+        log.warn("Corporate action {}: {} entitlement(s) HELD, the other holders are paid: {}",
+                ca.getId(), ineligible.size(), held);
+    }
+
+    private void openPayoutHeldTasks(CorporateAction ca, List<CorporateActionEntry> entries) {
+        for (CorporateActionEntry entry : entries) {
+            if (entry.getInvestorId() != null) {
+                entityTasks.open(entry.getInvestorId(), CorporateActionBlocks.TASK_PAYOUT_HELD,
+                        ca.getId() + ":" + entry.getAssetHolderId(),
+                        ca.getActionType() + " " + ca.getId() + ": entitlement " + entry.getEntitlementAmount()
+                                + " " + ca.getCurrency() + " not paid - " + entry.getHeldReason(), null);
+            }
+        }
+    }
+
+    private static String describe(List<CorporateActionEntry> entries) {
+        return entries.stream()
+                .map(e -> "investor " + e.getInvestorId() + " (" + e.getHeldReason() + ")")
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 }

@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.auth.internal;
 
 import de.makibytes.registerwerk.shared.InvalidCredentialsException;
 import de.makibytes.registerwerk.shared.LoginDisabledException;
+import de.makibytes.registerwerk.shared.LoginThrottledException;
 import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import de.makibytes.registerwerk.auth.api.AppUser;
@@ -9,13 +10,11 @@ import de.makibytes.registerwerk.auth.api.UserAuthProvider;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.LongConsumer;
 
 @Service
 public class AuthService {
@@ -63,28 +62,22 @@ public class AuthService {
         this.attemptLimiter = attemptLimiter;
     }
 
-    /** Pauses the request thread for the progressive login delay; replaceable in tests. */
-    private LongConsumer delayer = AuthService::sleepQuietly;
-
-    public void setDelayer(LongConsumer delayer) {
-        this.delayer = delayer;
-    }
-
-    @Transactional
+    /**
+     * Deliberately not {@code @Transactional}: a transaction would pin a pooled connection through the BCrypt
+     * work (~100 ms of CPU) and the second connection {@code recordFailure} needs, so a flood of failing
+     * logins larger than the pool starved it (C4). Every database step here - throttle check, user lookup,
+     * counter update, last-login stamp - is its own short statement or transaction. The throttle never
+     * sleeps: a caller who must wait is answered with 429 and {@code Retry-After}.
+     */
     public LoginResult login(String email, String rawPassword, String clientIp) {
         if (props.isEntraEnabled()) {
             throw new LoginDisabledException();
         }
         LoginAttemptLimiter.Decision decision = attemptLimiter.check(email, clientIp);
         if (decision.blocked()) {
-            // Same exception as wrong credentials — a distinct "locked" message
-            // would itself confirm that the account exists.
-            throw new InvalidCredentialsException();
-        }
-        if (decision.delayMillis() > 0) {
-            // Progressive delay (not a lock): applied to known and unknown e-mails alike, so a
-            // distributed attack on one account slows it down but cannot lock the real user out.
-            delayer.accept(decision.delayMillis());
+            // Keyed on e-mail and client address only, never on whether the account exists, so the same
+            // answer covers known and unknown accounts and confirms nothing.
+            throw new LoginThrottledException(decision.retryAfterSeconds());
         }
         Optional<AppUser> candidate = users.findByEmailIgnoreCase(email)
             .filter(AppUser::isEnabled)
@@ -109,8 +102,9 @@ public class AuthService {
             throw new InvalidCredentialsException();
         }
         attemptLimiter.recordSuccess(email, clientIp);
-        user.setLastLoginAt(Instant.now());
-        users.save(user);
+        Instant now = Instant.now();
+        users.touchLastLogin(user.getId(), now);
+        user.setLastLoginAt(now);
         String token = minter.mint(user);
         return new LoginResult(
             token,
@@ -121,14 +115,6 @@ public class AuthService {
             user.getLegalEntityId(),
             props.getTokenTtlSeconds()
         );
-    }
-
-    private static void sleepQuietly(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 
     public record LoginResult(

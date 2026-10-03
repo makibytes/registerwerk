@@ -602,7 +602,8 @@ class SubscriptionOrderServiceTest {
     }
 
     @Test
-    @DisplayName("settleOnDeployedAssetMintsNotInserts: a deployed ERC-20 gets a mapping row and a mint, no register credit")
+    @DisplayName("settleOnDeployedAssetMintsNotInserts: a deployed ERC-20 gets a mapping row and a mint, no register credit; "
+            + "the order is SETTLEMENT_PENDING, never SETTLED, on submission (C7)")
     void settleOnDeployedAssetMintsNotInserts() {
         UUID orderId = UUID.randomUUID();
         paidOrder(orderId);
@@ -613,6 +614,7 @@ class SubscriptionOrderServiceTest {
         AssetDeployment dep = new AssetDeployment();
         dep.setId(UUID.randomUUID());
         dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        dep.setTokenDecimals(0);
         when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(dep));
         AssetHolder mapping = new AssetHolder();
         mapping.setId(UUID.randomUUID());
@@ -622,9 +624,12 @@ class SubscriptionOrderServiceTest {
 
         SubscriptionOrder result = service.settle(orderId, actorId, "REGISTRY_ADMIN");
 
-        assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.SETTLED);
+        assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.SETTLEMENT_PENDING);
+        assertThat(result.getSettledAt()).isNull();
         assertThat(result.getSettlementTxId()).isEqualTo(txId);
         assertThat(result.getResultingHolderId()).isEqualTo(mapping.getId());
+        verify(events).publishEvent(any(de.makibytes.registerwerk.asset.events.SubscriptionOrderSettlementSubmittedEvent.class));
+        verify(events, never()).publishEvent(any(de.makibytes.registerwerk.asset.events.SubscriptionOrderSettledEvent.class));
         verify(holderService, never()).creditPosition(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any());
     }
 
@@ -639,6 +644,7 @@ class SubscriptionOrderServiceTest {
         investorWithKyc(KycStatus.APPROVED);
         AssetDeployment dep = new AssetDeployment();
         dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        dep.setTokenDecimals(0);
         when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(dep));
 
         assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
@@ -709,5 +715,219 @@ class SubscriptionOrderServiceTest {
         when(repository.findById(orderId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.get(orderId)).isInstanceOf(EntityNotFoundException.class);
+    }
+
+    // ── Wave 0b C5: whole-unit register guard ─────────────────────────────────
+
+    private AssetDeployment deploymentWithDecimals(Integer decimals) {
+        AssetDeployment dep = new AssetDeployment();
+        dep.setId(UUID.randomUUID());
+        dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        dep.setTokenDecimals(decimals);
+        return dep;
+    }
+
+    @Test
+    @DisplayName("C5: allocate() on an asset deployed with decimals != 0 is refused (409-class), nothing is allocated")
+    void allocate_refusedOnFractionalDeployment() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = submittedOrder(new BigDecimal("1000"));
+        when(repository.findById(orderId)).thenReturn(Optional.of(order));
+        Asset asset = approvedAsset();
+        asset.setTokenStandard(TokenStandard.ERC20);
+        stubAsset(asset);
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deploymentWithDecimals(18)));
+
+        assertThatThrownBy(() -> service.allocate(orderId, new BigDecimal("600"), actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.RegisterUnitsException.class)
+                .hasMessageContaining("Subscription allocation")
+                .hasMessageContaining("decimals=18");
+        assertThat(order.getStatus()).isEqualTo(SubscriptionOrder.Status.SUBMITTED);
+        assertThat(order.getAllocatedAmount()).isNull();
+    }
+
+    @Test
+    @DisplayName("C5: settle() on an asset deployed with decimals != 0 never mints (the order stays PAYMENT_CONFIRMED)")
+    void settle_refusedOnFractionalDeployment() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId);
+        Asset asset = approvedAsset();
+        asset.setTokenStandard(TokenStandard.ERC20);
+        stubAsset(asset);
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deploymentWithDecimals(18)));
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.RegisterUnitsException.class)
+                .hasMessageContaining("Subscription settlement");
+
+        verify(tokenAdminPort, never()).mint(any(), any(), any(), any(), any());
+        verify(erc3643MintPort, never()).mint(any(), any(), any(), any(), any());
+        assertThat(order.getStatus()).isEqualTo(SubscriptionOrder.Status.PAYMENT_CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("C5: an ERC-3643 deployment of unknown decimals is refused the same way (no mint)")
+    void settle_refusedOnUnknownDecimals() {
+        UUID orderId = UUID.randomUUID();
+        paidOrder(orderId);
+        Asset asset = approvedAsset();
+        asset.setTokenStandard(TokenStandard.ERC3643);
+        stubAsset(asset);
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(deploymentWithDecimals(null)));
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.RegisterUnitsException.class);
+        verify(erc3643MintPort, never()).mint(any(), any(), any(), any(), any());
+    }
+
+    // ── Wave 0b C7: SETTLEMENT_PENDING / outbox / retry ────────────────────────
+
+    private AssetDeployment deployedErc20() {
+        Asset asset = approvedAsset();
+        asset.setTokenStandard(TokenStandard.ERC20);
+        stubAsset(asset);
+        investorWithKyc(KycStatus.APPROVED);
+        AssetDeployment dep = new AssetDeployment();
+        dep.setId(UUID.randomUUID());
+        dep.setDeploymentStatus(AssetDeployment.DeploymentStatus.CONFIRMED);
+        dep.setTokenDecimals(0);
+        when(deploymentRepository.findByAssetId(assetId)).thenReturn(List.of(dep));
+        AssetHolder mapping = new AssetHolder();
+        mapping.setId(UUID.randomUUID());
+        org.mockito.Mockito.lenient().when(holderService.ensureMappingRow(eq(assetId), eq(investorId), any(), any(), any(), any()))
+                .thenReturn(mapping);
+        return dep;
+    }
+
+    @Test
+    @DisplayName("C7: a SETTLEMENT_PENDING order cannot be settled again - a lost response never produces a second mint")
+    void settle_pendingOrderCannotBeSettledAgain() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId);
+        order.setStatus(SubscriptionOrder.Status.SETTLEMENT_PENDING);
+        order.setSettlementTxId(UUID.randomUUID());
+        stubAsset(approvedAsset());
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(InvalidStateTransitionException.class);
+
+        verify(tokenAdminPort, never()).mint(any(), any(), any(), any(), any());
+        verify(erc3643MintPort, never()).mint(any(), any(), any(), any(), any());
+        assertThat(order.getStatus()).isEqualTo(SubscriptionOrder.Status.SETTLEMENT_PENDING);
+    }
+
+    @Test
+    @DisplayName("C7: after a definitive mint failure (SETTLEMENT_FAILED) the order can be settled again, and the retry mints once")
+    void settle_failedOrderIsRetryable() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId);
+        order.setStatus(SubscriptionOrder.Status.SETTLEMENT_FAILED);
+        order.setSettlementTxId(UUID.randomUUID());
+        order.setSettlementFailureReason("mint 0xold FAILED: Transaction reverted on-chain");
+        AssetDeployment dep = deployedErc20();
+        UUID retryTx = UUID.randomUUID();
+        when(tokenAdminPort.mint(eq(dep.getId()), any(), eq(BigInteger.valueOf(800)), any(), any())).thenReturn(retryTx);
+
+        SubscriptionOrder result = service.settle(orderId, actorId, "REGISTRY_ADMIN");
+
+        assertThat(result.getStatus()).isEqualTo(SubscriptionOrder.Status.SETTLEMENT_PENDING);
+        assertThat(result.getSettlementTxId()).isEqualTo(retryTx);
+        assertThat(result.getSettlementFailureReason()).isNull();
+        verify(tokenAdminPort, org.mockito.Mockito.times(1)).mint(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("C7: a mint that cannot even be submitted leaves the order PAYMENT_CONFIRMED (nothing advanced), retryable")
+    void settle_submissionFailureLeavesThePaidOrderUntouched() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId);
+        AssetDeployment dep = deployedErc20();
+        when(tokenAdminPort.mint(eq(dep.getId()), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("signer unavailable"));
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("signer unavailable");
+
+        assertThat(order.getStatus()).isEqualTo(SubscriptionOrder.Status.PAYMENT_CONFIRMED);
+        assertThat(order.getSettlementTxId()).isNull();
+        verify(events, never()).publishEvent(any(de.makibytes.registerwerk.asset.events.SubscriptionOrderSettlementSubmittedEvent.class));
+    }
+
+    @Test
+    @DisplayName("C7: a commit failure after settle() does not double-mint - the mint is broadcast only after commit, so the retry mints exactly once")
+    void settle_commitFailureDoesNotDoubleMint() {
+        java.util.List<String> broadcasts = new java.util.ArrayList<>();
+        AssetDeployment dep = deployedErc20();
+        // Behaves like DurableEvmTransactionGateway: the signed bytes are persisted with the caller's transaction,
+        // the broadcast happens only in afterCommit.
+        when(tokenAdminPort.mint(eq(dep.getId()), any(), any(), any(), any())).thenAnswer(inv -> {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override public void afterCommit() { broadcasts.add("mint"); }
+                    });
+            return UUID.randomUUID();
+        });
+        try {
+            // attempt 1: the transaction fails to commit -> synchronizations are dropped without afterCommit
+            org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+            UUID firstId = UUID.randomUUID();
+            paidOrder(firstId);
+            service.settle(firstId, actorId, "REGISTRY_ADMIN");
+            assertThat(broadcasts).as("nothing is broadcast inside the open transaction").isEmpty();
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+            assertThat(broadcasts).as("a failed commit broadcasts nothing").isEmpty();
+
+            // attempt 2 (retry on the order as it was before the failed commit): commits
+            org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+            UUID retryId = UUID.randomUUID();
+            paidOrder(retryId);
+            service.settle(retryId, actorId, "REGISTRY_ADMIN");
+            for (var sync : org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()) {
+                sync.afterCommit();
+            }
+            assertThat(broadcasts).as("exactly one mint reaches the chain").containsExactly("mint");
+        } finally {
+            if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+                org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("C7: the holding-cap check at settlement counts the investor's other mints still in flight")
+    void settle_holdingCapCountsMintsInFlight() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = paidOrder(orderId); // allocated 800
+        AssetDeployment dep = deployedErc20();
+        when(investorLimitService.effectiveMaxHolding(any(), eq(investorId))).thenReturn(new BigDecimal("1000"));
+        when(assetHolderRepository.sumActiveNominalByInvestorIdAndAssetId(investorId, assetId)).thenReturn(new BigDecimal("100"));
+        // another order of 300 units is SETTLEMENT_PENDING: 100 held + 300 in flight + 800 = 1200 > 1000
+        when(repository.sumPendingSettlementForInvestor(assetId, investorId, orderId)).thenReturn(new BigDecimal("300"));
+
+        assertThatThrownBy(() -> service.settle(orderId, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class)
+                .hasMessageContaining("maximum of 1000").hasMessageContaining("300 more in flight");
+
+        verify(tokenAdminPort, never()).mint(any(), any(), any(), any(), any());
+        assertThat(order.getStatus()).isEqualTo(SubscriptionOrder.Status.PAYMENT_CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("C7: an order whose mint is in flight cannot be released (the mint may still execute); a failed one can, with a refund")
+    void release_pendingRefused_failedAllowed() {
+        UUID pendingId = UUID.randomUUID();
+        SubscriptionOrder pending = paidOrder(pendingId);
+        pending.setStatus(SubscriptionOrder.Status.SETTLEMENT_PENDING);
+        assertThatThrownBy(() -> service.release(pendingId, "wrong", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(InvalidStateTransitionException.class);
+
+        UUID failedId = UUID.randomUUID();
+        SubscriptionOrder failed = paidOrder(failedId);
+        failed.setPaidAmount(new BigDecimal("792000"));
+        failed.setStatus(SubscriptionOrder.Status.SETTLEMENT_FAILED);
+        SubscriptionOrder released = service.release(failedId, "mint failed, refunding", actorId, "REGISTRY_ADMIN");
+
+        assertThat(released.getStatus()).isEqualTo(SubscriptionOrder.Status.RELEASED);
+        assertThat(released.getRefundDue()).isEqualByComparingTo("792000");
     }
 }

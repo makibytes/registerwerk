@@ -1257,7 +1257,7 @@ export class CustomerDetailComponent implements OnInit {
     const reason = prompt(`Reason for ceasing ${bo.givenName} ${bo.familyName} as beneficial owner (required, audited):`);
     if (!reason || !reason.trim()) return;
     this.withDualControl('BENEFICIAL_OWNER_CEASE', `Cease beneficial owner ${bo.givenName} ${bo.familyName}`,
-      `DELETE /api/v1/entities/${this.id}/beneficial-owners/${bo.id}`, tokens => {
+      `DELETE /api/v1/entities/${this.id}/beneficial-owners/${bo.id}`, { reason: reason.trim() }, tokens => {
       this.beneficialOwnerService.cease(this.id, bo.id, { reason: reason.trim() }, tokens).subscribe({
         next: (updated) => {
           this.beneficialOwners = this.beneficialOwners.map(o => o.id === updated.id ? updated : o)
@@ -1294,7 +1294,7 @@ export class CustomerDetailComponent implements OnInit {
     const note = prompt(`Enhanced due diligence note for ${bo.givenName} ${bo.familyName} (required, audited):`);
     if (!note || !note.trim()) return;
     this.withDualControl('PEP_EDD_APPROVE', `Approve EDD for ${bo.givenName} ${bo.familyName}`,
-      `POST /api/v1/entities/${this.id}/beneficial-owners/${bo.id}/edd-approvals`, tokens => {
+      `POST /api/v1/entities/${this.id}/beneficial-owners/${bo.id}/edd-approvals`, { note: note.trim() }, tokens => {
       this.beneficialOwnerService.approveEdd(this.id, bo.id, { note: note.trim() }, tokens).subscribe({
         next: () => {
           this.snackBar.open('EDD approved; review due within 6 months.', 'Dismiss', { duration: 5000 });
@@ -1357,9 +1357,14 @@ export class CustomerDetailComponent implements OnInit {
   }
 
   /** Step-up plus second approver for a KYC decision; calls back with the tokens or not at all when cancelled. */
-  private withDualControl(action: string, reason: string, target: string, then: (tokens: DualControlTokens) => void): void {
+  /**
+   * `targetBody` is the JSON body of the request that follows (undefined when it sends none): an approval
+   * is bound to the canonical body, so the approver must be shown, and bind, exactly what is then sent.
+   */
+  private withDualControl(action: string, reason: string, target: string, targetBody: unknown,
+                          then: (tokens: DualControlTokens) => void): void {
     this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: true, reason, action, target },
+      data: { requireDualControl: true, reason, action, target, targetBody },
       width: '500px',
       disableClose: true,
     }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
@@ -1370,7 +1375,7 @@ export class CustomerDetailComponent implements OnInit {
 
   approveJurisdiction(jur: Jurisdiction): void {
     this.withDualControl('KYC_JURISDICTION_APPROVE', `Approve KYC for ${this.jurisdictionLabel(jur)}`,
-      `POST /api/v1/entities/${this.id}/kyc/jurisdictions/${jur}/approve`, tokens => {
+      `POST /api/v1/entities/${this.id}/kyc/jurisdictions/${jur}/approve`, {}, tokens => {
       this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
       this.kycService.approveJurisdiction(this.id, jur, undefined, tokens).subscribe({
         next: () => {
@@ -1396,7 +1401,8 @@ export class CustomerDetailComponent implements OnInit {
     }).afterClosed().subscribe((decision: KycRejectDialogResult | undefined) => {
       if (!decision) return;
       this.withDualControl('KYC_JURISDICTION_REJECT', `Reject KYC for ${this.jurisdictionLabel(jur)}`,
-        `POST /api/v1/entities/${this.id}/kyc/jurisdictions/${jur}/reject`, tokens => {
+        `POST /api/v1/entities/${this.id}/kyc/jurisdictions/${jur}/reject`,
+        { reason: decision.reason, customerReasonCode: decision.customerReasonCode }, tokens => {
         this.jurActionLoading = { ...this.jurActionLoading, [jur]: true };
         this.kycService.rejectJurisdiction(this.id, jur, decision.reason, decision.customerReasonCode, tokens).subscribe({
           next: () => {
@@ -1469,7 +1475,7 @@ export class CustomerDetailComponent implements OnInit {
       overrideNote = note.trim();
     }
     this.withDualControl('KYC_APPROVE', 'Approve KYC for this customer',
-      `POST /api/v1/entities/${this.id}/kyc/approve`, tokens => {
+      `POST /api/v1/entities/${this.id}/kyc/approve`, { overrideNote }, tokens => {
       this.kycService.approveKyc(this.id, { overrideNote }, tokens).subscribe({
         next: () => {
           this.loadEntity();
@@ -1544,7 +1550,8 @@ export class CustomerDetailComponent implements OnInit {
       .afterClosed().subscribe((decision: KycRejectDialogResult | undefined) => {
         if (!decision) return;
         this.withDualControl('KYC_REJECT', 'Reject KYC for this customer',
-          `POST /api/v1/entities/${this.id}/kyc/reject`, tokens => {
+          `POST /api/v1/entities/${this.id}/kyc/reject`,
+          { reason: decision.reason, customerReasonCode: decision.customerReasonCode }, tokens => {
           this.kycService.rejectKyc(this.id, decision.reason, decision.customerReasonCode, tokens).subscribe({
             next: () => {
               this.snackBar.open('KYC rejected. The customer is told the selected category only.', 'Dismiss', { duration: 6000 });
@@ -1565,7 +1572,7 @@ export class CustomerDetailComponent implements OnInit {
     const reason = prompt(`Reason for this action (required, written to the audit trail):`);
     if (!reason || !reason.trim()) return;
     this.withDualControl(action, `${label} ${this.entity?.currentName ?? ''}`.trim(),
-      `POST /api/v1/entities/${this.id}/${path}`, tokens => {
+      `POST /api/v1/entities/${this.id}/${path}`, { reason: reason.trim() }, tokens => {
       const call = path === 'suspend'
         ? this.entityService.suspendEntity(this.id, reason.trim(), tokens)
         : this.entityService.reactivateEntity(this.id, reason.trim(), tokens);
@@ -1621,7 +1628,7 @@ export class CustomerDetailComponent implements OnInit {
   private openTerminateStepUp(reason: string, acknowledged: { obligationId: string; reason: string }[]): void {
     this.withDualControl('CUSTOMER_OFFBOARDING',
       `Terminate customer relationship for ${this.entity?.currentName} (offboarding)`,
-      `POST /api/v1/entities/${this.id}/terminate`, tokens => {
+      `POST /api/v1/entities/${this.id}/terminate`, { reason, acknowledgedObligations: acknowledged }, tokens => {
       this.entityService.terminateEntity(this.id, reason, acknowledged, tokens).subscribe({
         next: () => {
           this.snackBar.open('Customer relationship terminated. Audit event recorded.', 'Dismiss', { duration: 5000 });
@@ -1635,15 +1642,16 @@ export class CustomerDetailComponent implements OnInit {
   recordMerger(): void {
     if (!this.mergeForm.reason.trim()) return;
     if (!confirm('This will mark the current entity as dissolved (absorbed). Continue?')) return;
+    const mergeBody = {
+      targetEntityId: this.mergeForm.targetEntityId,
+      mergeType: this.mergeForm.mergeType,
+      effectiveDate: this.mergeForm.effectiveDate,
+      notes: this.mergeForm.notes || undefined,
+      reason: this.mergeForm.reason.trim(),
+    };
     this.withDualControl('ENTITY_MERGE', `Record merger of ${this.entity?.currentName ?? 'this entity'}`,
-      `POST /api/v1/entities/${this.id}/merge`, tokens => {
-      this.entityService.mergeEntity(this.id, {
-        targetEntityId: this.mergeForm.targetEntityId,
-        mergeType: this.mergeForm.mergeType,
-        effectiveDate: this.mergeForm.effectiveDate,
-        notes: this.mergeForm.notes || undefined,
-        reason: this.mergeForm.reason.trim(),
-      }, tokens).subscribe({
+      `POST /api/v1/entities/${this.id}/merge`, mergeBody, tokens => {
+      this.entityService.mergeEntity(this.id, mergeBody, tokens).subscribe({
         next: () => {
           this.mergeForm = { targetEntityId: '', mergeType: 'ABSORPTION', effectiveDate: '', notes: '', reason: '' };
           this.loadEntity();
@@ -1671,6 +1679,7 @@ export class CustomerDetailComponent implements OnInit {
         reason: `${onBehalf ? 'Act on behalf of' : 'Open a read-only support session for'} ${entity.currentName}`,
         action: 'ADMIN_IMPERSONATION_ACT_ON_BEHALF',
         target: 'POST /api/v1/impersonation/act-on-behalf',
+        targetBody: { entityId: entity.id, reason: choice.reason, ticket: choice.ticket || undefined },
       }).subscribe(tokens => {
         if (!tokens) return;
         // The tab must be opened inside the click gesture chain; the handoff URL (one-time code) is navigated to afterwards.

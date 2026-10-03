@@ -8,6 +8,8 @@ import {
   CollateralReconciled as CollateralReconciledEvent,
   LiquidationSurplusCredited as LiquidationSurplusCreditedEvent,
   SurplusClaimed as SurplusClaimedEvent,
+  CollateralAdded as CollateralAddedEvent,
+  CollateralWithdrawn as CollateralWithdrawnEvent,
 } from '../generated/templates/EwpgRepoMarket/EwpgRepoMarket'
 import { RepoMarket, RepoMarketEvent } from '../generated/schema'
 
@@ -164,6 +166,40 @@ export function handleSurplusClaimed(event: SurplusClaimedEvent): void {
   let e = newEvent(market.id, event.transaction.hash.toHexString(), event.logIndex.toString(), 'SURPLUS_CLAIMED')
   e.actor = event.params.borrower
   e.amount = event.params.amount
+  e.blockNumber = event.block.number
+  e.blockTimestamp = event.block.timestamp
+  e.transactionHash = event.transaction.hash
+  e.logIndex = event.logIndex
+  e.save()
+}
+
+/** Collateral topped up on an open position (no borrow). `collateralAmount` is the position's
+ *  total collateral after the top-up, as emitted — not the increment. */
+export function handleCollateralAdded(event: CollateralAddedEvent): void {
+  let market = RepoMarket.load(event.address.toHexString())
+  if (market == null) return
+
+  let e = newEvent(market.id, event.transaction.hash.toHexString(), event.logIndex.toString(), 'COLLATERAL_ADDED')
+  e.actor = event.params.borrower
+  e.amount = event.params.amount
+  e.collateralAmount = event.params.totalCollateral
+  e.blockNumber = event.block.number
+  e.blockTimestamp = event.block.timestamp
+  e.transactionHash = event.transaction.hash
+  e.logIndex = event.logIndex
+  e.save()
+}
+
+/** Collateral released to the borrower ({claimCollateral}, or a partial withdrawal that keeps the
+ *  position healthy). `collateralAmount` is the collateral still pledged afterwards. */
+export function handleCollateralWithdrawn(event: CollateralWithdrawnEvent): void {
+  let market = RepoMarket.load(event.address.toHexString())
+  if (market == null) return
+
+  let e = newEvent(market.id, event.transaction.hash.toHexString(), event.logIndex.toString(), 'COLLATERAL_WITHDRAWN')
+  e.actor = event.params.borrower
+  e.amount = event.params.amount
+  e.collateralAmount = event.params.remainingCollateral
   e.blockNumber = event.block.number
   e.blockTimestamp = event.block.timestamp
   e.transactionHash = event.transaction.hash

@@ -392,12 +392,14 @@ export class RegisterTransferComponent implements OnInit {
     if (!transfer || !txHash) return;
     this.dialog.closeAll();
 
+    const handoverBody = { txHash, deploymentId: deploymentId || undefined, attested: attested || undefined };
     const stepUpRef = this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Record on-chain control handover for register transfer to ${transfer.successorName}`,
         action: 'REGISTER_TRANSFER_ONCHAIN_HANDOVER',
         target: `POST /api/v1/register-transfers/${transfer.id}/onchain-handover`,
+        targetBody: handoverBody,
       },
       width: '500px',
       disableClose: true,
@@ -425,6 +427,7 @@ export class RegisterTransferComponent implements OnInit {
         reason: `Complete register transfer to ${transfer.successorName} (§§21/22 eWpG)`,
         action: 'REGISTER_TRANSFER_COMPLETE',
         target: `POST /api/v1/register-transfers/${transfer.id}/complete`,
+        targetBody: {},
       },
       width: '500px',
       disableClose: true,

@@ -153,6 +153,16 @@ contract EwpgERC7540 is EwpgERC4626 {
         return _pendingDepositAssets;
     }
 
+    /// @notice Headroom under {depositCap} for new deposit requests: the cap less settled assets
+    ///         and the escrow of requests still pending. `type(uint256).max` when no cap is set.
+    ///         ({maxDeposit} stays 0: the synchronous ERC-4626 path is disabled.)
+    function maxRequestDeposit(address) public view returns (uint256) {
+        uint256 cap = depositCap();
+        if (cap == 0) return type(uint256).max;
+        uint256 committed = totalAssets() + _pendingDepositAssets;
+        return committed >= cap ? 0 : cap - committed;
+    }
+
     // ── Settlement delay ──────────────────────────────────────────────────────
 
     function setMinSettlementDelay(uint256 delaySecs) external onlyRegistry {
@@ -166,7 +176,11 @@ contract EwpgERC7540 is EwpgERC4626 {
 
     // ── Deposit request ───────────────────────────────────────────────────────
 
-    /// @notice Investor places a deposit request. Assets are transferred in immediately and held pending settlement.
+    /// @notice Investor places a deposit request. Assets are transferred in immediately and held
+    ///         pending settlement. The request is booked at the amount the vault actually
+    ///         *received* (balance delta), so a fee-on-transfer underlying cannot mint shares for
+    ///         cash that never arrived, and it must fit under {depositCap} together with settled
+    ///         assets and the other pending requests.
     function requestDeposit(uint256 assets, address controller, address owner)
         external
         returns (uint256 requestId)
@@ -175,16 +189,21 @@ contract EwpgERC7540 is EwpgERC4626 {
         require(isWhitelisted(owner), "EwpgERC7540: owner not whitelisted");
         require(!isFrozen(msg.sender), "EwpgERC7540: payer is frozen");
         require(!isFrozen(owner), "EwpgERC7540: owner is frozen");
+        require(assets <= maxRequestDeposit(owner), "EwpgERC7540: deposit cap exceeded");
         // SafeERC20: tokens that signal failure by returning false (instead of
         // reverting) would otherwise leave the request recorded WITHOUT the
         // assets ever arriving — free shares at fulfillment.
-        IERC20(asset()).safeTransferFrom(msg.sender, address(this), assets);
+        IERC20 underlying = IERC20(asset());
+        uint256 balanceBefore = underlying.balanceOf(address(this));
+        underlying.safeTransferFrom(msg.sender, address(this), assets);
+        uint256 received = underlying.balanceOf(address(this)) - balanceBefore;
+        require(received > 0, "EwpgERC7540: nothing received");
         requestId = ++_requestCounter;
-        _depositRequests[requestId] = DepositRequest({ assets: assets, controller: controller, owner: owner, pending: true });
+        _depositRequests[requestId] = DepositRequest({ assets: received, controller: controller, owner: owner, pending: true });
         _depositPayer[requestId] = msg.sender;
-        _pendingDepositAssets += assets;
+        _pendingDepositAssets += received;
         _requestTimestamps[requestId] = block.timestamp;
-        emit DepositRequested(requestId, controller, owner, assets);
+        emit DepositRequested(requestId, controller, owner, received);
     }
 
     /// @notice Operator fulfills a pending deposit request at current NAV.
@@ -216,6 +235,10 @@ contract EwpgERC7540 is EwpgERC4626 {
         require(shares > 0, "EwpgERC7540: zero shares");
         require(balanceOf(owner) >= shares, "EwpgERC7540: insufficient shares");
         if (msg.sender != owner) {
+            // The share legs below only see owner and vault: an allowance holder frozen after it
+            // was approved must not be able to act on the owner's position (an allowance granted
+            // before the freeze stays on the books).
+            require(!isFrozen(msg.sender), "EwpgERC7540: caller is frozen");
             _spendAllowance(owner, msg.sender, shares);
         }
         _transfer(owner, address(this), shares);

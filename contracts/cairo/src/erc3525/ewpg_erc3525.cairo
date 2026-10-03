@@ -291,12 +291,10 @@ pub mod EwpgERC3525 {
             self.require_eligible_recipient(to);
 
             if from != to {
-                // Allowances are granted by an owner and must not survive that owner.
-                // `ApprovalValue(token_id, 0, 0)` is a reset marker for indexers.
+                // Allowances are granted by an owner and must not survive that owner. No event:
+                // the ownership-changing `Transfer` signals the reset (as ERC-721 does for its
+                // approval); `allowance` is the source of truth.
                 self.approval_epoch.write(token_id, self.approval_epoch.read(token_id) + 1);
-                self.emit(Event::ApprovalValue(ApprovalValue {
-                    token_id, operator: Zero::zero(), value: 0_u256,
-                }));
             }
             self.token_owner.write(token_id, to);
             self.balance.write(from, self.balance.read(from) - 1_u256);
@@ -327,9 +325,15 @@ pub mod EwpgERC3525 {
             assert!(!operator.is_zero(), "EwpgERC3525: zero operator address");
             // A frozen or paused position must not be able to delegate value either: an
             // allowance granted now would be spendable the moment the freeze/pause is lifted.
-            self.require_token_transferable(token_id);
-            assert!(!self.frozen_address.read(owner), "EwpgERC3525: owner address is frozen");
-            assert!(!self.frozen_address.read(operator), "EwpgERC3525: operator address is frozen");
+            // Revoking (value 0) is never restricted: a holder frozen *because* a delegate's key
+            // was compromised must still be able to cancel that delegate's allowance.
+            if value != 0_u256 {
+                self.require_token_transferable(token_id);
+                assert!(!self.frozen_address.read(owner), "EwpgERC3525: owner address is frozen");
+                assert!(
+                    !self.frozen_address.read(operator), "EwpgERC3525: operator address is frozen",
+                );
+            }
             let epoch = self.approval_epoch.read(token_id);
             self.value_allowances.write((token_id, epoch, operator), value);
             self.emit(Event::ApprovalValue(ApprovalValue { token_id, operator, value }));

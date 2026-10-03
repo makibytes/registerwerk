@@ -94,13 +94,23 @@ type DecisionMode = 'allocate' | 'reject' | 'payment' | 'release';
                     @if (o.allocationExpiresAt) { · until {{ o.allocationExpiresAt | date:'shortDate' }} }
                   </span>
                 }
-                @if (o.status === 'PAYMENT_CONFIRMED') {
-                  <button type="button" mat-icon-button color="primary" matTooltip="Settle: enter on the register (mint if deployed)" (click)="settle(o)">
-                    <mat-icon>verified</mat-icon>
+                @if (o.status === 'PAYMENT_CONFIRMED' || o.status === 'SETTLEMENT_FAILED') {
+                  <button type="button" mat-icon-button color="primary"
+                          [matTooltip]="o.status === 'SETTLEMENT_FAILED' ? 'Settle again: submit a new mint (the previous one did not happen)' : 'Settle: enter on the register (mint if deployed)'"
+                          (click)="settle(o)">
+                    <mat-icon>{{ o.status === 'SETTLEMENT_FAILED' ? 'replay' : 'verified' }}</mat-icon>
                   </button>
                   <button type="button" mat-icon-button color="warn" matTooltip="Release and mark payment for refund" (click)="openDecisionDialog(o, 'release')">
                     <mat-icon>undo</mat-icon>
                   </button>
+                }
+                @if (o.status === 'SETTLEMENT_PENDING') {
+                  <span class="dimmed small" matTooltip="The mint is submitted; the order is settled once it is final and indexed. It cannot be settled again or released meanwhile.">
+                    mint pending @if (o.settlementTxId) { · {{ o.settlementTxId.slice(0, 8) }} }
+                  </span>
+                }
+                @if (o.status === 'SETTLEMENT_FAILED' && o.settlementFailureReason) {
+                  <span class="dimmed small" [matTooltip]="o.settlementFailureReason">Mint failed ⓘ</span>
                 }
                 @if (o.status === 'SETTLED' && o.settlementTxId) {
                   <span class="dimmed small" matTooltip="Mint transaction id">mint {{ o.settlementTxId.slice(0, 8) }}</span>
@@ -220,6 +230,8 @@ type DecisionMode = 'allocate' | 'reject' | 'payment' | 'release';
     .status-badge.confirmed { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
     .status-badge.payment_confirmed { background: var(--rw-issued-bg); color: var(--rw-issued-fg); }
     .status-badge.settled   { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+    .status-badge.settlement_pending { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
+    .status-badge.settlement_failed  { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
     .status-badge.lapsed    { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
     .status-badge.released  { background: var(--rw-border-subtle); color: var(--rw-text-secondary); }
     .refund { color: var(--rw-text-warning); }
@@ -284,7 +296,12 @@ export class SubscriptionOrdersComponent implements OnInit {
   }
 
   statusLabel(o: SubscriptionOrder): string {
-    return o.status === 'PAYMENT_CONFIRMED' ? 'PAID' : o.status;
+    switch (o.status) {
+      case 'PAYMENT_CONFIRMED': return 'PAID';
+      case 'SETTLEMENT_PENDING': return 'MINT PENDING';
+      case 'SETTLEMENT_FAILED': return 'MINT FAILED';
+      default: return o.status;
+    }
   }
 
   dialogTitle(): string {

@@ -11,7 +11,8 @@ import de.makibytes.registerwerk.finality.api.FinalityGate;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.finality.api.FinalityNotReachedException;
 import de.makibytes.registerwerk.finality.api.GatedOperation;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
+import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,24 +56,28 @@ class CorporateActionFinalityGateTest {
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
     @Mock private ApplicationEventPublisher events;
-    @Mock private HolderBlockGate holderBlockGate;
+    @Mock private PartyEligibilityGate partyGate;
+    @Mock private EntityTaskPort entityTasks;
     @Mock private FinalityGate finalityGate;
 
     private CorporateActionService service;
 
     private CorporateActionFinalityGateTest init() {
         service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
-                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate,
+                couponPaymentRepository, proposalValidator, events, partyGate, entityTasks, finalityGate,
                 org.mockito.Mockito.mock(RegisterFreshnessGate.class), bondTermsRepository,
-                CorporateActionTestSupport.systemRegisterClock());
+                CorporateActionTestSupport.systemRegisterClock(),
+                CorporateActionTestSupport.directTransactions());
         return this;
     }
 
-    private static CorporateAction actionWithId(UUID id, UUID assetId, CorporateAction.Status status) {
+    private CorporateAction actionWithId(UUID id, UUID assetId, CorporateAction.Status status) {
         CorporateAction ca = new CorporateAction();
         ReflectionTestUtils.setField(ca, "id", id);
         ca.setAssetId(assetId);
         ca.setStatus(status);
+        // the daily job re-loads every action by id inside its own transaction (H8)
+        org.mockito.Mockito.lenient().when(repository.findById(id)).thenReturn(Optional.of(ca));
         return ca;
     }
 
@@ -84,8 +89,13 @@ class CorporateActionFinalityGateTest {
         UUID assetId = UUID.randomUUID();
         UUID actionId = UUID.randomUUID();
         CorporateAction attested = actionWithId(actionId, assetId, CorporateAction.Status.COMPUTED);
+        java.util.List<de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry> entries = java.util.List.of(
+                CorporateActionTestSupport.entry(actionId, "0xaaa", "1000", "50.00"));
+        CorporateActionTestSupport.computed(attested, entries);
         attested.setIssuerAttestedBy(UUID.randomUUID());
         attested.setIssuerAttestedAt(java.time.Instant.now());
+        attested.setIssuerAttestedDigest(attested.getPayoutDigest());
+        when(entryRepository.findByCorporateActionId(actionId)).thenReturn(entries);
         when(repository.findById(actionId)).thenReturn(Optional.of(attested));
         when(repository.findTokenStandardByCorpAction(actionId)).thenReturn("ERC3643");
 
@@ -126,10 +136,10 @@ class CorporateActionFinalityGateTest {
         UUID assetId = UUID.randomUUID();
         UUID actionId = UUID.randomUUID();
         CorporateAction due = actionWithId(actionId, assetId, CorporateAction.Status.COMPUTED);
-        due.setIssuerAttestedBy(UUID.randomUUID());
-        due.setIssuerAttestedAt(java.time.Instant.now());
-        due.setDualControlApproverId(UUID.randomUUID());
-        due.setDualControlApprovedAt(java.time.Instant.now());
+        java.util.List<de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry> entries = java.util.List.of(
+                CorporateActionTestSupport.entry(actionId, "0xaaa", "1000", "50.00"));
+        CorporateActionTestSupport.signedOff(due, entries, UUID.randomUUID(), UUID.randomUUID());
+        when(entryRepository.findByCorporateActionId(actionId)).thenReturn(entries);
         due.setPaymentDate(LocalDate.now());
 
         when(repository.findReadyToCompute(any())).thenReturn(List.of());
@@ -147,8 +157,9 @@ class CorporateActionFinalityGateTest {
 
         assertThat(due.getStatus()).isEqualTo(CorporateAction.Status.COMPUTED);
         verify(events, never()).publishEvent(any(CorporateActionSettlementRequestedEvent.class));
-        // Never even reaches the entitled-holder block check — held at the finality gate first.
-        verify(entryRepository, never()).findByCorporateActionId(any());
+        // Held at the finality gate before any holder is run through the eligibility gate, and recorded (H6).
+        verify(partyGate, never()).check(any(), any());
+        assertThat(due.getSettlementHoldReason()).contains("not yet final");
     }
 
     @Test
@@ -158,17 +169,16 @@ class CorporateActionFinalityGateTest {
         UUID assetId = UUID.randomUUID();
         UUID actionId = UUID.randomUUID();
         CorporateAction due = actionWithId(actionId, assetId, CorporateAction.Status.COMPUTED);
-        due.setIssuerAttestedBy(UUID.randomUUID());
-        due.setIssuerAttestedAt(java.time.Instant.now());
-        due.setDualControlApproverId(UUID.randomUUID());
-        due.setDualControlApprovedAt(java.time.Instant.now());
+        java.util.List<de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry> entries = java.util.List.of(
+                CorporateActionTestSupport.entry(actionId, "0xaaa", "1000", "50.00"));
+        CorporateActionTestSupport.signedOff(due, entries, UUID.randomUUID(), UUID.randomUUID());
+        when(entryRepository.findByCorporateActionId(actionId)).thenReturn(entries);
         due.setPaymentDate(LocalDate.now());
 
         when(repository.findReadyToCompute(any())).thenReturn(List.of());
         when(repository.findDueForSettlement(any())).thenReturn(List.of(due));
         when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
         when(repository.findTokenStandardByCorpAction(actionId)).thenReturn(null);
-        when(entryRepository.findByCorporateActionId(actionId)).thenReturn(List.of());
         when(finalityGate.check(eq(GatedOperation.CORPORATE_ACTION_SETTLEMENT_CONFIRM),
                 eq(assetId), any(), eq(FinalityLevel.FINALIZED))).thenReturn(new FinalityDecision.Allowed(FinalityLevel.FINALIZED));
 

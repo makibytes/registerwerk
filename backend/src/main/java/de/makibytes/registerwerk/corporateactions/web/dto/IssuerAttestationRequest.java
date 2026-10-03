@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.corporateactions.web.dto;
 
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 /**
  * The issuer's attestation that the underlying obligation/cash-leg for a corporate action's
@@ -16,8 +17,13 @@ import jakarta.validation.constraints.NotBlank;
  *                             can't be submitted by accident
  * @param acknowledged         must be {@code true} — an explicit, typed confirmation that the
  *                             issuer has reviewed and is ready to proceed, not just a button click
+ * @param payoutDigest         the {@code payoutDigest} of the computed amounts the issuer reviewed (Wave 0b C6);
+ *                             when present and different from the current digest the attestation is refused (409),
+ *                             so amounts re-computed after the issuer opened the page can never be attested unseen
  */
-public record IssuerAttestationRequest(@NotBlank String attestationReference, boolean acknowledged) {
+public record IssuerAttestationRequest(@NotBlank String attestationReference, boolean acknowledged,
+                                       @Size(max = 64) String payoutDigest) {
+
     @AssertTrue(message = "acknowledged must be true")
     public boolean isAcknowledged() {
         return acknowledged;

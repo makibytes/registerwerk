@@ -7,6 +7,10 @@ public enum AssetStatus {
     ISSUED,
     SUSPENDED,
     REDEEMED,
+    /** Redemption started (Wave 0b C7): the burns it dispatched are not all final yet. The asset becomes REDEEMED only
+     *  when every burn is confirmed (final receipt plus the indexed BURN transfer); a failed burn leaves it here, with
+     *  an operator alert, until the redemption is resumed. Trading, subscriptions and mints are closed meanwhile. */
+    REDEMPTION_PENDING,
     /** Register handover (eWpG §§21/22) exported to the successor but not yet completed (T3-07):
      *  the register is frozen - no trading, mint/burn/forced operations, corporate-action
      *  processing or holder edits - so the exported package stays valid until {@code complete}.

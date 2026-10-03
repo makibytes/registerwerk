@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.Ordered;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -14,10 +15,15 @@ import java.util.UUID;
 /**
  * One-off startup migration of TOTP secrets stored as plaintext before V35 (6-09). Idempotent and safe on
  * several nodes at once (compare-and-set on the old value); the plaintext is overwritten by the
- * ciphertext. Failures are logged, never fatal: the next verification re-encrypts lazily as well.
+ * ciphertext. Failures are logged, never fatal to boot - but this migration is now the <em>only</em> way off
+ * plaintext (H14): verification refuses a secret without the {@code enc:} prefix, so an account whose row
+ * could not be migrated cannot step up until the next start or an operator TOTP reset.
+ *
+ * <p>Runs last ({@link Ordered#LOWEST_PRECEDENCE}), after the demo seeders, which write the demo operators'
+ * well-known TOTP secret in plaintext.
  */
 @Component
-class TotpSecretMigration implements ApplicationRunner {
+class TotpSecretMigration implements ApplicationRunner, Ordered {
 
     private static final Logger log = LoggerFactory.getLogger(TotpSecretMigration.class);
 
@@ -27,6 +33,11 @@ class TotpSecretMigration implements ApplicationRunner {
     TotpSecretMigration(JdbcTemplate jdbc, TotpSecretStore store) {
         this.jdbc = jdbc;
         this.store = store;
+    }
+
+    @Override
+    public int getOrder() {
+        return Ordered.LOWEST_PRECEDENCE;
     }
 
     @Override

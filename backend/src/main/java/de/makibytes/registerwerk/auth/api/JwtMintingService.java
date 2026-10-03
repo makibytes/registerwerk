@@ -4,6 +4,7 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.nimbusds.jose.proc.SecurityContext;
 import java.util.UUID;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
@@ -12,6 +13,8 @@ import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +29,40 @@ public class JwtMintingService {
      * this value invalidates every token currently in circulation.
      */
     public static final String LOCAL_ISSUER = "registerwerk-local";
+
+    /** Claim that says what a locally minted token may be used for. */
+    public static final String CLAIM_USE = "use";
+    /** {@code use} of a login / impersonation session token. */
+    public static final String USE_SESSION = "session";
+    /**
+     * {@code use} of a dual-control approver token (the second approver's single-use approval of one
+     * concrete request). Such a token is only ever valid in the {@code X-Dual-Control-Token} header: it is
+     * minted for the approver, so presented as the caller's own Bearer it would run the request <em>as</em>
+     * the approver (Wave 0a C1). Everything that authenticates a caller refuses it.
+     */
+    public static final String USE_DUAL_CONTROL = "dual_control";
+    /** Audience every dual-control approver token carries in addition to the configured {@code JWT_AUDIENCE}. */
+    public static final String DUAL_CONTROL_AUDIENCE = "registerwerk-dual-control";
+    /** Scope claim of an approver token ({@code @RequiresStepUp(reason)} it approves). */
+    public static final String CLAIM_STEPUP_SCOPE = "stepup_scope";
+
+    /**
+     * True for a dual-control approver token - by marker, by audience, or (tokens minted before the marker
+     * existed live for minutes) by the scope claim that only approver tokens ever carried.
+     */
+    public static boolean isDualControlApproverToken(Jwt jwt) {
+        if (jwt == null) {
+            return false;
+        }
+        if (USE_DUAL_CONTROL.equals(jwt.getClaimAsString(CLAIM_USE))) {
+            return true;
+        }
+        List<String> audience = jwt.getAudience();
+        if (audience != null && audience.contains(DUAL_CONTROL_AUDIENCE)) {
+            return true;
+        }
+        return jwt.hasClaim(CLAIM_STEPUP_SCOPE);
+    }
 
     private final NimbusJwtEncoder encoder;
     private final long tokenTtlSeconds;
@@ -53,13 +90,24 @@ public class JwtMintingService {
             .subject(subject)
             .issuedAt(now)
             .expiresAt(now.plusSeconds(ttlSeconds));
+        List<String> audiences = new ArrayList<>();
         claims.forEach((name, value) -> {
-            if (value != null) {
+            if ("aud".equals(name)) {
+                // Token-specific audiences (dual-control approvals) are added to, never replace, JWT_AUDIENCE.
+                if (value instanceof Collection<?> c) {
+                    c.forEach(a -> audiences.add(String.valueOf(a)));
+                } else if (value != null) {
+                    audiences.add(String.valueOf(value));
+                }
+            } else if (value != null) {
                 builder.claim(name, value);
             }
         });
-        if (!audience.isBlank()) {
-            builder.claim("aud", List.of(audience));
+        if (!audience.isBlank() && !audiences.contains(audience)) {
+            audiences.add(0, audience);
+        }
+        if (!audiences.isEmpty()) {
+            builder.audience(audiences);
         }
         return encoder.encode(JwtEncoderParameters.from(header, builder.build())).getTokenValue();
     }
@@ -84,7 +132,7 @@ public class JwtMintingService {
             claims.put("entity_id", user.getLegalEntityId().toString());
         }
         claims.put("jti", newJti());
-        claims.put("use", "session");
+        claims.put(CLAIM_USE, USE_SESSION);
         return mintLocal(user.getId().toString(), tokenTtlSeconds, claims);
     }
 
@@ -105,7 +153,7 @@ public class JwtMintingService {
         claims.put("imp", true);
         claims.put("imp_mode", session.getMode().name());
         claims.put("jti", session.getId().toString());
-        claims.put("use", "session");
+        claims.put(CLAIM_USE, USE_SESSION);
         return mintLocal(actor.getId().toString(), ttlSeconds, claims);
     }
 

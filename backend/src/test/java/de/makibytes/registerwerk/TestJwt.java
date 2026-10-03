@@ -46,15 +46,24 @@ public final class TestJwt {
     }
 
     /**
-     * A dual-control approver token bound to one concrete request (K3, 6-08): carries {@code stepup_scope},
-     * {@code stepup_target} (digest of method + path[?query], no body) and a fresh {@code jti}.
+     * A dual-control approver token bound to one concrete request (K3, 6-08) that has no body: carries the
+     * {@code use=dual_control} marker and audience, {@code stepup_scope}, {@code stepup_target} (digest of
+     * method + path[?query] + the empty body, which every reason binds by default, C2) and a fresh {@code jti}.
      */
     public static String dualControl(String secret, UUID approver, String scope, String method, String pathAndQuery,
                                      String... roles) {
-        return dualControl(secret, approver, scope, method, pathAndQuery, null, UUID.randomUUID().toString(), roles);
+        return dualControl(secret, approver, scope, method, pathAndQuery, "", UUID.randomUUID().toString(), roles);
     }
 
-    /** @param canonicalBody canonical JSON of the body for body-bound reasons, or null; @param jti the token id */
+    /** As above for a request with a JSON body; the body is canonicalised exactly as the server does. */
+    public static String dualControlWithBody(String secret, UUID approver, String scope, String method,
+                                             String pathAndQuery, String bodyJson, String... roles) {
+        return dualControl(secret, approver, scope, method, pathAndQuery,
+                de.makibytes.registerwerk.stepup.api.DualControlTarget.canonicalJson(bodyJson),
+                UUID.randomUUID().toString(), roles);
+    }
+
+    /** @param canonicalBody canonical JSON of the body ({@code ""} when there is none), or null for "not body-bound"; @param jti the token id */
     public static String dualControl(String secret, UUID approver, String scope, String method, String pathAndQuery,
                                      String canonicalBody, String jti, String... roles) {
         try {
@@ -70,6 +79,8 @@ public final class TestJwt {
                     + "\"sub\":\"" + approver + "\","
                     + "\"roles\":[" + rolesJson + "],"
                     + "\"acr\":\"stepup\","
+                    + "\"use\":\"" + JwtMintingService.USE_DUAL_CONTROL + "\","
+                    + "\"aud\":[\"" + JwtMintingService.DUAL_CONTROL_AUDIENCE + "\"],"
                     + "\"stepup_scope\":\"" + scope + "\","
                     + "\"stepup_target\":\"" + digest + "\","
                     + "\"jti\":\"" + jti + "\","

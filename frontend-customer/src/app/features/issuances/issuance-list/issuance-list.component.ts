@@ -387,6 +387,7 @@ export class IssuanceListComponent implements OnInit {
     { value: 'APPROVED',         label: 'Approved' },
     { value: 'ISSUED',           label: 'Issued' },
     { value: 'SUSPENDED',        label: 'Suspended' },
+    { value: 'REDEMPTION_PENDING', label: 'Redemption pending' },
     { value: 'REDEEMED',         label: 'Redeemed' },
   ];
 
@@ -403,6 +404,7 @@ export class IssuanceListComponent implements OnInit {
     APPROVED: '#38BDF8',
     ISSUED: '#22C55E',
     SUSPENDED: '#FB7185',
+    REDEMPTION_PENDING: '#A78B6D',
     REDEEMED: '#A78B6D',
   };
 

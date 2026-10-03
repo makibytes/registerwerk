@@ -10,8 +10,8 @@ import java.util.UUID;
 
 /**
  * DB-backed TOTP replay and lockout state ({@code totp_state}), shared by every replica (K3, 6-09).
- * Each operation commits in its own transaction so a rejected verification still persists its failure
- * and an accepted code is consumed even if the caller's transaction later rolls back.
+ * Each operation commits in its own transaction so a reserved attempt stays counted and an accepted code is
+ * consumed even if the caller's transaction later rolls back.
  */
 @Repository
 class TotpStateRepository {
@@ -34,24 +34,52 @@ class TotpStateRepository {
         return one != null;
     }
 
-    /** Counts a failed verification; locks the account after {@value #MAX_ATTEMPTS} failures in the window. */
-    void recordFailure(UUID userId) {
-        requiresNew.executeWithoutResult(status -> {
+    /**
+     * Reserves one verification attempt <em>before</em> the code or password is compared, atomically under a
+     * row lock: the failure counter is advanced and, when it reaches {@value #MAX_ATTEMPTS}, the account is
+     * locked for {@value #LOCK_MINUTES} minutes - all before the caller learns whether its guess was right.
+     * Checking first and counting afterwards lets any number of parallel guesses through before the first
+     * failure is recorded.
+     *
+     * <p>The reservation that reaches the limit is still granted (that guess is the last of the window) and the
+     * lock refuses every later one until it expires. A success resets the counter ({@link #acceptStep} or
+     * {@link #releaseAttempt}).
+     *
+     * @return false when the account is locked (nothing is consumed), true when the caller may compare now
+     */
+    boolean reserveAttempt(UUID userId) {
+        Boolean granted = requiresNew.execute(status -> {
             ensureRow(userId);
-            int[] row = jdbc.query("""
+            Object[] row = jdbc.query("""
                     SELECT CASE WHEN updated_at < now() - make_interval(mins => ?)
                                   OR (locked_until IS NOT NULL AND locked_until <= now())
-                                THEN 0 ELSE failed_attempts END
+                                THEN 0 ELSE failed_attempts END,
+                           COALESCE(locked_until > now(), false)
                     FROM totp_state WHERE user_id = ? FOR UPDATE
-                    """, rs -> rs.next() ? new int[]{rs.getInt(1)} : null, LOCK_MINUTES, userId);
-            int failures = (row == null ? 0 : row[0]) + 1;
+                    """, rs -> rs.next() ? new Object[]{rs.getInt(1), rs.getBoolean(2)} : null, LOCK_MINUTES, userId);
+            if (row != null && (Boolean) row[1]) {
+                return false;
+            }
+            int attempts = (row == null ? 0 : (Integer) row[0]) + 1;
             jdbc.update("""
                     UPDATE totp_state SET failed_attempts = ?,
                         locked_until = CASE WHEN ? >= ? THEN now() + make_interval(mins => ?) ELSE NULL END,
                         updated_at = now()
                     WHERE user_id = ?
-                    """, failures, failures, MAX_ATTEMPTS, LOCK_MINUTES, userId);
+                    """, attempts, attempts, MAX_ATTEMPTS, LOCK_MINUTES, userId);
+            return true;
         });
+        return Boolean.TRUE.equals(granted);
+    }
+
+    /** Gives back one reservation after the guarded secret turned out to be right (never touches the replay step). */
+    void releaseAttempt(UUID userId) {
+        requiresNew.executeWithoutResult(status -> jdbc.update("""
+                UPDATE totp_state SET failed_attempts = GREATEST(failed_attempts - 1, 0),
+                    locked_until = CASE WHEN failed_attempts - 1 < ? THEN NULL ELSE locked_until END,
+                    updated_at = now()
+                WHERE user_id = ?
+                """, MAX_ATTEMPTS, userId));
     }
 
     /**

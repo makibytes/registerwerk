@@ -223,6 +223,7 @@ export class RepoDisputesComponent implements OnInit {
         reason: `Record repo dispute outcome: ${RESOLUTION_COPY[resolution].label} (trade ${dispute.id})`,
         action: 'REPO_DISPUTE_RESOLVE',
         target: `POST /api/v1/admin/repo/disputes/${dispute.id}/resolve`,
+        targetBody: { resolution, legalBasis, note },
       },
       width: '500px',
       disableClose: true,

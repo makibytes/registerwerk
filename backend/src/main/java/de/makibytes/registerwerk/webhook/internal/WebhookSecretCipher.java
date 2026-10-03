@@ -39,7 +39,7 @@ class WebhookSecretCipher {
      */
     String decrypt(String stored, UUID subscriptionId) {
         try {
-            return cipher.decrypt(stored, aad(subscriptionId));
+            return cipher.decryptAllowingLegacyPlaintext(stored, aad(subscriptionId));
         } catch (IllegalStateException e) {
             throw new IllegalStateException("Webhook secret decryption failed", e.getCause());
         }

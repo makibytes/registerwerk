@@ -5,7 +5,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
@@ -31,7 +30,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li><b>IP</b> {@code i|ip}: {@code ipMaxFailures} failures from one address inside the window block
  *       that address (password spray across many accounts).</li>
  *   <li><b>ACCOUNT</b> {@code a|email}: never a lock. After {@code maxAttempts} failures from anywhere the
- *       login is merely delayed 1, 2, 4 s (capped), applied to known and unknown e-mails alike.</li>
+ *       next attempt must wait 1, 2, 4 s (capped) after the last failure, applied to known and unknown
+ *       e-mails alike. The wait is answered with a 429 and {@code Retry-After}: a request thread never sleeps
+ *       (it used to, inside a database transaction).</li>
  *   <li><b>GLOBAL</b> {@code g|}: once the platform-wide failure rate exceeds the per-minute cap, addresses
  *       that already have failures in the window are refused; clean addresses keep working.</li>
  * </ul>
@@ -81,9 +82,13 @@ public class LoginAttemptLimiter {
         this.events = events;
     }
 
-    /** Outcome of {@link #check}: refuse outright, or proceed after {@code delayMillis}. */
-    public record Decision(boolean blocked, long delayMillis) {
+    /** Outcome of {@link #check}: proceed, or refuse with the whole seconds after which to try again. */
+    public record Decision(boolean blocked, long retryAfterSeconds) {
         public static final Decision OPEN = new Decision(false, 0);
+
+        public static Decision refuseFor(double seconds) {
+            return new Decision(true, Math.max(1, (long) Math.ceil(seconds)));
+        }
     }
 
     public Decision check(String email, String clientIp) {
@@ -93,41 +98,52 @@ public class LoginAttemptLimiter {
         String ipKey = "i|" + ip;
         String accountKey = "a|" + e;
 
-        record Row(int count, boolean locked, double ageSeconds) {}
+        record Row(int count, double lockLeftSeconds, double ageSeconds, double sinceUpdateSeconds) {}
         Map<String, Row> rows = new HashMap<>();
         jdbc.query("""
-                SELECT login_key, attempt_count, COALESCE(locked_until > now(), false) AS locked,
-                       EXTRACT(EPOCH FROM (now() - window_start)) AS age
+                SELECT login_key, attempt_count,
+                       COALESCE(EXTRACT(EPOCH FROM (locked_until - now())), 0) AS lock_left,
+                       EXTRACT(EPOCH FROM (now() - window_start)) AS age,
+                       EXTRACT(EPOCH FROM (now() - updated_at)) AS since_update
                 FROM login_attempt WHERE login_key IN (?, ?, ?, ?)
                 """, rs -> {
-            rows.put(rs.getString(1), new Row(rs.getInt(2), rs.getBoolean(3), rs.getDouble(4)));
+            rows.put(rs.getString(1), new Row(rs.getInt(2), rs.getDouble(3), rs.getDouble(4), rs.getDouble(5)));
         }, pairKey, ipKey, accountKey, GLOBAL_KEY);
 
         long windowSeconds = lockoutMinutes * 60;
         Row pair = rows.get(pairKey);
-        if (pair != null && pair.locked()) {
-            return new Decision(true, 0);
+        if (pair != null && pair.lockLeftSeconds() > 0) {
+            return Decision.refuseFor(pair.lockLeftSeconds());
         }
         Row ipRow = rows.get(ipKey);
         boolean ipHasFailures = ipRow != null && ipRow.ageSeconds() < windowSeconds && ipRow.count() > 0;
         if (ipHasFailures && ipRow.count() >= ipMaxFailures) {
-            return new Decision(true, 0);
+            return Decision.refuseFor(windowSeconds - ipRow.ageSeconds());
         }
         Row global = rows.get(GLOBAL_KEY);
         if (ipHasFailures && global != null && global.ageSeconds() < GLOBAL_WINDOW_SECONDS
                 && global.count() >= globalMaxFailuresPerMinute) {
-            return new Decision(true, 0);
+            return Decision.refuseFor(GLOBAL_WINDOW_SECONDS - global.ageSeconds());
         }
         Row account = rows.get(accountKey);
         if (account != null && account.ageSeconds() < windowSeconds && account.count() >= maxAttempts) {
             long exponent = Math.min(20, account.count() - maxAttempts);
-            return new Decision(false, Math.min(maxDelayMillis, 1000L << exponent));
+            double waitSeconds = Math.min(maxDelayMillis, 1000L << exponent) / 1000.0;
+            double remaining = waitSeconds - account.sinceUpdateSeconds();
+            if (remaining > 0) {
+                return Decision.refuseFor(remaining);
+            }
         }
         return Decision.OPEN;
     }
 
-    /** Records a failed attempt on all counters; locks the pair when it reaches the threshold. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    /**
+     * Records a failed attempt on all counters; locks the pair when it reaches the threshold. Plain
+     * {@code REQUIRED}: the login path holds no transaction, so this is one short transaction on one pooled
+     * connection - it used to be {@code REQUIRES_NEW} inside the login transaction, i.e. a second connection
+     * requested while the first was held, which parallel failing logins turned into pool exhaustion (C4).
+     */
+    @Transactional
     public void recordFailure(String email, String clientIp) {
         String e = normalizeEmail(email);
         String ip = normalizeIp(clientIp);
@@ -149,7 +165,7 @@ public class LoginAttemptLimiter {
     }
 
     /** Clears the pair and account counters after a successful login (the IP counter is left alone). */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public void recordSuccess(String email, String clientIp) {
         String e = normalizeEmail(email);
         jdbc.update("DELETE FROM login_attempt WHERE login_key IN (?, ?)",

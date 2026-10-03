@@ -98,6 +98,7 @@ import { AuthService } from '../../../core/auth/auth.service';
             <mat-option value="APPROVED">Approved</mat-option>
             <mat-option value="ISSUED">Issued</mat-option>
             <mat-option value="SUSPENDED">Suspended</mat-option>
+            <mat-option value="REDEMPTION_PENDING">Redemption pending</mat-option>
             <mat-option value="REDEEMED">Redeemed</mat-option>
             <mat-option value="TRANSFER_PENDING">Transfer pending</mat-option>
             <mat-option value="TRANSFERRED_OUT">Transferred out</mat-option>

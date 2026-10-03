@@ -354,6 +354,7 @@ export class DashboardComponent implements OnInit {
     PENDING_APPROVAL: 'var(--rw-pending-fg)',
     DRAFT:            'var(--rw-text-muted)',
     SUSPENDED:        'var(--rw-rejected-fg)',
+    REDEMPTION_PENDING: 'var(--rw-pending-fg)',
     REDEEMED:         'var(--rw-revoked-fg)',
     TRANSFER_PENDING: 'var(--rw-pending-fg)',
     TRANSFERRED_OUT:  'var(--rw-text-secondary)',

@@ -242,15 +242,21 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
     }
 
     /// @dev A frozen or paused position must not be able to delegate value either: an allowance
-    ///      granted now would be spendable the moment the freeze/pause is lifted.
+    ///      granted now would be spendable the moment the freeze/pause is lifted. Revoking
+    ///      (`value == 0`) is deliberately never restricted — a holder whose position is frozen
+    ///      *because* a delegate's key was compromised must still be able to cancel that delegate's
+    ///      allowance, or it would be spendable again on unfreeze. The base `approve` still limits
+    ///      who may revoke to the holder or its approved-for-all operator.
     function approve(uint256 tokenId, address operator, uint256 value)
         public payable virtual override
     {
-        require(!isPaused(), "EwpgERC3525: global transfers are paused");
-        require(!_slots[slotOf(tokenId)].paused, "EwpgERC3525: slot is paused");
-        require(!_frozenTokens[tokenId], "EwpgERC3525: token is frozen");
-        require(!isFrozen(ownerOf(tokenId)), "EwpgERC3525: owner address is frozen");
-        require(!isFrozen(operator), "EwpgERC3525: operator address is frozen");
+        if (value != 0) {
+            require(!isPaused(), "EwpgERC3525: global transfers are paused");
+            require(!_slots[slotOf(tokenId)].paused, "EwpgERC3525: slot is paused");
+            require(!_frozenTokens[tokenId], "EwpgERC3525: token is frozen");
+            require(!isFrozen(ownerOf(tokenId)), "EwpgERC3525: owner address is frozen");
+            require(!isFrozen(operator), "EwpgERC3525: operator address is frozen");
+        }
         super.approve(tokenId, operator, value);
     }
 

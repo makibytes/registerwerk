@@ -221,6 +221,25 @@ precedenti sono immutabili e mantengono il loro comportamento; vedere *Mercati l
   al mutuatario (`surplusOf`) e pagata tramite `claimLiquidationSurplus()`; non è liquidità del
   pool. La pagina cliente **I miei prestiti** mostra l'eccedenza riscuotibile con un'azione di
   riscossione.
+- **Prezzo di liquidazione: bonus sul debito chiuso, limite di rimborso rigido.** Il bonus è
+  addebitato sul debito effettivamente chiuso. Finché le unità vendute valgono meno del debito, il
+  liquidatore paga il loro valore al prezzo di riferimento meno il bonus; quando l'unità (o le
+  unità) valgono più dell'intero debito, l'intero debito viene chiuso e il liquidatore paga il
+  valore delle unità meno `bonus × debito`, mentre il mutuatario riceve il resto come `surplusOf`.
+  `maxRepayAmount` è un limite rigido di quanto viene addebitato al liquidatore: se
+  l'arrotondamento per eccesso lo superasse si vende un'unità in meno, e se anche una sola unità
+  costa di più `liquidate` va in revert con `LiquidationExceedsMaxRepay(required, maxRepayAmount)`
+  indicando l'importo da autorizzare. Bot e interfacce devono passare `maxRepayAmount ≥ required`:
+  `liquidate(borrower, debt)` non chiude più una posizione in una sola chiamata quando l'unità
+  finale vale più del debito.
+- **Finestra dell'oracolo scorrevole, nessun riancoraggio.** `RegisterwerkNavOracle` non riancora
+  più la propria finestra di deviazione sulla quotazione corrente quando la finestra scade, cosa
+  che permetteva a una chiave di feed di cumulare un movimento a cavallo del confine (ad esempio
+  100 → 80 poco prima e 80 → 64 poco dopo). Conserva anche gli estremi della finestra precedente
+  (`carriedBandOf(asset)`) e verifica ogni push rispetto a entrambe, così due quotazioni ordinarie
+  distanti al massimo una finestra restano entro `maxDeviationBps`. Una quotazione viene ricordata
+  per una o due finestre, mai indefinitamente, quindi una deriva lenta su molte finestre è ancora
+  accettata; `pushPriceWithOverride` azzera la banda riportata.
 - **Amministrazione legata all'istanza.** Ogni mercato memorizza `operatorOrg` (l'org del wallet
   che ha chiamato `EwpgRepoMarketFactory.createMarket`) e una `treasury` immutabile.
   `setReserveFactor`, `setBorrowPaused` e `withdrawReserves` richiedono `repo-markets.configure`;

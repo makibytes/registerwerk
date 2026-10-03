@@ -83,8 +83,8 @@ class HolderSyncBlockedSnapshotIT {
                 VALUES (?, ?, ?, 'T2-18 Bond', 'ERC20', 'ISSUED')
                 """, assetId, "AST-" + suffix, issuerId);
         jdbc.update("""
-                INSERT INTO asset_deployment (id, asset_id, chain, network, contract_address, deployment_status)
-                VALUES (?, ?, 'ETHEREUM', 'TESTNET', ?, 'CONFIRMED')
+                INSERT INTO asset_deployment (id, asset_id, chain, network, contract_address, deployment_status, token_decimals)
+                VALUES (?, ?, 'ETHEREUM', 'TESTNET', ?, 'CONFIRMED', 0)
                 """, deploymentId, assetId, contract);
         jdbc.update("INSERT INTO asset_holder (asset_id, investor_id, wallet_address, nominal_amount) VALUES (?, ?, ?, 100)",
                 assetId, investorId, investorWallet);

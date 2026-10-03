@@ -129,6 +129,25 @@ public class CorporateAction {
     @Column(name = "issuer_attestation_ref")
     private String issuerAttestationRef;
 
+    /** C6: SHA-256 over the computed entitlements (entries, total, rounding residual); set when the action reaches
+     *  COMPUTED and rewritten by every (re)snapshot. */
+    @Column(name = "payout_digest", length = 64)
+    private String payoutDigest;
+
+    /** C6: the {@link #payoutDigest} the issuer attested (or the operator overrode on its behalf). */
+    @Column(name = "issuer_attested_digest", length = 64)
+    private String issuerAttestedDigest;
+
+    /** C6: the {@link #payoutDigest} the operator confirmed. */
+    @Column(name = "operator_confirmed_digest", length = 64)
+    private String operatorConfirmedDigest;
+
+    /** H6: set while the SYSTEM holds the settlement back (a Canton aggregate call that cannot exclude one ineligible
+     *  holder, a finality hold); null otherwise. Lets the maturity job tell a registry-side hold from issuer
+     *  non-payment: a held action is never escalated to OVERDUE / DEFAULTED / MISSED. */
+    @Column(name = "settlement_hold_reason", columnDefinition = "text")
+    private String settlementHoldReason;
+
     @Column(name = "notes")
     private String notes;
 
@@ -203,6 +222,14 @@ public class CorporateAction {
     public void setIssuerAttestedAt(Instant v) { this.issuerAttestedAt = v; }
     public String getIssuerAttestationRef() { return issuerAttestationRef; }
     public void setIssuerAttestationRef(String v) { this.issuerAttestationRef = v; }
+    public String getPayoutDigest() { return payoutDigest; }
+    public void setPayoutDigest(String v) { this.payoutDigest = v; }
+    public String getIssuerAttestedDigest() { return issuerAttestedDigest; }
+    public void setIssuerAttestedDigest(String v) { this.issuerAttestedDigest = v; }
+    public String getOperatorConfirmedDigest() { return operatorConfirmedDigest; }
+    public void setOperatorConfirmedDigest(String v) { this.operatorConfirmedDigest = v; }
+    public String getSettlementHoldReason() { return settlementHoldReason; }
+    public void setSettlementHoldReason(String v) { this.settlementHoldReason = v; }
     public String getNotes() { return notes; }
     public void setNotes(String v) { this.notes = v; }
     public String getSnapshotBlockedReason() { return snapshotBlockedReason; }

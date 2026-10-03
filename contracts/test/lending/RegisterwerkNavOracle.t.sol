@@ -176,24 +176,153 @@ contract RegisterwerkNavOracleTest is Test {
         assertEq(high, 110e6);
     }
 
-    function test_pushPrice_windowReanchorsOnCurrentMarkAfterItElapses() public {
+    /// @notice H1 (red-first): the deviation window used to be tumbling — the first push after it
+    ///         elapsed re-anchored on the *current* mark, forgetting the window's high — so two
+    ///         max-deviation moves straddling the boundary compounded (100 → 80 → 64 = −36% against
+    ///         a 20% cap, seconds apart). The previous window's extremes now carry forward for as
+    ///         long as any of its marks is within one window of the new push.
+    function test_pushPrice_windowBoundaryDoesNotCompoundMoves() public {
+        uint256 t0 = block.timestamp;
+        vm.startPrank(feedKey);
+        navOracle.pushPrice(collateralAsset, 100e6);
+        vm.warp(t0 + WINDOW - 1);
+        navOracle.pushPrice(collateralAsset, 80e6); // −20% vs 100, one second before the boundary
+
+        // The window has now elapsed, but 100 was only WINDOW − 1 seconds before the 80 mark.
+        vm.warp(t0 + WINDOW);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkNavOracle.ExcessiveDeviation.selector, 100e6, 64e6, 2000));
+        navOracle.pushPrice(collateralAsset, 64e6);
+        vm.stopPrank();
+
+        assertEq(_price(collateralAsset), 80e6);
+    }
+
+    /// @notice The original (pre-fix) expectation of this test — "a new window anchors on the
+    ///         current mark (80), so another cap-sized move is allowed" at `t0 + WINDOW` — is the
+    ///         compounding defect itself: the 100 mark is exactly one window old there.
+    function test_pushPrice_oldMarksAreForgottenOnlyAfterMoreThanOneWindow() public {
+        uint256 t0 = block.timestamp;
         vm.startPrank(feedKey);
         navOracle.pushPrice(collateralAsset, 100e6);
         navOracle.pushPrice(collateralAsset, 80e6);
 
-        vm.warp(block.timestamp + WINDOW - 1);
+        vm.warp(t0 + WINDOW - 1);
         vm.expectRevert(abi.encodeWithSelector(RegisterwerkNavOracle.ExcessiveDeviation.selector, 100e6, 79e6, 2000));
         navOracle.pushPrice(collateralAsset, 79e6);
 
-        // A new window anchors on the current mark (80), so another cap-sized move is allowed.
-        vm.warp(block.timestamp + 1);
+        // Exactly one window after the 100/80 marks the 100 is still remembered (closed bound)…
+        vm.warp(t0 + WINDOW);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkNavOracle.ExcessiveDeviation.selector, 100e6, 64e6, 2000));
+        navOracle.pushPrice(collateralAsset, 64e6);
+
+        // …and forgotten one second later: the next window anchors on the current mark (80).
+        vm.warp(t0 + WINDOW + 1);
         navOracle.pushPrice(collateralAsset, 64e6);
         vm.stopPrank();
 
         assertEq(_price(collateralAsset), 64e6);
-        (, uint256 low, uint256 high) = navOracle.deviationWindowOf(collateralAsset);
+        (uint256 since, uint256 low, uint256 high) = navOracle.deviationWindowOf(collateralAsset);
+        assertEq(since, t0 + WINDOW + 1);
         assertEq(low, 64e6);
         assertEq(high, 80e6);
+        (uint256 carriedLow, uint256 carriedHigh) = navOracle.carriedBandOf(collateralAsset);
+        assertEq(carriedLow, 0);
+        assertEq(carriedHigh, 0);
+    }
+
+    /// @notice A skipped window must not become a loophole: the last mark is what ages the
+    ///         carried band, not the window count.
+    function test_pushPrice_skippedWindowDoesNotResetTheBand() public {
+        uint256 t0 = block.timestamp;
+        vm.startPrank(feedKey);
+        navOracle.pushPrice(collateralAsset, 100e6);
+        vm.warp(t0 + WINDOW - 1);
+        navOracle.pushPrice(collateralAsset, 80e6);
+
+        // Two windows after the first push, but less than a window after the 80 mark.
+        vm.warp(t0 + 2 * WINDOW - 2);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkNavOracle.ExcessiveDeviation.selector, 100e6, 64e6, 2000));
+        navOracle.pushPrice(collateralAsset, 64e6);
+
+        // Exactly one window after the 80 mark it is still within reach (closed bound), and the
+        // carried band is conservative: it is the whole previous window (100…80), not per mark.
+        vm.warp(t0 + 2 * WINDOW - 1);
+        vm.expectRevert(abi.encodeWithSelector(RegisterwerkNavOracle.ExcessiveDeviation.selector, 100e6, 64e6, 2000));
+        navOracle.pushPrice(collateralAsset, 64e6);
+
+        // More than a window after the 80 mark nothing remembered is within reach any more.
+        vm.warp(t0 + 2 * WINDOW);
+        navOracle.pushPrice(collateralAsset, 64e6);
+        vm.stopPrank();
+        assertEq(_price(collateralAsset), 64e6);
+    }
+
+    /// @notice A normal feed — one push per half-window, drifting inside the cap — is never
+    ///         blocked by the carried band, and the band forgets marks older than two windows.
+    function test_pushPrice_slowDriftAcrossManyWindowsIsAccepted() public {
+        vm.startPrank(feedKey);
+        uint256 px = 100e6;
+        navOracle.pushPrice(collateralAsset, px);
+        for (uint256 i = 0; i < 40; i++) {
+            vm.warp(block.timestamp + WINDOW / 2);
+            px = px * 98 / 100; // −2% per half-window: ~−4% per window, far inside 20%
+            navOracle.pushPrice(collateralAsset, px);
+        }
+        vm.stopPrank();
+        assertEq(_price(collateralAsset), px);
+        (, uint256 carriedHigh) = navOracle.carriedBandOf(collateralAsset);
+        (, uint256 low, uint256 high) = navOracle.deviationWindowOf(collateralAsset);
+        // The band only ever spans the last ≤ 2 windows (≈ 5 pushes), never the whole history.
+        assertGt(carriedHigh, 0);
+        assertLe(high * 10_000, low * 10_800);
+        assertLe(carriedHigh * 10_000, low * 11_000);
+    }
+
+    /// @notice H1 property: whatever the push cadence, any two accepted ordinary marks at most
+    ///         one window apart differ by no more than {maxDeviationBps}.
+    function testFuzz_pushPrice_anyTwoMarksWithinOneWindowStayInsideTheCap(
+        uint256 seed,
+        uint8 steps
+    ) public {
+        uint256 n = bound(steps, 4, 40);
+        uint256[] memory ts = new uint256[](n + 1);
+        uint256[] memory px = new uint256[](n + 1);
+        uint256 count;
+
+        ts[0] = block.timestamp;
+        px[0] = 100e6;
+        count = 1;
+        vm.prank(feedKey);
+        navOracle.pushPrice(collateralAsset, px[0]);
+
+        for (uint256 i = 0; i < n; i++) {
+            seed = uint256(keccak256(abi.encode(seed, i)));
+            // Gaps cluster around the window boundary: 0 .. 1.5 windows, with a bias to ±1s of 1 window.
+            uint256 gap = seed % 4 == 0 ? WINDOW - 1 + ((seed >> 8) % 3) : (seed >> 8) % (WINDOW * 3 / 2);
+            vm.warp(block.timestamp + gap);
+            // Next price: ±(0..25%) around the current mark, so many pushes sit right at the cap.
+            uint256 last = px[count - 1];
+            uint256 factor = 7_500 + ((seed >> 40) % 5_001); // 75%..125%
+            uint256 candidate = last * factor / 10_000;
+            if (candidate == 0) candidate = 1;
+
+            vm.prank(feedKey);
+            try navOracle.pushPrice(collateralAsset, candidate) {
+                ts[count] = block.timestamp;
+                px[count] = candidate;
+                count++;
+            } catch {}
+        }
+
+        // Every pair of accepted marks no more than one window apart is inside the cap.
+        for (uint256 i = 0; i < count; i++) {
+            for (uint256 j = i + 1; j < count; j++) {
+                if (ts[j] - ts[i] > WINDOW) continue;
+                uint256 hi = px[i] > px[j] ? px[i] : px[j];
+                uint256 lo = px[i] > px[j] ? px[j] : px[i];
+                assertLe((hi - lo) * 10_000, navOracle.maxDeviationBps() * hi, "pair within one window exceeds cap");
+            }
+        }
     }
 
     function test_pushPrice_minPushIntervalBlocksSameBlockRestore() public {
@@ -292,6 +421,27 @@ contract RegisterwerkNavOracleTest is Test {
         vm.prank(feedKey);
         navOracle.pushPrice(collateralAsset, 450e6);
         assertEq(_price(collateralAsset), 450e6);
+    }
+
+    function test_pushPriceWithOverride_dropsTheCarriedBand() public {
+        uint256 t0 = block.timestamp;
+        vm.startPrank(feedKey);
+        navOracle.pushPrice(collateralAsset, 100e6);
+        vm.warp(t0 + WINDOW - 1);
+        navOracle.pushPrice(collateralAsset, 80e6);
+        vm.warp(t0 + WINDOW);
+        vm.stopPrank();
+
+        vm.prank(operatorKey);
+        navOracle.pushPriceWithOverride(collateralAsset, 70e6);
+        (uint256 carriedLow, uint256 carriedHigh) = navOracle.carriedBandOf(collateralAsset);
+        assertEq(carriedLow, 0);
+        assertEq(carriedHigh, 0);
+
+        // Ordinary pushes continue from the overridden level, not from the dropped 100/80 band.
+        vm.prank(feedKey);
+        navOracle.pushPrice(collateralAsset, 57e6);
+        assertEq(_price(collateralAsset), 57e6);
     }
 
     function test_overridePath_otherOrgWithOverrideGrantReverts() public {
@@ -472,11 +622,14 @@ contract RegisterwerkNavOracleRatchetTest is Test {
         (uint256 px,) = nav.price(address(bond));
         assertEq(px, 80e6);
         uint256 lenderClaimBefore = market.balanceOf(lender);
+        uint256 cashBefore = loanToken.balanceOf(desk);
         vm.prank(desk);
         (uint256 repaid, uint256 seized) = market.liquidate(alice, 1_200e6);
-        // Whole units, rounded up: ⌈1.2k × 1.05 / 80⌉ = 16 units out of 1,000, paid at 80/1.05 each.
-        assertEq(seized, 16);
-        assertEq(repaid, (16 * uint256(80e6) * 10_000 + 10_499) / 10_500);
+        // Whole units: ⌈1.2k × 1.05 / 80⌉ = 16 would cost ⌈1_280 / 1.05⌉ = 1_219.05 > the 1_200
+        // authorised, so the sale is one unit smaller — 15 units, paid at 80/1.05 each.
+        assertEq(seized, 15);
+        assertEq(repaid, (15 * uint256(80e6) * 10_000 + 10_499) / 10_500);
+        assertLe(cashBefore - loanToken.balanceOf(desk), 1_200e6, "never charged more than maxRepayAmount");
         assertGe(market.balanceOf(lender), lenderClaimBefore); // no bad debt socialized
     }
 

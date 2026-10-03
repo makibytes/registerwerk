@@ -62,6 +62,15 @@
   },
   {
     "type": "event",
+    "name": "WithheldCouponClaimed",
+    "inputs": [
+      { "name": "period", "type": "uint256", "indexed": true },
+      { "name": "holder", "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
     "name": "ForcedRedemption",
     "inputs": [
       { "name": "holder",     "type": "address", "indexed": true },

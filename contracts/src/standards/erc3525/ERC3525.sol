@@ -101,15 +101,19 @@ abstract contract ERC3525 is ERC721, IERC3525 {
 
     /// @dev Invalidates all value allowances whenever a token leaves its current owner
     ///      (transfer, forced transfer or burn); allowances are granted by an owner and
-    ///      must not survive that owner. `ApprovalValue(tokenId, address(0), 0)` is a
-    ///      reset marker so indexers can drop every stale allowance for `tokenId`.
+    ///      must not survive that owner. No event is emitted for this: like ERC-721, which clears
+    ///      its approval silently on `Transfer`, the ownership-changing `Transfer` event itself
+    ///      signals that every value allowance of `tokenId` is gone (the operators holding one
+    ///      cannot be enumerated, so per-operator zero `ApprovalValue` events are not possible,
+    ///      and a synthetic `ApprovalValue(tokenId, address(0), 0)` would be non-standard noise
+    ///      that standard indexers would record as a bogus approval). {allowance} is the source
+    ///      of truth.
     function _update(address to, uint256 tokenId, address auth)
         internal virtual override returns (address)
     {
         address from = _ownerOf(tokenId);
         if (from != address(0) && from != to) {
             ++_approvalEpoch[tokenId];
-            emit ApprovalValue(tokenId, address(0), 0);
         }
         return super._update(to, tokenId, auth);
     }

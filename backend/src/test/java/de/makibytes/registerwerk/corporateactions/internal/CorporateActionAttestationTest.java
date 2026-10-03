@@ -8,7 +8,8 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionOperatorCon
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
+import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,16 +48,18 @@ class CorporateActionAttestationTest {
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
     @Mock private ApplicationEventPublisher events;
-    @Mock private HolderBlockGate holderBlockGate;
+    @Mock private PartyEligibilityGate partyGate;
+    @Mock private EntityTaskPort entityTasks;
     @Mock private FinalityGate finalityGate;
 
     private CorporateActionService service;
 
     private CorporateActionAttestationTest init() {
         service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
-                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate,
+                couponPaymentRepository, proposalValidator, events, partyGate, entityTasks, finalityGate,
                 org.mockito.Mockito.mock(RegisterFreshnessGate.class), bondTermsRepository,
-                CorporateActionTestSupport.systemRegisterClock());
+                CorporateActionTestSupport.systemRegisterClock(),
+                CorporateActionTestSupport.directTransactions());
         return this;
     }
 
@@ -68,6 +71,16 @@ class CorporateActionAttestationTest {
         return ca;
     }
 
+    /** A COMPUTED action whose entries and stored payout digest agree (what the snapshot leaves behind). */
+    private CorporateAction computedAction(UUID id, UUID assetId) {
+        CorporateAction ca = actionWithId(id, assetId, CorporateAction.Status.COMPUTED);
+        java.util.List<de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry> entries = java.util.List.of(
+                CorporateActionTestSupport.entry(id, "0xaaa", "1000", "50.00"));
+        CorporateActionTestSupport.computed(ca, entries);
+        org.mockito.Mockito.lenient().when(entryRepository.findByCorporateActionId(id)).thenReturn(entries);
+        return ca;
+    }
+
     @Test
     @DisplayName("attestSettlementAsIssuer records the issuer's attestation and publishes CorporateActionIssuerAttestedEvent")
     void attestSettlementAsIssuer_recordsAttestation() {
@@ -75,11 +88,12 @@ class CorporateActionAttestationTest {
         UUID assetId = UUID.randomUUID();
         UUID actionId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();
-        CorporateAction announced = actionWithId(actionId, assetId, CorporateAction.Status.ANNOUNCED);
+        CorporateAction announced = computedAction(actionId, assetId);
         when(repository.findById(actionId)).thenReturn(Optional.of(announced));
         when(repository.save(any(CorporateAction.class))).thenAnswer(inv -> inv.getArgument(0));
 
         CorporateAction result = service.attestSettlementAsIssuer(assetId, actionId, "SEPA-REF-123", actorId, "ISSUER", false);
+        assertThat(result.getIssuerAttestedDigest()).isEqualTo(announced.getPayoutDigest());
 
         assertThat(result.getIssuerAttestedBy()).isEqualTo(actorId);
         assertThat(result.getIssuerAttestedAt()).isNotNull();
@@ -96,7 +110,7 @@ class CorporateActionAttestationTest {
         init();
         UUID actualAssetId = UUID.randomUUID();
         UUID actionId = UUID.randomUUID();
-        CorporateAction announced = actionWithId(actionId, actualAssetId, CorporateAction.Status.ANNOUNCED);
+        CorporateAction announced = computedAction(actionId, actualAssetId);
         when(repository.findById(actionId)).thenReturn(Optional.of(announced));
 
         assertThatThrownBy(() -> service.attestSettlementAsIssuer(UUID.randomUUID(), actionId, "ref", UUID.randomUUID(), "ISSUER", false))
@@ -135,7 +149,7 @@ class CorporateActionAttestationTest {
         init();
         UUID actionId = UUID.randomUUID();
         UUID operatorId = UUID.randomUUID();
-        CorporateAction announced = actionWithId(actionId, UUID.randomUUID(), CorporateAction.Status.ANNOUNCED);
+        CorporateAction announced = computedAction(actionId, UUID.randomUUID());
         when(repository.findById(actionId)).thenReturn(Optional.of(announced));
         when(repository.save(any(CorporateAction.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -185,9 +199,10 @@ class CorporateActionAttestationTest {
         UUID actionId = UUID.randomUUID();
         UUID issuerActor = UUID.randomUUID();
         UUID operatorActor = UUID.randomUUID();
-        CorporateAction attested = actionWithId(actionId, UUID.randomUUID(), CorporateAction.Status.COMPUTED);
+        CorporateAction attested = computedAction(actionId, UUID.randomUUID());
         attested.setIssuerAttestedBy(issuerActor);
         attested.setIssuerAttestedAt(java.time.Instant.now());
+        attested.setIssuerAttestedDigest(attested.getPayoutDigest());
         when(repository.findById(actionId)).thenReturn(Optional.of(attested));
         when(repository.save(any(CorporateAction.class))).thenAnswer(inv -> inv.getArgument(0));
 

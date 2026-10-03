@@ -367,12 +367,15 @@ export class PortfolioMigrationComponent implements OnInit {
     if (!migration || !txHash) return;
     this.dialog.closeAll();
 
+    const operatorAttestation = this.transferAttestation.trim() || undefined;
+    const beneficiaryConsentRef = this.transferConsentRef.trim() || undefined;
     const stepUpRef = this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Record on-chain transfer for portfolio migration ${migration.id}`,
         action: 'PORTFOLIO_MIGRATION_ONCHAIN_TRANSFER',
         target: `POST /api/v1/portfolio-migrations/${migration.id}/onchain-transfer`,
+        targetBody: { txHash, operatorAttestation, beneficiaryConsentRef },
       },
       width: '500px',
       disableClose: true,
@@ -381,7 +384,7 @@ export class PortfolioMigrationComponent implements OnInit {
     stepUpRef.afterClosed().subscribe((result) => {
       if (!result) return;
       this.service.recordOnchainTransfer(migration.id, txHash, result.stepUpToken, result.dualControlToken!,
-        this.transferAttestation.trim() || undefined, this.transferConsentRef.trim() || undefined).subscribe({
+        operatorAttestation, beneficiaryConsentRef).subscribe({
         next: () => {
           this.snackBar.open('On-chain transfer recorded.', 'Dismiss', { duration: 5000 });
           this.load();

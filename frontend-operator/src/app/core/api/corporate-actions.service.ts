@@ -48,9 +48,12 @@ export class CorporateActionsService {
    * this no longer requires a second operator (dual control) — the issuer/operator split is the
    * cross-org control that replaces same-org 2x-operator dual control.
    */
-  confirmSettlement(corporateActionId: string, stepUpToken: string): Observable<CorporateAction> {
+  confirmSettlement(corporateActionId: string, stepUpToken: string, payoutDigest?: string | null): Observable<CorporateAction> {
     const headers = new HttpHeaders({ Authorization: `Bearer ${stepUpToken}` });
-    return this.http.post<CorporateAction>(`${this.base}/${corporateActionId}/confirm-settlement`, {}, { headers });
+    // The digest of the computed amounts the operator reviewed: when the amounts were re-computed since, the
+    // backend refuses (409) instead of confirming amounts the operator never saw.
+    return this.http.post<CorporateAction>(`${this.base}/${corporateActionId}/confirm-settlement`,
+      payoutDigest ? { payoutDigest } : {}, { headers });
   }
 
   /** Audited escape hatch for an issuer who never logs in to attest themselves. */

@@ -93,6 +93,10 @@ dataSources:
           handler: handleTradeCancelled
         - event: TradeForceCancelled(indexed bytes32,indexed address,string)
           handler: handleTradeForceCancelled
+        - event: ForceCancelProposed(indexed bytes32,indexed address,uint64,string)
+          handler: handleForceCancelProposed
+        - event: ForceCancelWithdrawn(indexed bytes32,indexed address)
+          handler: handleForceCancelWithdrawn
         - event: Paused(indexed address)
           handler: handlePaused
         - event: Unpaused(indexed address)
@@ -130,6 +134,8 @@ dataSources:
           handler: handleCouponWithheld
         - event: WithheldReleased(indexed uint256,indexed address,indexed address,uint256,string)
           handler: handleWithheldReleased
+        - event: WithheldCouponClaimed(indexed uint256,indexed address,uint256)
+          handler: handleWithheldCouponClaimed
         - event: ForcedRedemption(indexed address,indexed address,uint256,uint256,string)
           handler: handleForcedRedemption
 
@@ -482,6 +488,10 @@ templates:
           handler: handleLiquidationSurplusCredited
         - event: SurplusClaimed(indexed address,uint256)
           handler: handleSurplusClaimed
+        - event: CollateralAdded(indexed address,uint256,uint256)
+          handler: handleCollateralAdded
+        - event: CollateralWithdrawn(indexed address,uint256,uint256)
+          handler: handleCollateralWithdrawn
 
   # ── Confidential (Zama fhEVM) token  ────────────────────
   # Instantiated by EwpgConfidentialFactory.handleConfidentialTokenDeployed for each newly

@@ -51,5 +51,23 @@
     "inputs": [
       { "name": "by", "type": "address", "indexed": true }
     ]
+  },
+  {
+    "type": "event",
+    "name": "ForceCancelProposed",
+    "inputs": [
+      { "name": "tradeId", "type": "bytes32", "indexed": true },
+      { "name": "to", "type": "address", "indexed": true },
+      { "name": "executableAt", "type": "uint64", "indexed": false },
+      { "name": "legalBasis", "type": "string", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "ForceCancelWithdrawn",
+    "inputs": [
+      { "name": "tradeId", "type": "bytes32", "indexed": true },
+      { "name": "by", "type": "address", "indexed": true }
+    ]
   }
 ]

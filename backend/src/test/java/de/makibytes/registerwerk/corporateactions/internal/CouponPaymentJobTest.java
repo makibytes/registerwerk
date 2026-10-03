@@ -10,6 +10,7 @@ import de.makibytes.registerwerk.deployment.api.AssetCouponPayment;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
 import org.junit.jupiter.api.DisplayName;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -55,7 +56,8 @@ class CouponPaymentJobTest {
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
         job = new CouponPaymentJob(couponPaymentRepository, corporateActionRepository, corporateActionService,
-                bondTermsRepository, assetRepository, CorporateActionTestSupport.systemRegisterClock());
+                bondTermsRepository, assetRepository, CorporateActionTestSupport.systemRegisterClock(),
+                CorporateActionTestSupport.directTransactions());
     }
 
     private AssetCouponPayment duePayment() {
@@ -68,6 +70,9 @@ class CouponPaymentJobTest {
         payment.setAnnouncementDate(LocalDate.now());
         payment.setCouponStatus(CouponStatus.SCHEDULED);
         payment.setAmountPerUnit(new java.math.BigDecimal("40"));
+        // H8: every payment is re-loaded by id inside its own transaction.
+        org.mockito.Mockito.lenient().when(couponPaymentRepository.findById(payment.getId()))
+                .thenReturn(java.util.Optional.of(payment));
         return payment;
     }
 
@@ -162,5 +167,35 @@ class CouponPaymentJobTest {
         verify(corporateActionService).announce(any(CorporateAction.class));
         org.assertj.core.api.Assertions.assertThat(legacy.getAnnouncementDate()).isNotNull();
         org.assertj.core.api.Assertions.assertThat(legacy.getRecordDate()).isBefore(legacy.getScheduledDate());
+    }
+
+    @Test
+    @DisplayName("H8: a payment whose action cannot be raised rolls back only itself; the next payment still gets its action")
+    void oneFailingPaymentDoesNotRollBackTheOthers() {
+        org.springframework.transaction.PlatformTransactionManager manager =
+                org.mockito.Mockito.mock(org.springframework.transaction.PlatformTransactionManager.class);
+        CouponPaymentJob isolatedJob = new CouponPaymentJob(couponPaymentRepository, corporateActionRepository,
+                corporateActionService, bondTermsRepository, assetRepository,
+                CorporateActionTestSupport.systemRegisterClock(),
+                new de.makibytes.registerwerk.shared.IsolatedTransactionExecutor(manager));
+        AssetCouponPayment broken = duePayment();
+        AssetCouponPayment fine = duePayment();
+        when(couponPaymentRepository.findAnnounceable(
+                eq(CouponStatus.SCHEDULED), any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(broken, fine));
+        org.mockito.Mockito.doThrow(new IllegalStateException("constraint violated"))
+                .when(corporateActionService).announce(org.mockito.ArgumentMatchers.argThat(
+                        a -> a != null && broken.getId().equals(a.getCouponPaymentId())));
+
+        isolatedJob.processDuePayments();
+
+        ArgumentCaptor<CorporateAction> raised = ArgumentCaptor.forClass(CorporateAction.class);
+        verify(corporateActionService, org.mockito.Mockito.times(2)).announce(raised.capture());
+        org.assertj.core.api.Assertions.assertThat(raised.getAllValues())
+                .extracting(CorporateAction::getCouponPaymentId).containsExactly(broken.getId(), fine.getId());
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(manager);
+        order.verify(manager).getTransaction(any());
+        order.verify(manager).rollback(any());
+        order.verify(manager).getTransaction(any());
+        order.verify(manager).commit(any());
     }
 }

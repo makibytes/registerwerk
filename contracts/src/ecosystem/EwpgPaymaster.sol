@@ -41,12 +41,20 @@ import "./interfaces/IPermissionOracle.sol";
 ///      **Ownership.** Each policy records its `funder`; only the funder can change the
 ///      voucher signer or top up, and withdrawals ({withdrawPolicy}) always pay the funder —
 ///      `paymaster.configure` holders can trigger a refund or deactivate a policy but never
-///      redirect funds. Validation writes storage and reads other contracts, so under
+///      redirect funds. `paymaster.configure` is bound to {operatorOrg} (the org operating this
+///      instance): a same-slug grant held by any other org reaches neither a policy nor the stake.
+///      Registering a policy needs `paymaster.register-policy` (granted by the operator to the
+///      orgs it lets sponsor gas), so an unapproved wallet cannot squat a policy id the real
+///      funder is about to register. Validation writes storage and reads other contracts, so under
 ///      ERC-7562 the paymaster must be staked ({addStake}) to be accepted by public bundlers.
 contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
     using ERC4337Utils for PackedUserOperation;
 
+    /// @notice Operator safety valve and EntryPoint stake management — only for wallets of {operatorOrg}.
     bytes32 public constant CONFIGURE = keccak256("paymaster.configure");
+    /// @notice Registering a sponsorship policy. Held (via any org) by whoever the operator lets
+    ///         fund gas: the operator org itself, or issuers.
+    bytes32 public constant REGISTER_POLICY = keccak256("paymaster.register-policy");
     uint256 public constant TOPIC_KYC = 1;
 
     /// @notice Domain tag of the voucher digest — keeps a voucher signature from ever being a
@@ -66,6 +74,10 @@ contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
 
     /// @notice The ERC-4337 EntryPoint this paymaster is registered with.
     IEntryPoint public immutable entryPoint;
+
+    /// @notice The org (ONCHAINID address) operating this instance — the only org whose
+    ///         `paymaster.configure` holders have admin reach (safety valve, stake).
+    address public immutable operatorOrg;
 
     /// @notice policyId => the address that registered (and owns the budget of) the policy.
     mapping(bytes32 => address) public funder;
@@ -129,26 +141,38 @@ contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
         _;
     }
 
-    /// @dev The policy's funder, or a `paymaster.configure` holder (operator safety valve).
+    /// @dev The policy's funder, or a `paymaster.configure` holder of {operatorOrg} (operator
+    ///      safety valve).
     modifier onlyPolicyAdmin(bytes32 policyId) {
         address f = funder[policyId];
         if (f == address(0)) revert PolicyNotRegistered(policyId);
-        if (msg.sender != f && !oracle.hasPermission(msg.sender, CONFIGURE)) {
+        if (msg.sender != f && !_isOperatorConfigurer(msg.sender)) {
             revert NotPolicyAdmin(policyId, msg.sender);
         }
         _;
     }
 
-    constructor(IPermissionOracle oracle_, IEntryPoint entryPoint_) RegisterwerkGated(oracle_) {
+    /// @param operatorOrg_ The org operating this instance (see {operatorOrg}).
+    constructor(IPermissionOracle oracle_, IEntryPoint entryPoint_, address operatorOrg_)
+        RegisterwerkGated(oracle_)
+    {
         if (address(entryPoint_) == address(0)) revert ZeroAddressEntryPoint();
+        _requireOrg(operatorOrg_);
         entryPoint = entryPoint_;
+        operatorOrg = operatorOrg_;
     }
 
     // ── Policy lifecycle ──────────────────────────────────────────────────────
 
     /// @notice Registers `policyId` with the caller as its funder, the voucher `signer` and a
-    ///         per-org cap, optionally funding it with `msg.value` in the same call.
-    function registerPolicy(bytes32 policyId, address signer, uint256 orgCap) external payable {
+    ///         per-org cap, optionally funding it with `msg.value` in the same call. Requires
+    ///         `paymaster.register-policy` via the caller's org — an id cannot be taken by a
+    ///         wallet the operator has not approved as a sponsor.
+    function registerPolicy(bytes32 policyId, address signer, uint256 orgCap)
+        external
+        payable
+        requiresPermission(REGISTER_POLICY)
+    {
         if (funder[policyId] != address(0)) revert PolicyAlreadyRegistered(policyId);
         if (signer == address(0)) revert ZeroSigner();
         if (orgCap == 0) revert ZeroOrgCap();
@@ -210,9 +234,10 @@ contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
 
     // ── EntryPoint stake (ERC-7562) ───────────────────────────────────────────
 
-    /// @notice Stakes `msg.value` in the EntryPoint. The first staker becomes `stakeFunder`;
-    ///         top-ups must come from the same address so the stake has one owner.
-    function addStake(uint32 unstakeDelaySec) external payable requiresPermission(CONFIGURE) {
+    /// @notice Stakes `msg.value` in the EntryPoint. Operator-org `paymaster.configure` holders
+    ///         only. The first staker becomes `stakeFunder`; top-ups must come from the same
+    ///         address so the stake has one owner.
+    function addStake(uint32 unstakeDelaySec) external payable requiresOrgPermission(operatorOrg, CONFIGURE) {
         if (msg.value == 0) revert ZeroAmount();
         if (stakeFunder == address(0)) {
             stakeFunder = msg.sender;
@@ -241,9 +266,14 @@ contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
     }
 
     function _requireStakeAdmin() private view {
-        if (msg.sender != stakeFunder && !oracle.hasPermission(msg.sender, CONFIGURE)) {
+        if (msg.sender != stakeFunder && !_isOperatorConfigurer(msg.sender)) {
             revert NotStakeAdmin(msg.sender);
         }
+    }
+
+    /// @dev The caller's wallet is bound to {operatorOrg} **and** holds `paymaster.configure` via it.
+    function _isOperatorConfigurer(address wallet) private view returns (bool) {
+        return oracle.orgOf(wallet) == operatorOrg && oracle.hasPermission(wallet, CONFIGURE);
     }
 
     /// @notice EntryPoint deposit minus what the books owe to policies. Must never go

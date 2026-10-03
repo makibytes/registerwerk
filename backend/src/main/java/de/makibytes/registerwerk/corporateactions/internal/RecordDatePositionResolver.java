@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,10 +27,14 @@ import java.util.UUID;
  *
  * <ul>
  *   <li>Chain-deployed asset: the as-of balances from {@link RegisterAsOfQuery} (FINALIZED
- *       transfers before the cut-off). Each wallet with a positive balance is mapped to its holder
- *       row — the one active at the cut-off, else the latest row for that wallet — for investor and
- *       holder kind. A wallet with no row blocks the snapshot ("unmapped at record date"), and so
- *       do not-yet-final transfers before the cut-off.</li>
+ *       transfers before the cut-off, including transfers not yet linked to a deployment, H7). Each wallet with a
+ *       positive balance is mapped to the holder row that was active at the cut-off, for investor and holder kind.
+ *       <strong>Fail closed (H7):</strong> there is no "latest row" fallback. A wallet with no row active at the
+ *       cut-off blocks the snapshot ("unmapped at record date"), unless every register entry of the wallet that was
+ *       never closed before the cut-off names the same investor and holder kind - the entry merely postdates the
+ *       cut-off (the holder sync created it minutes after the record date), so the attribution is unambiguous; that
+ *       case is recorded in the snapshot notes. Entries that disagree, or that were closed before the cut-off,
+ *       block it, as do not-yet-final transfers before the cut-off.</li>
  *   <li>Off-chain asset, and off-chain entries ({@code chainDerived == false}) of a chain asset
  *       whose wallet has no as-of chain balance: the trigger-maintained position history.</li>
  * </ul>
@@ -90,18 +95,26 @@ class RecordDatePositionResolver {
                 if (balance.getValue().signum() <= 0) {
                     continue;
                 }
-                AssetHolder row = rowAt(byWallet.get(balance.getKey()), cutoff);
-                if (row == null) {
-                    unmapped.add(balance.getKey());
+                RowAt resolved = rowAt(byWallet.get(balance.getKey()), cutoff);
+                if (resolved.row() == null) {
+                    unmapped.add(balance.getKey() + " (" + resolved.problem() + ")");
                     continue;
                 }
+                if (resolved.note() != null) {
+                    notes.add("wallet " + balance.getKey() + ": " + resolved.note());
+                }
+                AssetHolder row = resolved.row();
                 positions.add(new Position(row.getId(), row.getInvestorId(), row.getWalletAddress(),
                         row.getHolderKind(), balance.getValue()));
+            }
+            if (asOf.unlinkedAttributed() > 0) {
+                notes.add(asOf.unlinkedAttributed() + " transfer(s) not yet linked to a deployment were attributed to "
+                        + "this asset by asset id / contract address and counted in the record-date positions");
             }
             if (!unmapped.isEmpty()) {
                 unmapped.sort(Comparator.naturalOrder());
                 return Resolution.blocked("Wallet(s) holding units at the record-date cut-off " + cutoff
-                        + " are unmapped at record date: " + unmapped
+                        + " are unmapped at record date (no register entry can be attributed to them as of the record date): " + unmapped
                         + ". Map the wallet(s) or register the pool address, then the snapshot is retried.");
             }
             historyRows = rows.stream()
@@ -135,17 +148,60 @@ class RecordDatePositionResolver {
         return new Resolution(positions, Optional.empty(), notes);
     }
 
-    /** The row held at the cut-off, else the most recently created row for the wallet. */
-    private static AssetHolder rowAt(List<AssetHolder> candidates, Instant cutoff) {
-        if (candidates == null || candidates.isEmpty()) {
-            return null;
+    /** The attributable row for a wallet (or why there is none), plus an operator note when it postdates the cut-off. */
+    private record RowAt(AssetHolder row, String note, String problem) {
+        static RowAt of(AssetHolder row) {
+            return new RowAt(row, null, null);
         }
-        return candidates.stream()
+
+        static RowAt noted(AssetHolder row, String note) {
+            return new RowAt(row, note, null);
+        }
+
+        static RowAt none(String problem) {
+            return new RowAt(null, null, problem);
+        }
+    }
+
+    /**
+     * H7, fail closed: the row that was active at the cut-off. No "newest row" fallback - a later row can name a
+     * different holder than the one who held the wallet on the record date.
+     */
+    private static RowAt rowAt(List<AssetHolder> candidates, Instant cutoff) {
+        if (candidates == null || candidates.isEmpty()) {
+            return RowAt.none("no register entry");
+        }
+        List<AssetHolder> active = candidates.stream()
                 .filter(r -> r.getCreatedAt() == null || r.getCreatedAt().isBefore(cutoff))
                 .filter(r -> r.getRemovedAt() == null || r.getRemovedAt().isAfter(cutoff))
-                .findFirst()
-                .orElseGet(() -> candidates.stream()
-                        .max(Comparator.comparing(AssetHolder::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder())))
-                        .orElse(null));
+                .toList();
+        if (!active.isEmpty()) {
+            return sameHolder(active)
+                    ? RowAt.of(active.getFirst())
+                    : RowAt.none("several register entries active at the record date name different holders");
+        }
+        // Nothing was active at the cut-off. Entries closed before it do not count; an entry created after it (and
+        // never closed before the cut-off) is attributable only when EVERY entry of the wallet - closed ones too -
+        // names the same holder, i.e. it merely postdates the cut-off.
+        List<AssetHolder> later = candidates.stream()
+                .filter(r -> r.getRemovedAt() == null || r.getRemovedAt().isAfter(cutoff))
+                .toList();
+        if (later.isEmpty()) {
+            return RowAt.none("its register entries were closed before the record date");
+        }
+        if (!sameHolder(candidates)) {
+            return RowAt.none("its register entries name different holders and none was active at the record date");
+        }
+        AssetHolder row = later.stream()
+                .min(Comparator.comparing(AssetHolder::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder())))
+                .orElseThrow();
+        return RowAt.noted(row, "register entry " + row.getId() + " was created after the record date; attributed to "
+                + "investor " + row.getInvestorId() + " because every entry of the wallet names the same holder");
+    }
+
+    private static boolean sameHolder(List<AssetHolder> rows) {
+        AssetHolder first = rows.getFirst();
+        return rows.stream().allMatch(r -> Objects.equals(r.getInvestorId(), first.getInvestorId())
+                && r.getHolderKind() == first.getHolderKind());
     }
 }

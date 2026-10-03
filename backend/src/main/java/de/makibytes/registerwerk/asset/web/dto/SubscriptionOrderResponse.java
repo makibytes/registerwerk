@@ -33,7 +33,9 @@ public record SubscriptionOrderResponse(
         Instant settledAt,
         UUID settlementTxId,
         Instant lapsedAt,
-        String releaseReason
+        String releaseReason,
+        // C7: why the mint of a SETTLEMENT_FAILED order did not happen (null otherwise)
+        String settlementFailureReason
 ) {
     public static SubscriptionOrderResponse from(SubscriptionOrder o) {
         return new SubscriptionOrderResponse(
@@ -44,6 +46,6 @@ public record SubscriptionOrderResponse(
                 o.getAcceptedAt(), o.getAllocationExpiresAt(), o.getAmountDue(), o.getPaymentCurrency(),
                 o.getPaidAmount(), o.getRefundDue(), o.getPaymentReference(), o.getPaymentValueDate(),
                 o.getPaymentConfirmedAt(), o.getSettledAt(), o.getSettlementTxId(), o.getLapsedAt(),
-                o.getReleaseReason());
+                o.getReleaseReason(), o.getSettlementFailureReason());
     }
 }

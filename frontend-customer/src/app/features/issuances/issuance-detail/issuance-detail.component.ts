@@ -346,7 +346,11 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                       @if (a.status === 'PROPOSED') {
                         <button mat-button type="button" (click)="withdrawProposal(a)">Withdraw</button>
                       }
-                      @if (isPreSettlement(a) && !a.issuerAttestedAt) {
+                      @if (isPreSettlement(a) && !a.issuerAttestedAt && a.status !== 'COMPUTED') {
+                        <span class="dimmed"
+                              matTooltip="Your attestation covers the computed amounts, so it opens once the entitlements are computed.">Attest once amounts are computed</span>
+                      }
+                      @if (isPreSettlement(a) && !a.issuerAttestedAt && a.status === 'COMPUTED') {
                         @if (auth.isImpersonating()) {
                           <span class="dimmed"
                                 matTooltip="Operators cannot attest as the issuer. Use the operator console's override-attestation instead.">Operator override required</span>
@@ -1063,7 +1067,8 @@ export class IssuanceDetailComponent implements OnInit {
     notes: string;
   } = this.emptyProposeForm();
   submittingProposal = false;
-  attestForm: { corporateActionId: string; attestationReference: string } = { corporateActionId: '', attestationReference: '' };
+  attestForm: { corporateActionId: string; attestationReference: string; payoutDigest: string | null } =
+    { corporateActionId: '', attestationReference: '', payoutDigest: null };
   submittingAttestation = false;
 
   // ── Term Sheet ────────────────────────────────────────────────────────────
@@ -1137,6 +1142,7 @@ export class IssuanceDetailComponent implements OnInit {
       APPROVED: 2,
       ISSUED: 3,
       SUSPENDED: 3,
+      REDEMPTION_PENDING: 3,
       REDEEMED: 4,
     };
     return map[this.asset.status] ?? 0;
@@ -1454,7 +1460,7 @@ export class IssuanceDetailComponent implements OnInit {
   }
 
   openAttestDialog(a: CorporateActionView): void {
-    this.attestForm = { corporateActionId: a.id, attestationReference: '' };
+    this.attestForm = { corporateActionId: a.id, attestationReference: '', payoutDigest: a.payoutDigest ?? null };
     this.dialog.open(this.attestDialogTpl, { width: '440px', maxWidth: '95vw' });
   }
 
@@ -1464,6 +1470,7 @@ export class IssuanceDetailComponent implements OnInit {
     this.cdr.markForCheck();
     this.corporateActionsService.attestSettlement(
       this.assetId, this.attestForm.corporateActionId, this.attestForm.attestationReference.trim(),
+      this.attestForm.payoutDigest,
     ).subscribe({
       next: () => {
         this.dialog.closeAll();

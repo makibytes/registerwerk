@@ -188,6 +188,9 @@ public class GraphNodeSyncService {
                     + "classification this tick.", chain.getIdentifier());
         }
         final Long effectiveHead = headBlock;
+        // H7: the head's BLOCK time (best effort) - what the freshness gate compares with the record-date cut-off.
+        final Instant headBlockTime = effectiveHead != null
+                ? graphNodeClient.fetchHeadBlockTime(chain).orElse(null) : null;
         // TAG_BASED chains: fetch the node's safe/finalized tags once per chain per tick (not once
         // per transfer/probe — every call below this point shares the same finality snapshot).
         // Other models don't need them: DEPTH_BASED derives finality from effectiveHead +
@@ -300,6 +303,9 @@ public class GraphNodeSyncService {
                 }
             }
             state.setLastSyncedAt(Instant.now());
+            if (headBlockTime != null && forkBlock == null) {
+                state.setLastSyncedBlockTime(headBlockTime); // never nulled: the old value stays a valid lower bound
+            }
             state.setConsecutiveErrors(0);
             state.setLastError(null);
             state.setStatus(IndexerState.IndexerStatus.ACTIVE);

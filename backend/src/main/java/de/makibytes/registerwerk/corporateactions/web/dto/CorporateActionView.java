@@ -35,7 +35,9 @@ public record CorporateActionView(
         Instant createdAt,
         Instant updatedAt,
         // SETTLED but some entitlements are still held (e.g. screening/compliance holds): not fully paid out.
-        boolean heldOutstanding
+        boolean heldOutstanding,
+        // C6: fingerprint of the computed amounts (entries, total, rounding residual) the sign-offs are bound to.
+        String payoutDigest
 ) {
     public static CorporateActionView of(CorporateAction ca) {
         return new CorporateActionView(
@@ -44,7 +46,7 @@ public record CorporateActionView(
                 ca.getRatioNumerator(), ca.getRatioDenominator(), ca.getAmountPerUnit(), ca.getTotalAmount(),
                 ca.getCurrency(), ca.getSettlementTxHash(), ca.getSettledAt(),
                 ca.getIssuerAttestedAt(), ca.getDualControlApprovedAt(),
-                ca.getCreatedAt(), ca.getUpdatedAt(), ca.isHeldOutstanding()
+                ca.getCreatedAt(), ca.getUpdatedAt(), ca.isHeldOutstanding(), ca.getPayoutDigest()
         );
     }
 }

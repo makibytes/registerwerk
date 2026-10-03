@@ -218,6 +218,19 @@ class Erc3643DeploymentServiceClaimTest {
     }
 
     @Test
+    @DisplayName("C5: a new T-REX suite is deployed with decimals = 0 (register amounts are raw base units counted as whole units)")
+    void deploySuiteFunction_deploysWholeUnitToken() {
+        Function fn = Erc3643DeploymentService.buildDeployEwpgSuiteFunction(
+                new byte[32], "salt", SIGNER, CLAIM_ISSUER, "Name", "SYM");
+        org.web3j.abi.datatypes.DynamicStruct tokenDetails =
+                (org.web3j.abi.datatypes.DynamicStruct) fn.getInputParameters().get(2);
+        // TokenDetails: (owner, name, symbol, decimals, irs, onchainid, irAgents, tokenAgents, modules, settings)
+        org.web3j.abi.datatypes.generated.Uint8 decimals =
+                (org.web3j.abi.datatypes.generated.Uint8) tokenDetails.getValue().get(3);
+        assertThat(decimals.getValue()).isEqualTo(java.math.BigInteger.ZERO);
+    }
+
+    @Test
     @DisplayName("revokeKycClaim rejects a PENDING identity instead of silently skipping")
     void revokeKycClaim_rejectsPendingIdentity() {
         UUID claimId = UUID.randomUUID();

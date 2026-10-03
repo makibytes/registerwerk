@@ -568,4 +568,29 @@ class GraphNodeSyncServiceTest {
         d.setDeploymentStatus(status);
         return d;
     }
+
+    @Test
+    @DisplayName("H7: a successful tick records the BLOCK time of the head it processed; an unknown time never erases the last one")
+    void syncChain_recordsHeadBlockTime_andNeverErasesIt() {
+        ChainConfig chain = ethereumChain();
+        IndexerState state = freshState(null, null);
+        when(indexerStateRepository.findByChainConfigIdAndIndexerType(
+                chainConfigId, IndexerState.IndexerType.GRAPH_NODE)).thenReturn(Optional.of(state));
+        when(indexerStateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(graphNodeClient.fetchMeta(chain, null)).thenReturn(Optional.of(new BlockMeta(500, "0xhead", false)));
+        when(graphNodeClient.fetchTransfers(eq(chain), eq(0L), eq(GraphNodeSyncService.PAGE_SIZE), eq(0))).thenReturn(List.of());
+        when(tokenTransferRepository.findDistinctUnsettledBlocks(chainConfigId)).thenReturn(List.of());
+        java.time.Instant headTime = java.time.Instant.parse("2025-06-28T00:30:00Z");
+        when(graphNodeClient.fetchHeadBlockTime(chain)).thenReturn(Optional.of(headTime));
+
+        service.syncChain(chain);
+
+        assertThat(state.getLastSyncedBlockTime()).isEqualTo(headTime);
+
+        // next tick: the node reports no timestamp - the previous block time stays (it is still a valid lower bound)
+        when(graphNodeClient.fetchHeadBlockTime(chain)).thenReturn(Optional.empty());
+        service.syncChain(chain);
+
+        assertThat(state.getLastSyncedBlockTime()).isEqualTo(headTime);
+    }
 }

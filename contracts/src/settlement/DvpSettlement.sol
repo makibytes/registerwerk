@@ -48,12 +48,26 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 ///      Compliance holds are freeze-in-place: {settle} reverts {PartyFrozen} while the
 ///      asset token (if it answers `isFrozen(address)`, as T-REX does) reports the seller
 ///      or buyer frozen. The escrow then stays here until the freeze is lifted, the trade
-///      is cancelled, or the operator releases it under a legal order via {forceCancel}.
+///      is cancelled, or it is released under a legal order. A legal-order release is never a
+///      one-key redirect: {forceCancel} (operator) can only return the escrow to one of the
+///      trade's own parties — e.g. to the counterparty when the locker is frozen — and a release to
+///      any other destination named in an order goes through the separate `LEGAL_ORDER_ROLE`
+///      ({proposeForceCancel} → {LEGAL_ORDER_DELAY} → {executeForceCancel}), during which the
+///      parties and monitors can see it coming and the admin can {withdrawForceCancel} it.
 contract DvpSettlement is ReentrancyGuard, AccessControl {
     using SafeERC20 for IERC20;
 
     /// @notice Role held by the registry operator's backend wallet(s).
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+
+    /// @notice Role that may propose releasing an escrow to a destination that is not one of the
+    ///         trade's parties (a third-party custodian or authority named in a legal order).
+    ///         Not granted at construction and deliberately separate from {OPERATOR_ROLE}: hold it
+    ///         on a different key/multisig than the backend's operator wallet.
+    bytes32 public constant LEGAL_ORDER_ROLE = keccak256("LEGAL_ORDER_ROLE");
+
+    /// @notice Delay between {proposeForceCancel} and the earliest {executeForceCancel}.
+    uint256 public constant LEGAL_ORDER_DELAY = 2 days;
 
     /// @notice Circuit breaker for new exposure ({lockAsset}, {lockPayment}, {settle}) —
     ///         e.g. when this rail's underlying payment token is disabled at the catalog
@@ -117,6 +131,16 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
 
     mapping(bytes32 => Trade) public trades;
 
+    /// @dev A proposed release of a trade's escrow to a destination outside the trade (see
+    ///      {proposeForceCancel}). `executableAt == 0`: none proposed.
+    struct PendingForceCancel {
+        address to;
+        uint64 executableAt;
+        string legalBasis;
+    }
+
+    mapping(bytes32 => PendingForceCancel) public pendingForceCancels;
+
     event LegLocked(
         bytes32 indexed tradeId,
         address indexed seller,
@@ -133,6 +157,11 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
     /// @notice The escrowed leg was released by the operator to a destination named in a
     ///         legal order, instead of to the locker.
     event TradeForceCancelled(bytes32 indexed tradeId, address indexed to, string legalBasis);
+    /// @notice A release of the escrow to `to`, a destination outside the trade, was proposed under
+    ///         a legal order; it can be executed from `executableAt` unless withdrawn or mooted by
+    ///         the trade being settled or cancelled first.
+    event ForceCancelProposed(bytes32 indexed tradeId, address indexed to, uint64 executableAt, string legalBasis);
+    event ForceCancelWithdrawn(bytes32 indexed tradeId, address indexed by);
 
     error TradeAlreadyExists(bytes32 tradeId);
     error TradeNotLocked(bytes32 tradeId);
@@ -144,6 +173,12 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
     error TermsMismatch(bytes32 tradeId, bytes32 expectedTermsHash, bytes32 actualTermsHash);
     error PartyFrozen(bytes32 tradeId, address party);
     error InvalidDestination();
+    /// @notice {forceCancel} may only return the escrow to the trade's locker or counterparty;
+    ///         use {proposeForceCancel} for a destination named in a legal order.
+    error DestinationNotTradeParty(bytes32 tradeId, address to);
+    error ForceCancelNotProposed(bytes32 tradeId);
+    error ForceCancelNotReady(bytes32 tradeId, uint64 executableAt);
+    error ForceCancelAlreadyProposed(bytes32 tradeId);
 
     /// @notice Seller escrows the asset leg. The buyer completes via {settle} by paying
     ///         the payment leg, before `expiry`.
@@ -243,10 +278,12 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
         emit TradeCancelled(tradeId, msg.sender);
     }
 
-    /// @notice Legal-order release: cancels a locked trade and transfers the escrowed leg
-    ///         to `to`, the destination named in the order (e.g. when the locker is frozen
-    ///         and a return to it would revert at the token). Policy-neutral — the contract
-    ///         never picks a destination itself. Like {cancel}, available while paused.
+    /// @notice Legal-order release to one of the trade's own parties: cancels a locked trade and
+    ///         sends the escrowed leg to `to`, which must be the trade's locker or its counterparty
+    ///         (e.g. to the counterparty when the locker is frozen and a return to it would revert
+    ///         at the token). The operator key therefore can never move an escrow out of the trade;
+    ///         a destination outside it needs {proposeForceCancel}. Like {cancel}, available while
+    ///         paused.
     /// @param legalBasis Reference to the legal authority (e.g. "BaFin Az. 2026-001").
     function forceCancel(bytes32 tradeId, address to, string calldata legalBasis)
         external
@@ -256,7 +293,58 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
         Trade storage trade = trades[tradeId];
         if (trade.state != TradeState.Locked) revert TradeNotLocked(tradeId);
         if (to == address(0) || to == address(this)) revert InvalidDestination();
+        if (to != trade.seller && to != trade.buyer) revert DestinationNotTradeParty(tradeId, to);
 
+        _forceCancel(tradeId, trade, to, legalBasis);
+    }
+
+    /// @notice Proposes releasing the escrow to `to` — a destination outside the trade (a
+    ///         custodian or authority named in a legal order). Executable by
+    ///         {executeForceCancel} after {LEGAL_ORDER_DELAY}; the trade stays settleable and
+    ///         cancellable meanwhile, and either of those moots the proposal. Replacing a pending
+    ///         proposal requires {withdrawForceCancel} first, so a destination cannot be swapped
+    ///         without the delay restarting.
+    function proposeForceCancel(bytes32 tradeId, address to, string calldata legalBasis)
+        external
+        onlyRole(LEGAL_ORDER_ROLE)
+    {
+        Trade storage trade = trades[tradeId];
+        if (trade.state != TradeState.Locked) revert TradeNotLocked(tradeId);
+        if (to == address(0) || to == address(this)) revert InvalidDestination();
+        PendingForceCancel storage pending = pendingForceCancels[tradeId];
+        if (pending.executableAt != 0) revert ForceCancelAlreadyProposed(tradeId);
+
+        uint64 executableAt = uint64(block.timestamp + LEGAL_ORDER_DELAY);
+        pendingForceCancels[tradeId] = PendingForceCancel({to: to, executableAt: executableAt, legalBasis: legalBasis});
+        emit ForceCancelProposed(tradeId, to, executableAt, legalBasis);
+    }
+
+    /// @notice Executes a matured {proposeForceCancel}: cancels the still-locked trade and sends
+    ///         the escrowed leg to the proposed destination. Emits {TradeForceCancelled} with the
+    ///         legal basis recorded at proposal. Like {cancel}, available while paused.
+    function executeForceCancel(bytes32 tradeId) external nonReentrant onlyRole(LEGAL_ORDER_ROLE) {
+        Trade storage trade = trades[tradeId];
+        if (trade.state != TradeState.Locked) revert TradeNotLocked(tradeId);
+        PendingForceCancel memory pending = pendingForceCancels[tradeId];
+        if (pending.executableAt == 0) revert ForceCancelNotProposed(tradeId);
+        if (block.timestamp < pending.executableAt) revert ForceCancelNotReady(tradeId, pending.executableAt);
+
+        delete pendingForceCancels[tradeId];
+        _forceCancel(tradeId, trade, pending.to, pending.legalBasis);
+    }
+
+    /// @notice Withdraws a pending {proposeForceCancel} (a superseded or mistaken order). The
+    ///         proposer's role or the admin may do so.
+    function withdrawForceCancel(bytes32 tradeId) external {
+        if (!hasRole(LEGAL_ORDER_ROLE, msg.sender) && !hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) {
+            revert AccessControlUnauthorizedAccount(msg.sender, LEGAL_ORDER_ROLE);
+        }
+        if (pendingForceCancels[tradeId].executableAt == 0) revert ForceCancelNotProposed(tradeId);
+        delete pendingForceCancels[tradeId];
+        emit ForceCancelWithdrawn(tradeId, msg.sender);
+    }
+
+    function _forceCancel(bytes32 tradeId, Trade storage trade, address to, string memory legalBasis) private {
         (IERC20 lockedToken, uint256 lockedAmount) = trade.lockedLeg == LockedLeg.Asset
             ? (trade.assetToken, trade.assetAmount)
             : (trade.paymentToken, trade.paymentAmount);

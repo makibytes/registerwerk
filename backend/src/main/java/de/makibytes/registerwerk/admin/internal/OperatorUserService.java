@@ -225,6 +225,11 @@ public class OperatorUserService {
             }
             user.markRolesChanged(actorId);
         }
+        if (!newEnabled && user.isEnabled() && isPrivilegedAccount(user)) {
+            // C3: switching off a privileged colleague is a four-eyes action. With one step-up it was a way to
+            // drop the enrolled-administrator count below two and walk through the bootstrap exception.
+            bootstrap = requirePrivilegedApproval("OPERATOR_USER_DISABLE");
+        }
         user.setEnabled(newEnabled);
         AppUser saved = appUserRepository.save(user);
         if (!newEnabled) {

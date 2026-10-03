@@ -262,7 +262,29 @@ export class WalletService {
     return address;
   }
 
+  /**
+   * Plain-language wording for custom contract errors the app can act on. viem decodes them into
+   * `ContractFunctionRevertedError.data` (somewhere in the `cause` chain) only when the error is in
+   * the ABI passed to the call; the default `shortMessage` is a raw signature otherwise.
+   */
+  private knownRevertMessage(err: unknown): string | null {
+    for (let e: unknown = err, depth = 0; e && typeof e === 'object' && depth < 10; depth++) {
+      const data = (e as { data?: { errorName?: string; args?: readonly unknown[] } }).data;
+      if (data?.errorName === 'LiquidationExceedsMaxRepay' && data.args?.length === 2) {
+        const [required, max] = data.args as [bigint, bigint];
+        return (
+          `Liquidating this position costs at least ${required} (loan-token base units), above the ` +
+          `maximum repay amount of ${max} that was allowed. Raise the maximum to at least ${required} and try again.`
+        );
+      }
+      e = (e as { cause?: unknown }).cause;
+    }
+    return null;
+  }
+
   private extractMessage(err: unknown, fallback: string): string {
+    const known = this.knownRevertMessage(err);
+    if (known) return known;
     if (err && typeof err === 'object') {
       const withShort = err as { shortMessage?: string; message?: string };
       return withShort.shortMessage ?? withShort.message ?? fallback;

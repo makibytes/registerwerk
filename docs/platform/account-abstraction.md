@@ -136,6 +136,15 @@ under `registerwerk.paymaster.addresses` (`PAYMASTER_<CHAIN>_<NETWORK>`). The on
   `unlockStake()`: de-staking makes public bundlers drop the paymaster, so another
   `paymaster.configure` holder cannot start it.
 
+!!! note "Operator org and sponsor permissions"
+    The paymaster is constructed as `(oracle, entryPoint, operatorOrg)`. `paymaster.configure` (the
+    kill switch, per-org cap, `withdrawPolicy` trigger and stake management above) only works for
+    wallets of that `operatorOrg`; a foreign org holding the same permission cannot administer a
+    policy or the stake. `registerPolicy` and `addStake` are gated the same way: `registerPolicy`
+    needs the permission `paymaster.register-policy` through the caller's org, which the operator
+    grants to each sponsor (its own org and the issuers'), so a wallet the operator has not approved
+    cannot register or squat a published policy id.
+
 **Operator UI.** `frontend-operator`'s asset detail page has a **Gas Sponsorship** tab per
 deployment (set/remove a deployment-specific override). The customer detail page has one for
 issuers (set the issuer-level default that new deployments inherit). Both are backed by
@@ -179,17 +188,18 @@ Rollout:
    unsafe: any member could spend any policy, the gas price was unbounded, and a bundle could
    overspend. **Stop funding it now.** There is no withdraw function, so no funding affordance
    points at it any more.
-2. Deploy the new `EwpgPaymaster`. Call `addStake` from the operator wallet and set
+2. Deploy the new `EwpgPaymaster` with its `operatorOrg` (`PAYMASTER_OPERATOR_ORG` in `DeployLiquidityDapps.s.sol`, default the deployer's org). Call `addStake` from the operator wallet and set
    `registerwerk.paymaster.addresses.<chain>` and the voucher signer key.
-3. Each funder calls `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` with the
+3. The operator grants `paymaster.register-policy` to each sponsor org (its own and the issuers') and `paymaster.configure` to the operator org only. Each funder then calls `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` with the
    budget.
 4. Record any ETH left in the old paymaster (`EntryPoint.balanceOf(old)`) per chain as a
    **stranded balance**. It can only be consumed by sponsored operations, which must not be
    done given the defects above.
 
-Known limitation: `registerPolicy` is first-come for a policy id. Someone who front-runs the
-registration can block that id (they cannot take funds). The funder then registers the policy
-under a new row id.
+Known limitation: `registerPolicy` is first-come for a policy id among approved sponsors. A
+sponsor that front-runs the registration can block that id (it cannot take funds); the funder then
+registers the policy under a new row id. Wallets without `paymaster.register-policy` can no longer
+do this.
 
 ## `EwpgPasskeyAccount` — passkey signers for retail
 

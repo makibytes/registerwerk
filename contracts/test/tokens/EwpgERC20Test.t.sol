@@ -27,6 +27,13 @@ contract EwpgERC20Test is Test {
         assertEq(token.registry(), registry);
     }
 
+    /// @dev Wave 0b C5: the register counts WHOLE units (asset_holder.nominal_amount, token_transfer value, coupon /
+    ///      redemption maths, EwpgRepoMarket's `collateralToken.decimals() == 0` rule). A security token that reports
+    ///      18 decimals makes every register amount off by 1e18, so the token must be an integer-unit token.
+    function test_decimals_isZero_registerUnitsAreWholeUnits() public view {
+        assertEq(token.decimals(), 0, "register security tokens are whole-unit tokens");
+    }
+
     // -------------------------------------------------------------------------
     // Minting
     // -------------------------------------------------------------------------

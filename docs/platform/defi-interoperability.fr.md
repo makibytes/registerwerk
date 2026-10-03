@@ -254,6 +254,25 @@ antérieurs sont immuables et conservent leur comportement ; voir *Marchés hér
   l'emprunteur (`surplusOf`) et versée par `claimLiquidationSurplus()` ; elle ne fait pas partie
   de la liquidité du pool. La page client **Mes prêts** affiche l'excédent réclamable avec une
   action de réclamation.
+- **Prix de liquidation : bonus sur la dette soldée, plafond de remboursement strict.** Le bonus
+  est prélevé sur la dette effectivement soldée. Tant que les unités vendues valent moins que la
+  dette, le liquidateur paie leur valeur au prix de marque diminuée du bonus ; dès que l'unité (ou
+  les unités) valent plus que la dette entière, toute la dette est soldée et le liquidateur paie
+  la valeur des unités moins `bonus × dette`, l'emprunteur recevant le reste sous forme de
+  `surplusOf`. `maxRepayAmount` est un plafond strict de ce qui est facturé au liquidateur : si
+  l'arrondi supérieur le dépasse, une unité de moins est vendue, et si même une seule unité coûte
+  plus, `liquidate` échoue avec `LiquidationExceedsMaxRepay(required, maxRepayAmount)` en
+  indiquant le montant à autoriser. Les bots et interfaces doivent passer `maxRepayAmount ≥
+  required` : `liquidate(borrower, debt)` ne solde plus une position en un seul appel lorsque
+  l'unité finale vaut plus que la dette.
+- **Fenêtre d'oracle glissante, sans réancrage.** `RegisterwerkNavOracle` ne réancre plus sa
+  fenêtre d'écart sur la marque courante une fois la fenêtre écoulée, ce qui permettait à une clé
+  de flux de cumuler un mouvement à cheval sur la limite (par exemple 100 → 80 juste avant puis 80
+  → 64 juste après). Il conserve aussi les extrêmes de la fenêtre précédente
+  (`carriedBandOf(asset)`) et contrôle chaque push par rapport aux deux, de sorte que deux marques
+  ordinaires espacées d'une fenêtre au plus restent dans `maxDeviationBps`. Une marque est retenue
+  pendant une à deux fenêtres, jamais indéfiniment ; une dérive lente sur de nombreuses fenêtres
+  reste acceptée. `pushPriceWithOverride` efface la bande reportée.
 - **Administration liée à l'instance.** Chaque marché enregistre `operatorOrg` (l'org du
   portefeuille qui a appelé `EwpgRepoMarketFactory.createMarket`) et une `treasury` immuable.
   `setReserveFactor`, `setBorrowPaused` et `withdrawReserves` exigent `repo-markets.configure` ;

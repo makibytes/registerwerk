@@ -88,7 +88,7 @@ public class IssuerCorporateActionController {
             @Valid @RequestBody IssuerAttestationRequest request, Authentication auth) {
         CorporateAction attested = corporateActionService.attestSettlementAsIssuer(assetId, corporateActionId,
                 request.attestationReference(), SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "ISSUER"),
-                isOperator(auth));
+                isOperator(auth), request.payoutDigest());
         return ResponseEntity.ok(CorporateActionView.of(attested));
     }
 

@@ -141,6 +141,16 @@ On-Chain-`policyId` einer `GasSponsorshipPolicy`-Zeile ist `keccak256(id.toStrin
   `unlockStake()` aufrufen: Ohne Stake verwerfen öffentliche Bundler den Paymaster, deshalb kann
   ein anderer Inhaber von `paymaster.configure` das Unstaking nicht starten.
 
+!!! note "Betreiber-Org und Sponsor-Berechtigungen"
+    Der Paymaster wird mit `(oracle, entryPoint, operatorOrg)` konstruiert. `paymaster.configure`
+    (Kill-Switch, Obergrenze je Org, Auslösen von `withdrawPolicy` und die oben genannte
+    Stake-Verwaltung) wirkt nur für Wallets dieser `operatorOrg`; eine fremde Org mit derselben
+    Berechtigung kann weder eine Policy noch den Stake verwalten. `registerPolicy` und `addStake`
+    sind genauso gebunden: `registerPolicy` erfordert die Berechtigung `paymaster.register-policy`
+    über die Org des Aufrufers, die der Betreiber jedem Sponsor erteilt (der eigenen Org und denen
+    der Emittenten); eine vom Betreiber nicht freigegebene Wallet kann daher keine veröffentlichte
+    Policy-ID registrieren oder besetzen.
+
 **Operator-UI.** Die Asset-Detailseite von `frontend-operator` hat pro Deployment einen Tab
 **Gas Sponsorship** (deploymentspezifische Überschreibung setzen/entfernen). Die
 Kunden-Detailseite hat einen für Emittenten (Emittenten-Standard setzen, den neue Deployments
@@ -186,17 +196,18 @@ Rollout:
    unsicher: Jedes Mitglied konnte jede Policy ausgeben, der Gaspreis war unbegrenzt, und ein
    Bundle konnte mehr ausgeben als vorhanden. **Nicht mehr finanzieren.** Er hat keine
    Auszahlungsfunktion, deshalb verweist keine Finanzierungsmöglichkeit mehr auf ihn.
-2. Den neuen `EwpgPaymaster` deployen. `addStake` aus der Operator-Wallet aufrufen und
+2. Den neuen `EwpgPaymaster` mit seiner `operatorOrg` deployen (`PAYMASTER_OPERATOR_ORG` in `DeployLiquidityDapps.s.sol`, Standard: die Org des Deployers). `addStake` aus der Operator-Wallet aufrufen und
    `registerwerk.paymaster.addresses.<chain>` sowie den Voucher-Signer-Schlüssel setzen.
-3. Jeder Funder ruft `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` mit dem
+3. Der Betreiber erteilt jeder Sponsor-Org (der eigenen und denen der Emittenten) `paymaster.register-policy` und nur der Betreiber-Org `paymaster.configure`. Jeder Funder ruft dann `registerPolicy(keccak256(policyRowId), voucherSigner, orgCap)` mit dem
    Budget auf.
 4. Restliches ETH im alten Paymaster (`EntryPoint.balanceOf(old)`) je Chain als **gestrandetes
    Guthaben** erfassen. Es lässt sich nur durch gesponserte Operationen verbrauchen, was wegen der
    oben genannten Mängel unterbleiben muss.
 
-Bekannte Einschränkung: `registerPolicy` vergibt eine Policy-ID an den Ersten. Wer die
-Registrierung front-runnt, kann diese ID blockieren (aber keine Mittel entnehmen). Der Funder
-registriert die Policy dann unter einer neuen Zeilen-ID.
+Bekannte Einschränkung: `registerPolicy` vergibt eine Policy-ID unter den freigegebenen Sponsoren
+an den Ersten. Ein Sponsor, der die Registrierung front-runnt, kann diese ID blockieren (aber
+keine Mittel entnehmen); der Funder registriert die Policy dann unter einer neuen Zeilen-ID.
+Wallets ohne `paymaster.register-policy` können das nicht mehr.
 
 ## `EwpgPasskeyAccount` — Passkey-Signaturgeber für Retail { #ewpgpasskeyaccount-passkey-signers-for-retail }
 

@@ -20,7 +20,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 
 import { StepUpDialogComponent } from '../../../shared/components/step-up/step-up-dialog.component';
 import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
-import { HolderBlockService } from '../../../core/api/holder-block.service';
+import { HolderBlockService, normalizeWalletAddress } from '../../../core/api/holder-block.service';
 import { HolderBlock, BlockType } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 import { AuthService } from '../../../core/auth/auth.service';
@@ -234,12 +234,23 @@ export class HolderBlocksComponent implements OnInit {
   submitCreate(): void {
     this.dialog.closeAll();
 
+    // The approval covers exactly this body (the service normalises the wallet address the same way).
+    const request = {
+      walletAddress: this.createForm.walletAddress,
+      blockType: this.createForm.blockType as BlockType,
+      legalBasis: this.createForm.legalBasis,
+      courtRef: this.createForm.courtRef || undefined,
+      entityId: this.createForm.entityId || undefined,
+      assetId: this.createForm.assetId || undefined,
+      expiresAt: this.createForm.expiresAt || undefined,
+    };
     const ref = this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Create Sperrvermerk on wallet ${this.createForm.walletAddress} (§16 eWpG)`,
         action: 'SPERRVERMERK_CREATE',
         target: 'POST /api/v1/holder-blocks',
+        targetBody: { ...request, walletAddress: normalizeWalletAddress(request.walletAddress) },
       },
       width: '500px',
       disableClose: true,
@@ -248,15 +259,7 @@ export class HolderBlocksComponent implements OnInit {
     ref.afterClosed().subscribe((result) => {
       if (!result) return;
 
-      this.service.create({
-        walletAddress: this.createForm.walletAddress,
-        blockType: this.createForm.blockType as BlockType,
-        legalBasis: this.createForm.legalBasis,
-        courtRef: this.createForm.courtRef || undefined,
-        entityId: this.createForm.entityId || undefined,
-        assetId: this.createForm.assetId || undefined,
-        expiresAt: this.createForm.expiresAt || undefined,
-      }, result.stepUpToken, result.dualControlToken!).subscribe({
+      this.service.create(request, result.stepUpToken, result.dualControlToken!).subscribe({
         next: (block) => {
           this.blocks = [block, ...this.blocks];
           this.cdr.markForCheck();
@@ -268,12 +271,17 @@ export class HolderBlocksComponent implements OnInit {
   }
 
   liftBlock(block: HolderBlock): void {
+    // The reason is part of what the approver binds, so it is asked for before the step-up dialog.
+    const reason = prompt('Lift reason (required for audit trail):');
+    if (!reason) return;
+
     const ref = this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Lift Sperrvermerk on wallet ${block.walletAddress} (§16 eWpG)`,
         action: 'SPERRVERMERK_LIFT',
         target: `POST /api/v1/holder-blocks/${block.id}/lift`,
+        targetBody: { reason },
       },
       width: '500px',
       disableClose: true,
@@ -281,9 +289,6 @@ export class HolderBlocksComponent implements OnInit {
 
     ref.afterClosed().subscribe((result) => {
       if (!result) return;
-
-      const reason = prompt('Lift reason (required for audit trail):');
-      if (!reason) return;
 
       this.service.lift(block.id, reason, result.stepUpToken, result.dualControlToken!).subscribe({
         next: () => {

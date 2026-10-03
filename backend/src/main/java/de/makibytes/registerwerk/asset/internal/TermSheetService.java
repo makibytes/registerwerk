@@ -62,7 +62,8 @@ public class TermSheetService {
     );
 
     /** After issuance the term sheet is public and may change only through an operator-approved amendment. */
-    static final Set<AssetStatus> PUBLIC_STATUSES = Set.of(AssetStatus.ISSUED, AssetStatus.SUSPENDED, AssetStatus.REDEEMED);
+    static final Set<AssetStatus> PUBLIC_STATUSES = Set.of(AssetStatus.ISSUED, AssetStatus.SUSPENDED,
+            AssetStatus.REDEMPTION_PENDING, AssetStatus.REDEEMED);
     static final Set<AssetStatus> POST_ISSUANCE = PUBLIC_STATUSES;
 
     private final AssetDocumentRepository assetDocumentRepository;

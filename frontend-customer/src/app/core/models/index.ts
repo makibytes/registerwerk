@@ -6,6 +6,7 @@ export type AssetStatus =
   | 'APPROVED'
   | 'ISSUED'
   | 'SUSPENDED'
+  | 'REDEMPTION_PENDING'
   | 'REDEEMED'
   | 'TRANSFER_PENDING'
   | 'TRANSFERRED_OUT';
@@ -104,6 +105,8 @@ export interface CorporateActionView {
   updatedAt: string;
   /** Settled, but some entitlements are still held back (older responses omit the field). */
   heldOutstanding?: boolean;
+  /** Fingerprint of the computed amounts the issuer's attestation is bound to. */
+  payoutDigest?: string | null;
 }
 
 export interface RegisterDocumentMeta {
@@ -487,7 +490,7 @@ export interface InvestmentSummary {
 
 /** CONFIRMED is the legacy (pre-payment-flow) state; new orders end in SETTLED, LAPSED or RELEASED. */
 export type SubscriptionOrderStatus =
-  'SUBMITTED' | 'ALLOCATED' | 'PAYMENT_CONFIRMED' | 'SETTLED' | 'CONFIRMED'
+  'SUBMITTED' | 'ALLOCATED' | 'PAYMENT_CONFIRMED' | 'SETTLEMENT_PENDING' | 'SETTLEMENT_FAILED' | 'SETTLED' | 'CONFIRMED'
   | 'REJECTED' | 'CANCELLED' | 'LAPSED' | 'RELEASED';
 
 export interface SubscriptionOrder {

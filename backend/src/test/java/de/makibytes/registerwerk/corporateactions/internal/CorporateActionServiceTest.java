@@ -9,7 +9,8 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
+import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -52,24 +53,28 @@ class CorporateActionServiceTest {
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
     @Mock private ApplicationEventPublisher events;
-    @Mock private HolderBlockGate holderBlockGate;
+    @Mock private PartyEligibilityGate partyGate;
+    @Mock private EntityTaskPort entityTasks;
     @Mock private FinalityGate finalityGate;
 
     private CorporateActionService service;
 
     private CorporateActionServiceTest init() {
         service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
-                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate,
+                couponPaymentRepository, proposalValidator, events, partyGate, entityTasks, finalityGate,
                 org.mockito.Mockito.mock(RegisterFreshnessGate.class), bondTermsRepository,
-                CorporateActionTestSupport.systemRegisterClock());
+                CorporateActionTestSupport.systemRegisterClock(),
+                CorporateActionTestSupport.directTransactions());
         return this;
     }
 
-    private static CorporateAction actionWithId(UUID id, CorporateAction.Status status) {
+    private CorporateAction actionWithId(UUID id, CorporateAction.Status status) {
         CorporateAction ca = new CorporateAction();
         ReflectionTestUtils.setField(ca, "id", id);
         ca.setAssetId(UUID.randomUUID());
         ca.setStatus(status);
+        // the daily job re-loads every action by id inside its own transaction (H8)
+        org.mockito.Mockito.lenient().when(repository.findById(id)).thenReturn(Optional.of(ca));
         return ca;
     }
 
@@ -200,51 +205,7 @@ class CorporateActionServiceTest {
         return entry;
     }
 
-    @Test
-    @DisplayName("markSettledManually refuses when any entitled holder has an active Sperrvermerk")
-    void markSettledManually_refusesBlockedEntitledHolder() {
-        init();
-        UUID actionId = UUID.randomUUID();
-        UUID cleanInvestor = UUID.randomUUID();
-        UUID blockedInvestor = UUID.randomUUID();
-        CorporateAction awaiting = actionWithId(actionId, CorporateAction.Status.AWAITING_SETTLEMENT);
-        when(repository.findById(actionId)).thenReturn(Optional.of(awaiting));
-        when(entryRepository.findByCorporateActionId(actionId)).thenReturn(List.of(
-                entryFor(actionId, cleanInvestor, "0x" + "11".repeat(20)),
-                entryFor(actionId, blockedInvestor, "0x" + "22".repeat(20))));
-        when(holderBlockGate.isBlocked(cleanInvestor, "0x" + "11".repeat(20))).thenReturn(false);
-        when(holderBlockGate.isBlocked(blockedInvestor, "0x" + "22".repeat(20))).thenReturn(true);
-
-        assertThatThrownBy(() -> service.markSettledManually(actionId, "ref", UUID.randomUUID(), "REGISTRY_ADMIN"))
-                .isInstanceOf(de.makibytes.registerwerk.shared.ComplianceGateException.class)
-                .hasMessageContaining("Sperrvermerk");
-        verify(settlementWriter, never()).markSettled(any(), any(), any(), any());
-    }
-
-    @Test
-    @DisplayName("processDailyTransitions holds settlement (leaves COMPUTED) when an entitled holder is blocked")
-    void processDailyTransitions_holdsSettlementForBlockedEntitledHolder() {
-        init();
-        UUID actionId = UUID.randomUUID();
-        UUID blockedInvestor = UUID.randomUUID();
-        CorporateAction due = actionWithId(actionId, CorporateAction.Status.COMPUTED);
-        due.setDualControlApproverId(UUID.randomUUID());
-        due.setIssuerAttestedBy(UUID.randomUUID());
-        due.setIssuerAttestedAt(java.time.Instant.now());
-        due.setPaymentDate(LocalDate.now());
-
-        when(repository.findReadyToCompute(any())).thenReturn(List.of());
-        when(repository.findDueForSettlement(any())).thenReturn(List.of(due));
-        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
-        when(entryRepository.findByCorporateActionId(actionId)).thenReturn(
-                List.of(entryFor(actionId, blockedInvestor, "0x" + "33".repeat(20))));
-        when(holderBlockGate.isBlocked(blockedInvestor, "0x" + "33".repeat(20))).thenReturn(true);
-
-        service.processDailyTransitions();
-
-        assertThat(due.getStatus()).isEqualTo(CorporateAction.Status.COMPUTED);
-        verify(events, never()).publishEvent(any(de.makibytes.registerwerk.corporateactions.api.CorporateActionSettlementRequestedEvent.class));
-    }
+    // H6: the all-or-nothing Sperrvermerk stall tests moved to CorporateActionPayoutHoldTest (per-holder payout).
 
     @Test
     @DisplayName("announce publishes a system-attributed audit event")

@@ -281,6 +281,7 @@ export class MifidClassificationComponent implements OnInit {
         reason: `${downgrade ? 'Lower' : 'Set'} the MiFID II client category to ${category}`,
         action: 'CLIENT_CLASSIFICATION_DOWNGRADE',
         target: `POST /api/v1/entities/${this.entityId}/classification`,
+        targetBody: { clientCategory: category, reason: reason || undefined },
       },
       width: '500px',
       disableClose: true,

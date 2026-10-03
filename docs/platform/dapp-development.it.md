@@ -216,6 +216,16 @@ garanzia resta allora dov'è finché il congelamento non viene revocato, lo scam
 o l'operatore non lo libera in base a un ordine legale con `forceCancel(tradeId, to, legalBasis)`
 (evento `TradeForceCancelled`).
 
+!!! note "Rilasci su ordine legale"
+    `forceCancel` (ruolo operatore) può restituire il deposito a garanzia solo alle parti dello
+    scambio, al depositante o alla controparte. Una destinazione esterna allo scambio, indicata da
+    un ordine legale, richiede il ruolo separato `LEGAL_ORDER_ROLE`, non assegnato alla
+    distribuzione (assegnarlo a una chiave o a un multisig diverso dal wallet dell'operatore):
+    `proposeForceCancel` (evento `ForceCancelProposed`), poi un blocco temporale di due giorni
+    (`LEGAL_ORDER_DELAY`) e infine `executeForceCancel`. Una proposta può essere ritirata con
+    `withdrawForceCancel` (evento `ForceCancelWithdrawn`); il regolamento o l'annullamento dello
+    scambio la rende superflua.
+
 ## Flusso di lavoro di pubblicazione { #publication-workflow }
 
 1. **Prerequisito:** la tua azienda è registrata come organizzazione onchain
@@ -302,7 +312,7 @@ test e `README`. Si tratta di esempi piuttosto che di modelli di prodotto approv
 | dApp | Slug | Punti salienti |
 |---|---|---|
 | **Governance del consiglio di amministrazione** | `boardroom` | Il framework completo di gestione delle autorizzazioni: proposta/voto/conteggio controllato in base alle autorizzazioni + attestazioni ONCHAINID (KYC, Accreditamento) e il flusso di **limitazione dei ruoli/delega dell'amministratore dell'organizzazione** su `boardroom.tally`. |
-| **Sportello obbligazionario eWpG** | `bond-desk` | Un esempio tecnico ERC-3643/T-REX con una gamba di pagamento in token configurata. `subscribe` esegue il trasferimento del pagamento e il conio in un'unica transazione; `payCoupon`/`redeem` esercitano controlli di tempistica/idempotenza. Non si tratta di un'obbligazione classificata legalmente, di un accordo di pagamento verificato o di una prova di regolamento legale. |
+| **Sportello obbligazionario eWpG** | `bond-desk` | Un esempio tecnico ERC-3643/T-REX con una gamba di pagamento in token configurata. `subscribe` esegue il trasferimento del pagamento e il conio in un'unica transazione; `payCoupon`/`redeem` esercitano controlli di tempistica/idempotenza. Un breve primo periodo di cedola (stub) è calcolato pro rata per giorni; per un titolare con unità congelate viene trattenuta in un deposito del desk solo la loro quota (il resto è pagato subito) e il titolare la richiede con `claimWithheldCoupon` quando non c'è più nulla di congelato. Non si tratta di un'obbligazione classificata legalmente, di un accordo di pagamento verificato o di una prova di regolamento legale. |
 | **eWpG Repo e strumento di prestito** | `repo-facility` | Un esempio tecnico di prestito collateralizzato con un lato prestatore di stablecoin aperto e un lato mutuatario vincolato dal contratto. L'utilizzo in produzione è bloccato in attesa della caratterizzazione legale, della custodia/controllo, dell'escussione della garanzia, dell'oracolo, dell'insolvenza, dell'ammissibilità e dell'approvazione in materia di sicurezza. I soli controlli sull'identità dei token non rendono conforme l'escussione della garanzia. Vedi [Interoperabilità DeFi](./defi-interoperability.md#ewpgrepofacility-the-primary-exit-liquidity-mechanism). |
 
 | | Percorso |

@@ -195,7 +195,7 @@ export class WalletsListComponent implements OnInit {
       this.withDualControl('WALLET_GENERATE', `Generate signing wallet "${r.name}"`, tokens => this.walletService.generate(r.name, r.type, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('Wallet generated', 'OK', { duration: 3000 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'Failed to generate wallet', 'OK', { duration: 4000 }),
-      }), `POST /api/v1/admin/wallets/generate`);
+      }), `POST /api/v1/admin/wallets/generate`, { name: r.name, type: r.type });
     });
   }
 
@@ -205,7 +205,7 @@ export class WalletsListComponent implements OnInit {
       this.withDualControl('WALLET_IMPORT_RAW', `Import signing key "${r.name}"`, tokens => this.walletService.importRaw(r.name, r.type, r.privateKey, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('Wallet imported', 'OK', { duration: 3000 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'Import failed', 'OK', { duration: 4000 }),
-      }), `POST /api/v1/admin/wallets/import-raw`);
+      }), `POST /api/v1/admin/wallets/import-raw`);   // no targetBody: the body is the private key itself (opt-out reason)
     });
   }
 
@@ -225,7 +225,7 @@ export class WalletsListComponent implements OnInit {
       this.withDualControl('WALLET_ATTACH_HSM', `Attach HSM key "${r.name}"`, tokens => this.walletService.attachHsm(r.name, r.keyAlias, r.address, tokens).subscribe({
         next: () => { this.load(); this.snackBar.open('HSM key verified and attached', 'OK', { duration: 3500 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'HSM key verification failed', 'OK', { duration: 5000 }),
-      }), `POST /api/v1/admin/wallets/attach-hsm`);
+      }), `POST /api/v1/admin/wallets/attach-hsm`, { name: r.name, keyAlias: r.keyAlias, address: r.address });
     });
   }
 
@@ -258,7 +258,7 @@ export class WalletsListComponent implements OnInit {
         next: () => this.setDefaultFor(wallet, chainIds),
         error: e => this.snackBar.open(e.error?.message ?? 'Failed to update the default', 'OK', { duration: 3000 }),
       });
-    }, `PUT /api/v1/admin/wallet-defaults/${cid}`);
+    }, `PUT /api/v1/admin/wallet-defaults/${cid}`, { walletId: wallet.id });
   }
 
   rename(wallet: OperatorWallet) {
@@ -281,9 +281,10 @@ export class WalletsListComponent implements OnInit {
   }
 
   /** Step-up + second approver (4-eyes) for the signer-lifecycle actions (P4C-5). */
-  private withDualControl(action: string, reason: string, run: (tokens: DualControlTokens) => void, target?: string): void {
+  private withDualControl(action: string, reason: string, run: (tokens: DualControlTokens) => void,
+                          target?: string, targetBody?: unknown): void {
     this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: true, reason, action, target },
+      data: { requireDualControl: true, reason, action, target, targetBody },
       width: '500px',
       disableClose: true,
     }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {

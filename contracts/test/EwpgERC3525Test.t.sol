@@ -370,9 +370,15 @@ contract EwpgERC3525Test is Test {
         token.approve(id, thief2, type(uint256).max);
 
         vm.startPrank(registry);
-        vm.expectEmit(true, true, false, true);
-        emit IERC3525.ApprovalValue(id, address(0), 0);
+        vm.recordLogs();
         token.forcedTransfer(mallory, alice, id, unicode"court order §24");
+        // The ownership change resets every value allowance silently (as ERC-721 does); no
+        // synthetic ApprovalValue event may be emitted.
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 approvalValueTopic = IERC3525.ApprovalValue.selector;
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != approvalValueTopic, "unexpected ApprovalValue on ownership change");
+        }
         token.freezeAddress(mallory, "fraud");
         vm.stopPrank();
 
@@ -484,6 +490,87 @@ contract EwpgERC3525Test is Test {
         vm.prank(alice);
         vm.expectRevert("EwpgERC3525: global transfers are paused");
         token.approve(id, mallory, 100);
+    }
+
+    // ── H15: a holder can always revoke a delegate, however restricted the position is ──────────
+
+    function _approvedOperator() private returns (uint256 id) {
+        id = _mintWholeToken();
+        vm.prank(alice);
+        token.approve(id, mallory, 300);
+        assertEq(token.allowance(id, mallory), 300);
+    }
+
+    /// @notice H15 (red-first): `approve(…, 0)` used to revert under every restriction `approve(…, n)`
+    ///         does — so the holder of a position frozen *because* an operator key was compromised
+    ///         could not revoke that operator, whose allowance would be spendable again on unfreeze.
+    function test_approveZero_revokesWhileTokenFrozen() public {
+        uint256 id = _approvedOperator();
+        vm.prank(registry);
+        token.freezeToken(id, "stolen operator key");
+        vm.prank(alice);
+        try token.approve(id, mallory, 0) {} catch {}
+        assertEq(token.allowance(id, mallory), 0, "holder could not revoke a delegate of a frozen token");
+    }
+
+    function test_approveZero_revokesWhileOwnerFrozen() public {
+        uint256 id = _approvedOperator();
+        vm.prank(registry);
+        token.freezeAddress(alice, "stolen key");
+        vm.prank(alice);
+        try token.approve(id, mallory, 0) {} catch {}
+        assertEq(token.allowance(id, mallory), 0, "a frozen holder could not revoke a delegate");
+    }
+
+    function test_approveZero_revokesWhileSlotOrGloballyPaused() public {
+        uint256 id = _approvedOperator();
+        vm.prank(registry);
+        uint256 id2 = token.mint(alice, SLOT_BONDS, 500);
+        vm.prank(alice);
+        token.approve(id2, mallory, 50);
+
+        vm.prank(registry);
+        token.pauseSlot(SLOT_BONDS);
+        vm.prank(alice);
+        try token.approve(id, mallory, 0) {} catch {}
+        assertEq(token.allowance(id, mallory), 0, "holder could not revoke a delegate while the slot is paused");
+
+        vm.startPrank(registry);
+        token.unpauseSlot(SLOT_BONDS);
+        token.pause();
+        vm.stopPrank();
+        vm.prank(alice);
+        try token.approve(id2, mallory, 0) {} catch {}
+        assertEq(token.allowance(id2, mallory), 0, "holder could not revoke a delegate while transfers are paused");
+    }
+
+    function test_approveZero_revokesForAFrozenOperator() public {
+        uint256 id = _approvedOperator();
+        vm.prank(registry);
+        token.freezeAddress(mallory, "sanctions");
+        vm.prank(alice);
+        try token.approve(id, mallory, 0) {} catch {}
+        assertEq(token.allowance(id, mallory), 0, "holder could not revoke a frozen operator");
+    }
+
+    /// @notice Only the holder (or its approved-for-all operator) may revoke, and a non-zero value is
+    ///         still refused under every restriction.
+    function test_approveZero_stillRequiresTheHolderAndNonZeroStaysRestricted() public {
+        uint256 id = _approvedOperator();
+        vm.prank(registry);
+        token.freezeToken(id, "stolen operator key");
+
+        vm.prank(bob);
+        vm.expectRevert("ERC3525: caller is not owner nor approved-for-all");
+        token.approve(id, mallory, 0);
+
+        vm.prank(alice);
+        vm.expectRevert("EwpgERC3525: token is frozen");
+        token.approve(id, mallory, 1);
+
+        vm.prank(alice);
+        token.approve(id, mallory, 0);
+        assertEq(token.allowance(id, mallory), 0);
     }
 
     // ── Token-to-token recipient whitelist (T1-02) ──────────────────────────

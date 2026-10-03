@@ -57,6 +57,9 @@ class AssetLifecycleServiceTest {
     @Mock
     private org.springframework.beans.factory.ObjectProvider<de.makibytes.registerwerk.asset.api.RedemptionBlocker> redemptionBlockers;
 
+    @Mock
+    private de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository deploymentRepository;
+
     @InjectMocks
     private AssetLifecycleService assetLifecycleService;
 
@@ -198,8 +201,8 @@ class AssetLifecycleServiceTest {
     // ── redeem ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("redeem should transition an ISSUED asset to REDEEMED")
-    void redeem_shouldTransitionToRedeemed() {
+    @DisplayName("redeem moves an ISSUED asset to REDEMPTION_PENDING - REDEEMED only once every burn is final (C7)")
+    void redeem_shouldTransitionToRedemptionPending() {
         Asset asset = buildAsset(AssetStatus.ISSUED);
         UUID actorId = UUID.randomUUID();
         when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
@@ -207,8 +210,58 @@ class AssetLifecycleServiceTest {
 
         assetLifecycleService.redeem(asset.getId(), "eWpG §26", "RES-1", actorId, UUID.randomUUID());
 
-        assertThat(asset.getStatus()).isEqualTo(AssetStatus.REDEEMED);
-        verify(eventPublisher).publishEvent(any(Object.class));
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.REDEMPTION_PENDING);
+        verify(eventPublisher).publishEvent(any(de.makibytes.registerwerk.asset.events.AssetRedeemedEvent.class));
+        verify(eventPublisher, never()).publishEvent(any(de.makibytes.registerwerk.asset.events.AssetRedemptionCompletedEvent.class));
+    }
+
+    @Test
+    @DisplayName("C7: calling redeem again while REDEMPTION_PENDING resumes it: still pending, the event is republished so failed burns are re-driven")
+    void redeem_resumesAPendingRedemption() {
+        Asset asset = buildAsset(AssetStatus.REDEMPTION_PENDING);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assetLifecycleService.redeem(asset.getId(), "eWpG §26", "RES-1", UUID.randomUUID(), UUID.randomUUID());
+
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.REDEMPTION_PENDING);
+        verify(eventPublisher).publishEvent(any(de.makibytes.registerwerk.asset.events.AssetRedeemedEvent.class));
+    }
+
+    @Test
+    @DisplayName("C5: redeem is refused on a deployment whose token does not count in whole units (burn amounts are raw base units)")
+    void redeem_refusedOnFractionalDeployment() {
+        Asset asset = buildAsset(AssetStatus.ISSUED);
+        when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+        de.makibytes.registerwerk.deployment.api.AssetDeployment dep = new de.makibytes.registerwerk.deployment.api.AssetDeployment();
+        dep.setId(UUID.randomUUID());
+        dep.setDeploymentStatus(de.makibytes.registerwerk.deployment.api.AssetDeployment.DeploymentStatus.CONFIRMED);
+        dep.setTokenDecimals(18);
+        when(deploymentRepository.findByAssetId(asset.getId())).thenReturn(java.util.List.of(dep));
+
+        assertThatThrownBy(() -> assetLifecycleService.redeem(asset.getId(), "eWpG §26", "RES-1", UUID.randomUUID(), null))
+                .isInstanceOf(de.makibytes.registerwerk.shared.RegisterUnitsException.class)
+                .hasMessageContaining("Asset redemption").hasMessageContaining("decimals=18");
+        assertThat(asset.getStatus()).isEqualTo(AssetStatus.ISSUED);
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
+    }
+
+    @Test
+    @DisplayName("C7: completeRedemption moves REDEMPTION_PENDING to REDEEMED (audited) and ignores every other status")
+    void completeRedemption_onlyFromPending() {
+        Asset pending = buildAsset(AssetStatus.REDEMPTION_PENDING);
+        when(assetRepository.findById(pending.getId())).thenReturn(Optional.of(pending));
+        when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(assetLifecycleService.completeRedemption(pending.getId(), 2)).isTrue();
+        assertThat(pending.getStatus()).isEqualTo(AssetStatus.REDEEMED);
+        verify(eventPublisher).publishEvent(any(de.makibytes.registerwerk.asset.events.AssetRedemptionCompletedEvent.class));
+
+        assertThat(assetLifecycleService.completeRedemption(pending.getId(), 2)).isFalse(); // already REDEEMED
+        Asset issued = buildAsset(AssetStatus.ISSUED);
+        when(assetRepository.findById(issued.getId())).thenReturn(Optional.of(issued));
+        assertThat(assetLifecycleService.completeRedemption(issued.getId(), 0)).isFalse();
+        assertThat(issued.getStatus()).isEqualTo(AssetStatus.ISSUED);
     }
 
     @Test

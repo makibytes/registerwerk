@@ -20,7 +20,9 @@ import java.util.UUID;
  * issuance), and the investor confirms before the position is actually entered on the register.
  *
  * <p>T3-08 flow: SUBMITTED -> ALLOCATED -> (investor accepts) -> PAYMENT_CONFIRMED (issuer/operator, after
- * the cash arrived) -> SETTLED (compliance gates re-run, then mint or register credit). Exits:
+ * the cash arrived) -> SETTLED (compliance gates re-run, then mint or register credit). Wave 0b C7: on a deployed
+ * asset the mint is only SUBMITTED at settlement (SETTLEMENT_PENDING); the order is SETTLED when the mint transaction
+ * is final and its MINT transfer is indexed as FINALIZED, and SETTLEMENT_FAILED (retryable) when it reverted. Exits:
  * REJECTED, CANCELLED (before allocation), LAPSED (no payment within the window), RELEASED
  * (issuer/operator gave the allocation back). CONFIRMED is the legacy state of the old flow, in which
  * the investor's confirm entered the register with no payment; it is read-only now.
@@ -34,11 +36,17 @@ import java.util.UUID;
 public class SubscriptionOrder {
 
     public enum Status {
-        SUBMITTED, ALLOCATED, PAYMENT_CONFIRMED, SETTLED, CONFIRMED, REJECTED, CANCELLED, LAPSED, RELEASED;
+        SUBMITTED, ALLOCATED, PAYMENT_CONFIRMED,
+        /** Wave 0b C7: the mint was submitted (durable outbox) - the units are NOT issued until the mint is final. */
+        SETTLEMENT_PENDING,
+        /** Wave 0b C7: the mint reverted / was replaced (definitively did not happen); settling again is allowed. */
+        SETTLEMENT_FAILED,
+        SETTLED, CONFIRMED, REJECTED, CANCELLED, LAPSED, RELEASED;
 
         /** States whose allocated amount is still spoken for (counts against issue size). */
         public static final java.util.Set<Status> CAPACITY_HOLDING =
-                java.util.EnumSet.of(ALLOCATED, PAYMENT_CONFIRMED, SETTLED, CONFIRMED);
+                java.util.EnumSet.of(ALLOCATED, PAYMENT_CONFIRMED, SETTLEMENT_PENDING, SETTLEMENT_FAILED, SETTLED,
+                        CONFIRMED);
     }
 
     @Id
@@ -128,6 +136,13 @@ public class SubscriptionOrder {
     @Column(name = "settlement_tx_id")
     private UUID settlementTxId;
 
+    /** C7: when / why the mint of this order definitively failed (SETTLEMENT_FAILED). */
+    @Column(name = "settlement_failed_at")
+    private Instant settlementFailedAt;
+
+    @Column(name = "settlement_failure_reason", columnDefinition = "text")
+    private String settlementFailureReason;
+
     @Column(name = "lapsed_at")
     private Instant lapsedAt;
 
@@ -158,6 +173,10 @@ public class SubscriptionOrder {
     public void setPaymentConfirmedBy(UUID paymentConfirmedBy) { this.paymentConfirmedBy = paymentConfirmedBy; }
     public Instant getSettledAt() { return settledAt; }
     public void setSettledAt(Instant settledAt) { this.settledAt = settledAt; }
+    public Instant getSettlementFailedAt() { return settlementFailedAt; }
+    public void setSettlementFailedAt(Instant settlementFailedAt) { this.settlementFailedAt = settlementFailedAt; }
+    public String getSettlementFailureReason() { return settlementFailureReason; }
+    public void setSettlementFailureReason(String settlementFailureReason) { this.settlementFailureReason = settlementFailureReason; }
     public UUID getSettlementTxId() { return settlementTxId; }
     public void setSettlementTxId(UUID settlementTxId) { this.settlementTxId = settlementTxId; }
     public Instant getLapsedAt() { return lapsedAt; }

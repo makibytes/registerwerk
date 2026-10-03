@@ -350,6 +350,7 @@ export class UnresolvedTradesComponent implements OnInit {
         reason: `${RESOLUTIONS[resolution].title} (trade ${item.trade.id})`,
         action: RESOLUTIONS[resolution].stepUpReason,
         target: `POST /api/v1/admin/trading/unresolved/${item.trade.id}/${resolution}`,
+        targetBody: { legalBasis, note },
       },
       width: '500px',
       disableClose: true,

@@ -64,6 +64,15 @@ Esto sustituye a las indicaciones de parámetros de más abajo cuando difieran.
 - **Unidades enteras.** Las liquidaciones venden unidades de garantía enteras, redondeadas al
   alza; la parte del pago que supera la deuda corresponde al prestatario como excedente en
   efectivo reclamable.
+- **Precio de liquidación.** La bonificación se cobra sobre la deuda realmente cerrada (una unidad
+  que vale más que la deuda la cierra, y el prestatario recibe el resto como excedente), y
+  `maxRepayAmount` es un tope estricto: se vende una unidad menos si el redondeo hacia arriba lo
+  superase; en caso contrario `liquidate` revierte con `LiquidationExceedsMaxRepay(required,
+  maxRepayAmount)`. Los liquidadores deben pasar `maxRepayAmount ≥ required`.
+- **Ventana de oráculo deslizante.** La ventana de desviación ya no se reancla a la marca actual
+  cuando transcurre. Los extremos de la ventana anterior se arrastran (`carriedBandOf`) entre una
+  y dos ventanas, de modo que dos marcas separadas como máximo una ventana nunca difieren en más
+  de `maxDeviationBps`; `pushPriceWithOverride` borra la banda arrastrada.
 - **Conciliación (hallazgo 5).** `reconcileCollateral` requiere ahora `repo-markets.reconcile`,
   en poder de la org operadora del mercado, y está acotada por la garantía cuya salida del mercado
   se ha observado realmente. La configuración del mercado usa `repo-markets.configure`; las

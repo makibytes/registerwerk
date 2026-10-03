@@ -2,6 +2,7 @@
 pragma solidity ^0.8.36;
 
 import "forge-std/Test.sol";
+import "@openzeppelin/contracts/access/IAccessControl.sol";
 import "../../src/settlement/DvpSettlement.sol";
 import "../../src/examples/MockStablecoin.sol";
 
@@ -412,26 +413,177 @@ contract DvpSettlementTest is Test {
         dvp.forceCancel(TRADE, stranger, "no order");
     }
 
-    function test_forceCancel_releasesEscrowToNamedDestination() public {
+    /// @notice The operator's legal-order release stays inside the trade: with the locker (seller)
+    ///         frozen, the escrow goes to the counterparty, regardless of the circuit breaker.
+    function test_forceCancel_releasesEscrowToATradeParty() public {
         (FreezableMockToken fbond, bytes32 id,) = _lockFreezable();
         fbond.setFrozen(seller, true);
-        address custodian = address(0x44);
 
         vm.prank(operator);
         dvp.pause(); // a legal-order release must work regardless of the circuit breaker
         vm.expectEmit(true, true, false, true, address(dvp));
-        emit DvpSettlement.TradeForceCancelled(id, custodian, "BaFin Az. 2026-001");
+        emit DvpSettlement.TradeForceCancelled(id, buyer, "BaFin Az. 2026-001");
         vm.prank(operator);
-        dvp.forceCancel(id, custodian, "BaFin Az. 2026-001");
+        dvp.forceCancel(id, buyer, "BaFin Az. 2026-001");
 
-        assertEq(fbond.balanceOf(custodian), ASSET_AMOUNT);
+        assertEq(fbond.balanceOf(buyer), ASSET_AMOUNT);
         assertEq(fbond.balanceOf(address(dvp)), 0);
         (,,,,,,,, DvpSettlement.TradeState state) = dvp.trades(id);
         assertEq(uint8(state), uint8(DvpSettlement.TradeState.Cancelled));
 
         vm.prank(operator);
         vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeNotLocked.selector, id));
-        dvp.forceCancel(id, custodian, "BaFin Az. 2026-001");
+        dvp.forceCancel(id, buyer, "BaFin Az. 2026-001");
+    }
+
+    function test_forceCancel_canReturnEscrowToTheLocker() public {
+        _lockPayment(); // buyer is the locker
+        vm.prank(operator);
+        dvp.forceCancel(TRADE, buyer, "order");
+        assertEq(cash.balanceOf(buyer), PAYMENT_AMOUNT);
+    }
+
+    function test_forceCancel_revertsForADestinationOutsideTheTrade() public {
+        _lockPayment();
+        address custodian = address(0x44);
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.DestinationNotTradeParty.selector, TRADE, custodian));
+        dvp.forceCancel(TRADE, custodian, "BaFin Az. 2026-001");
+        assertEq(cash.balanceOf(address(dvp)), PAYMENT_AMOUNT, "escrow untouched");
+    }
+
+    // ── legal-order release to a destination outside the trade: role + timelock ──────
+
+    address legalOfficer = address(0x55);
+    address custodian = address(0x44);
+
+    function _grantLegalOrderRole() private {
+        bytes32 role = dvp.LEGAL_ORDER_ROLE();
+        vm.prank(operator);
+        dvp.grantRole(role, legalOfficer);
+    }
+
+    function test_proposeForceCancel_operatorKeyAloneCannotPropose() public {
+        _lockPayment();
+        bytes32 role = dvp.LEGAL_ORDER_ROLE();
+        vm.prank(operator);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, operator, role)
+        );
+        dvp.proposeForceCancel(TRADE, custodian, "order");
+    }
+
+    function test_forceCancelToThirdParty_requiresTheTimelock() public {
+        _lockPayment();
+        _grantLegalOrderRole();
+
+        vm.expectEmit(true, true, false, true, address(dvp));
+        emit DvpSettlement.ForceCancelProposed(
+            TRADE, custodian, uint64(block.timestamp + 2 days), "BaFin Az. 2026-001"
+        );
+        vm.prank(legalOfficer);
+        dvp.proposeForceCancel(TRADE, custodian, "BaFin Az. 2026-001");
+
+        uint64 executableAt = uint64(block.timestamp + 2 days);
+        vm.prank(legalOfficer);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.ForceCancelNotReady.selector, TRADE, executableAt));
+        dvp.executeForceCancel(TRADE);
+
+        vm.warp(executableAt);
+        vm.prank(operator); // the operator key cannot execute it either
+        vm.expectRevert();
+        dvp.executeForceCancel(TRADE);
+
+        vm.prank(operator);
+        dvp.pause(); // must work regardless of the circuit breaker
+        vm.expectEmit(true, true, false, true, address(dvp));
+        emit DvpSettlement.TradeForceCancelled(TRADE, custodian, "BaFin Az. 2026-001");
+        vm.prank(legalOfficer);
+        dvp.executeForceCancel(TRADE);
+
+        assertEq(cash.balanceOf(custodian), PAYMENT_AMOUNT);
+        assertEq(cash.balanceOf(address(dvp)), 0);
+        (,,,,,,,, DvpSettlement.TradeState state) = dvp.trades(TRADE);
+        assertEq(uint8(state), uint8(DvpSettlement.TradeState.Cancelled));
+        (, uint64 pendingAt,) = dvp.pendingForceCancels(TRADE);
+        assertEq(pendingAt, 0, "proposal cleared");
+
+        vm.prank(legalOfficer);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeNotLocked.selector, TRADE));
+        dvp.executeForceCancel(TRADE);
+    }
+
+    function test_executeForceCancel_revertsWithoutProposal() public {
+        _lockPayment();
+        _grantLegalOrderRole();
+        vm.prank(legalOfficer);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.ForceCancelNotProposed.selector, TRADE));
+        dvp.executeForceCancel(TRADE);
+    }
+
+    function test_proposeForceCancel_cannotBeReplacedWithoutWithdrawing() public {
+        _lockPayment();
+        _grantLegalOrderRole();
+        vm.startPrank(legalOfficer);
+        dvp.proposeForceCancel(TRADE, custodian, "order");
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.ForceCancelAlreadyProposed.selector, TRADE));
+        dvp.proposeForceCancel(TRADE, address(0x66), "other order");
+
+        dvp.withdrawForceCancel(TRADE);
+        dvp.proposeForceCancel(TRADE, address(0x66), "other order");
+        vm.stopPrank();
+        (address to, uint64 executableAt,) = dvp.pendingForceCancels(TRADE);
+        assertEq(to, address(0x66));
+        assertEq(executableAt, block.timestamp + 2 days, "the delay restarts");
+    }
+
+    function test_withdrawForceCancel_byAdminBlocksExecution() public {
+        _lockPayment();
+        _grantLegalOrderRole();
+        vm.prank(legalOfficer);
+        dvp.proposeForceCancel(TRADE, custodian, "order");
+
+        vm.prank(stranger);
+        vm.expectRevert();
+        dvp.withdrawForceCancel(TRADE);
+
+        vm.prank(operator); // the admin
+        dvp.withdrawForceCancel(TRADE);
+
+        vm.warp(block.timestamp + 3 days);
+        vm.prank(legalOfficer);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.ForceCancelNotProposed.selector, TRADE));
+        dvp.executeForceCancel(TRADE);
+        assertEq(cash.balanceOf(address(dvp)), PAYMENT_AMOUNT);
+    }
+
+    function test_forceCancelToThirdParty_isMootedByTheTradeSettlingFirst() public {
+        _lockPayment();
+        _grantLegalOrderRole();
+        vm.prank(legalOfficer);
+        dvp.proposeForceCancel(TRADE, custodian, "order");
+
+        vm.prank(seller);
+        dvp.settle(TRADE, _paymentTerms());
+
+        vm.warp(block.timestamp + 3 days);
+        vm.prank(legalOfficer);
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeNotLocked.selector, TRADE));
+        dvp.executeForceCancel(TRADE);
+        assertEq(cash.balanceOf(custodian), 0);
+    }
+
+    function test_proposeForceCancel_rejectsInvalidDestinationAndUnlockedTrade() public {
+        _lockPayment();
+        _grantLegalOrderRole();
+        vm.startPrank(legalOfficer);
+        vm.expectRevert(DvpSettlement.InvalidDestination.selector);
+        dvp.proposeForceCancel(TRADE, address(0), "order");
+        vm.expectRevert(DvpSettlement.InvalidDestination.selector);
+        dvp.proposeForceCancel(TRADE, address(dvp), "order");
+        vm.expectRevert(abi.encodeWithSelector(DvpSettlement.TradeNotLocked.selector, bytes32(uint256(1))));
+        dvp.proposeForceCancel(bytes32(uint256(1)), custodian, "order");
+        vm.stopPrank();
     }
 
     function test_forceCancel_rejectsInvalidDestination() public {

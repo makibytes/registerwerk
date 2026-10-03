@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.stepup.internal;
 
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.stepup.api.ClaimsChallengeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,15 @@ class StepUpEnforcer {
     }
 
     void enforce(Jwt jwt, String reason, int maxAgeMinutes) {
+        // C1: a second approver's token is that person's approval of one request, not the caller's own
+        // proof. Accepting it here would run the request as the approver.
+        if (JwtMintingService.isDualControlApproverToken(jwt)) {
+            log.warn("Dual-control approver token presented as the caller's own step-up proof: sub={} action={}",
+                    jwt.getSubject(), reason);
+            throw new AccessDeniedException(
+                    "A dual-control approver token cannot be used as the caller's own step-up proof. "
+                    + "Complete MFA step-up at /api/v1/auth/step-up for your own session.");
+        }
         switch (policy.mode()) {
             case LOCAL_TOTP -> enforceLocalTotp(jwt, reason, maxAgeMinutes);
             case ENTRA_AUTH_CONTEXT -> enforceEntraAuthContext(jwt, reason, maxAgeMinutes);

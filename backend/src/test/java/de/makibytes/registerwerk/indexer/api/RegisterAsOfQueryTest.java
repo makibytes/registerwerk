@@ -39,6 +39,11 @@ class RegisterAsOfQueryTest {
     private final EntityManager em = mock(EntityManager.class);
     private final RegisterAsOfQuery query = new RegisterAsOfQuery(deployments, lookup);
 
+    /** One result row of the as-of query: from, to, amount, deployment id, chain id, contract. */
+    private static Object[] row(String from, String to, BigDecimal amount) {
+        return new Object[]{from, to, amount, UUID.randomUUID(), UUID.randomUUID(), "0xcontract"};
+    }
+
     @SuppressWarnings("unchecked")
     private void arrange(TokenStandard standard, List<Object[]> rows) {
         ReflectionTestUtils.setField(query, "entityManager", em);
@@ -62,7 +67,7 @@ class RegisterAsOfQueryTest {
     @DisplayName("ERC-3525 and Starknet ERC-3525 are unsupported: no netting of token ids")
     void erc3525Unsupported() {
         for (TokenStandard s : List.of(TokenStandard.ERC3525, TokenStandard.STARKNET_ERC3525)) {
-            arrange(s, List.<Object[]>of(new Object[]{ZERO, A, null}));
+            arrange(s, List.<Object[]>of(row(ZERO, A, null)));
             var result = query.balancesAsOf(assetId, CUTOFF);
             assertThat(result.unsupportedReason()).contains(s.name());
             assertThat(result.balances()).isEmpty();
@@ -72,7 +77,7 @@ class RegisterAsOfQueryTest {
     @Test
     @DisplayName("a null-amount transfer on ERC-20 is unsupported, not one unit")
     void nullAmountUnsupportedOnErc20() {
-        arrange(TokenStandard.ERC20, List.<Object[]>of(new Object[]{ZERO, A, new BigDecimal("5")}, new Object[]{A, B, null}));
+        arrange(TokenStandard.ERC20, List.<Object[]>of(row(ZERO, A, new BigDecimal("5")), row(A, B, null)));
         var result = query.balancesAsOf(assetId, CUTOFF);
         assertThat(result.unsupportedReason()).contains("without amount");
     }
@@ -80,15 +85,27 @@ class RegisterAsOfQueryTest {
     @Test
     @DisplayName("ERC-721 null amount still counts as one unit; ERC-20 amounts net normally")
     void supportedCases() {
-        arrange(TokenStandard.ERC721, List.<Object[]>of(new Object[]{ZERO, A, null}));
+        arrange(TokenStandard.ERC721, List.<Object[]>of(row(ZERO, A, null)));
         var nft = query.balancesAsOf(assetId, CUTOFF);
         assertThat(nft.unsupportedReason()).isNull();
         assertThat(nft.balances().get(A)).isEqualByComparingTo("1");
 
-        arrange(TokenStandard.ERC20, List.<Object[]>of(new Object[]{ZERO, A, new BigDecimal("5")}, new Object[]{A, B, new BigDecimal("2")}));
+        arrange(TokenStandard.ERC20, List.<Object[]>of(row(ZERO, A, new BigDecimal("5")), row(A, B, new BigDecimal("2"))));
         var ft = query.balancesAsOf(assetId, CUTOFF);
         assertThat(ft.unsupportedReason()).isNull();
         assertThat(ft.balances().get(A)).isEqualByComparingTo("3");
         assertThat(ft.balances().get(B)).isEqualByComparingTo("2");
+    }
+
+    @Test
+    @DisplayName("H7: transfers with a NULL deployment (not yet linked) are netted and counted as attributed")
+    void unlinkedTransfersAreNettedAndReported() {
+        Object[] unlinkedMint = new Object[]{ZERO, A, new BigDecimal("7"), null, UUID.randomUUID(), "0xcontract"};
+        arrange(TokenStandard.ERC20, List.<Object[]>of(row(ZERO, A, new BigDecimal("5")), unlinkedMint));
+
+        var result = query.balancesAsOf(assetId, CUTOFF);
+
+        assertThat(result.balances().get(A)).isEqualByComparingTo("12");
+        assertThat(result.unlinkedAttributed()).isEqualTo(1);
     }
 }

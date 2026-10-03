@@ -156,7 +156,7 @@ class KycJurisdictionApprovalIT {
      * caller AND a dual-control token from a second, currently-enabled REGISTRY_ADMIN
      * {@code AppUser} (the validator re-checks the DB, not just the JWT claims).
      */
-    private HttpHeaders stepUpHeaders(UUID entityId, String... roles) {
+    private HttpHeaders stepUpHeaders(UUID entityId, Map<String, String> body, String... roles) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(signedJwt("00000000-0000-0000-0000-000000000001", true, roles));
@@ -164,17 +164,18 @@ class KycJurisdictionApprovalIT {
         // (@RequiresStepUp(reason = "KYC_JURISDICTION_APPROVE")) — the dual-control token
         // must carry a matching stepup_scope claim .
         headers.set("X-Dual-Control-Token", dualControlToken("KYC_JURISDICTION_APPROVE",
-                "/api/v1/entities/" + entityId + "/kyc/jurisdictions/DE_EWPG/approve"));
+                "/api/v1/entities/" + entityId + "/kyc/jurisdictions/DE_EWPG/approve", body));
         return headers;
     }
 
-    private String dualControlToken(String scope, String path) {
+    private String dualControlToken(String scope, String path, Map<String, String> body) {
         AppUser approver = new AppUser();
         approver.setEmail("approver-" + UUID.randomUUID() + "@test.local");
         UUID approverId = appUserRepository.save(approver).getId();
         // Bound to this exact request and single use (K3, 6-08).
-        return de.makibytes.registerwerk.TestJwt.dualControl(TEST_JWT_SECRET, approverId, scope, "POST", path,
-                "REGISTRY_ADMIN");
+        // The approval covers the request body too (C2): the approver is shown, and binds, exactly this JSON.
+        return de.makibytes.registerwerk.TestJwt.dualControlWithBody(TEST_JWT_SECRET, approverId, scope, "POST", path,
+                tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(body), "REGISTRY_ADMIN");
     }
 
     private String signedJwt(String sub, boolean stepUp, String... roles) {
@@ -282,7 +283,7 @@ class KycJurisdictionApprovalIT {
             HttpMethod.POST,
             new HttpEntity<>(
                 Map.of("expiresAt", LocalDate.now().plusYears(1).toString()),
-                stepUpHeaders(entityId, "COMPLIANCE_OFFICER")
+                stepUpHeaders(entityId, Map.of("expiresAt", LocalDate.now().plusYears(1).toString()), "COMPLIANCE_OFFICER")
             ),
             String.class,
             entityId
@@ -304,7 +305,7 @@ class KycJurisdictionApprovalIT {
             HttpMethod.POST,
             new HttpEntity<>(
                 Map.of("expiresAt", LocalDate.now().plusYears(2).toString()),
-                stepUpHeaders(entityId, "COMPLIANCE_OFFICER")
+                stepUpHeaders(entityId, Map.of("expiresAt", LocalDate.now().plusYears(2).toString()), "COMPLIANCE_OFFICER")
             ),
             KycJurisdictionApprovalResponse.class,
             entityId
@@ -326,7 +327,7 @@ class KycJurisdictionApprovalIT {
             HttpMethod.POST,
             new HttpEntity<>(
                 Map.of("overrideNote", "Attempted override without admin role"),
-                stepUpHeaders(entityId, "COMPLIANCE_OFFICER")
+                stepUpHeaders(entityId, Map.of("overrideNote", "Attempted override without admin role"), "COMPLIANCE_OFFICER")
             ),
             String.class,
             entityId
@@ -346,7 +347,7 @@ class KycJurisdictionApprovalIT {
             HttpMethod.POST,
             new HttpEntity<>(
                 Map.of("overrideNote", "Approved after enhanced manual review"),
-                stepUpHeaders(entityId, "REGISTRY_ADMIN")
+                stepUpHeaders(entityId, Map.of("overrideNote", "Approved after enhanced manual review"), "REGISTRY_ADMIN")
             ),
             KycJurisdictionApprovalResponse.class,
             entityId

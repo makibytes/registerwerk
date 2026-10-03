@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.internal.CorporateActionConfirmationService;
 import de.makibytes.registerwerk.corporateactions.internal.CorporateActionService;
 import de.makibytes.registerwerk.corporateactions.web.dto.CancelCorporateActionRequest;
+import de.makibytes.registerwerk.corporateactions.web.dto.ConfirmSettlementRequest;
 import de.makibytes.registerwerk.corporateactions.web.dto.CorporateActionView;
 import de.makibytes.registerwerk.corporateactions.web.dto.MarkSettledRequest;
 import de.makibytes.registerwerk.corporateactions.web.dto.OverrideAttestationRequest;
@@ -90,9 +91,11 @@ public class CorporateActionAdminController {
     @PostMapping("/{corporateActionId}/confirm-settlement")
     @RequiresStepUp(requireSecondApprover = false, reason = "CORPORATE_ACTION_SETTLEMENT_CONFIRMATION")
     public ResponseEntity<CorporateAction> confirmSettlement(
-            @PathVariable UUID corporateActionId, Authentication auth) {
+            @PathVariable UUID corporateActionId,
+            @RequestBody(required = false) ConfirmSettlementRequest request, Authentication auth) {
         CorporateAction confirmed = corporateActionService.confirmSettlementAsOperator(
-                corporateActionId, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+                corporateActionId, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"),
+                request != null ? request.payoutDigest() : null);
         return ResponseEntity.ok(confirmed);
     }
 

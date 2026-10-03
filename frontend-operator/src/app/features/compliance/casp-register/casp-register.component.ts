@@ -382,6 +382,7 @@ export class CaspRegisterComponent implements OnInit {
       reason: `Save CASP register entry ${entry.legalName}`,
       action: 'CASP_REGISTER_EDIT',
       target: 'PUT /api/v1/compliance/casp-register',
+      targetBody: entry,
     }).subscribe(tokens => {
       if (!tokens?.dualControlToken) return;
       this.saving = true;

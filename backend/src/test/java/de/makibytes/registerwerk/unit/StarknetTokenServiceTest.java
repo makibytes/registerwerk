@@ -38,6 +38,12 @@ class StarknetTokenServiceTest {
     @InjectMocks
     private StarknetTokenService starknetTokenService;
 
+    @Test
+    @DisplayName("C5: the Cairo ERC-3525 is deployed with value_decimals = 0 (register amounts are whole units)")
+    void erc3525_valueDecimalsAreZero() {
+        assertThat(StarknetTokenService.ERC3525_VALUE_DECIMALS).isZero();
+    }
+
     // ── STARK ECDSA crypto tests ──────────────────────────────────────────────
 
     @Test

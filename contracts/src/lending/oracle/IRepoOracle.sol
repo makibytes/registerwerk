@@ -26,8 +26,10 @@ interface IRepoOracle {
     /// @notice Maximum cumulative relative move (in bps) this oracle tolerates for one asset
     ///         within one deviation window before requiring an explicit override (see
     ///         {RegisterwerkNavOracle.maxDeviationBps}). The bound must hold for any sequence of
-    ///         ordinary pushes, not just one, and it must never increase over the oracle's
-    ///         lifetime: `EwpgRepoMarket` cross-checks it against a market's liquidation haircut
+    ///         ordinary pushes, not just one, between any two marks at most one window apart
+    ///         (including marks on either side of a window boundary), and it must never
+    ///         increase over the oracle's lifetime: `EwpgRepoMarket` cross-checks it against a
+    ///         market's liquidation haircut
     ///         at creation time — a haircut thinner than this tolerance means ordinary,
     ///         in-tolerance price pushes could already leave a liquidation under-collateralized.
     ///         An oracle with no such concept (e.g. a future continuous feed) may return

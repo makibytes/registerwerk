@@ -66,6 +66,16 @@ Cette section remplace les indications de paramètres ci-dessous lorsqu'elles di
 - **Unités entières.** Les liquidations vendent des unités de garantie entières, arrondies au
   supérieur ; la part du paiement au-delà de la dette revient à l'emprunteur sous forme
   d'excédent en espèces réclamable.
+- **Prix de liquidation.** Le bonus est prélevé sur la dette effectivement soldée (une unité qui
+  vaut plus que la dette la solde, et l'emprunteur reçoit le reste en excédent), et
+  `maxRepayAmount` est un plafond strict : une unité de moins est vendue si l'arrondi supérieur le
+  dépasserait, sinon `liquidate` échoue avec `LiquidationExceedsMaxRepay(required,
+  maxRepayAmount)`. Les liquidateurs doivent passer `maxRepayAmount ≥ required`.
+- **Fenêtre d'oracle glissante.** La fenêtre d'écart ne se réancre plus sur la marque courante
+  lorsqu'elle s'écoule. Les extrêmes de la fenêtre précédente sont reportés (`carriedBandOf`)
+  pendant une à deux fenêtres, de sorte que deux marques espacées d'une fenêtre au plus ne
+  diffèrent jamais de plus de `maxDeviationBps` ; `pushPriceWithOverride` efface la bande
+  reportée.
 - **Rapprochement (constat 5).** `reconcileCollateral` exige désormais `repo-markets.reconcile`,
   détenu par l'org opératrice du marché, et est borné par les garanties effectivement observées
   en sortie du marché. La configuration du marché utilise `repo-markets.configure` ; les réserves

@@ -51,6 +51,8 @@ const requiredEconomicEvents = {
     'CollateralReconciled(indexed address,uint256,uint256,bytes32)',
     'LiquidationSurplusCredited(indexed address,uint256)',
     'SurplusClaimed(indexed address,uint256)',
+    'CollateralAdded(indexed address,uint256,uint256)',
+    'CollateralWithdrawn(indexed address,uint256,uint256)',
   ],
   EwpgRepoMarketFactory: [
     'MarketCreated(indexed address,indexed address,indexed address,uint256,address)',
@@ -59,11 +61,14 @@ const requiredEconomicEvents = {
   DvpSettlement: [
     'TradeCancelled(indexed bytes32,indexed address)',
     'TradeForceCancelled(indexed bytes32,indexed address,string)',
+    'ForceCancelProposed(indexed bytes32,indexed address,uint64,string)',
+    'ForceCancelWithdrawn(indexed bytes32,indexed address)',
   ],
   EwpgBondDesk: [
     'CouponPaid(indexed uint256,indexed address,uint256)',
     'CouponWithheld(indexed uint256,indexed address,uint256)',
     'WithheldReleased(indexed uint256,indexed address,indexed address,uint256,string)',
+    'WithheldCouponClaimed(indexed uint256,indexed address,uint256)',
     'ForcedRedemption(indexed address,indexed address,uint256,uint256,string)',
   ],
   EwpgRepoVault: [

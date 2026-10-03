@@ -79,5 +79,23 @@
       { "name": "borrower", "type": "address", "indexed": true },
       { "name": "amount",   "type": "uint256", "indexed": false }
     ]
+  },
+  {
+    "type": "event",
+    "name": "CollateralAdded",
+    "inputs": [
+      { "name": "borrower", "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false },
+      { "name": "totalCollateral", "type": "uint256", "indexed": false }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "CollateralWithdrawn",
+    "inputs": [
+      { "name": "borrower", "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false },
+      { "name": "remainingCollateral", "type": "uint256", "indexed": false }
+    ]
   }
 ]

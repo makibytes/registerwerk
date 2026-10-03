@@ -22,7 +22,9 @@ class OpenSubscriptionOrdersPortImpl implements OpenSubscriptionOrdersPort {
     @Transactional(readOnly = true)
     public List<OpenOrder> openOrders(UUID assetId) {
         return repository.findByAssetIdAndStatusIn(assetId,
-                        EnumSet.of(SubscriptionOrder.Status.SUBMITTED, SubscriptionOrder.Status.ALLOCATED)).stream()
+                        EnumSet.of(SubscriptionOrder.Status.SUBMITTED, SubscriptionOrder.Status.ALLOCATED,
+                                // C7: a mint in flight (or to be retried) must not be overtaken by a register handover
+                                SubscriptionOrder.Status.SETTLEMENT_PENDING, SubscriptionOrder.Status.SETTLEMENT_FAILED)).stream()
                 .map(o -> new OpenOrder(o.getId(), o.getInvestorEntityId(), o.getWalletAddress(),
                         o.getRequestedAmount(), o.getAllocatedAmount(), o.getStatus().name()))
                 .toList();

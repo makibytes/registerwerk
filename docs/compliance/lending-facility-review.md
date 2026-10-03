@@ -64,6 +64,15 @@ This supersedes the parameter guidance below where they differ.
   at a 50% close factor per call.
 - **Whole units.** Liquidations sell whole collateral units rounded up; payment above the debt is
   owed to the borrower as a claimable cash surplus.
+- **Liquidation pricing.** The bonus is charged on the debt actually closed (a unit worth more
+  than the debt closes it, and the borrower gets the remainder as surplus), and `maxRepayAmount`
+  is a hard cap: one unit fewer is sold if rounding up would exceed it, otherwise `liquidate`
+  reverts `LiquidationExceedsMaxRepay(required, maxRepayAmount)`. Liquidators must pass
+  `maxRepayAmount ≥ required`.
+- **Sliding oracle window.** The deviation window no longer re-anchors on the current mark when it
+  elapses. The previous window's extremes are carried (`carriedBandOf`) for one to two windows, so
+  two marks at most one window apart never differ by more than `maxDeviationBps`;
+  `pushPriceWithOverride` clears the carried band.
 - **Reconciliation (finding 5).** `reconcileCollateral` now needs `repo-markets.reconcile` held by
   the market's operating org, and is bounded by the collateral actually observed leaving the
   market. Market configuration uses `repo-markets.configure`; reserves only go to the market's

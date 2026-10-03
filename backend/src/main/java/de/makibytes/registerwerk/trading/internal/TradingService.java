@@ -909,6 +909,10 @@ public class TradingService {
      * {@code registerwerk.trading.offchain-settlement-on-deployed-assets} is on (demo only).
      */
     private void requireOffchainSettlementAllowed(UUID assetId) {
+        // C5: quantities and prices are per WHOLE unit, the register holds raw base units - same guard as every
+        // other register-unit flow, whether or not off-chain settlement on deployed assets is switched on.
+        de.makibytes.registerwerk.deployment.api.RegisterUnits.requireWholeUnits(
+                assetDeploymentRepository, assetId, "Trading");
         if (!offchainSettlementBlocked(assetId)) {
             return;
         }

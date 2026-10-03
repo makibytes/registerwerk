@@ -39,10 +39,13 @@ export class CorporateActionsService {
   /** The issuer's attestation that the underlying obligation/cash-leg is ready — not step-up
    *  gated (this app has no step-up UI today; see the corporate-actions plan's confirmed
    *  deferral), but authenticated: the caller must be the asset's issuer. */
-  attestSettlement(assetId: string, corporateActionId: string, attestationReference: string): Observable<CorporateActionView> {
+  attestSettlement(assetId: string, corporateActionId: string, attestationReference: string,
+                   payoutDigest?: string | null): Observable<CorporateActionView> {
+    // The digest of the computed amounts the issuer is looking at: the backend refuses (409) when they were
+    // re-computed since, so amounts the issuer never saw can never be attested.
     return this.http.post<CorporateActionView>(
       `${this.assetsBase}/${assetId}/corporate-actions/${corporateActionId}/attest-settlement`,
-      { attestationReference, acknowledged: true });
+      { attestationReference, acknowledged: true, payoutDigest: payoutDigest ?? null });
   }
 
   // ── Investor side ────────────────────────────────────────────────────────────

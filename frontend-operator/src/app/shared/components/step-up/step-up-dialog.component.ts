@@ -13,6 +13,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatIconModule } from '@angular/material/icon';
 import { StepUpService } from '../../../core/api/step-up.service';
 import { buildApprovalRequestBlock } from '../../utils/approval-request';
+import { canonicalJson } from '../../utils/canonical-json';
 import { submitTotpForStepUpToken } from './step-up-totp-submit';
 
 export interface StepUpDialogData {
@@ -37,7 +38,12 @@ export interface StepUpDialogData {
    * field may be left empty; the backend decides and refuses with 403 when one was needed.
    */
   dualControlOptional?: boolean;
-  /** JSON body of that request, for body-bound reasons (mint, burn, forced transfer/allowance). */
+  /**
+   * JSON body of that request. Every dual-control approval is bound to the canonical body (only a few
+   * documented non-JSON / secret-bearing reasons are exempt), so a caller whose request has a body MUST
+   * pass exactly what it then sends - otherwise the approver's token does not match and the call is refused.
+   * Leave undefined when the request sends no body.
+   */
   targetBody?: unknown;
 }
 
@@ -257,8 +263,9 @@ export class StepUpDialogComponent {
   loading = false;
   errorMessage: string | null = null;
 
+  /** The body in canonical form: the text the backend binds and the approver sees. */
   get bodyText(): string {
-    return this.data.targetBody === undefined ? '' : JSON.stringify(this.data.targetBody);
+    return this.data.targetBody === undefined ? '' : canonicalJson(this.data.targetBody);
   }
 
   cancel(): void {

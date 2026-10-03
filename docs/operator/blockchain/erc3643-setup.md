@@ -39,9 +39,12 @@ The backend issues KYC/AML claims through an ONCHAINID `ClaimIssuer` **contract*
 cd contracts
 REGISTRY_WALLET_PRIVATE_KEY=$REGISTRY_SIGNER_KEY \
   forge script script/DeployClaimIssuer.s.sol --rpc-url $RPC_URL --broadcast
-# Logs "ClaimIssuer : 0x…"; CLAIM_ISSUER_MANAGEMENT_KEY overrides the management key
-# (default: the broadcasting wallet, which must be the backend's registry signer).
+# Logs "ClaimIssuer : 0x…". The MANAGEMENT key is the broadcasting wallet, i.e. the
+# backend's registry signer (default); CLAIM_ISSUER_MANAGEMENT_KEY is an optional override.
 ```
+
+!!! warning "Management key = hot signing key by default"
+    With the default, the registry signer both signs claims and controls the ClaimIssuer's key set (`addKey`/`removeKey`) and its upgrades, and the backend needs MANAGEMENT rights to call `revokeClaimBySignature`. Treat the registry signer as a high-value key (KMS/HSM-backed in production). `CLAIM_ISSUER_MANAGEMENT_KEY` may name a separate cold or multisig key instead; that key must then `addKey(keccak256(abi.encode(registrySigner)), 3, 1)` so the signer can sign claims, and revocation by the backend reverts unless the signer also holds a MANAGEMENT key (purpose 1), so claims have to be revoked from the management key.
 
 Set `CLAIM_ISSUER_<CHAIN>` (for example `CLAIM_ISSUER_ETH_TESTNET`, bound to `registerwerk.contracts.claim-issuer.<chain>`) and restart the backend. Without it, the backend rejects claim issuance and T-REX suite deployment on that chain instead of broadcasting transactions that would revert. Before each `addClaim`, it also checks that the signer holds a key on the ClaimIssuer.
 

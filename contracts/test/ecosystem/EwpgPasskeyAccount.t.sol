@@ -221,4 +221,51 @@ contract EwpgPasskeyAccountTest is Test {
         vm.prank(address(entryPoint));
         assertEq(delegated.validateUserOp(op, hash, 0), 1, "SIG_VALIDATION_FAILED");
     }
+
+    /// @notice H15 (red-first): the shared immutable guardian is, in every delegating EOA's context, the
+    ///         guardian of *that EOA* — `guardianExecute` ran an arbitrary call from the delegating
+    ///         account, so one registry key controlled every EOA that ever pointed a 7702 authorization at
+    ///         an instance. The privileged functions now only run at the instance's own address.
+    function test_eip7702DelegateCannotBeControlledByTheInstanceGuardian() public {
+        address registryGuardian = address(0x6A);
+        EwpgPasskeyAccount impl = new EwpgPasskeyAccount(IEntryPoint(address(entryPoint)), qx, qy, registryGuardian);
+
+        MockStablecoin token = new MockStablecoin("EUR", "EUR", 6);
+        uint256 alicePk = 0xA11CE5;
+        address alice = vm.addr(alicePk);
+        token.mint(alice, 1_000_000e6);
+        vm.signAndAttachDelegation(address(impl), alicePk);
+        vm.prank(alice);
+        (bool ok,) = alice.call("");
+        assertTrue(ok);
+
+        EwpgPasskeyAccount delegated = EwpgPasskeyAccount(payable(alice));
+        vm.prank(registryGuardian);
+        try delegated.guardianExecute(address(token), 0, abi.encodeCall(IERC20.transfer, (registryGuardian, 1_000_000e6))) {}
+        catch {}
+        assertEq(token.balanceOf(alice), 1_000_000e6, "guardian drained a delegating EOA");
+        assertEq(token.balanceOf(registryGuardian), 0);
+        vm.prank(registryGuardian);
+        vm.expectRevert(EwpgPasskeyAccount.NotInstance.selector);
+        delegated.guardianExecute(address(token), 0, abi.encodeCall(IERC20.transfer, (registryGuardian, 1)));
+
+        vm.prank(registryGuardian);
+        try delegated.setCallRole(address(token), IERC20.transfer.selector, delegated.ROLE_ADMIN()) {} catch {}
+        assertEq(delegated.callRole(address(token), IERC20.transfer.selector), bytes32(0), "guardian wrote a delegating EOA's policy");
+    }
+
+    /// @notice The instance itself keeps its guardian (the check must not lock out the real account).
+    function test_instanceGuardianStillWorksAtTheInstanceAddress() public {
+        MockStablecoin token = new MockStablecoin("EUR", "EUR", 6);
+        token.mint(address(account), 5e6);
+        address guardian = account.guardian();
+
+        vm.prank(guardian);
+        account.guardianExecute(address(token), 0, abi.encodeCall(IERC20.transfer, (guardian, 5e6)));
+        assertEq(token.balanceOf(guardian), 5e6);
+
+        vm.prank(guardian);
+        account.setCallRole(address(token), IERC20.transfer.selector, account.ROLE_ADMIN());
+        assertEq(account.callRole(address(token), IERC20.transfer.selector), account.ROLE_ADMIN());
+    }
 }

@@ -219,6 +219,16 @@ están congelados; el depósito en garantía permanece entonces en su sitio hast
 congelación, se cancele la operación o el operador lo libere en virtud de una orden legal con
 `forceCancel(tradeId, to, legalBasis)` (evento `TradeForceCancelled`).
 
+!!! note "Liberaciones por orden legal"
+    `forceCancel` (rol de operador) solo puede devolver el depósito en garantía a las partes de la
+    operación, el depositante o la contraparte. Un destino ajeno a la operación, indicado por una
+    orden legal, requiere el rol independiente `LEGAL_ORDER_ROLE`, que no se concede en el
+    despliegue (asígnelo a una clave o multifirma distinta de la cartera del operador):
+    `proposeForceCancel` (evento `ForceCancelProposed`), después un bloqueo temporal de dos días
+    (`LEGAL_ORDER_DELAY`) y por último `executeForceCancel`. Una propuesta puede retirarse con
+    `withdrawForceCancel` (evento `ForceCancelWithdrawn`); liquidar o cancelar la operación la
+    deja sin efecto.
+
 ## Flujo de trabajo de publicación { #publication-workflow }
 
 1. **Requisito previo:** su empresa está registrada como organización en cadena (por el lado del
@@ -312,7 +322,7 @@ cuando `registerwerk.seed-demo-data=true`:
 | dApp | Slug | Muestra |
 |---|---|---|
 | **Boardroom Governance** | `boardroom` | El marco de gestión de permisos al completo: proponer/votar/escrutar restringido por permisos + atestaciones ONCHAINID (KYC, Acreditación), y el flujo de **restricción por rol / delegación de administrador de organización** en `boardroom.tally`. |
-| **eWpG Bond Desk** | `bond-desk` | Un ejemplo técnico ERC-3643/T-REX con una pata de pago en token configurada. `subscribe` realiza la transferencia de pago y la acuñación en una sola transacción; `payCoupon`/`redeem` ejercitan los controles de tiempo/idempotencia. No es un bono clasificado legalmente, ni un acuerdo de pago verificado, ni prueba de liquidación legal. |
+| **eWpG Bond Desk** | `bond-desk` | Un ejemplo técnico ERC-3643/T-REX con una pata de pago en token configurada. `subscribe` realiza la transferencia de pago y la acuñación en una sola transacción; `payCoupon`/`redeem` ejercitan los controles de tiempo/idempotencia. Un primer periodo de cupón corto (stub) se prorratea por días; para un titular con unidades congeladas solo se retiene esa parte en un depósito del desk (el resto se paga de inmediato) y el titular la reclama con `claimWithheldCoupon` cuando ya no haya nada congelado. No es un bono clasificado legalmente, ni un acuerdo de pago verificado, ni prueba de liquidación legal. |
 | **eWpG Repo & Lending Facility** | `repo-facility` | Un ejemplo técnico de préstamo con garantía, con un lado de prestamista en stablecoin abierto y un lado de prestatario restringido por contrato. El uso en producción está bloqueado en espera de la calificación legal, custodia/control, ejecución de la garantía, oráculo, insolvencia, elegibilidad y aprobación de seguridad. Las comprobaciones de identidad del token por sí solas no hacen que la ejecución de la garantía sea conforme. Véase [Interoperabilidad DeFi](./defi-interoperability.md#ewpgrepofacility-the-primary-exit-liquidity-mechanism). |
 
 | | Ruta |

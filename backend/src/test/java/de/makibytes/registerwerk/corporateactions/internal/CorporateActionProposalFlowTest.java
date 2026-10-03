@@ -11,7 +11,8 @@ import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.corporateactions.web.dto.ProposeCorporateActionRequest;
 import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
+import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -55,7 +56,8 @@ class CorporateActionProposalFlowTest {
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
     @Mock private ApplicationEventPublisher events;
-    @Mock private HolderBlockGate holderBlockGate;
+    @Mock private PartyEligibilityGate partyGate;
+    @Mock private EntityTaskPort entityTasks;
     @Mock private FinalityGate finalityGate;
     @Mock private RegisterFreshnessGate registerFreshnessGate;
 
@@ -63,9 +65,10 @@ class CorporateActionProposalFlowTest {
 
     private CorporateActionProposalFlowTest init() {
         service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
-                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate,
+                couponPaymentRepository, proposalValidator, events, partyGate, entityTasks, finalityGate,
                 registerFreshnessGate, bondTermsRepository,
-                CorporateActionTestSupport.systemRegisterClock());
+                CorporateActionTestSupport.systemRegisterClock(),
+                CorporateActionTestSupport.directTransactions());
         return this;
     }
 

@@ -250,6 +250,26 @@ Frühere Märkte sind unveränderlich und behalten ihr Verhalten; siehe *Legacy-
   gutgeschrieben (`surplusOf`) und über `claimLiquidationSurplus()` ausgezahlt; er ist keine
   Pool-Liquidität. Die Kundenseite **Meine Kredite** zeigt den abrufbaren Überschuss mit einer
   Abruf-Aktion.
+- **Liquidationspreis: Bonus auf die geschlossene Schuld, harte Rückzahlungsgrenze.** Der Bonus
+  wird auf die tatsächlich geschlossene Schuld erhoben. Solange die verkauften Einheiten weniger
+  wert sind als die Schuld, zahlt der Liquidator ihren Wert zur Marke abzüglich Bonus; sind die
+  Einheit(en) mehr wert als die gesamte Schuld, wird die gesamte Schuld geschlossen und der
+  Liquidator zahlt den Wert der Einheiten abzüglich `bonus × Schuld`; den Rest erhält der
+  Kreditnehmer als `surplusOf`. `maxRepayAmount` ist eine harte Obergrenze für den Betrag, der dem
+  Liquidator belastet wird: Würde Aufrunden sie überschreiten, wird eine Einheit weniger verkauft,
+  und kostet selbst eine Einheit mehr, revertiert `liquidate` mit
+  `LiquidationExceedsMaxRepay(required, maxRepayAmount)` und nennt den zu autorisierenden Betrag.
+  Bots und UIs müssen `maxRepayAmount ≥ required` übergeben: `liquidate(borrower, debt)` schließt
+  eine Position nicht mehr in einem Aufruf, wenn die abschließende Einheit mehr wert ist als die
+  Schuld.
+- **Gleitendes Oracle-Fenster, kein Neuverankern.** `RegisterwerkNavOracle` verankert sein
+  Abweichungsfenster nach Ablauf nicht mehr auf der aktuellen Marke neu; dadurch konnte ein
+  Feed-Schlüssel eine Bewegung über die Fenstergrenze hinweg aufsummieren (zum Beispiel 100 → 80
+  kurz davor und 80 → 64 kurz danach). Das Oracle behält zusätzlich die Extrema des vorherigen
+  Fensters (`carriedBandOf(asset)`) und prüft jeden Push gegen beide, sodass zwei gewöhnliche
+  Marken im Abstand von höchstens einem Fenster innerhalb von `maxDeviationBps` bleiben. Eine
+  Marke wird ein bis zwei Fenster lang gemerkt, nie unbegrenzt; ein langsamer Drift über viele
+  Fenster wird weiterhin akzeptiert. `pushPriceWithOverride` löscht das übernommene Band.
 - **Instanzgebundene Verwaltung.** Jeder Markt speichert `operatorOrg` (die Org der Wallet, die
   `EwpgRepoMarketFactory.createMarket` aufgerufen hat) und eine unveränderliche `treasury`.
   `setReserveFactor`, `setBorrowPaused` und `withdrawReserves` erfordern `repo-markets.configure`;

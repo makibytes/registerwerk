@@ -223,6 +223,23 @@ immutable and keep their old behavior; see *Legacy markets* below.
   part of that payment above the remaining debt is credited to the borrower (`surplusOf`) and paid
   out by `claimLiquidationSurplus()`; it is not pool liquidity. The customer **My Loans** page
   shows the claimable surplus with a claim action.
+- **Liquidation pricing: bonus on the debt closed, hard repay cap.** The bonus is charged on the
+  debt actually closed. While the sold units are still worth less than the debt, the liquidator
+  pays their value at the mark less the bonus; once the unit(s) are worth more than the whole
+  debt, the whole debt is closed and the liquidator pays the units' value less `bonus × debt`, and
+  the borrower receives the rest as `surplusOf`. `maxRepayAmount` is a hard cap on what the
+  liquidator is charged: if rounding up would exceed it, one unit fewer is sold, and if even one
+  unit costs more, `liquidate` reverts with `LiquidationExceedsMaxRepay(required, maxRepayAmount)`
+  naming the amount to authorise. Bots and UIs must pass `maxRepayAmount ≥ required`:
+  `liquidate(borrower, debt)` no longer closes a position in one call when the closing unit is
+  worth more than the debt.
+- **Sliding oracle window, no re-anchoring.** `RegisterwerkNavOracle` no longer re-anchors its
+  deviation window on the current mark once the window elapses, which let a feed key compound a
+  move across the boundary (for example 100 → 80 just before and 80 → 64 just after). It keeps the
+  previous window's extremes as well (`carriedBandOf(asset)`) and checks every push against both,
+  so any two ordinary marks at most one window apart stay within `maxDeviationBps`. A mark is
+  remembered for one to two windows, never indefinitely, so a slow drift over many windows is
+  still accepted; `pushPriceWithOverride` clears the carried band.
 - **Instance-bound administration.** Each market stores `operatorOrg` (the org of the wallet that
   called `EwpgRepoMarketFactory.createMarket`) and an immutable `treasury`. `setReserveFactor`,
   `setBorrowPaused` and `withdrawReserves` need `repo-markets.configure`; `reconcileCollateral`

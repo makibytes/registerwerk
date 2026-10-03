@@ -181,6 +181,34 @@ class AssetDeploymentServiceTest {
     }
 
     @Test
+    @DisplayName("C5: the PENDING deployment row records the decimals the token is deployed with (0 for register tokens, the contract's fixed value otherwise)")
+    void deploy_recordsDeployedDecimalsOnTheRow() {
+        for (Object[] c : new Object[][] {
+                {TokenStandard.ERC20, 0}, {TokenStandard.ERC3525, 0},
+                {TokenStandard.STARKNET_ERC20, 18}, {TokenStandard.ERC4626, null}}) {
+            TokenStandard standard = (TokenStandard) c[0];
+            Integer expected = (Integer) c[1];
+            UUID assetId = UUID.randomUUID();
+            Asset asset = new Asset();
+            asset.setId(assetId);
+            asset.setTokenStandard(standard);
+            when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+            when(assetDeploymentRepository.save(any(AssetDeployment.class))).thenAnswer(invocation -> {
+                AssetDeployment deployment = invocation.getArgument(0);
+                deployment.setId(UUID.randomUUID());
+                return deployment;
+            });
+            lenient().when(tokenDeploymentPort.deploy(any(), any(), any(), any(), any()))
+                    .thenReturn(new CompletableFuture<>());
+            Chain chain = standard == TokenStandard.STARKNET_ERC20 ? Chain.STARKNET : Chain.ETHEREUM;
+
+            AssetDeployment deployment = assetDeploymentService.deploy(assetId, chain, Network.TESTNET, UUID.randomUUID());
+
+            assertThat(deployment.getTokenDecimals()).as(standard.name()).isEqualTo(expected);
+        }
+    }
+
+    @Test
     @DisplayName("deploy should reject confidential tokens on non-fhEVM L2 chains before persisting")
     void deploy_shouldRejectConfidentialTokensOnNewL2Chains() {
         UUID assetId = UUID.randomUUID();

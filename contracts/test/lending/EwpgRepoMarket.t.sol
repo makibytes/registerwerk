@@ -144,9 +144,13 @@ contract EwpgRepoMarketTest is Test {
         return price * 10_000 / (10_000 + LIQ_BONUS_BPS);
     }
 
-    /// @dev What a liquidator pays for `units` whole units (rounded up, as the market does).
-    function _payment(uint256 units, uint256 price) private pure returns (uint256) {
-        return (units * price * 10_000 + 10_000 + LIQ_BONUS_BPS - 1) / (10_000 + LIQ_BONUS_BPS);
+    /// @dev What a liquidator pays for `units` whole units against `debt` outstanding, as the
+    ///      market prices it: the value less the bonus (rounded up) while that stays below the
+    ///      debt, otherwise the value less the bonus on the debt closed.
+    function _paymentFor(uint256 units, uint256 price, uint256 debt) private pure returns (uint256) {
+        uint256 value = units * price;
+        uint256 discounted = (value * 10_000 + 10_000 + LIQ_BONUS_BPS - 1) / (10_000 + LIQ_BONUS_BPS);
+        return discounted > debt ? value - debt * LIQ_BONUS_BPS / 10_000 : discounted;
     }
 
     /// @dev Simulates an issuer/agent forcedTransfer of `units` out of the market's custody.
@@ -601,17 +605,19 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(alice);
         market.pledgeAndBorrow(100, 7_000e6);
 
-        // HF = 100*80*0.8/7000 = 0.914 < 0.95 -> full close; units = ceil(7000*1.05/80) = 92,
-        // paying 92*80/1.05 = 7009.52: the 9.52 above the debt is the borrower's surplus.
+        // HF = 100*80*0.8/7000 = 0.914 < 0.95 -> full close; units = ceil(7000*1.05/80) = 92 (worth
+        // 7360), paying 7360 − 5% of the 7000 closed = 7010: the 10 above the debt is the borrower's
+        // surplus. The liquidator has to authorise the 7010 — a 7000 cap yields 91 units instead.
         vm.prank(alice);
         navOracle.pushPriceWithOverride(address(collateralToken), 80e6);
 
+        uint256 payment = _paymentFor(92, 80e6, 7_000e6);
+        assertEq(payment, 7_010e6);
         vm.prank(liquidator);
-        (uint256 debtRepaid, uint256 seized) = market.liquidate(alice, 7_000e6);
+        (uint256 debtRepaid, uint256 seized) = market.liquidate(alice, payment);
 
         assertEq(seized, 92);
         assertEq(debtRepaid, 7_000e6);
-        uint256 payment = _payment(92, 80e6);
         assertEq(market.surplusOf(alice), payment - 7_000e6);
         (uint256 collateral, uint256 scaledDebt) = market.positions(alice);
         assertEq(scaledDebt, 0);
@@ -1113,7 +1119,9 @@ contract EwpgRepoMarketTest is Test {
         (uint256 hfBefore,) = market.healthFactor(alice);
         assertLt(hfBefore, 1e18);
 
-        uint256 repay = bound(repaySeed, 1, 7_000e6);
+        // `maxRepayAmount` caps the payment, so it must cover at least one whole unit (rounded
+        // down by the market) — a smaller one is the dedicated revert tested separately.
+        uint256 repay = bound(repaySeed, price, 7_000e6);
         vm.prank(liquidator);
         market.liquidate(alice, repay);
 
@@ -1174,7 +1182,9 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(liquidator);
         (uint256 repaid, uint256 seized) = market.liquidate(alice, type(uint256).max);
 
-        uint256 payment = _payment(1, 81_000e6);
+        // The unit (81_000e6) is worth more than the debt: the discount is the bonus on the debt only.
+        uint256 payment = _paymentFor(1, 81_000e6, debt);
+        assertEq(payment, 81_000e6 - debt * LIQ_BONUS_BPS / 10_000);
         assertEq(seized, 1);
         assertEq(repaid, debt);
         assertEq(liquidatorCashBefore - loanToken.balanceOf(liquidator), payment);
@@ -1195,6 +1205,138 @@ contract EwpgRepoMarketTest is Test {
         vm.prank(alice);
         vm.expectRevert(EwpgRepoMarket.ZeroAmount.selector);
         market.claimLiquidationSurplus();
+    }
+
+    // ── H2: indivisible-unit liquidation pricing (payment cap + bonus on the debt closed) ──────────
+
+    /// @dev One collateral unit marked at 85_000e6 backing a 70_000e6 loan: HF 0.971, so the
+    ///      ordinary 50% close factor applies — yet the single unit is worth more than the whole debt.
+    function _indivisibleUnitScenario() private returns (uint256 debt) {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), 100_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(1, 70_000e6);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), 85_000e6);
+        debt = market.debtOf(alice);
+        assertEq(debt, 70_000e6);
+    }
+
+    /// @notice H2 (red-first): a liquidator asking to spend at most 35_000e6 used to be charged
+    ///         ~80_952e6 — the whole unit rounded up, the excess credited to the borrower.
+    function test_liquidate_neverChargesMoreThanMaxRepayAmount() public {
+        uint256 debt = _indivisibleUnitScenario();
+        uint256 maxRepay = debt / 2;
+
+        uint256 cashBefore = loanToken.balanceOf(liquidator);
+        vm.prank(liquidator);
+        try market.liquidate(alice, maxRepay) {} catch {}
+
+        assertLe(cashBefore - loanToken.balanceOf(liquidator), maxRepay, "liquidator charged more than maxRepayAmount");
+    }
+
+    /// @notice H2: when even one unit costs more than `maxRepayAmount` the call reverts and names the
+    ///         amount to authorise — and authorising exactly that amount then succeeds.
+    function test_liquidate_revertsWhenOneUnitCostsMoreThanMaxRepayAmount() public {
+        uint256 debt = _indivisibleUnitScenario();
+        uint256 required = 85_000e6 - debt * LIQ_BONUS_BPS / 10_000; // 81_500e6
+
+        vm.prank(liquidator);
+        vm.expectRevert(
+            abi.encodeWithSelector(EwpgRepoMarket.LiquidationExceedsMaxRepay.selector, required, debt / 2)
+        );
+        market.liquidate(alice, debt / 2);
+
+        vm.prank(liquidator);
+        (uint256 repaid, uint256 seized) = market.liquidate(alice, required);
+        assertEq(repaid, debt);
+        assertEq(seized, 1);
+    }
+
+    /// @notice H2 (red-first): the bonus is `bonusBps × debt closed`, not `bonusBps × the value of
+    ///         the whole unit`. A liquidator who permits the full unit price pays the unit's value
+    ///         less 5% of the 70_000e6 it closes — not 85_000e6/1.05.
+    function test_liquidate_bonusIsChargedOnTheDebtClosedNotOnTheWholeUnit() public {
+        uint256 debt = _indivisibleUnitScenario();
+        uint256 unitValue = 85_000e6;
+        uint256 bonus = debt * LIQ_BONUS_BPS / 10_000; // 3_500e6
+        uint256 expectedPayment = unitValue - bonus; // 81_500e6
+
+        uint256 cashBefore = loanToken.balanceOf(liquidator);
+        vm.prank(liquidator);
+        (uint256 repaid, uint256 seized) = market.liquidate(alice, expectedPayment);
+
+        uint256 paid = cashBefore - loanToken.balanceOf(liquidator);
+        assertEq(seized, 1);
+        assertEq(repaid, debt, "the unit's proceeds close the whole debt");
+        assertEq(paid, expectedPayment, "payment = unit value - bonus x debt closed");
+        assertEq(unitValue * seized - paid, bonus, "liquidator's discount equals the bonus on the debt closed");
+        // The borrower's side balances: the proceeds beyond the debt are the borrower's surplus.
+        assertEq(market.surplusOf(alice), expectedPayment - debt);
+        assertEq(market.totalSurplus(), expectedPayment - debt);
+        assertEq(market.debtOf(alice), 0);
+    }
+
+    /// @notice H2 (red-first): when rounding the units up would overshoot `maxRepayAmount` but one
+    ///         unit fewer fits, the liquidator gets one unit fewer instead of an overcharge.
+    function test_liquidate_dropsOneUnitInsteadOfExceedingMaxRepayAmount() public {
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), 75e6); // HF 0.857: full close factor
+
+        // ⌈1_200 × 1.05 / 75⌉ = 17 units would cost ⌈1_275 / 1.05⌉ = 1_214.29e6 > 1_200e6.
+        uint256 cashBefore = loanToken.balanceOf(liquidator);
+        vm.prank(liquidator);
+        (uint256 repaid, uint256 seized) = market.liquidate(alice, 1_200e6);
+
+        uint256 paid = cashBefore - loanToken.balanceOf(liquidator);
+        assertEq(seized, 16, "one unit fewer than the rounded-up 17");
+        assertLe(paid, 1_200e6, "never charged more than maxRepayAmount");
+        assertEq(repaid, paid, "no surplus when the units cover less than the debt");
+        assertEq(market.surplusOf(alice), 0);
+    }
+
+    /// @notice H2 property: for any position, price and `maxRepayAmount` the liquidator never pays
+    ///         more than `maxRepayAmount`, is discounted by exactly the bonus on the debt closed
+    ///         (up to rounding), and the borrower's surplus is exactly what was paid beyond it.
+    function testFuzz_liquidate_paymentNeverExceedsMaxRepayAndBonusIsOnDebtClosed(
+        uint256 unitsSeed,
+        uint256 priceSeed,
+        uint256 crashSeed,
+        uint256 repaySeed
+    ) public {
+        uint256 n = bound(unitsSeed, 1, 30);
+        uint256 p0 = bound(priceSeed, 100e6, 100_000e6);
+        loanToken.mint(lender1, 100_000_000e6);
+        vm.prank(lender1);
+        market.supply(100_000_000e6);
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), p0);
+        collateralToken.mint(alice, n);
+        vm.prank(alice);
+        market.pledgeAndBorrow(n, n * p0 * 7 / 10);
+
+        // HF = p1 × 0.8 / (0.7 × p0) < 1 for p1 < 0.875 × p0 (includes underwater positions).
+        uint256 p1 = p0 * bound(crashSeed, 3_000, 8_749) / 10_000;
+        vm.prank(alice);
+        navOracle.pushPriceWithOverride(address(collateralToken), p1);
+
+        uint256 debt = market.debtOf(alice);
+        uint256 maxRepay = bound(repaySeed, 1, 2 * debt);
+        uint256 cashBefore = loanToken.balanceOf(liquidator);
+        vm.prank(liquidator);
+        try market.liquidate(alice, maxRepay) returns (uint256 repaid, uint256 seized) {
+            uint256 paid = cashBefore - loanToken.balanceOf(liquidator);
+            assertLe(paid, maxRepay, "liquidator charged more than maxRepayAmount");
+            assertApproxEqAbs(seized * p1 - paid, repaid * LIQ_BONUS_BPS / 10_000, 2, "bonus is on the debt closed");
+            assertEq(market.surplusOf(alice), paid - repaid, "surplus is what was paid beyond the debt closed");
+            assertEq(market.totalSurplus(), paid - repaid);
+        } catch {}
     }
 
     /// T2-10: surplus owed to a borrower is not pool liquidity — a lender with a larger claim

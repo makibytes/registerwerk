@@ -39,25 +39,35 @@ enough; the T-REX layer rejects a mint to a wallet with no ONCHAINID regardless)
 | `issue(investor, amount)` | `bond-desk.issue` | KYC (topic 1) | `bond.mint` — reverts if the investor isn't verified/compliant |
 | `payCoupon(holders[])` | `bond-desk.pay-coupon` | KYC (topic 1) | Reads `balanceOf` only; no token mutation |
 | `redeem(holder)` | `bond-desk.redeem` | AML (topic 2) | `bond.burn` at/after maturity, once the final coupon period is open; reverts for a frozen holder |
-| `releaseWithheld(period, holder, to, legalBasis)` | `bond-desk.legal-order` | — | None; pays a withheld coupon from the treasury to `to` |
+| `claimWithheldCoupon(period, holder)` | — (anyone; pays only the holder) | — | None; pays the holder's withheld coupon from the desk's escrow once nothing is frozen |
+| `releaseWithheld(period, holder, to, legalBasis)` | `bond-desk.legal-order` | — | None; pays a withheld coupon from the desk's escrow to `to` |
 | `forceRedeem(holder, to, legalBasis)` | `bond-desk.legal-order` | — | `bond.burn` of a frozen holder's matured position; principal to `to` |
 
 Every function is also bound to the desk's `operatorOrg` (a constructor argument,
 `BOND_DESK_OPERATOR_ORG` in the deploy script): another org holding the same `bond-desk.*`
 grants gets `WrongOperatingOrg`. The coupon schedule is anchored on maturity: the final period
 falls due exactly at maturity, and any remainder of the term becomes a short first (stub) period
-that still pays the full per-period coupon. At maturity call `payCoupon` for the final period
-first (no period opens after it), then `redeem`.
-A frozen holder (address frozen or any frozen units) is not paid: `payCoupon` records the
-coupon in `withheld` and leaves the cash in the treasury, `redeem` reverts, and `subscribe`
-refuses a frozen investor. Both are released only under a legal order, to the destination
-it names.
+that is **pro-rated by day count**: it pays `firstPeriodSecs / couponIntervalSecs` of the period
+coupon (ICMA actual/actual for an irregular first period; days are counted to the second, so a
+deployment mined seconds late does not cost a whole day). `couponStart` (the deployment second)
+and `firstPeriodSecs` are public, and `couponAmount(period, units)` is the single formula; every
+later period pays in full, and a maturity on the interval grid has no stub. At maturity call
+`payCoupon` for the final period first (no period opens after it), then `redeem`.
 
-Coupon payment is deliberately **on-chain-obligation-only**: `payCoupon` computes and
-emits the amount owed per holder from their live bond balance, but actual cash
-settlement happens off-chain through the registry backend — mirroring how Registerwerk
-already separates on-chain token events from off-chain settlement status for trade
-executions.
+Frozen holders are handled by share, not all-or-nothing. If the whole address is frozen, the
+holder's entire coupon is withheld; if only some units are frozen, the share of those units
+(`min(frozen units, snapshot)`) is withheld and the rest is paid at once, so `paid + withheld` is
+always exactly the coupon. A withheld amount moves from the treasury into the desk's own escrow
+(`withheld`, `totalWithheld`; events `CouponWithheld`) so it stays backed. It leaves escrow in
+exactly one of two ways: `claimWithheldCoupon(period, holder)` pays it to the holder once no unit
+of the holder is frozen any more (callable by anyone, the cash can only go to the holder; event
+`WithheldCouponClaimed`), or a legal order directs it elsewhere with `releaseWithheld`.
+`redeem` still reverts for a frozen holder (use `forceRedeem` under a legal order), and
+`subscribe` refuses a frozen investor.
+
+Coupon payment is an on-chain stablecoin transfer from the treasury (which pre-approves the desk)
+to each holder, computed from the balance snapshotted when the period opens, not from a live
+balance: units transferred mid-period cannot collect the same coupon twice.
 
 ## Bug fixes exercised by this example
 
@@ -107,7 +117,7 @@ claims via a `ClaimIssuer`) — before deploying for real.
 | `bond-desk.pay-coupon` | Record the per-holder coupon obligation for a period |
 | `bond-desk.redeem` | Burn a matured holder's position at redemption |
 | `bond-desk.pause` | Suspend / resume subscription, coupon, redemption and legal-order payouts |
-| `bond-desk.legal-order` | Release a withheld coupon or force-redeem a frozen holder under a legal order |
+| `bond-desk.legal-order` | Release a withheld coupon to a named destination or force-redeem a frozen holder under a legal order |
 
 Claim topics: `1` (KYC), `2` (AML).
 

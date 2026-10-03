@@ -56,6 +56,12 @@ public class AssetDeployment {
     @Column(name = "chain_config_id")
     private UUID chainConfigId;
 
+    /** Decimals the token was deployed with; 0 = whole-unit register token. Null = unknown. The
+     *  register's amounts are raw base units, so only 0 is acceptable to register-unit flows (see
+     *  {@link RegisterUnits}, Wave 0b C5). */
+    @Column(name = "token_decimals")
+    private Integer tokenDecimals;
+
     // ── Getters & Setters ──────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -90,4 +96,7 @@ public class AssetDeployment {
 
     public UUID getChainConfigId() { return chainConfigId; }
     public void setChainConfigId(UUID chainConfigId) { this.chainConfigId = chainConfigId; }
+
+    public Integer getTokenDecimals() { return tokenDecimals; }
+    public void setTokenDecimals(Integer tokenDecimals) { this.tokenDecimals = tokenDecimals; }
 }

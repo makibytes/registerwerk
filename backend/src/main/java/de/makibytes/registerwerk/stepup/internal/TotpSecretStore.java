@@ -25,7 +25,10 @@ class TotpSecretStore {
         return cipher.encrypt(base32Secret, aad(userId));
     }
 
-    /** Decrypts; a value without the {@code enc:} prefix is a legacy plaintext row and is returned as-is. */
+    /**
+     * Decrypts. A value without the {@code enc:} prefix is refused (H14): plaintext secrets are moved to
+     * ciphertext only by {@link TotpSecretMigration} at startup, never accepted on the verification path.
+     */
     String decrypt(UUID userId, String stored) {
         try {
             return cipher.decrypt(stored, aad(userId));

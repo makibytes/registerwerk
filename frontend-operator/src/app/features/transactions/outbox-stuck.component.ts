@@ -241,6 +241,7 @@ export class OutboxStuckComponent implements OnInit {
         reason: `${action === 'cancel' ? 'Cancel' : 'Re-price'} outbox transaction (nonce ${entry.nonce}, ${entry.methodName ?? 'transaction'})`,
         action: stepUpAction,
         target: `POST /api/v1/admin/chains/${entry.chainConfigId}/outbox/${entry.id}/${action === 'cancel' ? 'cancel' : 'reprice'}`,
+        targetBody: { reason },
       },
       width: '500px',
       disableClose: true,

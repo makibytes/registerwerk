@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.stepup.internal;
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -20,6 +21,8 @@ import java.util.UUID;
  * Validates the second-approver token for the 4-eyes (Vieraugenprinzip) check.
  * The token must:
  * - Be a valid JWT (decoded by the same JwtDecoder as the primary token)
+ * - Be a dual-control approval token: {@code use=dual_control} and the dual-control audience. This is the
+ *   other half of C1 - such a token is refused as anyone's Bearer, so this header is the only place it works
  * - Carry acr=stepup and be fresh (≤10 min)
  * - Carry role REGISTRY_ADMIN or COMPLIANCE_OFFICER
  * - Have a different sub than the primary caller (cannot self-approve)
@@ -66,8 +69,9 @@ class StepUpTokenValidator {
     }
 
     /**
-     * A validated approval. {@code jti}/{@code expiresAt} identify the one-time use; {@code targetDigest}
-     * is what the approver bound the token to (null only while target binding is rolled back).
+     * A validated approval. {@code jti}/{@code expiresAt} identify the one-time use (always present);
+     * {@code targetDigest} is what the approver bound the token to (null only while target binding is
+     * rolled back).
      */
     record Approval(UUID approverId, String jti, Instant expiresAt, String targetDigest) {}
 
@@ -86,6 +90,16 @@ class StepUpTokenValidator {
             approverJwt = jwtDecoder.decode(rawToken);
         } catch (JwtException e) {
             throw new AccessDeniedException("Invalid dual-control token: " + e.getMessage());
+        }
+
+        // C1: only a token minted as a dual-control approval is one. Session, ordinary step-up and
+        // impersonation tokens are signed with the same key but are not approvals.
+        List<String> audience = approverJwt.getAudience();
+        if (!JwtMintingService.USE_DUAL_CONTROL.equals(approverJwt.getClaimAsString(JwtMintingService.CLAIM_USE))
+                || audience == null || !audience.contains(JwtMintingService.DUAL_CONTROL_AUDIENCE)) {
+            log.warn("Token presented as dual-control approval is not one: sub={} action={}", approverJwt.getSubject(), action);
+            throw new AccessDeniedException(
+                    "Dual-control token is not a dual-control approval token. Mint one with action and target.");
         }
 
         // Must be different person
@@ -133,8 +147,13 @@ class StepUpTokenValidator {
         // body): the scope alone is shared by every endpoint with the same reason, so a token minted to
         // approve "burn 5 of X" would otherwise approve "burn all of Y". Unbound tokens are refused
         // (fail closed) unless binding was rolled back for this reason.
-        String digest = null;
+        // Single use is not part of the rollback switch for target binding: every approval token carries a
+        // jti (the issuer always sets one) and it is consumed whether or not a target digest is bound.
         String jti = approverJwt.getId();
+        if (jti == null || jti.isBlank()) {
+            throw new AccessDeniedException("Dual-control approver token has no id and cannot be single-use.");
+        }
+        String digest = null;
         if (expectedTargetDigest != null) {
             String bound = approverJwt.getClaimAsString("stepup_target");
             boolean equal = bound != null && java.security.MessageDigest.isEqual(
@@ -147,9 +166,6 @@ class StepUpTokenValidator {
                         ? "Dual-control approver token is not bound to a request. Mint a fresh token with action and target."
                         : "Dual-control approver token was issued for a different request.");
             }
-            if (jti == null || jti.isBlank()) {
-                throw new AccessDeniedException("Dual-control approver token has no id and cannot be single-use.");
-            }
             digest = expectedTargetDigest;
         }
 
@@ -159,7 +175,7 @@ class StepUpTokenValidator {
 
         log.info("Dual-control approved: initiator={} approver={} action={}", primarySub, approverJwt.getSubject(), action);
         Instant exp = approverJwt.getExpiresAt();
-        return new Approval(UUID.fromString(approverJwt.getSubject()), digest != null ? jti : null,
+        return new Approval(UUID.fromString(approverJwt.getSubject()), jti,
                 exp != null ? exp : Instant.now().plusSeconds(window), digest);
     }
 

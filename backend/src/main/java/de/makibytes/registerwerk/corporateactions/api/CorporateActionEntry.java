@@ -23,8 +23,10 @@ import java.util.UUID;
 @Table(name = "corporate_action_entry")
 public class CorporateActionEntry {
 
-    /** Whether an entry's entitlement is paid out at settlement (T2-18). */
-    public enum PayoutStatus { PAYABLE, HELD_LOOK_THROUGH }
+    /** Whether an entry's entitlement is paid out at settlement (T2-18). {@code HELD_BLOCKED} (Wave 0b H6): the holder
+     *  failed the party-eligibility gate at payout time (entity not active, KYC missing / expired, unresolved sanctions
+     *  hit, Sperrvermerk) - the entitlement stays recorded, is not paid, and {@link #getHeldReason()} says why. */
+    public enum PayoutStatus { PAYABLE, HELD_LOOK_THROUGH, HELD_BLOCKED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -54,6 +56,10 @@ public class CorporateActionEntry {
     @Column(name = "payout_status", nullable = false, length = 24)
     private PayoutStatus payoutStatus = PayoutStatus.PAYABLE;
 
+    /** Why a {@link PayoutStatus#HELD_BLOCKED} entry was not paid. */
+    @Column(name = "held_reason", columnDefinition = "text")
+    private String heldReason;
+
     @Column(name = "settlement_tx_hash")
     private String settlementTxHash;
 
@@ -78,6 +84,8 @@ public class CorporateActionEntry {
     public void setEntitlementAmount(BigDecimal v) { this.entitlementAmount = v; }
     public PayoutStatus getPayoutStatus() { return payoutStatus; }
     public void setPayoutStatus(PayoutStatus v) { this.payoutStatus = v; }
+    public String getHeldReason() { return heldReason; }
+    public void setHeldReason(String v) { this.heldReason = v; }
     public String getSettlementTxHash() { return settlementTxHash; }
     public void setSettlementTxHash(String v) { this.settlementTxHash = v; }
     public Instant getSettledAt() { return settledAt; }

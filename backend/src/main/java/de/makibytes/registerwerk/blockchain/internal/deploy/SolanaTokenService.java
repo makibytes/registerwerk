@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.blockchain.internal.deploy;
 
+import de.makibytes.registerwerk.deployment.api.RegisterUnits;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
@@ -50,8 +51,8 @@ public class SolanaTokenService {
 
     private static final Logger log = LoggerFactory.getLogger(SolanaTokenService.class);
 
-    /** Default decimals for new SPL token mints. */
-    private static final int DEFAULT_DECIMALS = 6;
+    /** Decimals for new SPL token mints. */
+    public static final int REGISTER_UNIT_DECIMALS = RegisterUnits.WHOLE_UNIT_DECIMALS;
 
     /** SPL Token program address. */
     private static final String TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -218,7 +219,7 @@ public class SolanaTokenService {
                 ));
 
                 // 4. InitializeMint — MUST come after all extension-init instructions
-                byte[] initMintData = buildInitializeMintInstruction(DEFAULT_DECIMALS, mintAuthority, payer.getPublicKey());
+                byte[] initMintData = buildInitializeMintInstruction(REGISTER_UNIT_DECIMALS, mintAuthority, payer.getPublicKey());
                 tx.addInstruction(new org.p2p.solanaj.core.TransactionInstruction(
                         new PublicKey(TOKEN_2022_PROGRAM_ID),
                         java.util.List.of(
@@ -285,7 +286,7 @@ public class SolanaTokenService {
                         ? payer.getPublicKey().toBase58() : ownerAddress);
                 // Freeze authority is always the registry payer so admin ops are available.
                 byte[] initMintData = buildInitializeMintInstruction(
-                        DEFAULT_DECIMALS, mintAuthority, payer.getPublicKey());
+                        REGISTER_UNIT_DECIMALS, mintAuthority, payer.getPublicKey());
 
                 org.p2p.solanaj.core.AccountMeta mintMeta =
                         new org.p2p.solanaj.core.AccountMeta(mintAccount.getPublicKey(), false, true);

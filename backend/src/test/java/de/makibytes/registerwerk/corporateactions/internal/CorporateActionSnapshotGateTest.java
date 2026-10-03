@@ -9,7 +9,8 @@ import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.HolderKind;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
+import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,7 +49,8 @@ class CorporateActionSnapshotGateTest {
     @Mock private AssetCouponPaymentRepository couponPaymentRepository;
     @Mock private CorporateActionProposalValidator proposalValidator;
     @Mock private ApplicationEventPublisher events;
-    @Mock private HolderBlockGate holderBlockGate;
+    @Mock private PartyEligibilityGate partyGate;
+    @Mock private EntityTaskPort entityTasks;
     @Mock private FinalityGate finalityGate;
     @Mock private RegisterFreshnessGate freshnessGate;
 
@@ -57,8 +59,9 @@ class CorporateActionSnapshotGateTest {
     @BeforeEach
     void setUp() {
         service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
-                couponPaymentRepository, proposalValidator, events, holderBlockGate, finalityGate, freshnessGate,
-                bondTermsRepository, CorporateActionTestSupport.systemRegisterClock());
+                couponPaymentRepository, proposalValidator, events, partyGate, entityTasks, finalityGate, freshnessGate,
+                bondTermsRepository, CorporateActionTestSupport.systemRegisterClock(),
+                CorporateActionTestSupport.directTransactions());
     }
 
     private static CorporateAction dueAction(CorporateAction.Status status) {
@@ -73,6 +76,7 @@ class CorporateActionSnapshotGateTest {
     }
 
     private void givenDailyRun(CorporateAction ca) {
+        when(repository.findById(ca.getId())).thenReturn(Optional.of(ca));
         when(repository.findReadyToCompute(any())).thenReturn(List.of(ca));
         when(repository.findDueForSettlement(any())).thenReturn(List.of());
         when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
@@ -146,8 +150,12 @@ class CorporateActionSnapshotGateTest {
     @DisplayName("settlement confirmation is refused while the register is not reconciled")
     void confirmSettlement_refusedWhileBlocked() {
         CorporateAction ca = dueAction(CorporateAction.Status.COMPUTED);
+        List<CorporateActionEntry> computed = List.of(CorporateActionTestSupport.entry(ca.getId(), "0xaaa", "1000", "50.00"));
+        CorporateActionTestSupport.computed(ca, computed);
         ca.setIssuerAttestedAt(Instant.now());
         ca.setIssuerAttestedBy(UUID.randomUUID());
+        ca.setIssuerAttestedDigest(ca.getPayoutDigest());
+        when(entryRepository.findByCorporateActionId(ca.getId())).thenReturn(computed);
         when(repository.findById(ca.getId())).thenReturn(Optional.of(ca));
         when(freshnessGate.blockedReason(any(), any())).thenReturn(Optional.of("holder sync BLOCKED"));
 

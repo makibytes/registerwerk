@@ -43,6 +43,23 @@ class UserSessionGuardFilterTest {
     }
 
     @Test
+    @DisplayName("C1: a dual-control approver token is not a session credential, whichever way it is presented")
+    void approverTokenIsNoSession() {
+        when(state.user(userId)).thenReturn(Optional.of(user(true, null)));
+        Instant now = Instant.now();
+        Jwt marked = Jwt.withTokenValue("t").header("alg", "HS256").subject(userId.toString())
+                .issuer("registerwerk-local").issuedAt(now).expiresAt(now.plusSeconds(300))
+                .claim("use", "dual_control").claim("acr", "stepup").claim("jti", "a1")
+                .audience(java.util.List.of("registerwerk-dual-control")).build();
+        Jwt scopedOnly = Jwt.withTokenValue("t").header("alg", "HS256").subject(userId.toString())
+                .issuer("registerwerk-local").issuedAt(now).expiresAt(now.plusSeconds(300))
+                .claim("acr", "stepup").claim("stepup_scope", "FORCE_BURN_EWG26").claim("jti", "a2").build();
+
+        assertThat(guard.rejectionReason(marked)).isEqualTo("dual_control_token");
+        assertThat(guard.rejectionReason(scopedOnly)).isEqualTo("dual_control_token");
+    }
+
+    @Test
     @DisplayName("a disabled user's token is rejected (HS256)")
     void disabledLocal() {
         when(state.user(userId)).thenReturn(Optional.of(user(false, null)));

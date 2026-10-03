@@ -266,15 +266,17 @@ contract EwpgRepoMarketTrexCollateralTest is Test {
 
     /// @dev Price 80: HF = 100*80*0.8/7000 = 0.914 < 0.95, so one call closes the full debt;
     ///      units = ceil(7000*1.05/80) = 92, leaving an 8-unit residual plus a cash surplus
-    ///      (92*80/1.05 − 7000). Neither is pushed to the frozen borrower, which would revert
-    ///      the whole liquidation.
+    ///      (92*80 − 5% of the 7000 closed = 7010, i.e. 10 above the debt). Neither is pushed to
+    ///      the frozen borrower, which would revert the whole liquidation. The liquidator must
+    ///      authorise the whole 7010 — `maxRepayAmount` caps the payment, not just the debt closed.
     function test_liquidate_fullClose_doesNotRevertForFrozenBorrower() public {
         navOracle.setPrice(address(bond), 80e6);
         _freezeAlice(true);
 
         uint256 debt = market.debtOf(alice);
+        uint256 payment = 92 * uint256(80e6) - debt * 500 / 10_000;
         vm.prank(liquidator);
-        (uint256 debtRepaid, uint256 seized) = market.liquidate(alice, debt);
+        (uint256 debtRepaid, uint256 seized) = market.liquidate(alice, payment);
 
         assertEq(debtRepaid, debt);
         assertEq(seized, 92);
@@ -284,7 +286,7 @@ contract EwpgRepoMarketTrexCollateralTest is Test {
         assertEq(collateral, 8, "residual credited to the position");
         assertEq(bond.balanceOf(address(market)), 8);
         uint256 surplus = market.surplusOf(alice);
-        assertEq(surplus, (92 * uint256(80e6) * 10_000 + 10_499) / 10_500 - debt, "surplus credited, not pushed");
+        assertEq(surplus, payment - debt, "surplus credited, not pushed");
 
         _freezeAlice(false);
         vm.prank(alice);

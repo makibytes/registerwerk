@@ -19,7 +19,7 @@ import { AmendTermsDialogComponent } from './amend-terms-dialog.component';
 
 /** Economic fields: fixed once the asset is approved; changed only via a 4-eyes amendment. */
 const ECONOMIC_FIELDS = ['isin', 'currency', 'issueSize', 'denomination', 'issueDate', 'maturityDate'] as const;
-const LOCKED_STATUSES: Asset['status'][] = ['APPROVED', 'ISSUED', 'SUSPENDED', 'REDEEMED', 'TRANSFER_PENDING', 'TRANSFERRED_OUT'];
+const LOCKED_STATUSES: Asset['status'][] = ['APPROVED', 'ISSUED', 'SUSPENDED', 'REDEMPTION_PENDING', 'REDEEMED', 'TRANSFER_PENDING', 'TRANSFERRED_OUT'];
 
 @Component({
   selector: 'app-asset-edit',
@@ -151,6 +151,7 @@ const LOCKED_STATUSES: Asset['status'][] = ['APPROVED', 'ISSUED', 'SUSPENDED', '
                   <mat-option value="APPROVED">Approved</mat-option>
                   <mat-option value="ISSUED">Issued</mat-option>
                   <mat-option value="SUSPENDED">Suspended</mat-option>
+                  <mat-option value="REDEMPTION_PENDING">Redemption pending</mat-option>
                   <mat-option value="REDEEMED">Redeemed</mat-option>
                 </mat-select>
               </mat-form-field>
@@ -332,7 +333,7 @@ export class AssetEditComponent implements OnInit {
     }).afterClosed().subscribe((body: TermsAmendment | undefined) => {
       if (!body) return;
       this.dialog.open(StepUpDialogComponent, {
-        data: { requireDualControl: true, reason: `Amend the terms of ${this.asset?.name ?? 'this asset'}`, action: 'TERMS_AMENDMENT', target: `POST /api/v1/assets/${this.id}/terms-amendments` },
+        data: { requireDualControl: true, reason: `Amend the terms of ${this.asset?.name ?? 'this asset'}`, action: 'TERMS_AMENDMENT', target: `POST /api/v1/assets/${this.id}/terms-amendments`, targetBody: body },
         width: '500px',
         disableClose: true,
       }).afterClosed().subscribe((result) => {

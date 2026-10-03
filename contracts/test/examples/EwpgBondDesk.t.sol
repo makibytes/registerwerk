@@ -600,6 +600,8 @@ contract EwpgBondDeskTest is Test {
 
     function test_constructor_derivesFinalCouponPeriodFromMaturity() public view {
         assertEq(desk.finalCouponPeriod(), 4);
+        assertEq(desk.firstPeriodSecs(), COUPON_INTERVAL, "on-grid term has no stub");
+        assertEq(desk.couponAmount(1, 1000), desk.couponAmount(2, 1000), "so period 1 pays in full");
         assertEq(desk.operatorOrg(), address(orgId));
     }
 
@@ -613,6 +615,10 @@ contract EwpgBondDeskTest is Test {
         assertEq(d.finalCouponPeriod(), 5);
         assertEq(d.nextCouponDue(), block.timestamp + 5 days, "stub first period");
         assertEq(d.nextCouponDue() + 4 * COUPON_INTERVAL, mat, "final period due at maturity");
+        assertEq(d.couponStart(), block.timestamp, "issue date stored");
+        assertEq(d.firstPeriodSecs(), 5 days, "stub length stored");
+        assertEq(d.couponAmount(1, 1000), 250_000_000, "period 1 pro-rated 5/90");
+        assertEq(d.couponAmount(2, 1000), 4_500_000_000, "later periods in full");
     }
 
     function test_constructor_rejectsMaturityNotInTheFuture() public {
@@ -635,6 +641,8 @@ contract EwpgBondDeskTest is Test {
         );
         assertEq(d.finalCouponPeriod(), 4);
         assertEq(d.nextCouponDue(), t0 + COUPON_INTERVAL, "first period shortened by the 7s stub");
+        assertEq(d.couponStart(), t0 + 7);
+        assertEq(d.firstPeriodSecs(), COUPON_INTERVAL - 7);
 
         vm.startPrank(alice);
         vm.warp(t0 + COUPON_INTERVAL - 1);
@@ -705,10 +713,107 @@ contract EwpgBondDeskTest is Test {
         assertEq(stable.balanceOf(investor1), cashBefore, "no coupon after the final one");
     }
 
+    // ── Stub period: pro-rated by day count ───────────────────────────────
+
+    function _deployDesk(uint256 term) internal returns (EwpgBondDesk d) {
+        d = new EwpgBondDesk(
+            oracle,
+            bond,
+            stable,
+            issuerTreasury,
+            PRICE_PER_UNIT,
+            COUPON_BPS,
+            COUPON_INTERVAL,
+            block.timestamp + term,
+            address(orgId)
+        );
+        vm.prank(issuerTreasury);
+        stable.approve(address(d), type(uint256).max);
+    }
+
+    /// @notice A 5-day first period of a 90-day interval pays 5/90 of the period coupon
+    ///         (ICMA actual/actual for an irregular first period); every later period pays in
+    ///         full. 1000 units x 100e6 x 4.50% = 4_500_000_000 per full period.
+    function test_payCoupon_firstStubPeriodIsProRatedByDayCount() public {
+        EwpgBondDesk d = _deployDesk(365 days); // 4 regular periods + a 5-day stub
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        uint256 cashBefore = stable.balanceOf(investor1);
+
+        vm.warp(d.nextCouponDue());
+        vm.expectEmit(true, true, false, true, address(d));
+        emit EwpgBondDesk.CouponPaid(1, investor1, 250_000_000);
+        vm.prank(alice);
+        d.payCoupon(_one(investor1));
+        assertEq(stable.balanceOf(investor1), cashBefore + 250_000_000, "stub = 5/90 of the period coupon");
+
+        vm.warp(d.nextCouponDue());
+        vm.prank(alice);
+        assertEq(d.payCoupon(_one(investor1)), 2);
+        assertEq(stable.balanceOf(investor1), cashBefore + 250_000_000 + 4_500_000_000, "full period unchanged");
+    }
+
+    /// @notice A deployment mined seconds after the script computed maturity (the normal case)
+    ///         pays the period coupon scaled by (interval - 7s) / interval: day count is
+    ///         measured to the second, so a few seconds of delay never costs a whole day.
+    function test_payCoupon_stubCountsDaysToTheSecond() public {
+        uint256 t0 = block.timestamp;
+        uint256 mat = t0 + 4 * COUPON_INTERVAL;
+        vm.warp(t0 + 7);
+        EwpgBondDesk d = new EwpgBondDesk(
+            oracle, bond, stable, issuerTreasury, PRICE_PER_UNIT, COUPON_BPS, COUPON_INTERVAL, mat, address(orgId)
+        );
+        vm.prank(issuerTreasury);
+        stable.approve(address(d), type(uint256).max);
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        uint256 cashBefore = stable.balanceOf(investor1);
+
+        vm.warp(d.nextCouponDue());
+        vm.prank(alice);
+        d.payCoupon(_one(investor1));
+        // floor(4.5e13 * (90 days - 7 s) / (10_000 * 90 days))
+        assertEq(stable.balanceOf(investor1) - cashBefore, 4_499_995_949);
+    }
+
+    /// @notice A term shorter than one interval is a single stub that is also the final period.
+    function test_payCoupon_singleStubPeriodThatIsAlsoTheFinalPeriod() public {
+        EwpgBondDesk d = _deployDesk(30 days);
+        assertEq(d.finalCouponPeriod(), 1);
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        uint256 cashBefore = stable.balanceOf(investor1);
+
+        vm.warp(d.maturityTimestamp());
+        vm.prank(alice);
+        assertEq(d.payCoupon(_one(investor1)), 1);
+        assertEq(stable.balanceOf(investor1) - cashBefore, 1_500_000_000, "30/90 of 4_500_000_000");
+    }
+
+    /// @notice The pro-rating applies to the withheld share as well: with 10 of 1000 units frozen
+    ///         in the 5-day stub, 5/90 of the 45_000_000 frozen share is escrowed.
+    function test_payCoupon_stubAndPartialFreezeCombine() public {
+        EwpgBondDesk d = _deployDesk(365 days);
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.prank(operator);
+        bond.freezePartialTokens(investor1, 10);
+        uint256 cashBefore = stable.balanceOf(investor1);
+
+        vm.warp(d.nextCouponDue());
+        vm.prank(alice);
+        d.payCoupon(_one(investor1));
+
+        assertEq(d.withheld(1, investor1), 2_500_000, "5/90 of 45_000_000");
+        assertEq(stable.balanceOf(investor1) - cashBefore, 250_000_000 - 2_500_000);
+        assertEq(stable.balanceOf(address(d)), 2_500_000);
+    }
+
     // ── T2-16: frozen holders ─────────────────────────────────────────────
 
-    /// @notice Regression (C-05): a frozen holder was paid the coupon in cash. Now the
-    ///         coupon is recorded as withheld and the cash stays in the treasury.
+    /// @notice Regression (C-05): a frozen holder was paid the coupon in cash. Now the whole
+    ///         coupon is withheld and moved into the desk's escrow (not left as an unbacked
+    ///         claim on the treasury).
     function test_payCoupon_withholdsFromFrozenHolder() public {
         vm.startPrank(alice);
         desk.subscribe(investor1, 1000);
@@ -721,6 +826,7 @@ contract EwpgBondDeskTest is Test {
         holders[0] = investor1;
         holders[1] = investor3;
         uint256 coupon1 = (uint256(1000) * PRICE_PER_UNIT * COUPON_BPS) / 10_000;
+        uint256 coupon3 = (uint256(2000) * PRICE_PER_UNIT * COUPON_BPS) / 10_000;
         uint256 cash1Before = stable.balanceOf(investor1);
         uint256 treasuryBefore = stable.balanceOf(issuerTreasury);
 
@@ -733,30 +839,252 @@ contract EwpgBondDeskTest is Test {
         assertEq(stable.balanceOf(investor1), cash1Before, "frozen holder receives nothing");
         assertEq(desk.withheld(1, investor1), coupon1);
         assertFalse(desk.couponPaid(1, investor1));
-        uint256 coupon3 = (uint256(2000) * PRICE_PER_UNIT * COUPON_BPS) / 10_000;
-        assertEq(stable.balanceOf(issuerTreasury), treasuryBefore - coupon3, "withheld cash stays in the treasury");
+        assertEq(stable.balanceOf(address(desk)), coupon1, "withheld cash is escrowed in the desk");
+        assertEq(stable.balanceOf(issuerTreasury), treasuryBefore - coupon1 - coupon3, "treasury funded both");
 
-        // Unfreezing does not let a later payCoupon pay it — release is by legal order only.
+        // A later payCoupon in the same period never pays the withheld coupon a second time.
         vm.prank(operator);
         bond.setAddressFrozen(investor1, false);
         vm.prank(alice);
         desk.payCoupon(holders);
-        assertEq(stable.balanceOf(investor1), cash1Before);
+        assertEq(stable.balanceOf(investor1), cash1Before, "no payment through payCoupon");
+        assertEq(stable.balanceOf(address(desk)), coupon1);
     }
 
-    function test_payCoupon_withholdsFromHolderWithPartiallyFrozenUnits() public {
+    /// @notice Only the frozen units' share is withheld (10 of 1000 units = 1% of the coupon);
+    ///         the rest is paid immediately. The withheld cash is moved from the treasury into
+    ///         the desk's own escrow, so it cannot be spent or un-approved before it is claimed.
+    function test_payCoupon_withholdsOnlyTheFrozenUnitsShare() public {
         vm.prank(alice);
         desk.subscribe(investor1, 1000);
         vm.prank(operator);
         bond.freezePartialTokens(investor1, 10);
+
+        uint256 total = 4_500_000_000; // 1000 units * 100e6 * 4.50%
+        uint256 held = 45_000_000; //     10 units  * 100e6 * 4.50%
+        uint256 cashBefore = stable.balanceOf(investor1);
+        uint256 treasuryBefore = stable.balanceOf(issuerTreasury);
+
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.expectEmit(true, true, false, true, address(desk));
+        emit EwpgBondDesk.CouponPaid(1, investor1, total - held);
+        vm.expectEmit(true, true, false, true, address(desk));
+        emit EwpgBondDesk.CouponWithheld(1, investor1, held);
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+
+        assertEq(stable.balanceOf(investor1), cashBefore + total - held, "the unfrozen share is paid in cash");
+        assertEq(desk.withheld(1, investor1), held, "exactly the frozen units' share is withheld");
+        assertEq(stable.balanceOf(address(desk)), held, "the withheld share is escrowed in the desk");
+        assertEq(stable.balanceOf(issuerTreasury), treasuryBefore - total, "treasury funds paid + escrowed");
+        assertTrue(desk.couponPaid(1, investor1));
+
+        // A second call in the same period neither pays nor withholds again.
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+        assertEq(stable.balanceOf(investor1), cashBefore + total - held, "no double payment");
+        assertEq(desk.withheld(1, investor1), held);
+        assertEq(stable.balanceOf(address(desk)), held);
+    }
+
+    /// @notice The cut is by frozen units, not by the coupon: freezing every unit withholds
+    ///         everything, and a holder with no frozen units is paid in full.
+    function test_payCoupon_withholdsTheWholeCouponWhenEveryUnitIsFrozen() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.prank(operator);
+        bond.freezePartialTokens(investor1, 1000);
 
         uint256 cashBefore = stable.balanceOf(investor1);
         vm.warp(block.timestamp + COUPON_INTERVAL);
         vm.prank(alice);
         desk.payCoupon(_one(investor1));
 
-        assertEq(stable.balanceOf(investor1), cashBefore);
-        assertGt(desk.withheld(1, investor1), 0);
+        assertEq(stable.balanceOf(investor1), cashBefore, "nothing paid");
+        assertEq(desk.withheld(1, investor1), 4_500_000_000);
+        assertEq(stable.balanceOf(address(desk)), 4_500_000_000);
+        assertFalse(desk.couponPaid(1, investor1));
+    }
+
+    /// @notice After the freeze lifts, the holder gets exactly the withheld share from escrow:
+    ///         the sum of what it received equals the full coupon, the escrow is empty and a
+    ///         later payCoupon in the same period pays nothing more.
+    function test_claimWithheldCoupon_paysTheHolderOnceUnfrozen() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.prank(operator);
+        bond.freezePartialTokens(investor1, 10);
+        uint256 cashBefore = stable.balanceOf(investor1);
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+
+        // Still frozen: the escrow stays put.
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.HolderFrozen.selector, investor1));
+        desk.claimWithheldCoupon(1, investor1);
+        assertEq(stable.balanceOf(address(desk)), 45_000_000);
+
+        vm.prank(operator);
+        bond.unfreezePartialTokens(investor1, 10);
+
+        vm.expectEmit(true, true, false, true, address(desk));
+        emit EwpgBondDesk.WithheldCouponClaimed(1, investor1, 45_000_000);
+        assertEq(desk.claimWithheldCoupon(1, investor1), 45_000_000);
+
+        assertEq(stable.balanceOf(investor1), cashBefore + 4_500_000_000, "paid + claimed == the whole coupon");
+        assertEq(desk.withheld(1, investor1), 0);
+        assertEq(desk.totalWithheld(), 0);
+        assertEq(stable.balanceOf(address(desk)), 0, "escrow emptied");
+
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NothingWithheld.selector, 1, investor1));
+        desk.claimWithheldCoupon(1, investor1);
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+        assertEq(stable.balanceOf(investor1), cashBefore + 4_500_000_000, "no double payment");
+    }
+
+    /// @notice A frozen address's whole coupon is claimable after the address is unfrozen — by
+    ///         anyone, but only ever to the holder.
+    function test_claimWithheldCoupon_addressFrozenHolder_anyoneTriggers_paysOnlyTheHolder() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, true);
+        uint256 cashBefore = stable.balanceOf(investor1);
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.HolderFrozen.selector, investor1));
+        desk.claimWithheldCoupon(1, investor1);
+
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, false);
+        address stranger = makeAddr("stranger");
+        vm.prank(stranger);
+        desk.claimWithheldCoupon(1, investor1);
+
+        assertEq(stable.balanceOf(investor1), cashBefore + 4_500_000_000);
+        assertEq(stable.balanceOf(stranger), 0, "the trigger collects nothing");
+        assertEq(stable.balanceOf(address(desk)), 0);
+        assertTrue(desk.couponPaid(1, investor1));
+        // The claimed (period, holder) is settled: payCoupon never pays it again.
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+        assertEq(stable.balanceOf(investor1), cashBefore + 4_500_000_000);
+    }
+
+    function test_claimWithheldCoupon_revertsWhenNothingWithheldOrPaused() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, true);
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+        vm.prank(operator);
+        bond.setAddressFrozen(investor1, false);
+
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NothingWithheld.selector, 2, investor1));
+        desk.claimWithheldCoupon(2, investor1);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NothingWithheld.selector, 1, investor3));
+        desk.claimWithheldCoupon(1, investor3);
+
+        vm.prank(alice);
+        desk.pause();
+        vm.expectRevert(EwpgBondDesk.DeskIsPaused.selector);
+        desk.claimWithheldCoupon(1, investor1);
+        assertEq(stable.balanceOf(address(desk)), 4_500_000_000, "escrow untouched while paused");
+    }
+
+    /// @notice A legal-order release pays from the escrow, leaves the treasury alone, and
+    ///         settles the (period, holder) so the holder cannot also claim it.
+    function test_releaseWithheld_paysFromEscrowAndExcludesALaterClaim() public {
+        vm.prank(alice);
+        desk.subscribe(investor1, 1000);
+        vm.prank(operator);
+        bond.freezePartialTokens(investor1, 10);
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.prank(alice);
+        desk.payCoupon(_one(investor1));
+        uint256 treasuryAfterPay = stable.balanceOf(issuerTreasury);
+
+        address court = makeAddr("courtBlockedAccount");
+        vm.prank(alice);
+        desk.releaseWithheld(1, investor1, court, "AG Frankfurt 2-01 O 123/26");
+
+        assertEq(stable.balanceOf(court), 45_000_000);
+        assertEq(stable.balanceOf(issuerTreasury), treasuryAfterPay, "treasury is not charged again");
+        assertEq(stable.balanceOf(address(desk)), 0);
+        assertEq(desk.totalWithheld(), 0);
+
+        vm.prank(operator);
+        bond.unfreezePartialTokens(investor1, 10);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NothingWithheld.selector, 1, investor1));
+        desk.claimWithheldCoupon(1, investor1);
+    }
+
+    /// @notice Nothing is lost and nothing is paid twice for any balance / frozen split: the
+    ///         cash paid at once plus the escrow equals the coupon, the treasury is charged
+    ///         exactly the coupon, the desk's token balance is exactly `totalWithheld`, and
+    ///         after the unfreeze the holder ends with exactly the coupon.
+    function testFuzz_partialFreeze_neverLosesOrDoublePaysCoupon(uint256 units, uint256 frozen) public {
+        units = bound(units, 1, 10_000); // the investor holds 1_000_000e6 to pay 100e6 per unit
+        frozen = bound(frozen, 0, units);
+        vm.prank(alice);
+        desk.subscribe(investor1, units);
+        if (frozen != 0) {
+            vm.prank(operator);
+            bond.freezePartialTokens(investor1, frozen);
+        }
+        uint256 coupon = desk.couponAmount(1, units);
+        uint256 cashBefore = stable.balanceOf(investor1);
+        uint256 treasuryBefore = stable.balanceOf(issuerTreasury);
+
+        vm.warp(block.timestamp + COUPON_INTERVAL);
+        vm.startPrank(alice);
+        desk.payCoupon(_one(investor1));
+        desk.payCoupon(_one(investor1)); // a repeat changes nothing
+        vm.stopPrank();
+
+        uint256 held = desk.withheld(1, investor1);
+        assertEq(stable.balanceOf(investor1) - cashBefore + held, coupon, "paid + withheld == coupon");
+        assertEq(held, frozen == 0 ? 0 : desk.couponAmount(1, frozen), "withheld = the frozen units' share");
+        assertEq(treasuryBefore - stable.balanceOf(issuerTreasury), coupon, "treasury charged exactly once");
+        assertEq(stable.balanceOf(address(desk)), desk.totalWithheld(), "escrow is fully backed");
+
+        if (frozen != 0) {
+            vm.prank(operator);
+            bond.unfreezePartialTokens(investor1, frozen);
+        }
+        if (held != 0) {
+            desk.claimWithheldCoupon(1, investor1);
+        }
+        assertEq(stable.balanceOf(investor1) - cashBefore, coupon, "holder ends with the whole coupon");
+        assertEq(stable.balanceOf(address(desk)), 0);
+        assertEq(desk.totalWithheld(), 0);
+    }
+
+    /// @notice The schedule's first period is always in (0, interval] and only period 1 is
+    ///         scaled; every other period pays the plain `units * price * bps / 10_000`.
+    function testFuzz_couponAmount_onlyPeriodOneIsProRated(uint256 term, uint256 units) public {
+        term = bound(term, 1, 40 * COUPON_INTERVAL);
+        units = bound(units, 0, 1e12);
+        EwpgBondDesk d = _deployDesk(term);
+
+        uint256 stub = d.firstPeriodSecs();
+        assertGt(stub, 0);
+        assertLe(stub, COUPON_INTERVAL);
+        assertEq(d.couponStart() + stub, d.nextCouponDue(), "stub runs from the issue date to the first due date");
+
+        uint256 full = (units * PRICE_PER_UNIT * COUPON_BPS) / 10_000;
+        assertLe(d.couponAmount(1, units), full, "a stub never pays more than a full period");
+        assertEq(d.couponAmount(2, units), full, "later periods are unchanged");
+        if (stub == COUPON_INTERVAL) {
+            assertEq(d.couponAmount(1, units), full, "no stub, no pro-rating");
+        }
+        // Rounded down once: the exact rational value brackets the result.
+        assertEq(d.couponAmount(1, units), (units * PRICE_PER_UNIT * COUPON_BPS * stub) / (10_000 * COUPON_INTERVAL));
     }
 
     function test_redeem_revertsForFrozenHolder() public {

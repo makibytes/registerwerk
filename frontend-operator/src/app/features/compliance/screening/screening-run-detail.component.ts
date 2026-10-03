@@ -299,12 +299,17 @@ export class ScreeningRunDetailComponent implements OnInit {
   }
 
   acceptHit(hit: ScreeningHit): void {
+    // The justification is part of what the approver binds, so it is asked for before the step-up dialog.
+    const reason = prompt('Please enter the acceptance justification (required for audit trail):');
+    if (!reason) return;
+
     const dialogRef = this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Accept false-positive screening hit (${hit.listSource} / ${hit.matchedValue})`,
         action: 'SCREENING_HIT_ACCEPT',
         target: `POST /api/v1/compliance/screening/hits/${hit.id}/accept`,
+        targetBody: { reason },
       },
       width: '500px',
       disableClose: true,
@@ -312,9 +317,6 @@ export class ScreeningRunDetailComponent implements OnInit {
 
     dialogRef.afterClosed().subscribe((result) => {
       if (!result) return; // cancelled
-
-      const reason = prompt('Please enter the acceptance justification (required for audit trail):');
-      if (!reason) return;
 
       this.screeningService.acceptHit(
         hit.id,
@@ -342,19 +344,20 @@ export class ScreeningRunDetailComponent implements OnInit {
   }
 
   confirmPep(hit: ScreeningHit): void {
+    const note = prompt('Confirmation note (required for audit trail):');
+    if (!note || !note.trim()) return;
     this.dialog.open(StepUpDialogComponent, {
       data: {
         requireDualControl: true,
         reason: `Confirm PEP status (${hit.listSource} / ${hit.matchedValue})`,
         action: 'SCREENING_PEP_CONFIRM',
         target: `POST /api/v1/compliance/screening/hits/${hit.id}/confirm-pep`,
+        targetBody: { note: note.trim() },
       },
       width: '500px',
       disableClose: true,
     }).afterClosed().subscribe((result) => {
       if (!result?.stepUpToken || !result.dualControlToken) return;
-      const note = prompt('Confirmation note (required for audit trail):');
-      if (!note || !note.trim()) return;
       this.screeningService.confirmPep(hit.id, note.trim(), result.stepUpToken, result.dualControlToken).subscribe({
         next: () => {
           this.snackBar.open('PEP confirmed. The hit stays open until an EDD approval is recorded.', 'Dismiss', { duration: 7000 });

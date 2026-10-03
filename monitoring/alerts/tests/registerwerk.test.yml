@@ -63,3 +63,32 @@ tests:
             exp_annotations:
               summary: "Audit chain has no verification verdict"
               description: "registerwerk_audit_chain_valid has been -1 (never verified) for 10 minutes. The verifier is not running or cannot reach the database."
+
+  # Wave 0b C7: a failed mint / burn is an incident from the first scrape (no `for:`).
+  - interval: 1m
+    input_series:
+      - series: 'registerwerk_subscription_settlement_failed{job="registerwerk-backend"}'
+        values: "0 0 2 2 2"
+      - series: 'registerwerk_asset_redemption_burn_failed{job="registerwerk-backend"}'
+        values: "0 1 1 0 0"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: SubscriptionSettlementFailed
+        exp_alerts:
+          - exp_labels: {severity: critical, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Subscription mint failed after payment"
+              description: "2 paid subscription order(s) are SETTLEMENT_FAILED: the mint reverted or was replaced, the investor has paid and holds no units. Settle the order again, or release it and refund."
+      - eval_time: 1m
+        alertname: SubscriptionSettlementFailed
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: AssetRedemptionBurnFailed
+        exp_alerts:
+          - exp_labels: {severity: critical, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Redemption burn failed"
+              description: "1 redemption burn(s) are FAILED: the asset stays REDEMPTION_PENDING with live tokens on chain. Resume the redemption to re-dispatch the failed burns."
+      - eval_time: 4m
+        alertname: AssetRedemptionBurnFailed
+        exp_alerts: []

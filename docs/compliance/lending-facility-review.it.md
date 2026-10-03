@@ -62,6 +62,16 @@ Questa sezione sostituisce le indicazioni sui parametri riportate più sotto, do
 - **Unità intere.** Le liquidazioni vendono unità di garanzia intere, arrotondate per eccesso; la
   parte del pagamento oltre il debito spetta al mutuatario come eccedenza in contanti
   riscuotibile.
+- **Prezzo di liquidazione.** Il bonus è addebitato sul debito effettivamente chiuso (un'unità che
+  vale più del debito lo chiude e il mutuatario riceve il resto come eccedenza), e
+  `maxRepayAmount` è un limite rigido: si vende un'unità in meno se l'arrotondamento per eccesso
+  lo superasse, altrimenti `liquidate` va in revert con `LiquidationExceedsMaxRepay(required,
+  maxRepayAmount)`. I liquidatori devono passare `maxRepayAmount ≥ required`.
+- **Finestra dell'oracolo scorrevole.** La finestra di deviazione non si riancora più sulla
+  quotazione corrente alla scadenza. Gli estremi della finestra precedente vengono riportati
+  (`carriedBandOf`) per una o due finestre, così due quotazioni distanti al massimo una finestra
+  non differiscono mai di più di `maxDeviationBps`; `pushPriceWithOverride` azzera la banda
+  riportata.
 - **Riconciliazione (rilievo 5).** `reconcileCollateral` richiede ora `repo-markets.reconcile`,
   detenuto dall'org operatrice del mercato, ed è limitata dalla garanzia di cui è stata
   effettivamente osservata l'uscita dal mercato. La configurazione del mercato usa

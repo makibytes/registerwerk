@@ -55,6 +55,9 @@ class AssetCachingIntegrationTest {
     @MockitoBean
     private RedemptionReadinessPort redemptionReadiness;
 
+    @MockitoBean
+    private de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository deploymentRepository;
+
     private UUID assetId;
 
     @BeforeEach

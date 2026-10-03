@@ -39,10 +39,15 @@ class DualControlBodyCachingFilter extends OncePerRequestFilter {
         this.properties = properties;
     }
 
+    /** Methods whose body is captured (and so must be bound); the others have no body to change. */
+    static boolean carriesBody(String method) {
+        return BODY_METHODS.contains(method);
+    }
+
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         return request.getHeader(DualControlApproverInterceptor.DUAL_CONTROL_HEADER) == null
-                || !BODY_METHODS.contains(request.getMethod());
+                || !carriesBody(request.getMethod());
     }
 
     @Override

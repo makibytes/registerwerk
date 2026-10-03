@@ -27,6 +27,7 @@ import de.makibytes.registerwerk.shared.AfterCommit;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.RegisterUnits;
 import de.makibytes.registerwerk.chain.api.Chain;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
@@ -159,6 +160,10 @@ public class AssetDeploymentService {
         deployment.setNetwork(network);
         deployment.setChainConfigId(chainConfig.getId());
         deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+        // C5: record the decimals the token is deployed with. Register amounts are raw base units that every
+        // register-unit flow reads as whole units, so bond / fund tokens are deployed with 0 and RegisterUnits
+        // refuses any flow on a deployment that does not report exactly 0 (including unknown = null).
+        deployment.setTokenDecimals(RegisterUnits.deployedDecimals(standard));
         AssetDeployment saved = assetDeploymentRepository.save(deployment);
 
         UUID deploymentId = saved.getId();

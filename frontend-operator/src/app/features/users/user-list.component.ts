@@ -417,6 +417,7 @@ export class UserListComponent implements OnInit {
         reason: `Change the roles of ${user.name || user.email}`,
         action: 'OPERATOR_USER_ROLES',
         target: `PATCH /api/v1/admin/users/${user.id}/roles`,
+        targetBody: { roles },
       }).subscribe(result => {
         if (!result) return;
         this.adminUserService.updateRoles(user.id, roles, result).subscribe({
@@ -440,12 +441,17 @@ export class UserListComponent implements OnInit {
       disableReason = reason.trim();
     }
     const reinstating = !user.enabled && !!reinstatementReason;
+    // Switching a privileged account on OR off is a four-eyes action (C3); outside the bootstrap phase the
+    // approver is mandatory, and the server says so with a 403 if the field was left empty.
     openStepUp(this.dialog, {
-      requireDualControl: !user.enabled && (reinstating || isGatedOperatorAccount(user.roles, user.entityId)),
+      requireDualControl: reinstating || isGatedOperatorAccount(user.roles, user.entityId),
       dualControlOptional: !reinstating,
       reason: `${user.enabled ? 'Disable' : 'Enable'} ${user.name || user.email}`,
-      action: reinstating ? 'OPERATOR_USER_REINSTATE' : 'OPERATOR_USER_ENABLE',
+      action: reinstating ? 'OPERATOR_USER_REINSTATE' : user.enabled ? 'OPERATOR_USER_DISABLE' : 'OPERATOR_USER_ENABLE',
       target: `POST /api/v1/admin/users/${user.id}/${user.enabled ? 'disable' : 'enable'}`,
+      targetBody: user.enabled
+        ? (disableReason ? { reason: disableReason } : {})
+        : (reinstatementReason ? { reinstatementReason } : {}),
     }).subscribe(tokens => {
       if (!tokens) return;
       const request$ = user.enabled
@@ -483,6 +489,7 @@ export class UserListComponent implements OnInit {
       reason: `Reset the bound identity of ${user.email}`,
       action: 'IDENTITY_REBIND',
       target: `POST /api/v1/admin/users/${user.id}/reset-identity`,
+      targetBody: { reason: reason.trim() },
     }).subscribe(tokens => {
       if (!tokens) return;
       this.adminUserService.resetIdentity(user.id, reason.trim(), tokens).subscribe({
@@ -500,6 +507,7 @@ export class UserListComponent implements OnInit {
       reason: `Reset the authenticator of ${user.email}`,
       action: 'TOTP_RESET',
       target: `POST /api/v1/admin/users/${user.id}/totp-reset`,
+      targetBody: {},
     }).subscribe(tokens => {
       if (!tokens) return;
       this.adminUserService.resetTotp(user.id, tokens).subscribe({

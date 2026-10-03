@@ -130,4 +130,28 @@ class GraphNodeClientTest {
         assertThat(result.get(0).transactionHash()).isEqualTo("0xtx1");
         mockServer.verify();
     }
+
+    @Test
+    @DisplayName("H7: fetchHeadBlockTime reads the subgraph head's block timestamp")
+    void fetchHeadBlockTime_readsTheTimestamp() {
+        mockServer.expect(requestTo(GRAPH_URL)).andRespond(withSuccess(
+                "{\"data\":{\"_meta\":{\"block\":{\"number\":123,\"timestamp\":1751068800}}}}",
+                MediaType.APPLICATION_JSON));
+
+        assertThat(client.fetchHeadBlockTime(chain())).contains(java.time.Instant.ofEpochSecond(1751068800L));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("H7: an older node without the timestamp field (GraphQL error) or a null timestamp gives empty, never an exception")
+    void fetchHeadBlockTime_isBestEffort() {
+        mockServer.expect(requestTo(GRAPH_URL)).andRespond(withSuccess(
+                "{\"errors\":[{\"message\":\"Type `_Block_` has no field `timestamp`\"}]}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(GRAPH_URL)).andRespond(withSuccess(
+                "{\"data\":{\"_meta\":{\"block\":{\"number\":123,\"timestamp\":null}}}}", MediaType.APPLICATION_JSON));
+
+        assertThat(client.fetchHeadBlockTime(chain())).isEmpty();
+        assertThat(client.fetchHeadBlockTime(chain())).isEmpty();
+        mockServer.verify();
+    }
 }

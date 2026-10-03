@@ -57,6 +57,14 @@ public class IndexerState {
     @Column(name = "last_synced_at")
     private Instant lastSyncedAt;
 
+    /**
+     * H7: BLOCK time (chain time, not wall-clock) of the head block the indexer had processed at its last successful
+     * tick. The corporate-action freshness gate compares it with the record-date cut-off. Null when the indexer cannot
+     * report it (only the Graph Node indexer does today); never overwritten with null.
+     */
+    @Column(name = "last_synced_block_time")
+    private Instant lastSyncedBlockTime;
+
     /** Human-readable description of the most recent error. */
     @Column(name = "last_error", length = 2000)
     private String lastError;
@@ -102,6 +110,9 @@ public class IndexerState {
 
     public Instant getLastSyncedAt() { return lastSyncedAt; }
     public void setLastSyncedAt(Instant lastSyncedAt) { this.lastSyncedAt = lastSyncedAt; }
+
+    public Instant getLastSyncedBlockTime() { return lastSyncedBlockTime; }
+    public void setLastSyncedBlockTime(Instant lastSyncedBlockTime) { this.lastSyncedBlockTime = lastSyncedBlockTime; }
 
     public String getLastError() { return lastError; }
     public void setLastError(String lastError) { this.lastError = lastError; }

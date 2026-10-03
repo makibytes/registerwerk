@@ -244,6 +244,10 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     error InvalidLiquidationBonus();
     error InvalidCollateralDecimals();
     error InsufficientLiquidationHaircut();
+    /// @notice The cheapest sale this {liquidate} could make costs `required` of the loan token,
+    ///         more than the `maxRepayAmount` the liquidator authorised — a single collateral unit
+    ///         is worth more than the debt it would close. Retry with `maxRepayAmount >= required`.
+    error LiquidationExceedsMaxRepay(uint256 required, uint256 maxRepayAmount);
     /// @notice `lltvBps × (1 + liquidationBonusBps) ≥ 1`: liquidating a still over-collateralised
     ///         position would already create bad debt.
     error InvalidLiquidationIncentive();
@@ -589,21 +593,29 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
     ///         position remains unhealthy. Not gated by {RegisterwerkGated} — see the
     ///         contract-level NatSpec for why an unverified caller cannot actually succeed.
     ///
-    ///         Collateral is whole units, so the liquidator buys whole units at the mark less
-    ///         the bonus: `collateralSeized = ceil(requested × (1 + bonus) / price)` (at least
-    ///         one, at most the pledged collateral), for a payment of `collateralSeized × price
-    ///         / (1 + bonus)`. That payment reduces the debt; any part of it beyond the
-    ///         remaining debt is credited to the borrower as {surplusOf}. Rounding up means the
-    ///         payment — and the debt closed — can exceed the requested amount (and the close
-    ///         factor) by less than one unit's discounted price; a small position is therefore
-    ///         always liquidatable instead of seizing zero units.
+    ///         Collateral is whole units, so the liquidator buys whole units: `collateralSeized =
+    ///         ceil(requested × (1 + bonus) / price)` (at least one, at most the pledged collateral),
+    ///         worth `V = collateralSeized × price`. The sale closes the debt it covers at the
+    ///         mark less the bonus, `min(debt, V / (1 + bonus))`, and the liquidator's discount is
+    ///         exactly `bonus × debt closed`: it pays `V / (1 + bonus)` while that is below the debt,
+    ///         and `V − bonus × debt` once the units are worth more than the whole debt (so the
+    ///         bonus is never charged on value beyond the debt closed). Any payment beyond the debt
+    ///         closed is credited to the borrower as {surplusOf}.
+    ///
+    ///         `maxRepayAmount` is a hard cap on the liquidator's payment. Rounding up the units
+    ///         can overshoot it; the sale then drops one unit (whose payment never exceeds the
+    ///         request), and if even a single unit costs more than `maxRepayAmount` the call
+    ///         reverts with {LiquidationExceedsMaxRepay} naming the amount to authorise. Rounding
+    ///         up still means a call may close more debt than the close factor (up to one unit's
+    ///         value), but never costs the liquidator more than it authorised.
     ///
     ///         When a call closes the debt completely, any collateral beyond the liquidator's
     ///         units stays credited to the position; the borrower takes it out with
     ///         {claimCollateral}. Neither it nor the surplus is pushed to the borrower here,
     ///         because a push to a frozen or no-longer-verified borrower would revert the whole
     ///         liquidation.
-    /// @return debtRepaid Debt closed. The liquidator pays this plus any credited surplus.
+    /// @return debtRepaid Debt closed. The liquidator pays this plus any credited surplus, never
+    ///         more than `maxRepayAmount` in total.
     function liquidate(address borrower, uint256 maxRepayAmount)
         external
         nonReentrant
@@ -618,6 +630,7 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         uint256 payment;
         (debtRepaid, payment) = _applyLiquidationPayment(pos, borrower, currentDebt, units, pricePerUnit);
         collateralSeized = units;
+        if (payment > maxRepayAmount) revert LiquidationExceedsMaxRepay(payment, maxRepayAmount);
 
         loanToken.safeTransferFrom(msg.sender, address(this), payment);
         collateralToken.safeTransfer(msg.sender, collateralSeized);
@@ -714,11 +727,42 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         if (units > pos.collateralAmount) {
             units = pos.collateralAmount;
         }
+
+        // `maxRepayAmount` caps what the liquidator pays, not just the debt it asks to close.
+        // Rounding the units up can overshoot it; one unit fewer then costs less than `requestedRepay`
+        // (its value is below `requestedRepay × (1 + bonus)`), unless that leaves nothing to sell.
+        (uint256 payment,) = _liquidationPayment(units, pricePerUnit, currentDebt);
+        if (payment > maxRepayAmount) {
+            if (units <= 1) revert LiquidationExceedsMaxRepay(payment, maxRepayAmount);
+            units -= 1;
+        }
     }
 
-    /// @dev Sells `units` to the liquidator at the mark less the bonus. The payment reduces the
-    ///      debt (conservative debt-share rounding); whatever the debt reduction leaves of the
-    ///      payment is credited to the borrower's {surplusOf}. Collateral left over after a full
+    /// @dev What the liquidator pays for `units` whole units at the mark, and the debt that payment
+    ///      closes. While the units are worth less than the debt plus bonus, everything the
+    ///      liquidator pays closes debt: `payment = ⌈V / (1 + bonus)⌉` for `V = units × price`.
+    ///      Once `V / (1 + bonus)` exceeds `currentDebt` the whole debt is closed and the bonus is
+    ///      earned on that debt only: `payment = V − ⌊bonus × currentDebt⌋` (the rest of the unit's
+    ///      value goes back to the borrower, as surplus).
+    function _liquidationPayment(uint256 units, uint256 pricePerUnit, uint256 currentDebt)
+        private
+        view
+        returns (uint256 payment, uint256 debtClosed)
+    {
+        uint256 value = units * pricePerUnit;
+        payment = Math.mulDiv(value, BPS_DENOMINATOR, BPS_DENOMINATOR + liquidationBonusBps, Math.Rounding.Ceil);
+        if (payment > currentDebt) {
+            payment = value - Math.mulDiv(currentDebt, liquidationBonusBps, BPS_DENOMINATOR);
+            debtClosed = currentDebt;
+        } else {
+            debtClosed = payment;
+        }
+    }
+
+    /// @dev Sells `units` to the liquidator at the mark less the bonus on the debt closed (see
+    ///      {_liquidationPayment}). The payment reduces the debt (conservative debt-share
+    ///      rounding); whatever the debt reduction leaves of the payment is credited to the
+    ///      borrower's {surplusOf}. Collateral left over after a full
     ///      close stays in `pos.collateralAmount` for {claimCollateral} (see {liquidate}).
     function _applyLiquidationPayment(
         Position storage pos,
@@ -727,9 +771,10 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
         uint256 units,
         uint256 pricePerUnit
     ) private returns (uint256 debtRepaid, uint256 payment) {
-        payment = Math.mulDiv(units * pricePerUnit, BPS_DENOMINATOR, BPS_DENOMINATOR + liquidationBonusBps, Math.Rounding.Ceil);
+        uint256 debtClosed;
+        (payment, debtClosed) = _liquidationPayment(units, pricePerUnit, currentDebt);
         (uint256 residualScaledDebt, uint256 actualRepayAmount) =
-            _residualDebtAfterPayment(pos.scaledDebt, currentDebt, payment < currentDebt ? payment : currentDebt);
+            _residualDebtAfterPayment(pos.scaledDebt, currentDebt, debtClosed);
         debtRepaid = actualRepayAmount;
 
         uint256 scaledRepaid = pos.scaledDebt - residualScaledDebt;

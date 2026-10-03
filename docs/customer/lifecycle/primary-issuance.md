@@ -96,7 +96,11 @@ stateDiagram-v2
     direction LR
     SUBMITTED --> ALLOCATED: allocate
     ALLOCATED --> PAYMENT_CONFIRMED: accepted and paid
-    PAYMENT_CONFIRMED --> SETTLED: settle
+    PAYMENT_CONFIRMED --> SETTLEMENT_PENDING: settle (deployed asset)
+    PAYMENT_CONFIRMED --> SETTLED: settle (off-chain register)
+    SETTLEMENT_PENDING --> SETTLED: mint final and indexed
+    SETTLEMENT_PENDING --> SETTLEMENT_FAILED: mint reverted
+    SETTLEMENT_FAILED --> SETTLEMENT_PENDING: settle again
     ALLOCATED --> LAPSED: not paid in time
     ALLOCATED --> RELEASED: released
     SUBMITTED --> REJECTED: reject
@@ -106,7 +110,7 @@ stateDiagram-v2
 2. **Allocate.** The issuer or operator allocates — fully, or scaled down. Allocations count against the issue size, and against the investor's maximum holding **together with their other open allocations**, so two parallel allocations cannot each slip under the cap.
 3. **Accept.** The investor accepts the allocation. Nothing is entered on the register yet. For a bond the amount due (allocated units × face value × issue price) and a payment reference are shown, with a payment deadline — by default 10 TARGET business days. An allocation that is not paid in time **lapses** and frees its capacity; the issuer or operator can also **release** it.
 4. **Confirm payment.** The issuer or operator confirms that the cash arrived ([step-up](../../compliance/step-up-mfa.md) required). An underpayment is refused; an overpayment is accepted and shown as *refund due*.
-5. **Settle.** Before anything is written, the same checks as for a trade settlement run again: KYC approved, no unresolved sanctions hit, no [Sperrvermerk](holding.md), register not frozen for a handover, chain finality, target market and holding cap. Then the units are issued. If the asset is **deployed**, the units are minted to the investor's wallet and the register is credited by the holder sync once the transfer is indexed. Otherwise the register is credited directly; a second subscription on the same wallet increases the existing entry.
+5. **Settle.** Before anything is written, the same checks as for a trade settlement run again: KYC approved, no unresolved sanctions hit, no [Sperrvermerk](holding.md), register not frozen for a handover, chain finality, target market and holding cap. Then the units are issued. If the asset is **deployed**, the mint is *submitted* (through the durable outbox — it is only broadcast after the settlement has been committed, so a failed commit can never mint) and the order is `SETTLEMENT_PENDING`; it becomes `SETTLED` only when the mint transaction is final **and** the indexer has recorded the mint transfer as final, and the register is credited by the holder sync from that transfer. A mint that reverts leaves the order `SETTLEMENT_FAILED` — the investor has paid and holds no units, an operator is alerted, and the order can be settled again (or released with a refund); a mint that merely timed out is *not* a failure (it may still be mined), so the order waits. A pending order cannot be settled twice and still counts against the investor's holding cap. Otherwise (no deployment) the register is credited directly; a second subscription on the same wallet increases the existing entry.
 
 !!! note "Open points"
     A token standard without an automated mint leaves the order at *payment confirmed* — an operator issues the units. For assets without bond terms the operator enters the amount received; there is no computed price. For collective entries the investor, not a custodian, is entered as holder — that question is not decided yet.

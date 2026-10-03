@@ -22,7 +22,10 @@ import {ERC7579Utils} from "@openzeppelin/contracts/account/utils/draft-ERC7579U
 ///         `guardian` is an immutable in its code. An EOA that delegates to a deployed instance
 ///         runs that code against its *own* (empty) storage — no passkey is set, so every
 ///         signature fails closed ({_rawSignatureValidation}) — while sharing the instance's
-///         guardian with every other delegating EOA. Do not point a 7702 authorization at it.
+///         guardian with every other delegating EOA. Do not point a 7702 authorization at it —
+///         and if one does, the guardian's privileged functions ({guardianExecute},
+///         {setCallRole}) refuse to run in the delegating account's context ({NotInstance}), so the
+///         shared guardian key cannot act as the guardian of every EOA that delegates to an instance.
 ///
 ///         **Guardian = full custodial override.** {guardianExecute} performs an arbitrary call
 ///         from the account with no timelock, role check or passkey co-signature; whoever holds
@@ -55,6 +58,8 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
 
     IEntryPoint private immutable _entryPoint;
     address public immutable guardian;
+    /// @dev The instance's own address (immutables live in code, which a 7702 delegate shares).
+    address private immutable _self = address(this);
     mapping(address => mapping(bytes4 => bytes32)) public callRole;
 
     event CallRoleSet(address indexed target, bytes4 indexed selector, bytes32 indexed role);
@@ -62,6 +67,9 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
 
     error GuardianRequired(address target, bytes4 selector);
     error NotGuardian();
+    /// @notice A guardian function was called in the context of an EIP-7702 delegating account
+    ///         rather than at the deployed instance.
+    error NotInstance();
     error SelfCallTrampolineForbidden();
     error ZeroGuardian();
 
@@ -77,6 +85,7 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
     /// guardian — see {guardianExecute}.
     function setCallRole(address target, bytes4 selector, bytes32 role) external {
         if (msg.sender != guardian) revert NotGuardian();
+        if (address(this) != _self) revert NotInstance();
         require(role == ROLE_ROUTINE || role == ROLE_ADMIN || role == ROLE_RECOVERY, "invalid role");
         callRole[target][selector] = role;
         emit CallRoleSet(target, selector, role);
@@ -90,6 +99,7 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
         returns (bytes memory result)
     {
         if (msg.sender != guardian) revert NotGuardian();
+        if (address(this) != _self) revert NotInstance();
         (bool ok, bytes memory returned) = target.call{value: value}(data);
         if (!ok) {
             assembly ("memory-safe") { revert(add(returned, 32), mload(returned)) }

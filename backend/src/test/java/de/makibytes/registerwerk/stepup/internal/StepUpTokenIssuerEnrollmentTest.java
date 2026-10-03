@@ -67,6 +67,7 @@ class StepUpTokenIssuerEnrollmentTest {
         lenient().when(userRepository.save(any(AppUser.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
         lenient().when(state.acceptStep(any(), org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
+        lenient().when(state.reserveAttempt(any())).thenReturn(true);
     }
 
     private AppUser freshUser() {
@@ -109,7 +110,7 @@ class StepUpTokenIssuerEnrollmentTest {
     }
 
     @Test
-    @DisplayName("K3 6-09: enrolment without the current password is refused and counted as a failure (no trust on first use)")
+    @DisplayName("K3 6-09: enrolment without the current password is refused; the attempt was reserved first and is never given back (no trust on first use)")
     void enroll_requiresCurrentPassword() {
         AppUser user = freshUser();
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
@@ -118,7 +119,35 @@ class StepUpTokenIssuerEnrollmentTest {
         assertThatThrownBy(() -> issuer.enroll(userId, "wrong")).isInstanceOf(AccessDeniedException.class);
 
         assertThat(user.getTotpSecret()).isNull();
-        org.mockito.Mockito.verify(state, org.mockito.Mockito.times(2)).recordFailure(userId);
+        org.mockito.Mockito.verify(state, org.mockito.Mockito.times(2)).reserveAttempt(userId);
+        org.mockito.Mockito.verify(state, org.mockito.Mockito.never()).releaseAttempt(userId);
+    }
+
+    @Test
+    @DisplayName("C4: a correct password gives its reservation back, so enrolling does not eat into the attempt budget")
+    void enroll_releasesReservationOnSuccess() {
+        AppUser user = freshUser();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        issuer.enroll(userId, "pw");
+
+        org.mockito.Mockito.verify(state).reserveAttempt(userId);
+        org.mockito.Mockito.verify(state).releaseAttempt(userId);
+    }
+
+    @Test
+    @DisplayName("C4/H14: the attempt is reserved before the code is compared; a locked account never reaches the comparison")
+    void verify_reservesBeforeComparing() {
+        AppUser user = enrolledAdmin(StepUpTokenIssuer.generateBase32Secret());
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(state.reserveAttempt(userId)).thenReturn(false);
+        long step = Instant.now().getEpochSecond() / 30;
+
+        assertThatThrownBy(() -> issuer.issueAfterVerification(userId, "123456", "TOTP"))
+                .isInstanceOf(AccessDeniedException.class).hasMessageContaining("Too many");
+        org.mockito.Mockito.verify(state, org.mockito.Mockito.never())
+                .acceptStep(any(), org.mockito.ArgumentMatchers.anyLong());
+        assertThat(step).isPositive();
     }
 
     @Test
@@ -138,7 +167,7 @@ class StepUpTokenIssuerEnrollmentTest {
     void enroll_refusedWhileLocked() {
         AppUser user = freshUser();
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(state.isLocked(userId)).thenReturn(true);
+        when(state.reserveAttempt(userId)).thenReturn(false);
 
         assertThatThrownBy(() -> issuer.enroll(userId, "pw")).isInstanceOf(AccessDeniedException.class);
         org.mockito.Mockito.verify(passwordEncoder, org.mockito.Mockito.never()).matches(any(), any());
@@ -170,13 +199,13 @@ class StepUpTokenIssuerEnrollmentTest {
         assertThatThrownBy(() -> issuer.confirmEnrollment(userId, StepUpTokenIssuer.generateTotp(start.secret(), step)))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining("already used");
-        org.mockito.Mockito.verify(state).recordFailure(userId);
+        org.mockito.Mockito.verify(state, org.mockito.Mockito.atLeastOnce()).reserveAttempt(userId);
         assertThat(user.isTotpEnabled()).isFalse();
     }
 
     @Test
-    @DisplayName("K3 6-09: a pre-V35 plaintext secret still verifies and is re-encrypted on that verification")
-    void legacyPlaintextSecret_lazilyReencrypted() {
+    @DisplayName("H14: a plaintext TOTP secret is never accepted at verification time - the startup migration is the only path off plaintext")
+    void plaintextSecret_isRefused() {
         AppUser user = freshUser();
         String legacy = StepUpTokenIssuer.generateBase32Secret();
         user.setTotpSecret(legacy);
@@ -184,11 +213,9 @@ class StepUpTokenIssuerEnrollmentTest {
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         long step = Instant.now().getEpochSecond() / 30;
 
-        String token = issuer.issueAfterVerification(userId, StepUpTokenIssuer.generateTotp(legacy, step), "TOTP");
-
-        assertThat(token).isNotBlank();
-        assertThat(user.getTotpSecret()).startsWith("enc:v1:").doesNotContain(legacy);
-        assertThat(plainSecretOf(user)).isEqualTo(legacy);
+        assertThatThrownBy(() -> issuer.issueAfterVerification(userId, StepUpTokenIssuer.generateTotp(legacy, step), "TOTP"))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThat(user.getTotpSecret()).as("verification must not quietly rewrite it either").isEqualTo(legacy);
     }
 
     @Test
@@ -256,8 +283,55 @@ class StepUpTokenIssuerEnrollmentTest {
                 java.nio.charset.StandardCharsets.UTF_8);
         assertThat(payload).contains("\"stepup_scope\":\"FORCE_BURN_EWG26\"")
                 .contains("\"stepup_target\":\"" + de.makibytes.registerwerk.stepup.api.DualControlTarget
-                        .digestOfTarget("POST /api/v1/x/1", null) + "\"")
+                        .digestOfTarget("POST /api/v1/x/1", "") + "\"")
                 .contains("\"jti\"");
+    }
+
+    private AppUser enrolledAdmin(String secret) {
+        AppUser user = freshUser();
+        user.setTotpSecret(new TotpSecretStore(XOR_KEK).encrypt(userId, secret));
+        user.setTotpEnabled(true);
+        user.setRoles(java.util.Set.of(de.makibytes.registerwerk.auth.api.AppUserRole.REGISTRY_ADMIN));
+        return user;
+    }
+
+    private static String payloadOf(String token) {
+        return new String(java.util.Base64.getUrlDecoder().decode(token.split("\\.")[1]),
+                java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    @Test
+    @DisplayName("C1: an approval token is marked use=dual_control with its own audience; an ordinary step-up token is not")
+    void approvalToken_isMarkedDualControlOnly() {
+        String secret = StepUpTokenIssuer.generateBase32Secret();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledAdmin(secret)));
+        long step = Instant.now().getEpochSecond() / 30;
+
+        String approval = issuer.issueAfterVerification(userId, StepUpTokenIssuer.generateTotp(secret, step), "TOTP",
+                "FORCE_BURN_EWG26", "POST /api/v1/x/1", null);
+        String ordinary = issuer.issueAfterVerification(userId, StepUpTokenIssuer.generateTotp(secret, step + 1), "TOTP");
+
+        assertThat(payloadOf(approval)).contains("\"use\":\"dual_control\"").contains("registerwerk-dual-control");
+        assertThat(payloadOf(ordinary)).doesNotContain("dual_control").doesNotContain("stepup_scope")
+                .doesNotContain("\"jti\"");
+    }
+
+    @Test
+    @DisplayName("C2: the canonical body is part of every approval by default - changing one field changes the bound target")
+    void approvalToken_bindsBodyForAnyReason() {
+        String secret = StepUpTokenIssuer.generateBase32Secret();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(enrolledAdmin(secret)));
+        long step = Instant.now().getEpochSecond() / 30;
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+
+        String a = issuer.issueAfterVerification(userId, StepUpTokenIssuer.generateTotp(secret, step), "TOTP",
+                "KYC_APPROVE", "POST /api/v1/entities/1/kyc/approve", mapper.readTree("{\"overrideNote\":\"accepted\"}"));
+        String b = issuer.issueAfterVerification(userId, StepUpTokenIssuer.generateTotp(secret, step + 1), "TOTP",
+                "KYC_APPROVE", "POST /api/v1/entities/1/kyc/approve", mapper.readTree("{\"overrideNote\":\"other\"}"));
+
+        String targetA = payloadOf(a).replaceAll(".*\"stepup_target\":\"([^\"]+)\".*", "$1");
+        String targetB = payloadOf(b).replaceAll(".*\"stepup_target\":\"([^\"]+)\".*", "$1");
+        assertThat(targetA).isNotEqualTo(targetB);
     }
 
     @Test

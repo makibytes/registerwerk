@@ -39,9 +39,12 @@ El backend emite las atestaciones KYC/AML mediante un **contrato** ONCHAINID `Cl
 cd contracts
 REGISTRY_WALLET_PRIVATE_KEY=$REGISTRY_SIGNER_KEY \
   forge script script/DeployClaimIssuer.s.sol --rpc-url $RPC_URL --broadcast
-# Logs "ClaimIssuer : 0x…"; CLAIM_ISSUER_MANAGEMENT_KEY overrides the management key
-# (default: the broadcasting wallet, which must be the backend's registry signer).
+# Logs "ClaimIssuer : 0x…". The MANAGEMENT key is the broadcasting wallet, i.e. the
+# backend's registry signer (default); CLAIM_ISSUER_MANAGEMENT_KEY is an optional override.
 ```
+
+!!! warning "Clave de gestión = clave de firma «caliente» por defecto"
+    Por defecto, el firmante del registro firma las atestaciones y controla a la vez el conjunto de claves del ClaimIssuer (`addKey`/`removeKey`) y sus actualizaciones; el backend necesita derechos MANAGEMENT para llamar a `revokeClaimBySignature`. Trate al firmante del registro como una clave de alto valor (respaldada por KMS/HSM en producción). `CLAIM_ISSUER_MANAGEMENT_KEY` puede indicar en su lugar una clave separada (fría o multifirma); esa clave debe entonces ejecutar `addKey(keccak256(abi.encode(registrySigner)), 3, 1)` para que el firmante pueda firmar atestaciones, y la revocación por parte del backend revierte mientras el firmante no tenga también una clave MANAGEMENT (purpose 1), por lo que las atestaciones deben revocarse desde la clave de gestión.
 
 Establezca `CLAIM_ISSUER_<CHAIN>` (por ejemplo `CLAIM_ISSUER_ETH_TESTNET`, vinculado a `registerwerk.contracts.claim-issuer.<chain>`) y reinicie el backend. Sin este valor, el backend rechaza la emisión de atestaciones y el despliegue de suites T-REX en esa cadena (denegación por defecto), en lugar de difundir transacciones que revertirían. Antes de cada `addClaim` comprueba además que el firmante tiene una clave en el ClaimIssuer.
 

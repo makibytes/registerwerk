@@ -1,6 +1,8 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
+import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.corporateactions.api.BondRedemptionBlockedEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
 import de.makibytes.registerwerk.deployment.api.AssetBondTerms;
@@ -9,17 +11,21 @@ import de.makibytes.registerwerk.deployment.api.BondStatus;
 import de.makibytes.registerwerk.deployment.api.schedule.BusinessDayCalendar;
 import de.makibytes.registerwerk.deployment.api.schedule.BusinessDayConvention;
 import de.makibytes.registerwerk.deployment.api.schedule.HolidayCalendar;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
+import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
 import de.makibytes.registerwerk.shared.RegisterClock;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -43,6 +49,14 @@ import java.util.UUID;
  * {@code OVERDUE} (operator-visible; customers see "payment pending"); only after the principal
  * grace period ({@code principalGraceDays}) does it become {@code DEFAULTED}. Settlement moves
  * either straight to {@code REDEEMED}.
+ *
+ * <p>H6: a redemption the REGISTRY side blocks (record-date snapshot blocked, register frozen or handed over,
+ * settlement held by the system - see {@link CorporateActionBlocks}) is not the issuer's non-payment: it never
+ * counts toward OVERDUE / DEFAULTED. The bond is left as it is, the cause is audited once
+ * ({@link BondRedemptionBlockedEvent}) and an operator task is raised on the issuer.
+ *
+ * <p>H8: the job holds no transaction of its own; every bond is handled in its own {@code REQUIRES_NEW}
+ * transaction, so one failing bond cannot roll back the others' transitions.
  */
 @Component
 class BondMaturityJob {
@@ -55,17 +69,26 @@ class BondMaturityJob {
     private final CorporateActionService corporateActionService;
     private final AssetRepository assetRepository;
     private final RegisterClock registerClock;
+    private final IsolatedTransactionExecutor isolated;
+    private final EntityTaskPort entityTasks;
+    private final ApplicationEventPublisher events;
 
     BondMaturityJob(AssetBondTermsRepository bondTermsRepository,
                      CorporateActionRepository corporateActionRepository,
                      CorporateActionService corporateActionService,
                      AssetRepository assetRepository,
-                     RegisterClock registerClock) {
+                     RegisterClock registerClock,
+                     IsolatedTransactionExecutor isolated,
+                     EntityTaskPort entityTasks,
+                     ApplicationEventPublisher events) {
         this.bondTermsRepository = bondTermsRepository;
         this.corporateActionRepository = corporateActionRepository;
         this.corporateActionService = corporateActionService;
         this.assetRepository = assetRepository;
         this.registerClock = registerClock;
+        this.isolated = isolated;
+        this.entityTasks = entityTasks;
+        this.events = events;
     }
 
     /** The redemption's dates, derived from the bond's conventions. */
@@ -84,47 +107,56 @@ class BondMaturityJob {
     }
 
     /** 05:45 register time: after CouponPaymentJob (05:30), before the daily transitions (06:00). */
-    @Transactional
     @SchedulerLock(name = "bondMaturityJob", lockAtMostFor = "PT14M")
     @Scheduled(cron = "0 45 5 * * *", zone = "${registerwerk.register.time-zone:Europe/Berlin}")
     public void processMaturitiesAndDefaults() {
         LocalDate today = registerClock.today();
 
-        for (AssetBondTerms terms : bondTermsRepository.findMaturedButNotTransitioned(today)) {
-            try {
-                if (corporateActionRepository.existsSettledCallForAsset(terms.getAssetId())) {
-                    terms.setBondStatus(BondStatus.CALLED);
-                    bondTermsRepository.save(terms);
-                    log.info("Bond assetId={} reached maturity but was already called — marked CALLED.", terms.getAssetId());
-                    continue;
-                }
-                terms.setBondStatus(BondStatus.MATURED);
-                bondTermsRepository.save(terms);
-                log.info("Bond matured: assetId={} maturityDate={}", terms.getAssetId(), terms.getMaturityDate());
-            } catch (Exception e) {
-                log.error("Failed to process maturity for bond assetId={}: {}", terms.getAssetId(), e.getMessage());
-            }
+        for (AssetBondTerms scanned : bondTermsRepository.findMaturedButNotTransitioned(today)) {
+            UUID assetId = scanned.getAssetId();
+            runItem("maturity", assetId, () -> transitionToMatured(assetId));
         }
 
         for (BondStatus status : List.of(BondStatus.ACTIVE, BondStatus.MATURED)) {
-            for (AssetBondTerms terms : bondTermsRepository.findByBondStatus(status)) {
-                try {
-                    raiseRedemptionIfAnnounceable(terms, today);
-                } catch (Exception e) {
-                    log.error("Failed to raise redemption for bond assetId={}: {}", terms.getAssetId(), e.getMessage());
-                }
+            for (AssetBondTerms scanned : bondTermsRepository.findByBondStatus(status)) {
+                UUID assetId = scanned.getAssetId();
+                runItem("raise-redemption", assetId, () -> bondTermsRepository.findById(assetId)
+                        .ifPresent(terms -> raiseRedemptionIfAnnounceable(terms, today)));
             }
         }
 
         for (BondStatus status : List.of(BondStatus.ACTIVE, BondStatus.MATURED, BondStatus.OVERDUE)) {
-            for (AssetBondTerms terms : bondTermsRepository.findByBondStatus(status)) {
-                try {
-                    evaluateOverdue(terms, today);
-                } catch (Exception e) {
-                    log.error("Failed to evaluate default status for bond assetId={}: {}", terms.getAssetId(), e.getMessage());
-                }
+            for (AssetBondTerms scanned : bondTermsRepository.findByBondStatus(status)) {
+                UUID assetId = scanned.getAssetId();
+                runItem("default-evaluation", assetId, () -> bondTermsRepository.findById(assetId)
+                        .ifPresent(terms -> evaluateOverdue(terms, today)));
             }
         }
+    }
+
+    private void runItem(String step, UUID assetId, IsolatedTransactionExecutor.Work work) {
+        try {
+            isolated.run(work);
+        } catch (Exception e) {
+            log.error("BondMaturityJob step '{}' failed for bond assetId={} (rolled back on its own; other bonds "
+                    + "are unaffected): {}", step, assetId, e.getMessage(), e);
+        }
+    }
+
+    private void transitionToMatured(UUID assetId) {
+        AssetBondTerms terms = bondTermsRepository.findById(assetId).orElse(null);
+        if (terms == null) {
+            return;
+        }
+        if (corporateActionRepository.existsSettledCallForAsset(terms.getAssetId())) {
+            terms.setBondStatus(BondStatus.CALLED);
+            bondTermsRepository.save(terms);
+            log.info("Bond assetId={} reached maturity but was already called — marked CALLED.", terms.getAssetId());
+            return;
+        }
+        terms.setBondStatus(BondStatus.MATURED);
+        bondTermsRepository.save(terms);
+        log.info("Bond matured: assetId={} maturityDate={}", terms.getAssetId(), terms.getMaturityDate());
     }
 
     private void raiseRedemptionIfAnnounceable(AssetBondTerms terms, LocalDate today) {
@@ -157,15 +189,33 @@ class BondMaturityJob {
                 terms.getAssetId(), dates.recordDate(), dates.paymentDate());
     }
 
-    /** OVERDUE once the payment date has passed unsettled; DEFAULTED only after the grace period. */
+    /**
+     * OVERDUE once the payment date has passed unsettled; DEFAULTED only after the grace period. Only redemptions
+     * that wait for the ISSUER count (H6): registry-side blocks are reported, not escalated.
+     */
     private void evaluateOverdue(AssetBondTerms terms, LocalDate today) {
         List<CorporateAction> overdue = corporateActionRepository.findOverdueRedemptions(terms.getAssetId(), today);
         if (overdue.isEmpty()) {
             return;
         }
-        LocalDate earliestPayment = overdue.stream().map(CorporateAction::getPaymentDate)
+        boolean frozen = isTransferredOut(terms.getAssetId());
+        List<CorporateAction> issuerSide = new ArrayList<>();
+        for (CorporateAction ca : overdue) {
+            Optional<String> cause = CorporateActionBlocks.systemBlockCause(ca, frozen);
+            if (cause.isPresent()) {
+                reportBlocked(terms, ca, cause.get());
+            } else {
+                issuerSide.add(ca);
+            }
+        }
+        if (issuerSide.isEmpty()) {
+            log.warn("Bond assetId={} redemption is past its payment date but blocked on the registry side — status "
+                    + "left unchanged ({}), not escalated.", terms.getAssetId(), terms.getBondStatus());
+            return;
+        }
+        LocalDate earliestPayment = issuerSide.stream().map(CorporateAction::getPaymentDate)
                 .min(Comparator.naturalOrder()).orElseThrow();
-        List<UUID> ids = overdue.stream().map(CorporateAction::getId).toList();
+        List<UUID> ids = issuerSide.stream().map(CorporateAction::getId).toList();
         if (today.isAfter(earliestPayment.plusDays(terms.getPrincipalGraceDays()))) {
             terms.setBondStatus(BondStatus.DEFAULTED);
             bondTermsRepository.save(terms);
@@ -178,6 +228,21 @@ class BondMaturityJob {
             log.warn("Bond redemption overdue: assetId={} — action(s) {} unsettled after payment date {} "
                     + "(inside the {}-day principal grace period)", terms.getAssetId(), ids, earliestPayment,
                     terms.getPrincipalGraceDays());
+        }
+    }
+
+    /** One operator task per (issuer, action) while it is open; the audit event only when the task is new. */
+    private void reportBlocked(AssetBondTerms terms, CorporateAction ca, String cause) {
+        UUID issuerId = assetRepository.findById(terms.getAssetId()).map(Asset::getIssuerId).orElse(null);
+        boolean fresh = true;
+        if (issuerId != null) {
+            fresh = entityTasks.open(issuerId, CorporateActionBlocks.TASK_REDEMPTION_BLOCKED, ca.getId().toString(),
+                    "The redemption " + ca.getId() + " of asset " + terms.getAssetId() + " (payment date "
+                            + ca.getPaymentDate() + ") is blocked on the registry side — " + cause
+                            + ". The bond is NOT marked overdue or defaulted.", null);
+        }
+        if (fresh) {
+            events.publishEvent(new BondRedemptionBlockedEvent(terms.getAssetId(), ca.getId(), cause));
         }
     }
 

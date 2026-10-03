@@ -221,6 +221,16 @@ bestehen, bis die Sperre aufgehoben, der Handel storniert oder die Hinterlegung 
 behördliche oder gerichtliche Anordnung mit `forceCancel(tradeId, to, legalBasis)` freigegeben wird
 (Ereignis `TradeForceCancelled`).
 
+!!! note "Freigabe aufgrund einer Anordnung"
+    `forceCancel` (Betreiberrolle) kann die Hinterlegung nur an die Parteien des Handels
+    zurückgeben, den Hinterleger oder die Gegenpartei. Ein Ziel außerhalb des Handels, das eine
+    Anordnung benennt, erfordert die separate `LEGAL_ORDER_ROLE`, die bei der Bereitstellung nicht
+    vergeben wird (vergeben Sie sie an einen anderen Schlüssel oder Multisig als das
+    Betreiber-Wallet): `proposeForceCancel` (Ereignis `ForceCancelProposed`), danach eine
+    zweitägige Zeitsperre (`LEGAL_ORDER_DELAY`), danach `executeForceCancel`. Ein Vorschlag lässt
+    sich mit `withdrawForceCancel` zurückziehen (Ereignis `ForceCancelWithdrawn`); Abwicklung oder
+    Stornierung des Handels erledigt ihn.
+
 ## Veröffentlichungsworkflow { #publication-workflow }
 
 1. **Voraussetzung:** Ihr Unternehmen ist als On-Chain-Organisation (betreiberseitig) registriert,
@@ -313,7 +323,7 @@ geseedet, wenn `registerwerk.seed-demo-data=true` gesetzt ist:
 | dApp | Slug | Demonstriert |
 |---|---|---|
 | **Boardroom Governance** | `boardroom` | Das Berechtigungsverwaltungs-Framework in voller Ausprägung: Vorschlagen/Abstimmen/Auszählen, gesteuert durch Berechtigungen + ONCHAINID-Ansprüche (KYC, Akkreditierung), sowie den Ablauf zur **Rollenbeschränkung / Admin-Delegation der Organisation** bei `boardroom.tally`. |
-| **eWpG Bond Desk** | `bond-desk` | Ein technisches ERC-3643/T-REX-Beispiel mit einer konfigurierten Token-Zahlungsseite. `subscribe` führt Zahlungsübertragung und Prägung in einer Transaktion durch; `payCoupon`/`redeem` wenden Zeit- und Idempotenzkontrollen an. Dies ist keine rechtlich klassifizierte Anleihe, keine verifizierte Zahlungsvereinbarung und kein Nachweis einer rechtswirksamen Abwicklung. |
+| **eWpG Bond Desk** | `bond-desk` | Ein technisches ERC-3643/T-REX-Beispiel mit einer konfigurierten Token-Zahlungsseite. `subscribe` führt Zahlungsübertragung und Prägung in einer Transaktion durch; `payCoupon`/`redeem` wenden Zeit- und Idempotenzkontrollen an. Eine kurze erste Kuponperiode (Stub) wird nach Tagen anteilig berechnet; bei einem Inhaber mit eingefrorenen Einheiten wird nur deren Anteil in ein Desk-Escrow einbehalten (der Rest wird sofort gezahlt), und der Inhaber ruft ihn mit `claimWithheldCoupon` ab, sobald nichts mehr eingefroren ist. Dies ist keine rechtlich klassifizierte Anleihe, keine verifizierte Zahlungsvereinbarung und kein Nachweis einer rechtswirksamen Abwicklung. |
 | **eWpG Repo & Lending Facility** | `repo-facility` | Ein technisches Beispiel für besicherte Kreditvergabe mit einer offenen Stablecoin-Kreditgeberseite und einer vertragsgebundenen Kreditnehmerseite. Die Produktionsnutzung ist gesperrt, bis rechtliche Einordnung, Verwahrung/Kontrolle, Verwertung, Orakel, Insolvenz, Anspruchsberechtigung und Sicherheitsfreigabe geklärt sind. Allein die Prüfung der Token-Identität macht die Verwertung nicht compliant. Siehe [DeFi-Interoperabilität](./defi-interoperability.md#ewpgrepofacility-the-primary-exit-liquidity-mechanism). |
 
 | | Pfad |

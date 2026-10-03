@@ -14,10 +14,11 @@ public interface CorporateActionEntryRepository extends JpaRepository<CorporateA
 
     boolean existsByCorporateActionId(UUID corporateActionId);
 
-    /** T3-02: does the action carry a nominee-pool (HELD_LOOK_THROUGH) entry with a non-zero
-     *  entitlement? Such an entitlement has no resolution path yet (PARK-T2-18). */
+    /** T3-02 / H6: does the action carry a held entry (nominee pool HELD_LOOK_THROUGH, or an ineligible holder
+     *  HELD_BLOCKED) with a non-zero entitlement? Such an entitlement was not paid and has no automatic
+     *  resolution path (PARK-T2-18 / operator task). */
     @Query("SELECT CASE WHEN COUNT(e) > 0 THEN true ELSE false END FROM CorporateActionEntry e "
-            + "WHERE e.corporateActionId = :caId AND e.payoutStatus = 'HELD_LOOK_THROUGH' "
+            + "WHERE e.corporateActionId = :caId AND e.payoutStatus <> 'PAYABLE' "
             + "AND e.entitlementAmount IS NOT NULL AND e.entitlementAmount <> 0")
     boolean existsHeldWithEntitlement(@Param("caId") UUID corporateActionId);
 

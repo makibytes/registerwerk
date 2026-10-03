@@ -278,6 +278,10 @@ export interface CorporateAction {
   notes?: string;
   /** Sum of unrounded minus rounded payable entitlements (T3-05). */
   roundingResidual?: number | null;
+  /** C6: SHA-256 over the computed entitlements (entries, total, rounding residual) the sign-offs are bound to. */
+  payoutDigest?: string | null;
+  /** H6: set while the system itself holds the settlement back (it is not escalated to overdue / defaulted). */
+  settlementHoldReason?: string | null;
   /** SETTLED but nominee-pool entitlements are unresolved, so the action is not closed (T3-02). */
   heldOutstanding?: boolean;
   /** Why the record-date snapshot is refused while status is SNAPSHOT_BLOCKED (register not reconciled). */
@@ -508,7 +512,7 @@ export interface Asset {
   isin?: string;
   tokenStandard: TokenStandard;
   onchainLevel: 'NONE' | 'SIMPLE' | 'CONTROL';
-  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ISSUED' | 'SUSPENDED' | 'REDEEMED' | 'TRANSFER_PENDING' | 'TRANSFERRED_OUT';
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'ISSUED' | 'SUSPENDED' | 'REDEMPTION_PENDING' | 'REDEEMED' | 'TRANSFER_PENDING' | 'TRANSFERRED_OUT';
   jurisdiction?: Jurisdiction;
   totalSupply?: number;
   decimals?: number;
@@ -740,9 +744,13 @@ export interface ChainDriftEvent {
   kind?: 'DRIFT' | 'NOT_INDEXED';
 }
 
-/** CONFIRMED is the legacy (pre-payment-flow) state; new orders end in SETTLED, LAPSED or RELEASED. */
+/**
+ * CONFIRMED is the legacy (pre-payment-flow) state; new orders end in SETTLED, LAPSED or RELEASED. On a deployed asset
+ * the mint is only submitted at settlement: SETTLEMENT_PENDING until it is final and indexed, SETTLEMENT_FAILED
+ * (retryable) when it reverted.
+ */
 export type SubscriptionOrderStatus =
-  'SUBMITTED' | 'ALLOCATED' | 'PAYMENT_CONFIRMED' | 'SETTLED' | 'CONFIRMED'
+  'SUBMITTED' | 'ALLOCATED' | 'PAYMENT_CONFIRMED' | 'SETTLEMENT_PENDING' | 'SETTLEMENT_FAILED' | 'SETTLED' | 'CONFIRMED'
   | 'REJECTED' | 'CANCELLED' | 'LAPSED' | 'RELEASED';
 
 export interface SubscriptionOrder {
@@ -772,6 +780,8 @@ export interface SubscriptionOrder {
   settlementTxId: string | null;
   lapsedAt: string | null;
   releaseReason: string | null;
+  /** Why the mint of a SETTLEMENT_FAILED order did not happen. */
+  settlementFailureReason?: string | null;
 }
 
 export interface PageResponse<T> {

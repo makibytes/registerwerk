@@ -67,7 +67,8 @@ public class TermsAmendmentService {
                        UUID dualControlApproverId) {
         Asset asset = assetRepository.findById(assetId)
                 .orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
-        if (asset.getStatus() == AssetStatus.REDEEMED || asset.getStatus().isRegisterFrozen()) {
+        if (asset.getStatus() == AssetStatus.REDEEMED || asset.getStatus() == AssetStatus.REDEMPTION_PENDING
+                || asset.getStatus().isRegisterFrozen()) {
             throw new InvalidStateTransitionException("Terms of a " + asset.getStatus() + " asset cannot be amended");
         }
         AssetBondTerms terms = bondTermsRepository.findById(assetId).orElse(null);
