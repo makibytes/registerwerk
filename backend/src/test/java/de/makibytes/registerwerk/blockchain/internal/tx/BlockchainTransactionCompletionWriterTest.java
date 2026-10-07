@@ -3,7 +3,8 @@ package de.makibytes.registerwerk.blockchain.internal.tx;
 import de.makibytes.registerwerk.finality.api.ChainEffectDescriptor;
 import de.makibytes.registerwerk.finality.api.ChainEffectRecorder;
 import de.makibytes.registerwerk.finality.api.CompensationCategory;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,10 +32,11 @@ class BlockchainTransactionCompletionWriterTest {
     @Mock private ChainEffectRecorder chainEffectRecorder;
 
     private BlockchainTransactionCompletionWriter writer;
+    private final PrometheusMeterRegistry meters = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
 
     @BeforeEach
     void setUp() {
-        writer = new BlockchainTransactionCompletionWriter(repository, eventPublisher, new SimpleMeterRegistry(), chainEffectRecorder);
+        writer = new BlockchainTransactionCompletionWriter(repository, eventPublisher, meters, chainEffectRecorder);
     }
 
     private BlockchainTransaction pendingTx(UUID chainConfigId) {
@@ -88,6 +90,45 @@ class BlockchainTransactionCompletionWriterTest {
         assertThat(descriptor.effectType()).isEqualTo("TX_COMPLETED");
         assertThat(descriptor.entityType()).isEqualTo("BlockchainTransaction");
         assertThat(descriptor.category()).isEqualTo(CompensationCategory.INVERSE_FLIP);
+    }
+
+    @Test
+    @DisplayName("P4B-5: a receipt for a TIMEOUT row counts registerwerk_blockchain_tx_late_mined_total by outcome")
+    void lateMinedReceiptIncrementsTheLateMinedCounter() {
+        BlockchainTransaction tx = pendingTx(UUID.randomUUID());
+        tx.setStatus(BlockchainTransaction.Status.TIMEOUT);
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1");
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100");
+        receipt.setGasUsed("0x5208");
+
+        writer.complete(tx, receipt);
+
+        assertThat(meters.get("registerwerk.blockchain.tx.late_mined").tag("outcome", "SUCCESS").counter().count())
+                .isEqualTo(1.0);
+        // BlockchainTxLateMined alert: increase(registerwerk_blockchain_tx_late_mined_total[30m]) > 0
+        assertThat(meters.scrape()).contains("registerwerk_blockchain_tx_late_mined_total{outcome=\"SUCCESS\"} 1.0");
+    }
+
+    @Test
+    @DisplayName("a normal completion leaves the late-mined counter alone but records the submission-to-confirmation latency histogram")
+    void normalCompletionRecordsLatencyNotLateMined() {
+        BlockchainTransaction tx = pendingTx(UUID.randomUUID());
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1");
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100");
+        receipt.setGasUsed("0x5208");
+
+        writer.complete(tx, receipt);
+
+        assertThat(meters.find("registerwerk.blockchain.tx.late_mined").counter()).isNull();
+        assertThat(meters.get("registerwerk.blockchain.tx.confirmation.latency")
+                .tag("chain", "ETHEREUM").tag("outcome", "SUCCESS").timer().count()).isEqualTo(1L);
+        // BlockchainTxConfirmationLatencyHigh: histogram_quantile over ..._seconds_bucket, grouped by chain
+        assertThat(meters.scrape())
+                .contains("registerwerk_blockchain_tx_confirmation_latency_seconds_bucket{chain=\"ETHEREUM\",outcome=\"SUCCESS\",le=");
     }
 
     @Test

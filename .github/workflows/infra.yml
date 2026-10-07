@@ -17,6 +17,9 @@ on:
       - deploy/helm/**
       - monitoring/**
       - scripts/lint-placeholders.sh
+      - scripts/check-alert-metrics.sh
+      - backend/src/main/java/**
+      - backend/src/main/resources/application.yml
       - .github/workflows/infra.yml
   pull_request:
     branches: [main, develop]
@@ -27,6 +30,9 @@ on:
       - deploy/helm/**
       - monitoring/**
       - scripts/lint-placeholders.sh
+      - scripts/check-alert-metrics.sh
+      - backend/src/main/java/**
+      - backend/src/main/resources/application.yml
 
 concurrency:
   group: infra-ci-${{ github.ref }}
@@ -189,6 +195,10 @@ jobs:
         run: |
           docker run --rm --entrypoint amtool -v "$PWD/monitoring:/m:ro" prom/alertmanager:v0.28.1 \
             check-config /m/alertmanager.yml
+      # Every registerwerk_* name in alerts, promtool tests, dashboards and the charts must be a meter
+      # the backend registers (a gauge `x_total` is exposed as `x`; a counter `x` as `x_total`).
+      - name: Alert/dashboard metric names resolve to backend meters
+        run: scripts/check-alert-metrics.sh -v
 
   workflows:
     name: Workflow Lint

@@ -1,0 +1,14 @@
+{{- if .Values.postgresql.enabled }}
+# T6-17: the runtime DB login is created by an init container of the backend Deployment (works on a fresh
+# AND an existing PostgreSQL volume, unlike chart-time initdb scripts). Verbatim copy of
+# postgres-init/roles/ensure-runtime-role.sh (the compose db-roles service runs the same file).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "registerwerk.fullname" . }}-db-roles
+  labels:
+    {{- include "registerwerk.labels" . | nindent 4 }}
+data:
+  ensure-runtime-role.sh: |
+{{ .Files.Get "files/ensure-runtime-role.sh" | indent 4 }}
+{{- end }}

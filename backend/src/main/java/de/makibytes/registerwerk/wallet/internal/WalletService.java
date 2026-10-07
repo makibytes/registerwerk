@@ -51,6 +51,7 @@ public class WalletService implements WalletManagement {
     private final WalletDefaultService     defaultService;
     private final WalletSigner             walletSigner;
     private final Pkcs11HsmService         pkcs11HsmService;
+    private final KmsSignerService         kmsSignerService;
     private final ApplicationEventPublisher eventPublisher;
     private final WalletUsagePort          usagePort;
 
@@ -60,6 +61,7 @@ public class WalletService implements WalletManagement {
             WalletDefaultService defaultService,
             WalletSigner walletSigner,
             Pkcs11HsmService pkcs11HsmService,
+            KmsSignerService kmsSignerService,
             ApplicationEventPublisher eventPublisher,
             WalletUsagePort usagePort) {
         this.usagePort          = usagePort;
@@ -68,6 +70,7 @@ public class WalletService implements WalletManagement {
         this.defaultService     = defaultService;
         this.walletSigner       = walletSigner;
         this.pkcs11HsmService   = pkcs11HsmService;
+        this.kmsSignerService   = kmsSignerService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -193,6 +196,41 @@ public class WalletService implements WalletManagement {
         return saved;
     }
 
+    /**
+     * Registers an existing cloud-KMS secp256k1 key (T7-05). The address is derived from the KMS public
+     * key (a supplied address must match), and one challenge signature proves the identity may sign
+     * before the key can become a chain default. Nothing is exported or stored besides the reference.
+     */
+    @Override
+    public OperatorWallet attachKms(String name, String keyReference, String expectedAddress,
+                                    UUID actorId, String actorRole) {
+        requireUniqueName(name);
+        if (!kmsSignerService.isEnabled()) {
+            throw new IllegalStateException(
+                    "Cloud-KMS signing is not enabled for this instance (registerwerk.wallet.signer=kms)");
+        }
+        if (!kmsSignerService.isValidKeyReference(keyReference)) {
+            throw new IllegalArgumentException("'" + keyReference + "' is not a valid key reference for KMS provider '"
+                    + kmsSignerService.provider() + "'");
+        }
+        KmsEvmSigner signer = kmsSignerService.signerFor(keyReference.trim(), expectedAddress);
+        signer.signDigest(org.web3j.crypto.Hash.sha3(
+                ("registerwerk-kms-enrollment:" + name).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+        OperatorWallet wallet = new OperatorWallet();
+        wallet.setName(name);
+        wallet.setType(WalletType.EVM);
+        wallet.setAddress(signer.address());
+        wallet.setCustodyType(OperatorWallet.CustodyType.KMS);
+        wallet.setKeyReference(keyReference.trim());
+        wallet.setCreatedBy(actorId);
+        OperatorWallet saved = walletRepository.save(wallet);
+        defaultService.bootstrapDefaultIfFirstWalletEver(saved);
+        eventPublisher.publishEvent(new WalletGeneratedEvent(saved.getId(), actorId, actorRole));
+        log.info("Attached KMS key as wallet '{}': address={}", name, saved.getAddress());
+        return saved;
+    }
+
     // ── Export ────────────────────────────────────────────────────────────────
 
     /**
@@ -201,8 +239,8 @@ public class WalletService implements WalletManagement {
      */
     public String exportKeystore(UUID walletId, String exportPassword, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
-        if (wallet.getCustodyType() == OperatorWallet.CustodyType.PKCS11) {
-            throw new UnsupportedOperationException("HSM keys are non-exportable");
+        if (wallet.getCustodyType().isOpaque()) {
+            throw new UnsupportedOperationException("HSM/KMS keys are non-exportable");
         }
         if (wallet.getType() != WalletType.EVM) {
             throw new UnsupportedOperationException("Keystore export is only supported for EVM wallets");
@@ -219,8 +257,8 @@ public class WalletService implements WalletManagement {
      */
     public String exportRaw(UUID walletId, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
-        if (wallet.getCustodyType() == OperatorWallet.CustodyType.PKCS11) {
-            throw new UnsupportedOperationException("HSM keys are non-exportable");
+        if (wallet.getCustodyType().isOpaque()) {
+            throw new UnsupportedOperationException("HSM/KMS keys are non-exportable");
         }
         String raw = wallet.getType() == WalletType.EVM
                 ? walletStorage.exportEvmRaw(wallet.getKeystorePath())
@@ -334,7 +372,7 @@ public class WalletService implements WalletManagement {
      */
     public boolean rotateKek(UUID walletId, UUID actorId, String actorRole) {
         OperatorWallet wallet = getById(walletId);
-        if (wallet.getCustodyType() == OperatorWallet.CustodyType.PKCS11) {
+        if (wallet.getCustodyType().isOpaque()) {
             return false;
         }
         boolean rotated = walletStorage.rewrapDek(wallet.getKeystorePath(), wallet.getType() == WalletType.EVM);

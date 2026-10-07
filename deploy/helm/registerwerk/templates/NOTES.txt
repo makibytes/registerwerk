@@ -51,8 +51,11 @@ failing the install itself.
    backend refuses to start with the SOFTHSM profile. Mount your PKCS#11 configuration and vendor
    client library through the generic hooks (extraVolumes, extraVolumeMounts, extraEnv,
    extraEnvFrom, initContainers, sidecars; see values-production.yaml for a commented pattern).
-   Running more than one replica needs a shared signer (network HSM or KMS). This chart bundles no
-   vendor client, so production mode cannot boot until you choose an HSM/KMS target (T7-05).
+   Running more than one replica needs a shared signer (network HSM or KMS). For GKE the chart can
+   point the backend at Google Cloud KMS (wallets.kmsSigner.enabled=true + keyVersion, Workload
+   Identity, no key files): a KMS signer satisfies the production HSM/KMS requirement without a
+   PKCS#11 token. For any other HSM/KMS target this chart bundles no vendor client, so production
+   mode cannot boot until you choose one.
 
 3. Install the companion backup chart — SEPARATELY, as its own release.
    deploy/helm/backup is not a dependency of this chart (a different release, potentially a
@@ -66,6 +69,22 @@ failing the install itself.
        --set postgresql.pvcName=data-{{ .Release.Name }}-postgresql-0 \
        --set postgresql.existingSecret={{ .Values.postgresql.auth.existingSecret }} \
        --set wallets.pvcName={{ include "registerwerk.fullname" . }}-wallets
+
+3b. Database durability (database.shape={{ .Values.database.shape }}, RPO target <= {{ .Values.database.rpoTargetMinutes }} min).
+{{- if eq .Values.database.shape "bundled" }}
+   WARNING: the bundled PostgreSQL has NO WAL archive. Recovery stops at the last daily base backup
+   of the companion backup chart (RPO up to 24 h, no point-in-time recovery). This shape is for
+   dev/test. For production use a managed PostgreSQL with PITR (database.shape=managed) or
+   CloudNativePG with Barman Cloud archiving (database.shape=cnpg, examples/cnpg-cluster.yaml).
+{{- else if eq .Values.database.shape "managed" }}
+   The managed instance must have PITR enabled (e.g. Cloud SQL point-in-time recovery with 7 days of
+   transaction-log retention). The chart cannot verify that: see docs/operator/maintenance/backups.md
+   for the required settings, and run scripts/pitr-drill.sh-style restores against your provider.
+   Alert on WAL lag with the provider's metric or the documented pg_stat_archiver query.
+{{- else }}
+   PostgreSQL is operated by CloudNativePG; apply deploy/helm/registerwerk/examples/cnpg-cluster.yaml
+   (adapted) and verify the WalArchiveLag alert is scraping cnpg_pg_stat_archiver_* metrics.
+{{- end }}
 
 4. (Optional but recommended) Configure a KMS-backed audit-chain signing key.
    registerwerk.audit.signing.provider is blank by default — the hash chain is still

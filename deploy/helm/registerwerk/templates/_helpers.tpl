@@ -69,3 +69,20 @@ helm.sh/chart: {{ include "registerwerk.chart" .context }}
 app.kubernetes.io/version: {{ .context.Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .context.Release.Service }}
 {{- end }}
+
+{{/*
+Database durability shape (T7-04): the declared shape must match what is actually deployed, so a
+production-looking release cannot silently ride on the bundled single instance without WAL archiving.
+*/}}
+{{- define "registerwerk.validateDatabase" -}}
+{{- $shape := .Values.database.shape | default "bundled" -}}
+{{- if not (has $shape (list "bundled" "managed" "cnpg")) -}}
+{{- fail (printf "database.shape must be one of bundled|managed|cnpg, got %q" $shape) -}}
+{{- end -}}
+{{- if and (eq $shape "bundled") (not .Values.postgresql.enabled) -}}
+{{- fail "database.shape=bundled requires postgresql.enabled=true; for an external database set database.shape to managed or cnpg." -}}
+{{- end -}}
+{{- if and (ne $shape "bundled") .Values.postgresql.enabled -}}
+{{- fail (printf "database.shape=%s means PITR is provided outside this chart: set postgresql.enabled=false (the bundled subchart has no WAL archiving)." $shape) -}}
+{{- end -}}
+{{- end -}}

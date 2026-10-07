@@ -156,6 +156,24 @@ sidecars: []
 # FILESYSTEM — and if you do, you MUST also drop replicaCount to 1 (or relax the anti-affinity
 # in affinity: below), or the exact same deadlock recurs.
 wallets:
+  # Cloud-KMS signing (T7-05): the EVM signing keys live in Google Cloud KMS (EC_SIGN_SECP256K1_SHA256,
+  # HSM protection level) and never in this process. A KMS signer counts as the production HSM/KMS target:
+  # no PKCS#11 token and no allow-software-token acknowledgement needed. Stateless, so any replica count works.
+  # No secrets here: the backend uses Application Default Credentials. On GKE use Workload Identity:
+  # annotate serviceAccount.annotations with iam.gke.io/gcp-service-account=<gsa>@<project>.iam.gserviceaccount.com,
+  # set serviceAccount.automountServiceAccountToken=true, and grant that GSA roles/cloudkms.signerVerifier
+  # (useToSign + viewPublicKey) on the key version only. Wallets are then enrolled with
+  # POST /api/v1/admin/wallets/attach-kms (step-up + second approver). Unreachable KMS or a missing/invalid
+  # keyVersion makes the backend refuse to start in production mode (readiness ERROR; WARN otherwise).
+  kmsSigner:
+    enabled: false
+    provider: gcp           # SPI: only gcp is implemented today
+    # projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>/cryptoKeyVersions/<n> - the registry signer key,
+    # probed at startup; further key versions can be attached as wallets at runtime.
+    keyVersion: ""
+    timeout: 5s             # per KMS call
+    maxAttempts: 3          # bounded retries (UNAVAILABLE/ABORTED/timeouts only)
+    healthCheckTimeout: 10s # startup reachability probe
   persistence:
     enabled: false
     storageClass: ""
@@ -207,11 +225,32 @@ lifecycle:
 # graceful shutdown.
 terminationGracePeriodSeconds: 60
 
+# Database durability shape (T7-04). Declares how THIS release gets point-in-time recovery (PITR) so the
+# chart can refuse inconsistent combinations and NOTES.txt can say what is and is not covered. It installs
+# nothing by itself. Target: RPO <= rpoTargetMinutes via continuous WAL archiving (archive_timeout 300 s).
+#   bundled  Bitnami subchart below (postgresql.enabled=true). DEV/TEST shape: no WAL archive, so recovery
+#            stops at the last daily base backup of the companion deploy/helm/backup chart (RPO up to 24 h,
+#            no PITR). Do not use for production.
+#   managed  A managed PostgreSQL with PITR switched on (Cloud SQL via cloudSqlProxy.enabled, RDS, Azure
+#            Flexible Server, ...). Required provider settings: docs/operator/maintenance/backups.md.
+#   cnpg     CloudNativePG cluster with Barman Cloud WAL archiving to object storage, operated OUTSIDE this
+#            chart. Example: deploy/helm/registerwerk/examples/cnpg-cluster.yaml. Set postgresql.enabled=false
+#            and point env.DB_URL / extraEnv at the cluster's -rw Service.
+database:
+  shape: bundled
+  rpoTargetMinutes: 15
+
 postgresql:
   enabled: true
   auth:
     database: registerwerk
+    # Schema OWNER / migrator login: used only by Flyway (SPRING_FLYWAY_USER/PASSWORD).
     username: registerwerk
+    # Runtime login (T6-17): the application datasource. DML only: no ownership/DDL, no
+    # UPDATE/DELETE/TRUNCATE on audit_event. Created/refreshed by the backend's ensure-db-roles init
+    # container; its password is the `runtimePasswordKey` entry of the SAME existingSecret below (create it
+    # out of band like `password`; production mode refuses published defaults).
+    runtimeUsername: registerwerk_app
     existingSecret: registerwerk-postgres-secret
     # Matches the Bitnami postgresql subchart's own default (values.yaml:
     # auth.secretKeys.userPasswordKey) — spelled out here, rather than left to that subchart's
@@ -219,6 +258,7 @@ postgresql:
     # this same key from the same existingSecret) stays correct if you ever override it.
     secretKeys:
       userPasswordKey: password
+      runtimePasswordKey: runtime-password
   primary:
     persistence:
       enabled: true
@@ -227,6 +267,33 @@ postgresql:
       requests:
         memory: 1Gi
         cpu: 500m
+
+# One-shot role provisioning for the bundled PostgreSQL (postgresql.enabled): any image that ships psql.
+dbRoles:
+  image: postgres:18.6-alpine
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
+# External audit-anchor store (T6-17): daily signed chain-tip anchor as an immutable object in an S3
+# Object Lock bucket (AWS S3, MinIO, ...), compared by the chain verifier. The bucket must be created WITH
+# Object Lock; the chart never creates it. No credentials here: reference an existing Secret holding the
+# access/secret key, or leave existingSecret empty and use IRSA / GKE Workload Identity federation.
+auditAnchor:
+  enabled: false
+  bucket: ""
+  prefix: audit-anchors/
+  region: eu-central-1
+  endpoint: ""          # blank for AWS; set for MinIO / other S3-compatible stores
+  pathStyle: false      # true for MinIO and most S3-compatible stores
+  retentionMode: COMPLIANCE   # COMPLIANCE (cannot be shortened by anyone) or GOVERNANCE
+  retentionDays: 3650
+  existingSecret: ""
+  accessKeyKey: access-key
+  secretKeyKey: secret-key
 
 # Optional production database path for GKE. Disable postgresql.enabled when this is enabled.
 # The proxy uses Application Default Credentials; with Workload Identity Federation for GKE,
@@ -239,9 +306,15 @@ cloudSqlProxy:
   privateIp: false
   autoIamAuthn: false
   database: registerwerk
+  # Schema OWNER / migrator login (Flyway only).
   username: registerwerk
   secretName: registerwerk-postgres-secret
   passwordKey: password
+  # Runtime login (T6-17): DML-only login used by the application datasource. Cloud SQL has no chart-side
+  # init, so provision it once out of band with postgres-init/roles/ensure-runtime-role.sh (as the owner
+  # login) before the first rollout; its password lives under runtimePasswordKey of the same Secret.
+  runtimeUsername: registerwerk_app
+  runtimePasswordKey: runtime-password
   resources:
     requests:
       cpu: 100m

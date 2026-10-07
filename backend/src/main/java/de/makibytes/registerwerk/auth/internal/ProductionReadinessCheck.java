@@ -68,7 +68,7 @@ class ProductionReadinessCheck {
     private final AtomicInteger defaultProxiesGauge = new AtomicInteger();
     private final AtomicInteger softHsmGauge = new AtomicInteger();
 
-    static final Set<String> WEAK_DB_PASSWORDS = Set.of("", "changeme", "registerwerk");
+    static final Set<String> WEAK_DB_PASSWORDS = Set.of("", "changeme", "registerwerk", "registerwerk_app");
     static final String DEFAULT_RELAYER_KEY = "registerwerk-dev-zama-relayer-key-change-in-production";
     static final String DEFAULT_CHAINCACHE_SECRET = "registerwerk-chaincache-demo-secret-change-me";
     static final String DEFAULT_ADMIN_PASSWORD = "changeme-please";
@@ -154,12 +154,7 @@ class ProductionReadinessCheck {
                         "REGISTERWERK_WALLET_KEK_PROVIDER must be set to AWS_KMS, AZURE_KEY_VAULT, " +
                         "or GCP_KMS in production mode. The EnvVarKekProvider is not safe for production.");
             }
-            if (!hsmEnabled) {
-                throw new IllegalStateException(
-                        "REGISTERWERK_HSM_ENABLED must be true in production mode so EVM signing keys " +
-                        "remain non-exportable in PKCS#11 hardware.");
-            }
-            checkHsm();
+            checkSigningCustody();
             if (stepUpAllowUnenrolled) {
                 throw new IllegalStateException(
                         "registerwerk.auth.step-up.allow-unenrolled must be false in production mode — " +
@@ -214,7 +209,21 @@ class ProductionReadinessCheck {
         String dbPassword = env.getProperty("spring.datasource.password", "");
         if (WEAK_DB_PASSWORDS.contains(dbPassword.trim().toLowerCase())) {
             throw new IllegalStateException("DB_PASSWORD is blank or a known default (changeme/registerwerk); set a "
-                    + "strong database password in production mode.");
+                    + "strong database password in production mode (DB_APP_PASSWORD for the runtime login).");
+        }
+        // T6-17: with split logins the schema owner / migrator credentials reach Flyway as spring.flyway.*
+        String flywayUser = env.getProperty("spring.flyway.user", "").trim();
+        if (!flywayUser.isEmpty()) {
+            String flywayPassword = env.getProperty("spring.flyway.password", "");
+            if (WEAK_DB_PASSWORDS.contains(flywayPassword.trim().toLowerCase())) {
+                throw new IllegalStateException("SPRING_FLYWAY_PASSWORD (the schema-owner / migrator login, DB_PASSWORD in "
+                        + "compose and Helm) is blank or a known default; set a strong password in production mode.");
+            }
+            if (flywayUser.equals(env.getProperty("spring.datasource.username", "").trim())) {
+                throw new IllegalStateException("The runtime database login (DB_APP_USER) and the Flyway migrator login "
+                        + "(SPRING_FLYWAY_USER) must differ in production mode: the application must not run as the "
+                        + "owner of the audit tables.");
+            }
         }
         String devSecret = authProps.getDevSecret();
         if (noIssuerUri && (devSecret == null
@@ -258,6 +267,30 @@ class ProductionReadinessCheck {
                 return true;
             }
         });
+    }
+
+    /**
+     * Signing-key custody gate. Production needs non-exportable keys: either a PKCS#11 HSM
+     * ({@code registerwerk.wallet.hsm.enabled=true}, SoftHSM refused unless acknowledged) or, since T7-05,
+     * a cloud-KMS signer ({@code registerwerk.wallet.signer=kms}). A KMS signer needs no PKCS#11 token;
+     * its own configuration and reachability are checked by the wallet module's KmsSignerReadinessCheck
+     * (ERROR in production). A PKCS#11 token that is additionally enabled stays under the HSM rules.
+     */
+    void checkSigningCustody() {
+        boolean kmsSigner = "kms".equalsIgnoreCase(env.getProperty("registerwerk.wallet.signer", "").trim());
+        if (kmsSigner) {
+            if (hsmEnabled) {
+                checkHsm();
+            }
+            return;
+        }
+        if (!hsmEnabled) {
+            throw new IllegalStateException(
+                    "REGISTERWERK_HSM_ENABLED must be true in production mode so EVM signing keys " +
+                    "remain non-exportable in PKCS#11 hardware (or set registerwerk.wallet.signer=kms to sign " +
+                    "with a cloud KMS key).");
+        }
+        checkHsm();
     }
 
     private void checkHsm() {

@@ -40,8 +40,10 @@ spec:
                   # (PGDATA=/bitnami/postgresql/data) — previously this pointed at
                   # /var/lib/postgresql/data, one directory level above the actual PGDATA,
                   # which would have failed at runtime even once PGHOST/DB_USER were fixed.
-                  # RPO note: only the daily base backup is guaranteed. WAL is NOT archived
-                  # (no archive_command), so RPO = time since the last successful base backup.
+                  # RPO note (T7-04): this job is the BASE backup for the bundled (dev/test) PostgreSQL only.
+                  # That instance does not archive WAL, so RPO = time since the last successful base
+                  # backup (<= 24 h) and there is no PITR. The <= 15 min RPO target is met by the
+                  # production shapes in the main chart (database.shape=managed|cnpg), not by this CronJob.
                   # A failure here is fatal on purpose (set -e + backoffLimit): the job must
                   # fail so BackupStale fires.
                   wal-g backup-push /bitnami/postgresql/data

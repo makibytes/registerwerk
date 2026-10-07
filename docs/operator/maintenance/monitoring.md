@@ -63,7 +63,7 @@ in `monitoring/grafana/dashboards/registerwerk-overview.json`.
 |--------|-------------|----------------|
 | `registerwerk_indexer_last_sync_timestamp_seconds{chain_config_id,indexer_type}` | Unix epoch of each indexer's last successful sync; 0 if never synced | `time() - metric` > 30 min = WARN, > 2h = CRITICAL |
 | `registerwerk_indexer_lag_blocks{chain_config_id,indexer_type}` | Blocks between `last_synced_block` and the best enabled+healthy `rpc_node`'s `latest_block_number` on that chain — absent (not 0) if no healthy node or no synced block is known yet | > 1000 for 10m = WARN (`IndexerLagBlocksHigh`) |
-| `registerwerk_chain_drift_open_total` | Count of currently OPEN `chain_drift_event` rows (registry vs. on-chain balance divergence, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
+| `registerwerk_chain_drift_open` | Count of currently OPEN `chain_drift_event` rows (registry vs. on-chain balance divergence, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
 
 See `docs/operator/indexers/resilience.md` for the reorg-detection model
 (`token_transfer.finality_status`, `ReorgGuard`) that produces the lag/staleness signals above.
@@ -73,7 +73,7 @@ See `docs/operator/indexers/resilience.md` for the reorg-detection model
 | Metric | Description | Alert threshold |
 |--------|-------------|----------------|
 | `registerwerk_sanctions_oldest_open_hit_seconds` | Age in seconds of the longest-unresolved open sanctions/PEP hit; 0 if none open | > 4h = CRITICAL (`SanctionsHitOpenTooLong`, GwG §10) |
-| `registerwerk_screening_errors_recent_total` | Count of `ScreeningRun` rows with status=ERROR in the last 24h — provider-call failures, distinct from the hit-age gauge above | > 5 = CRITICAL (`ScreeningErrorsElevated`) — `ScreeningGateImpl` fails closed on this, silently blocking new-entity approvals |
+| `registerwerk_screening_errors_recent` | Count of `ScreeningRun` rows with status=ERROR in the last 24h — provider-call failures, distinct from the hit-age gauge above | > 5 = CRITICAL (`ScreeningErrorsElevated`) — `ScreeningGateImpl` fails closed on this, silently blocking new-entity approvals |
 | `registerwerk_screening_periodic_refresh_last_failures` | Entities that failed re-screening in the most recent daily periodic refresh | > 0 = WARN (`ScreeningPeriodicRefreshFailures`) |
 
 ### Confidential-token reconciliation (`blockchain` module)
@@ -84,14 +84,14 @@ not a live DB query.
 
 | Metric | Description | Alert threshold |
 |--------|-------------|----------------|
-| `registerwerk_confidential_reconciliation_mismatch_total` | Sum of the most recent mismatch count across all confidential assets | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
+| `registerwerk_confidential_reconciliation_mismatch` | Sum of the most recent mismatch count across all confidential assets | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
 | `registerwerk_confidential_reconciliation_last_run_timestamp_seconds` | Unix epoch of the most recent reconciliation run (any asset) | `time() - metric` > 1h = WARN (`ConfidentialReconciliationStale`) — catches a misconfigured Zama relayer silently halting the sweep |
 
 ### RPC node health (`blockchain` module)
 
 | Metric | Description | Alert threshold |
 |--------|-------------|----------------|
-| `registerwerk_rpc_nodes_unhealthy_total` | Count of `RpcNode` rows currently marked unhealthy | > 0 for 2m = WARN (`RpcNodesUnhealthy`) |
+| `registerwerk_rpc_nodes_unhealthy` | Count of `RpcNode` rows currently marked unhealthy | > 0 for 2m = WARN (`RpcNodesUnhealthy`) |
 
 ### OrgIdentity onchain reconciliation (`orgidentity` module)
 
@@ -101,8 +101,8 @@ this accurately reflects "currently open drift" without needing new persisted st
 
 | Metric | Description | Alert threshold |
 |--------|-------------|----------------|
-| `registerwerk_org_chain_drift_open_total` | Org registrations/member wallets disagreeing with onchain `OrgRegistry` in the most recent sweep | > 0 = CRITICAL (`OrgChainDriftDetected`) |
-| `registerwerk_permission_chain_drift_open_total` | Permission grants disagreeing with onchain `PermissionRegistry`, incl. role-restriction flips | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
+| `registerwerk_org_chain_drift_open` | Org registrations/member wallets disagreeing with onchain `OrgRegistry` in the most recent sweep | > 0 = CRITICAL (`OrgChainDriftDetected`) |
+| `registerwerk_permission_chain_drift_open` | Permission grants disagreeing with onchain `PermissionRegistry`, incl. role-restriction flips | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
 
 ### DORA reporting deadlines (`dora` module)
 
@@ -114,13 +114,13 @@ this accurately reflects "currently open drift" without needing new persisted st
 
 | Metric | Description | Alert threshold |
 |--------|-------------|----------------|
-| `registerwerk_regreport_stale_submissions_total` | Count of `TRANSPORTED_UNVERIFIED` draft rows lacking verified authority evidence beyond the configured threshold | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
+| `registerwerk_regreport_stale_submissions` | Count of `TRANSPORTED_UNVERIFIED` draft rows lacking verified authority evidence beyond the configured threshold | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
 
 ### Travel Rule (`travelrule` module)
 
 | Metric | Description | Alert threshold |
 |--------|-------------|----------------|
-| `registerwerk_travelrule_failed_messages_recent_total` | Count of `travel_rule_message` rows with status=FAILED in the last 24h | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
+| `registerwerk_travelrule_failed_messages_recent` | Count of `travel_rule_message` rows with status=FAILED in the last 24h | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
 
 ### Notification delivery (`notification` module)
 

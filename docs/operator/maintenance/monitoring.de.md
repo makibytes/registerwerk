@@ -48,14 +48,14 @@ in `monitoring/grafana/dashboards/registerwerk-overview.json`.
 | Metrik | Beschreibung | Alarmschwelle |
 |--------|-------------|----------------|
 | `registerwerk_indexer_last_sync_timestamp_seconds{chain_config_id,indexer_type}` | Unix-Epoch der letzten erfolgreichen Synchronisierung jedes Indexers; 0, wenn nie synchronisiert | `time() - metric` > 30 Min. = WARN, > 2 Std. = CRITICAL |
-| `registerwerk_chain_drift_open_total` | Anzahl aktuell OPEN `chain_drift_event`-Zeilen (Divergenz Register vs. On-Chain-Saldo, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
+| `registerwerk_chain_drift_open` | Anzahl aktuell OPEN `chain_drift_event`-Zeilen (Divergenz Register vs. On-Chain-Saldo, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
 
 ### Sanktionen/Screening (Modul `screening`)
 
 | Metrik | Beschreibung | Alarmschwelle |
 |--------|-------------|----------------|
 | `registerwerk_sanctions_oldest_open_hit_seconds` | Alter in Sekunden des am längsten ungelösten offenen Sanktions-/PEP-Treffers; 0, wenn keiner offen ist | > 4 Std. = CRITICAL (`SanctionsHitOpenTooLong`, GwG §10) |
-| `registerwerk_screening_errors_recent_total` | Anzahl der `ScreeningRun`-Zeilen mit Status=ERROR in den letzten 24 Std. — Anbieteraufruf-Fehler, unterschieden vom Treffer-Alters-Gauge oben | > 5 = CRITICAL (`ScreeningErrorsElevated`) — `ScreeningGateImpl` schlägt hierbei fail-closed und blockiert stillschweigend Genehmigungen neuer Entitäten |
+| `registerwerk_screening_errors_recent` | Anzahl der `ScreeningRun`-Zeilen mit Status=ERROR in den letzten 24 Std. — Anbieteraufruf-Fehler, unterschieden vom Treffer-Alters-Gauge oben | > 5 = CRITICAL (`ScreeningErrorsElevated`) — `ScreeningGateImpl` schlägt hierbei fail-closed und blockiert stillschweigend Genehmigungen neuer Entitäten |
 | `registerwerk_screening_periodic_refresh_last_failures` | Entitäten, deren erneutes Screening im letzten täglichen periodischen Refresh fehlgeschlagen ist | > 0 = WARN (`ScreeningPeriodicRefreshFailures`) |
 
 ### Vertraulicher-Token-Abgleich (Modul `blockchain`)
@@ -66,14 +66,14 @@ keine Live-DB-Abfrage.
 
 | Metrik | Beschreibung | Alarmschwelle |
 |--------|-------------|----------------|
-| `registerwerk_confidential_reconciliation_mismatch_total` | Summe der jüngsten Abweichungsanzahl über alle vertraulichen Assets | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
+| `registerwerk_confidential_reconciliation_mismatch` | Summe der jüngsten Abweichungsanzahl über alle vertraulichen Assets | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
 | `registerwerk_confidential_reconciliation_last_run_timestamp_seconds` | Unix-Epoch des jüngsten Abgleichslaufs (beliebiges Asset) | `time() - metric` > 1 Std. = WARN (`ConfidentialReconciliationStale`) — erfasst einen falsch konfigurierten Zama-Relayer, der den Sweep stillschweigend stoppt |
 
 ### RPC-Node-Zustand (Modul `blockchain`)
 
 | Metrik | Beschreibung | Alarmschwelle |
 |--------|-------------|----------------|
-| `registerwerk_rpc_nodes_unhealthy_total` | Anzahl der `RpcNode`-Zeilen, die aktuell als unhealthy markiert sind | > 0 für 2 Min. = WARN (`RpcNodesUnhealthy`) |
+| `registerwerk_rpc_nodes_unhealthy` | Anzahl der `RpcNode`-Zeilen, die aktuell als unhealthy markiert sind | > 0 für 2 Min. = WARN (`RpcNodesUnhealthy`) |
 
 ### OrgIdentity-On-Chain-Abgleich (Modul `orgidentity`)
 
@@ -83,8 +83,8 @@ dies die „aktuell offene Drift“ genau widerspiegelt, ohne dass neuer persist
 
 | Metrik | Beschreibung | Alarmschwelle |
 |--------|-------------|----------------|
-| `registerwerk_org_chain_drift_open_total` | Org-Registrierungen/Mitglieder-Wallets, die im jüngsten Sweep vom On-Chain-`OrgRegistry` abweichen | > 0 = CRITICAL (`OrgChainDriftDetected`) |
-| `registerwerk_permission_chain_drift_open_total` | Berechtigungsvergaben, die vom On-Chain-`PermissionRegistry` abweichen, einschl. Umkehrungen der Rollenbeschränkung | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
+| `registerwerk_org_chain_drift_open` | Org-Registrierungen/Mitglieder-Wallets, die im jüngsten Sweep vom On-Chain-`OrgRegistry` abweichen | > 0 = CRITICAL (`OrgChainDriftDetected`) |
+| `registerwerk_permission_chain_drift_open` | Berechtigungsvergaben, die vom On-Chain-`PermissionRegistry` abweichen, einschl. Umkehrungen der Rollenbeschränkung | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
 
 ### DORA-Meldefristen (Modul `dora`)
 
@@ -96,13 +96,13 @@ dies die „aktuell offene Drift“ genau widerspiegelt, ohne dass neuer persist
 
 | Metrik | Beschreibung | Alarmschwelle |
 |--------|-------------|----------------|
-| `registerwerk_regreport_stale_submissions_total` | Anzahl der `TRANSPORTED_UNVERIFIED`-Entwurfszeilen ohne verifizierten Behördennachweis über der konfigurierten Schwelle hinaus | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
+| `registerwerk_regreport_stale_submissions` | Anzahl der `TRANSPORTED_UNVERIFIED`-Entwurfszeilen ohne verifizierten Behördennachweis über der konfigurierten Schwelle hinaus | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
 
 ### Travel Rule (Modul `travelrule`)
 
 | Metrik | Beschreibung | Alarmschwelle |
 |--------|-------------|----------------|
-| `registerwerk_travelrule_failed_messages_recent_total` | Anzahl der `travel_rule_message`-Zeilen mit Status=FAILED in den letzten 24 Std. | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
+| `registerwerk_travelrule_failed_messages_recent` | Anzahl der `travel_rule_message`-Zeilen mit Status=FAILED in den letzten 24 Std. | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
 
 ### Zustellung von Benachrichtigungen (Modul `notification`)
 

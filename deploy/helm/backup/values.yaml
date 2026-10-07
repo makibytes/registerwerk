@@ -1,3 +1,5 @@
+# Companion BASE-backup chart for the bundled (dev/test) PostgreSQL. It does not provide WAL archiving or PITR:
+# production RPO <= 15 min comes from database.shape=managed|cnpg in the main chart (T7-04).
 backup:
   s3Bucket: registerwerk-backups-prod
   awsRegion: eu-central-1

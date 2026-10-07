@@ -111,8 +111,11 @@ by default, so neither Zone.js nor an explicit `provideZonelessChangeDetection()
 | `ENTRA_SPA_CLIENT_ID` / `ENTRA_API_SCOPE` | blank | Served to the browser by `GET /api/v1/public/auth/config` |
 | `ENTRA_SUPPORT_ENABLED` | `false` | Master switch for all Microsoft Graph calls (2FA status + operator support console) |
 | `ENTRA_STEPUP_AUTH_CONTEXT_ID` | blank | Conditional Access auth context (c1–c99) for step-up; must be *published to apps* |
+| `REGISTERWERK_WALLET_SIGNER` | blank | `kms` → EVM signing keys live in a cloud KMS (GCP Cloud KMS `EC_SIGN_SECP256K1_SHA256` via ADC/workload identity; `REGISTERWERK_WALLET_KMS_PROVIDER`/`_KEY_VERSION`/`_TIMEOUT`/`_MAX_ATTEMPTS`); counts as the production HSM/KMS target; wallets enrolled via `POST /api/v1/admin/wallets/attach-kms` |
 | `DB_URL` | `jdbc:postgresql://postgres:5432/registerwerk` | |
-| `DB_USER` / `DB_PASSWORD` | `registerwerk` / — | |
+| `DB_USER` / `DB_PASSWORD` | `registerwerk` / — | Schema **owner** login; used only by Flyway (`SPRING_FLYWAY_USER/PASSWORD`) |
+| `DB_APP_USER` / `DB_APP_PASSWORD` | `registerwerk_app` / — | Runtime login, DML only (no ownership/DDL, no UPDATE/DELETE/TRUNCATE on `audit_event`); falls back to `DB_USER` when unset (un-split dev only — production mode refuses it) |
+| `REGISTERWERK_AUDIT_ANCHOR_SINK` | `none` | `s3` writes the daily signed audit anchor to an S3 Object Lock bucket (`REGISTERWERK_AUDIT_ANCHOR_S3_*`) |
 
 ---
 
@@ -134,6 +137,8 @@ cd contracts && forge test -vvv
 cd contracts/cairo && scarb build && snforge test   # Cairo (Starknet) contracts
 cd daml && dpm build                                # Daml (Canton) bond templates — SDK via dpm
 docker compose --profile docs up                    # docs server :48003
+docker compose -f docker-compose.yml -f docker-compose.wal.yml up -d postgres   # opt-in WAL-G archiving (PITR); `--profile backup` adds the base-backup job
+scripts/pitr-drill.sh                               # real PITR drill on throwaway containers (never the demo DB)
 ```
 
 **Documentation** is MkDocs Material (`mkdocs.yml` + `docs/`). The `docs` compose profile builds the site into a **static nginx image** (`docs/Dockerfile`) rather than running `mkdocs serve` — so doc changes need a rebuild to show up:

@@ -1,0 +1,106 @@
+# CloudNativePG + Barman Cloud: continuous WAL archiving and PITR for Registerwerk (T7-04).
+#
+# Production shape `database.shape: cnpg` (deploy/helm/registerwerk/values.yaml): PostgreSQL is operated by the
+# CloudNativePG operator OUTSIDE the registerwerk chart. Install the operator and the Barman Cloud plugin
+# first (https://cloudnative-pg.io, https://cloudnative-pg.io/plugin-barman-cloud/), then adapt and apply:
+#
+#   kubectl apply -n registerwerk -f deploy/helm/registerwerk/examples/cnpg-cluster.yaml
+#   helm install registerwerk deploy/helm/registerwerk -f values.yaml -f values-production.yaml \
+#     --set database.shape=cnpg --set postgresql.enabled=false \
+#     --set env.DB_URL=jdbc:postgresql://registerwerk-pg-rw:5432/registerwerk
+#   (DB_USER/DB_PASSWORD/SPRING_FLYWAY_*/DB_APP_* then come from `extraEnv` referencing the secrets below.)
+#
+# RPO: archive_timeout=300 forces a WAL switch (and so an upload) at least every 5 minutes under write
+# activity; a full 16 MiB segment uploads sooner. Target <= 15 minutes. Verify with the WalArchiveLag alert
+# (monitoring/alerts/registerwerk.yml) and by running a restore drill (recovery manifest at the bottom).
+# NOT applied to a live cluster in this repository: validate against your operator/plugin versions first.
+# The runtime DML-only login (DB_APP_USER) is not created by CNPG's initdb: provision it once with
+# postgres-init/roles/ensure-runtime-role.sh as the owner login, exactly as for Cloud SQL.
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: registerwerk-wal
+spec:
+  retentionPolicy: "30d"
+  configuration:
+    destinationPath: s3://registerwerk-pg-backups/registerwerk-pg   # bucket with versioning (+ Object Lock for WORM)
+    # S3-compatible stores (MinIO, ...): endpointURL: http://minio.example:9000
+    s3Credentials:                       # or use IRSA / Workload Identity and drop this block
+      accessKeyId: {name: registerwerk-pg-backup-s3, key: ACCESS_KEY_ID}
+      secretAccessKey: {name: registerwerk-pg-backup-s3, key: ACCESS_SECRET_KEY}
+    wal:
+      compression: gzip
+      maxParallel: 4
+    data:
+      compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: registerwerk-pg
+spec:
+  instances: 3                           # primary + 2 synchronous-capable standbys; failover is automatic
+  imageName: ghcr.io/cloudnative-pg/postgresql:18   # pin a minor tag + digest in production
+  storage:
+    size: 50Gi
+  walStorage:
+    size: 20Gi                           # separate WAL volume: archiving backlog must not fill PGDATA
+  postgresql:
+    parameters:
+      archive_timeout: "300"             # RPO knob (seconds); CNPG owns archive_mode/archive_command
+      wal_level: replica
+      log_checkpoints: "on"
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: registerwerk-wal
+  bootstrap:
+    initdb:
+      database: registerwerk
+      owner: registerwerk                # schema OWNER login = Flyway only
+      secret:
+        name: registerwerk-pg-owner      # kubernetes.io/basic-auth: username=registerwerk, password=...
+  monitoring:
+    enablePodMonitor: true               # exposes cnpg_pg_stat_archiver_* used by the WalArchiveLag alert
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {memory: 2Gi}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: registerwerk-pg-daily
+spec:
+  schedule: "0 30 1 * * *"               # six-field cron (seconds first): 01:30 UTC daily base backup
+  backupOwnerReference: self
+  cluster:
+    name: registerwerk-pg
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+---
+# ── Point-in-time recovery (restore drill / real recovery) ─────────────────────────────────────────
+# Recovery always creates a NEW cluster from the object store; point the backend at its -rw Service once
+# verified. Keep this commented out in the live manifest set, apply it only for a restore:
+#
+# apiVersion: postgresql.cnpg.io/v1
+# kind: Cluster
+# metadata:
+#   name: registerwerk-pg-restore
+# spec:
+#   instances: 1
+#   storage: {size: 50Gi}
+#   bootstrap:
+#     recovery:
+#       source: origin
+#       recoveryTarget:
+#         targetTime: "2026-01-01 12:00:00.00000+00"   # UTC; omit for "latest"
+#   externalClusters:
+#     - name: origin
+#       plugin:
+#         name: barman-cloud.cloudnative-pg.io
+#         parameters:
+#           barmanObjectName: registerwerk-wal
+#           serverName: registerwerk-pg

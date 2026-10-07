@@ -57,6 +57,9 @@ class NonceCoordinatorIT {
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
+    @Autowired
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
     private static final long CHAIN_ID = 11155111L; // Sepolia
 
     @Test
@@ -135,6 +138,10 @@ class NonceCoordinatorIT {
                 nodes(5, java.util.Optional.of(BigInteger.valueOf(5)), TX_5::equals), nonce -> nonce);
 
         assertThat(next).as("nonce 5 belongs to a live direct send").isEqualTo(BigInteger.valueOf(6));
+        assertThat(meterRegistry.get("registerwerk.outbox.lease_repair_blocked").tag("chain", String.valueOf(chain))
+                .tag("reason", "DIRECT_SEND").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.find("registerwerk.outbox.lease_repaired").tag("chain", String.valueOf(chain)).counter())
+                .as("a blocked repair is not counted as a repair").isNull();
     }
 
     @Test
@@ -149,6 +156,9 @@ class NonceCoordinatorIT {
                 nodes(5, java.util.Optional.of(BigInteger.valueOf(5)), hash -> false), nonce -> nonce);
 
         assertThat(next).as("nobody holds nonce 5 any more").isEqualTo(BigInteger.valueOf(5));
+        // EvmNonceLeaseRepaired alert: increase(registerwerk_outbox_lease_repaired_total{chain}) > 0
+        assertThat(meterRegistry.get("registerwerk.outbox.lease_repaired").tag("chain", String.valueOf(chain))
+                .counter().count()).isEqualTo(1.0);
     }
 
     @Test

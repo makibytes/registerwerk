@@ -17,7 +17,12 @@ import java.util.UUID;
 public class OperatorWallet {
 
     public enum WalletType { EVM, SOLANA, STARKNET, STELLAR, CANTON }
-    public enum CustodyType { SOFTWARE, PKCS11 }
+    public enum CustodyType {
+        SOFTWARE, PKCS11, KMS;
+
+        /** Opaque custody: the private key never exists in this process, so it can never be exported. */
+        public boolean isOpaque() { return this != SOFTWARE; }
+    }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -44,7 +49,7 @@ public class OperatorWallet {
     @Column(name = "custody_type", nullable = false, length = 20)
     private CustodyType custodyType = CustodyType.SOFTWARE;
 
-    /** Vendor-neutral PKCS#11 object alias. Null for software wallets. */
+    /** PKCS#11 object alias (PKCS11) or cloud-KMS key-version resource name (KMS). Null for software wallets. */
     @Column(name = "key_reference", length = 255)
     private String keyReference;
 

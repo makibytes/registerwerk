@@ -47,6 +47,7 @@ class WalletServiceTest {
     @Mock private WalletDefaultService defaultService;
     @Mock private WalletSigner walletSigner;
     @Mock private Pkcs11HsmService pkcs11HsmService;
+    @Mock private KmsSignerService kmsSignerService;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private de.makibytes.registerwerk.wallet.api.WalletUsagePort usagePort;
 
@@ -57,7 +58,7 @@ class WalletServiceTest {
     @BeforeEach
     void setUp() {
         service = new WalletService(walletRepository, walletStorage, defaultService, walletSigner,
-                pkcs11HsmService, eventPublisher, usagePort);
+                pkcs11HsmService, kmsSignerService, eventPublisher, usagePort);
         lenient().when(walletRepository.save(any(OperatorWallet.class))).thenAnswer(inv -> {
             OperatorWallet w = inv.getArgument(0);
             if (w.getId() == null) {
@@ -347,5 +348,76 @@ class WalletServiceTest {
             org.springframework.transaction.support.TransactionSynchronizationManager.clear();
         }
         verify(walletStorage, org.mockito.Mockito.times(2)).delete(any());
+    }
+
+    // ── KMS custody (T7-05) ───────────────────────────────────────────────────
+
+    private WalletService serviceWithKms(FakeKmsSigningClient fake, boolean enabled) {
+        KmsProperties props = new KmsProperties();
+        if (enabled) {
+            props.setSigner("kms");
+        }
+        props.getKms().setRetryBackoff(java.time.Duration.ofMillis(1));
+        KmsSignerService kms = new KmsSignerService(props, Optional.of(fake),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        return new WalletService(walletRepository, walletStorage, defaultService, walletSigner,
+                pkcs11HsmService, kms, eventPublisher, usagePort);
+    }
+
+    @Test
+    @DisplayName("attachKms derives the address from the KMS key, proves signing, stores a KMS wallet and never touches keystores")
+    void attachKms_persistsOpaqueWallet() throws Exception {
+        FakeKmsSigningClient fake = new FakeKmsSigningClient(Keys.createEcKeyPair());
+        WalletService kmsService = serviceWithKms(fake, true);
+        when(walletRepository.findByName("kms-registry")).thenReturn(Optional.empty());
+
+        OperatorWallet w = kmsService.attachKms("kms-registry", FakeKmsSigningClient.KEY, null, actorId, "REGISTRY_ADMIN");
+
+        assertThat(w.getCustodyType()).isEqualTo(OperatorWallet.CustodyType.KMS);
+        assertThat(w.getKeyReference()).isEqualTo(FakeKmsSigningClient.KEY);
+        assertThat(w.getKeystorePath()).isNull();
+        assertThat(w.getType()).isEqualTo(WalletType.EVM);
+        assertThat(w.getAddress()).isEqualTo(Keys.toChecksumAddress(Credentials.create(fake.key).getAddress()));
+        assertThat(fake.signCalls.get()).as("enrolment challenge").isEqualTo(1);
+        verify(defaultService).bootstrapDefaultIfFirstWalletEver(w);
+        ArgumentCaptor<WalletGeneratedEvent> event = ArgumentCaptor.forClass(WalletGeneratedEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().actorId()).isEqualTo(actorId);
+        verifyNoInteractions(walletStorage);
+    }
+
+    @Test
+    @DisplayName("attachKms is refused when KMS signing is off, for a malformed reference, or a foreign address")
+    void attachKms_refusals() throws Exception {
+        FakeKmsSigningClient fake = new FakeKmsSigningClient(Keys.createEcKeyPair());
+        lenient().when(walletRepository.findByName(any())).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> serviceWithKms(fake, false)
+                .attachKms("n", FakeKmsSigningClient.KEY, null, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("registerwerk.wallet.signer=kms");
+        WalletService kmsService = serviceWithKms(fake, true);
+        assertThatThrownBy(() -> kmsService.attachKms("n", "alias/x", null, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class);
+        String foreign = Credentials.create("0x" + "22".repeat(32)).getAddress();
+        assertThatThrownBy(() -> kmsService.attachKms("n", FakeKmsSigningClient.KEY, foreign, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("does not control");
+        verify(walletRepository, org.mockito.Mockito.never()).save(any());
+        assertThat(fake.signCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("KMS wallets cannot export key material or rotate a KEK")
+    void kmsWalletsAreOpaque() {
+        UUID id = UUID.randomUUID();
+        OperatorWallet kmsWallet = wallet(id, WalletType.EVM, null);
+        kmsWallet.setCustodyType(OperatorWallet.CustodyType.KMS);
+        kmsWallet.setKeyReference(FakeKmsSigningClient.KEY);
+        when(walletRepository.findById(id)).thenReturn(Optional.of(kmsWallet));
+
+        assertThatThrownBy(() -> service.exportRaw(id, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(UnsupportedOperationException.class).hasMessageContaining("non-exportable");
+        assertThatThrownBy(() -> service.exportKeystore(id, "pw", actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(UnsupportedOperationException.class).hasMessageContaining("non-exportable");
+        assertThat(service.rotateKek(id, actorId, "REGISTRY_ADMIN")).isFalse();
+        verifyNoInteractions(walletStorage);
     }
 }

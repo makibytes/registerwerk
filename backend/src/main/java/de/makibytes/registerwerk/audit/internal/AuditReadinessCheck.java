@@ -15,15 +15,19 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Production readiness for audit integrity (6-11, parked T6-17). Two conditions:
+ * Production readiness for audit integrity (6-11, T6-17). Conditions:
  * <ul>
  *   <li>a signing key provider must be active;</li>
- *   <li>the runtime DB role must not own (or be a superuser over) {@code audit_event}: an owner
- *       can lift any privilege or trigger, so REVOKE/WORM trigger defences do not bind it. Until
- *       migrator and runtime logins are split, {@code registerwerk.audit.allow-owner-runtime-role=true}
- *       acknowledges the interim (warning + gauge stay).</li>
+ *   <li>the runtime DB login must not own (or be a superuser over) {@code audit_event}: an owner
+ *       can lift any privilege or trigger, so the V36/V57 REVOKEs and the WORM triggers do not bind it.
+ *       Compose and Helm split the logins (owner/migrator for Flyway only, {@code registerwerk_app}
+ *       for the application); {@code registerwerk.audit.allow-owner-runtime-role=true} remains only as
+ *       an explicit, logged acknowledgement for an environment that has not split them yet;</li>
+ *   <li>a non-owner runtime login must not hold UPDATE/DELETE/TRUNCATE on {@code audit_event} or its
+ *       partitions, nor CREATE in schema public (no ack: that is a mis-grant, not an interim state).</li>
  * </ul>
- * The gauge {@code registerwerk_audit_runtime_role_owns_table} is published in every mode.
+ * The gauge {@code registerwerk_audit_runtime_role_owns_table} (1 = the WORM defences do not bind
+ * this login, for either reason) is published in every mode.
  */
 @Component
 class AuditReadinessCheck implements ApplicationRunner {
@@ -45,7 +49,8 @@ class AuditReadinessCheck implements ApplicationRunner {
         this.jdbc = jdbc;
         this.signing = signing;
         Gauge.builder("registerwerk_audit_runtime_role_owns_table", ownsGauge, AtomicInteger::get)
-                .description("1 if the runtime DB role owns/superuses audit_event (WORM privileges not binding), 0 if not")
+                .description("1 if the runtime DB role owns/superuses audit_event or can modify it / run DDL "
+                        + "(WORM privileges not binding), 0 if not")
                 .register(registry);
     }
 
@@ -56,10 +61,12 @@ class AuditReadinessCheck implements ApplicationRunner {
 
     void check(boolean productionMode) {
         boolean owns = runtimeRoleOwnsAuditTable();
-        ownsGauge.set(owns ? 1 : 0);
+        boolean mutates = !owns && runtimeRoleCanModifyAuditTable();
+        ownsGauge.set(owns || mutates ? 1 : 0);
         if (owns) {
-            log.warn("AUDIT: the runtime database role owns audit_event (or is a superuser); REVOKE and the WORM "
-                    + "trigger do not bind an owner. Split migrator and runtime logins (docs: platform/audit-log).");
+            log.warn("AUDIT: {}", ownerMessage());
+        } else if (mutates) {
+            log.warn("AUDIT: {}", privilegeMessage());
         }
         if (!productionMode) {
             return;
@@ -69,10 +76,56 @@ class AuditReadinessCheck implements ApplicationRunner {
                     + "(registerwerk.audit.signing.provider).");
         }
         if (owns && !allowOwnerRuntimeRole) {
-            throw new IllegalStateException("AUDIT: the runtime database role owns audit_event. Use separate migrator "
-                    + "and runtime logins (runbook: platform/audit-log), or set "
-                    + "registerwerk.audit.allow-owner-runtime-role=true to acknowledge the interim risk.");
+            throw new IllegalStateException("AUDIT: " + ownerMessage() + " Set "
+                    + "registerwerk.audit.allow-owner-runtime-role=true only to acknowledge this interim risk.");
         }
+        if (mutates) {
+            throw new IllegalStateException("AUDIT: " + privilegeMessage());
+        }
+    }
+
+    private String runtimeLogin() {
+        try {
+            String user = jdbc.queryForObject("SELECT current_user", String.class);
+            return user == null ? "<unknown>" : user;
+        } catch (RuntimeException e) {
+            return "<unknown>";
+        }
+    }
+
+    private String ownerMessage() {
+        return "the application's runtime database login '" + runtimeLogin() + "' owns audit_event (or is a "
+                + "superuser). Failure mode: an owner can ALTER TABLE ... DISABLE TRIGGER, GRANT itself "
+                + "UPDATE/DELETE/TRUNCATE or DROP the table, so neither the REVOKEs (V36/V57) nor the WORM triggers "
+                + "protect the audit trail. Fix: run the application as the DML-only login (DB_APP_USER / "
+                + "DB_APP_PASSWORD, default registerwerk_app, created by postgres-init/roles/ensure-runtime-role.sh) "
+                + "and keep the schema-owner login for Flyway only (DB_USER / DB_PASSWORD -> spring.flyway.user / "
+                + "spring.flyway.password). Docker Compose does this by default; Helm: postgresql.auth.runtimeUsername "
+                + "(runbook: platform/audit-log).";
+    }
+
+    private String privilegeMessage() {
+        return "the runtime database login '" + runtimeLogin() + "' is not the owner of audit_event but still holds "
+                + "UPDATE/DELETE/TRUNCATE on audit_event or one of its partitions, or CREATE on schema public. "
+                + "Failure mode: audit rows can be rewritten or removed, or the schema altered, by the application's "
+                + "own credentials. Fix: REVOKE UPDATE, DELETE, TRUNCATE ON audit_event (and its partitions) and "
+                + "REVOKE CREATE ON SCHEMA public from this login (migration V57 and "
+                + "audit_event_ensure_partitions() do this for registerwerk_app).";
+    }
+
+    boolean runtimeRoleCanModifyAuditTable() {
+        Boolean can = jdbc.queryForObject("""
+                SELECT has_table_privilege(current_user, 'audit_event', 'UPDATE')
+                    OR has_table_privilege(current_user, 'audit_event', 'DELETE')
+                    OR has_table_privilege(current_user, 'audit_event', 'TRUNCATE')
+                    OR has_schema_privilege(current_user, 'public', 'CREATE')
+                    OR EXISTS (SELECT 1 FROM pg_inherits i
+                               WHERE i.inhparent = 'audit_event'::regclass
+                                 AND (has_table_privilege(current_user, i.inhrelid, 'UPDATE')
+                                   OR has_table_privilege(current_user, i.inhrelid, 'DELETE')
+                                   OR has_table_privilege(current_user, i.inhrelid, 'TRUNCATE')))
+                """, Boolean.class);
+        return Boolean.TRUE.equals(can);
     }
 
     boolean runtimeRoleOwnsAuditTable() {

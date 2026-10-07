@@ -49,14 +49,14 @@ in `monitoring/grafana/dashboards/registerwerk-overview.json`.
 | Metrica | Descrizione | Soglia di avviso |
 |--------|-------------|----------------|
 | `registerwerk_indexer_last_sync_timestamp_seconds{chain_config_id,indexer_type}` | Epoca Unix dell'ultima sincronizzazione riuscita di ciascun indicizzatore; 0 se mai sincronizzato | `time() - metric` > 30 min = WARN, > 2 ore = CRITICAL |
-| `registerwerk_chain_drift_open_total` | Conteggio delle righe attualmente OPEN `chain_drift_event` (registro rispetto a divergenza del saldo sulla catena, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
+| `registerwerk_chain_drift_open` | Conteggio delle righe attualmente OPEN `chain_drift_event` (registro rispetto a divergenza del saldo sulla catena, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
 
 ### Sanzioni/screening (modulo `screening`) { #sanctionsscreening-screening-module }
 
 | Metrica | Descrizione | Soglia di avviso |
 |--------|-------------|----------------|
 | `registerwerk_sanctions_oldest_open_hit_seconds` | Età in secondi delle sanzioni aperte/PEP irrisolte da più tempo; 0 se nessuno aperto | > 4h = CRITICAL (`SanctionsHitOpenTooLong`, GwG §10) |
-| `registerwerk_screening_errors_recent_total` | Conteggio di righe `ScreeningRun` con stato=ERROR nelle ultime 24 ore: errori di chiamata del provider, distinti dall'indicatore dell'età del riscontro riportato sopra | > 5 = CRITICAL (`ScreeningErrorsElevated`) — su questo `ScreeningGateImpl` applica il rifiuto in caso di errore (fail closed), bloccando silenziosamente le approvazioni di nuove entità |
+| `registerwerk_screening_errors_recent` | Conteggio di righe `ScreeningRun` con stato=ERROR nelle ultime 24 ore: errori di chiamata del provider, distinti dall'indicatore dell'età del riscontro riportato sopra | > 5 = CRITICAL (`ScreeningErrorsElevated`) — su questo `ScreeningGateImpl` applica il rifiuto in caso di errore (fail closed), bloccando silenziosamente le approvazioni di nuove entità |
 | `registerwerk_screening_periodic_refresh_last_failures` | Entità che non hanno superato il nuovo screening nell'aggiornamento periodico giornaliero più recente | > 0 = WARN (`ScreeningPeriodicRefreshFailures`) |
 
 ### Riconciliazione token confidenziale (modulo `blockchain`) { #confidential-token-reconciliation-blockchain-module }
@@ -67,14 +67,14 @@ non una query DB live.
 
 | Metrica | Descrizione | Soglia di avviso |
 |--------|-------------|----------------|
-| `registerwerk_confidential_reconciliation_mismatch_total` | Somma del conteggio di discrepanze più recenti tra tutte le risorse riservate | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
+| `registerwerk_confidential_reconciliation_mismatch` | Somma del conteggio di discrepanze più recenti tra tutte le risorse riservate | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
 | `registerwerk_confidential_reconciliation_last_run_timestamp_seconds` | Epoca Unix dell'esecuzione di riconciliazione più recente (qualsiasi risorsa) | `time() - metric` > 1h = WARN (`ConfidentialReconciliationStale`) — rileva un relayer Zama configurato in modo errato che interrompe silenziosamente la scansione |
 
 ### Stato del nodo RPC (modulo `blockchain`) { #rpc-node-health-blockchain-module }
 
 | Metrica | Descrizione | Soglia di avviso |
 |--------|-------------|----------------|
-| `registerwerk_rpc_nodes_unhealthy_total` | Conteggio delle righe `RpcNode` attualmente contrassegnate come non integre | > 0 per 2m = WARN (`RpcNodesUnhealthy`) |
+| `registerwerk_rpc_nodes_unhealthy` | Conteggio delle righe `RpcNode` attualmente contrassegnate come non integre | > 0 per 2m = WARN (`RpcNodesUnhealthy`) |
 
 ### Riconciliazione OrgIdentity onchain (modulo `orgidentity`) { #orgidentity-onchain-reconciliation-orgidentity-module }
 
@@ -84,8 +84,8 @@ questo riflette accuratamente la "deriva attualmente aperta" senza bisogno di un
 
 | Metrica | Descrizione | Soglia di avviso |
 |--------|-------------|----------------|
-| `registerwerk_org_chain_drift_open_total` | Registrazioni di organizzazioni/portafogli membri in disaccordo con onchain `OrgRegistry` nell'analisi più recente | > 0 = CRITICAL (`OrgChainDriftDetected`) |
-| `registerwerk_permission_chain_drift_open_total` | Concessioni di autorizzazione in disaccordo con onchain `PermissionRegistry`, incl. ribaltamenti di limitazione di ruolo | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
+| `registerwerk_org_chain_drift_open` | Registrazioni di organizzazioni/portafogli membri in disaccordo con onchain `OrgRegistry` nell'analisi più recente | > 0 = CRITICAL (`OrgChainDriftDetected`) |
+| `registerwerk_permission_chain_drift_open` | Concessioni di autorizzazione in disaccordo con onchain `PermissionRegistry`, incl. ribaltamenti di limitazione di ruolo | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
 
 ### DORA scadenze di reporting (modulo `dora`) { #dora-reporting-deadlines-dora-module }
 
@@ -97,13 +97,13 @@ questo riflette accuratamente la "deriva attualmente aperta" senza bisogno di un
 
 | Metrica | Descrizione | Soglia di avviso |
 |--------|-------------|----------------|
-| `registerwerk_regreport_stale_submissions_total` | Conteggio delle righe bozza `TRANSPORTED_UNVERIFIED` prive di prove di autorità verificate oltre la soglia configurata | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
+| `registerwerk_regreport_stale_submissions` | Conteggio delle righe bozza `TRANSPORTED_UNVERIFIED` prive di prove di autorità verificate oltre la soglia configurata | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
 
 ### Travel Rule (modulo `travelrule`) { #travel-rule-travelrule-module }
 
 | Metrica | Descrizione | Soglia di avviso |
 |--------|-------------|----------------|
-| `registerwerk_travelrule_failed_messages_recent_total` | Conteggio di righe `travel_rule_message` con stato=FAILED nelle ultime 24 ore | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
+| `registerwerk_travelrule_failed_messages_recent` | Conteggio di righe `travel_rule_message` con stato=FAILED nelle ultime 24 ore | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
 
 ### Invio notifiche (modulo `notification`) { #notification-delivery-notification-module }
 

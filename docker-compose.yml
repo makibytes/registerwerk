@@ -384,6 +384,55 @@ services:
           cpus: "1.0"
           memory: 1g
 
+  # ─── Runtime database login (T6-17) ─────────────────────────────────────────
+  # Two logins, one database. DB_USER / DB_PASSWORD is the schema OWNER (the Postgres bootstrap user)
+  # and is used only by Flyway (SPRING_FLYWAY_USER below). The backend itself runs as DB_APP_USER
+  # (default registerwerk_app): DML only, no ownership, no DDL, and no UPDATE/DELETE/TRUNCATE on
+  # audit_event, so the audit WORM defences actually bind the application. This one-shot creates/refreshes
+  # that login on every `up` (works on a fresh AND an existing data volume; postgres-init/ only runs on a
+  # fresh one); migration V57 grants it its privileges. Re-running it also rotates the password.
+  db-roles:
+    image: postgres:18.6-alpine
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPASSWORD: ${DB_PASSWORD:-registerwerk}
+      POSTGRES_USER: ${DB_USER:-registerwerk}
+      POSTGRES_DB: registerwerk
+      DB_APP_USER: ${DB_APP_USER:-registerwerk_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-registerwerk_app}
+    volumes:
+      - ./postgres-init/roles:/roles:ro
+    entrypoint: ["sh", "/roles/ensure-runtime-role.sh"]
+    restart: "no"
+
+  # ─── Audit anchor store (optional, local demo of the S3 Object Lock sink) ────
+  # Not started by default: `docker compose --profile audit-anchor up` (or add audit-anchor to
+  # COMPOSE_PROFILES) and set REGISTERWERK_AUDIT_ANCHOR_SINK=s3 plus the REGISTERWERK_AUDIT_ANCHOR_S3_*
+  # variables from .env.example. GOVERNANCE retention + create-bucket keep the demo bucket disposable;
+  # production uses COMPLIANCE on a bucket provisioned with Object Lock. The official minio/minio images
+  # are no longer published, so this pins the last Bitnami repack (MinIO RELEASE.2025-05-24). Demo only.
+  minio:
+    image: bitnamilegacy/minio:2025.5.24
+    profiles: [audit-anchor]
+    logging: *default-logging
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-registerwerk-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-registerwerk-minio-demo}
+    volumes:
+      - minio_data:/bitnami/minio/data
+    ports:
+      - "127.0.0.1:${MINIO_HOST_PORT:-49000}:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
     build:
@@ -393,8 +442,28 @@ services:
     logging: *default-logging
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/registerwerk
+      # T6-17: split logins. The application datasource is the DML-only runtime login; Flyway alone gets
+      # the schema-owner login. Production mode refuses published default passwords for both and refuses
+      # a runtime login that owns audit_event (AuditReadinessCheck).
       DB_USER: ${DB_USER:-registerwerk}
       DB_PASSWORD: ${DB_PASSWORD:-registerwerk}
+      DB_APP_USER: ${DB_APP_USER:-registerwerk_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-registerwerk_app}
+      SPRING_FLYWAY_USER: ${DB_USER:-registerwerk}
+      SPRING_FLYWAY_PASSWORD: ${DB_PASSWORD:-registerwerk}
+      # External audit-anchor sink (T6-17): none (default) | s3. For the local demo bucket see the `minio`
+      # service (profile audit-anchor); the endpoint/credentials below match its defaults.
+      REGISTERWERK_AUDIT_ANCHOR_SINK: ${REGISTERWERK_AUDIT_ANCHOR_SINK:-none}
+      REGISTERWERK_AUDIT_ANCHOR_S3_BUCKET: ${REGISTERWERK_AUDIT_ANCHOR_S3_BUCKET:-registerwerk-audit-anchors}
+      REGISTERWERK_AUDIT_ANCHOR_S3_PREFIX: ${REGISTERWERK_AUDIT_ANCHOR_S3_PREFIX:-audit-anchors/}
+      REGISTERWERK_AUDIT_ANCHOR_S3_ENDPOINT: ${REGISTERWERK_AUDIT_ANCHOR_S3_ENDPOINT:-http://minio:9000}
+      REGISTERWERK_AUDIT_ANCHOR_S3_REGION: ${REGISTERWERK_AUDIT_ANCHOR_S3_REGION:-us-east-1}
+      REGISTERWERK_AUDIT_ANCHOR_S3_ACCESS_KEY: ${REGISTERWERK_AUDIT_ANCHOR_S3_ACCESS_KEY:-${MINIO_ROOT_USER:-registerwerk-minio}}
+      REGISTERWERK_AUDIT_ANCHOR_S3_SECRET_KEY: ${REGISTERWERK_AUDIT_ANCHOR_S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-registerwerk-minio-demo}}
+      REGISTERWERK_AUDIT_ANCHOR_S3_PATH_STYLE: ${REGISTERWERK_AUDIT_ANCHOR_S3_PATH_STYLE:-true}
+      REGISTERWERK_AUDIT_ANCHOR_S3_RETENTION_MODE: ${REGISTERWERK_AUDIT_ANCHOR_S3_RETENTION_MODE:-GOVERNANCE}
+      REGISTERWERK_AUDIT_ANCHOR_S3_RETENTION_DAYS: ${REGISTERWERK_AUDIT_ANCHOR_S3_RETENTION_DAYS:-1}
+      REGISTERWERK_AUDIT_ANCHOR_S3_CREATE_BUCKET: ${REGISTERWERK_AUDIT_ANCHOR_S3_CREATE_BUCKET:-true}
       # This compose file is the local/demo deployment path (see CLAUDE.md). Without an
       # active "dev"/"test" profile, SecurityConfig.jwtDecoder() refuses to start at all
       # when JWT_DEV_SECRET is left at its factory default below and JWT_ISSUER_URI is
@@ -456,6 +525,12 @@ services:
       REGISTERWERK_HSM_PROVIDER_CONFIG: ${REGISTERWERK_HSM_PROVIDER_CONFIG:-/etc/registerwerk/pkcs11.cfg}
       REGISTERWERK_HSM_PIN: ${REGISTERWERK_HSM_PIN:-${DEMO_HSM_USER_PIN:-123456}}
       REGISTERWERK_HSM_SIGNATURE_ALGORITHM: ${REGISTERWERK_HSM_SIGNATURE_ALGORITHM:-}
+      # T7-05 cloud-KMS signer (blank = off; see .env.example). No credentials here: Application Default Credentials.
+      REGISTERWERK_WALLET_SIGNER: ${REGISTERWERK_WALLET_SIGNER:-}
+      REGISTERWERK_WALLET_KMS_PROVIDER: ${REGISTERWERK_WALLET_KMS_PROVIDER:-gcp}
+      REGISTERWERK_WALLET_KMS_KEY_VERSION: ${REGISTERWERK_WALLET_KMS_KEY_VERSION:-}
+      REGISTERWERK_WALLET_KMS_TIMEOUT: ${REGISTERWERK_WALLET_KMS_TIMEOUT:-5s}
+      REGISTERWERK_WALLET_KMS_MAX_ATTEMPTS: ${REGISTERWERK_WALLET_KMS_MAX_ATTEMPTS:-3}
       S3_BUCKET: ${S3_BUCKET:-registerwerk-documents}
       S3_ENDPOINT: ${S3_ENDPOINT}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
@@ -539,6 +614,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-roles:
+        condition: service_completed_successfully
       demo-onchain-deploy:
         condition: service_completed_successfully
       softhsm:
@@ -847,6 +924,7 @@ services:
 
 volumes:
   anvil_state:
+  minio_data:
   lending_demo_addresses:
   pg18data:
   registerwerk_wallets:

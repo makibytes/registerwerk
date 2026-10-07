@@ -95,6 +95,17 @@ public class WalletController {
                 .body(toResponse(wallet, defaultService.listAll()));
     }
 
+    @PostMapping("/attach-kms")
+    @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_ATTACH_KMS")
+    public ResponseEntity<WalletResponse> attachKms(
+            @RequestBody @Valid WalletAttachKmsRequest req, Authentication auth) {
+        OperatorWallet wallet = walletService.attachKms(
+                req.name(), req.keyVersion(), req.address(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(toResponse(wallet, defaultService.listAll()));
+    }
+
     @RequiresIdempotencyKey
     @PostMapping(value = "/import-keystore", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RequiresStepUp(requireSecondApprover = true, reason = "WALLET_IMPORT_KEYSTORE")

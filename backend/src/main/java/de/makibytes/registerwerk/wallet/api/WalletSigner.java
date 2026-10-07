@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import de.makibytes.registerwerk.wallet.internal.SoftwareEvmSigner;
 import de.makibytes.registerwerk.wallet.internal.Pkcs11EvmSigner;
 import de.makibytes.registerwerk.wallet.internal.Pkcs11HsmService;
+import de.makibytes.registerwerk.wallet.internal.KmsSignerService;
 
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +38,7 @@ public class WalletSigner {
     private final OperatorWalletRepository walletRepository;
     private final WalletStorage walletStorage;
     private final Pkcs11HsmService pkcs11HsmService;
+    private final KmsSignerService kmsSignerService;
 
     private final ConcurrentHashMap<UUID, EvmSigner>      evmCache      = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Account>        solanaCache   = new ConcurrentHashMap<>();
@@ -48,11 +50,13 @@ public class WalletSigner {
             WalletChainDefaultRepository defaultRepository,
             OperatorWalletRepository walletRepository,
             WalletStorage walletStorage,
-            Pkcs11HsmService pkcs11HsmService) {
+            Pkcs11HsmService pkcs11HsmService,
+            KmsSignerService kmsSignerService) {
         this.defaultRepository = defaultRepository;
         this.walletRepository  = walletRepository;
         this.walletStorage     = walletStorage;
         this.pkcs11HsmService  = pkcs11HsmService;
+        this.kmsSignerService  = kmsSignerService;
     }
 
     // ── EVM ───────────────────────────────────────────────────────────────────
@@ -69,6 +73,9 @@ public class WalletSigner {
             log.debug("Loading {} EVM signer for wallet '{}' ({})", wallet.getCustodyType(), wallet.getName(), id);
             if (wallet.getCustodyType() == OperatorWallet.CustodyType.PKCS11) {
                 return new Pkcs11EvmSigner(pkcs11HsmService, wallet.getKeyReference(), wallet.getAddress());
+            }
+            if (wallet.getCustodyType() == OperatorWallet.CustodyType.KMS) {
+                return kmsSignerService.signerFor(wallet.getKeyReference(), wallet.getAddress());
             }
             return new SoftwareEvmSigner(walletStorage.loadEvm(wallet.getKeystorePath()));
         });

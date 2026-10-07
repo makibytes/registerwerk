@@ -21,7 +21,7 @@
     {
       "id": 3, "type": "stat", "title": "Open Chain Drift Events",
       "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
-      "targets": [{"expr": "registerwerk_chain_drift_open_total", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_chain_drift_open", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
     },
     {
@@ -64,19 +64,19 @@
     {
       "id": 9, "type": "stat", "title": "Confidential Reconciliation Mismatches",
       "gridPos": {"h": 4, "w": 6, "x": 0, "y": 18},
-      "targets": [{"expr": "registerwerk_confidential_reconciliation_mismatch_total", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_confidential_reconciliation_mismatch", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
     },
     {
       "id": 10, "type": "stat", "title": "Org Chain Drift", "description": "OrgRegistry (org registrations + member wallets)",
       "gridPos": {"h": 4, "w": 6, "x": 6, "y": 18},
-      "targets": [{"expr": "registerwerk_org_chain_drift_open_total", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_org_chain_drift_open", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
     },
     {
       "id": 11, "type": "stat", "title": "Permission Chain Drift", "description": "PermissionRegistry grants, incl. role-restriction flips",
       "gridPos": {"h": 4, "w": 6, "x": 12, "y": 18},
-      "targets": [{"expr": "registerwerk_permission_chain_drift_open_total", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_permission_chain_drift_open", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
     },
     {
@@ -89,7 +89,7 @@
     {
       "id": 13, "type": "stat", "title": "Screening Errors (24h)", "description": "Provider-call failures, distinct from unresolved hits",
       "gridPos": {"h": 4, "w": 6, "x": 0, "y": 22},
-      "targets": [{"expr": "registerwerk_screening_errors_recent_total", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_screening_errors_recent", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}, {"value": 6, "color": "red"}]}}}
     },
     {
@@ -101,13 +101,13 @@
     {
       "id": 15, "type": "stat", "title": "Stale RegReport Submissions",
       "gridPos": {"h": 4, "w": 6, "x": 12, "y": 22},
-      "targets": [{"expr": "registerwerk_regreport_stale_submissions_total", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_regreport_stale_submissions", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
     },
     {
       "id": 16, "type": "stat", "title": "Travel Rule Send Failures (24h)",
       "gridPos": {"h": 4, "w": 6, "x": 18, "y": 22},
-      "targets": [{"expr": "registerwerk_travelrule_failed_messages_recent_total", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_travelrule_failed_messages_recent", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}]}}}
     },
 
@@ -126,7 +126,7 @@
     {
       "id": 19, "type": "stat", "title": "Unhealthy RPC Nodes",
       "gridPos": {"h": 4, "w": 8, "x": 16, "y": 26},
-      "targets": [{"expr": "registerwerk_rpc_nodes_unhealthy_total", "datasource": "${DS_PROMETHEUS}"}],
+      "targets": [{"expr": "registerwerk_rpc_nodes_unhealthy", "datasource": "${DS_PROMETHEUS}"}],
       "fieldConfig": {"defaults": {"thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}]}}}
     }
   ]

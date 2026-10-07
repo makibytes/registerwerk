@@ -50,8 +50,10 @@ zamaRelayer:
 
 # Bitnami's postgresql subchart defaults to architecture: standalone (values.yaml) — a single
 # primary with no standby, so a lost pod/PVC/node means a full WAL-G restore (docs/operator/dr/
-# runbook.md §2a, RPO target ≤15 min but RTO is "however long that restore takes") before the
-# registry is writable again. architecture: replication here adds one streaming read replica —
+# runbook.md §2a; RTO is "however long that restore takes") before the registry is writable again.
+# NOTE (T7-04): the bundled subchart does NOT archive WAL — with it the recovery point is the last daily
+# base backup (up to 24 h). The ≤15 min RPO target needs `database.shape: managed` (managed PostgreSQL
+# with PITR, postgresql.enabled=false) or `database.shape: cnpg` (examples/cnpg-cluster.yaml) instead. architecture: replication here adds one streaming read replica —
 # in real time, not periodic — cutting recovery from "run the restore runbook" to "promote the
 # replica" for a lost-primary scenario. It does NOT give automatic failover (nothing here
 # repoints DB_URL at the replica if the primary dies — that's still a manual promotion, see

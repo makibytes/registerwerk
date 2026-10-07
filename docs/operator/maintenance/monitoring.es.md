@@ -49,14 +49,14 @@ en `monitoring/grafana/dashboards/registerwerk-overview.json`.
 | Métrica | Descripción | Umbral de alerta |
 |--------|----------------------|----------------|
 | `registerwerk_indexer_last_sync_timestamp_seconds{chain_config_id,indexer_type}` | Época Unix de la última sincronización exitosa de cada indexador; 0 si nunca se sincroniza | `time() - metric` > 30 min = WARN, > 2h = CRITICAL |
-| `registerwerk_chain_drift_open_total` | Recuento de filas actuales OPEN `chain_drift_event` (registro frente a divergencia de equilibrio en cadena, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
+| `registerwerk_chain_drift_open` | Recuento de filas actuales OPEN `chain_drift_event` (registro frente a divergencia de equilibrio en cadena, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
 
 ### Sanciones/detección (módulo `screening`) { #sanctionsscreening-screening-module }
 
 | Métrica | Descripción | Umbral de alerta |
 |--------|----------------------|----------------|
 | `registerwerk_sanctions_oldest_open_hit_seconds` | Antigüedad en segundos de la alerta de sanciones o PEP abierta sin resolver más antigua; 0 si no hay ninguna abierta | > 4h = CRITICAL (`SanctionsHitOpenTooLong`, GwG §10) |
-| `registerwerk_screening_errors_recent_total` | Recuento de filas `ScreeningRun` con estado=ERROR en las últimas 24 horas: fallos en las llamadas al proveedor, distintos del indicador de antigüedad de alertas anterior | > 5 = CRITICAL (`ScreeningErrorsElevated`) — `ScreeningGateImpl` deniega por defecto (fail closed) en este caso, bloqueando silenciosamente las aprobaciones de nuevas entidades |
+| `registerwerk_screening_errors_recent` | Recuento de filas `ScreeningRun` con estado=ERROR en las últimas 24 horas: fallos en las llamadas al proveedor, distintos del indicador de antigüedad de alertas anterior | > 5 = CRITICAL (`ScreeningErrorsElevated`) — `ScreeningGateImpl` deniega por defecto (fail closed) en este caso, bloqueando silenciosamente las aprobaciones de nuevas entidades |
 | `registerwerk_screening_periodic_refresh_last_failures` | Entidades que no pasaron la nueva evaluación en la actualización periódica diaria más reciente | > 0 = WARN (`ScreeningPeriodicRefreshFailures`) |
 
 ### Conciliación de token confidencial (módulo `blockchain`) { #confidential-token-reconciliation-blockchain-module }
@@ -67,14 +67,14 @@ no es una consulta de base de datos en vivo.
 
 | Métrica | Descripción | Umbral de alerta |
 |--------|----------------------|----------------|
-| `registerwerk_confidential_reconciliation_mismatch_total` | Suma del recuento de discrepancias más reciente en todos los activos confidenciales | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
+| `registerwerk_confidential_reconciliation_mismatch` | Suma del recuento de discrepancias más reciente en todos los activos confidenciales | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
 | `registerwerk_confidential_reconciliation_last_run_timestamp_seconds` | Época Unix de la ejecución de conciliación más reciente (cualquier activo) | `time() - metric` > 1h = WARN (`ConfidentialReconciliationStale`) — detecta un retransmisor (relayer) de Zama mal configurado que detiene silenciosamente el barrido |
 
 ### Estado del nodo RPC (módulo `blockchain`) { #rpc-node-health-blockchain-module }
 
 | Métrica | Descripción | Umbral de alerta |
 |--------|-------------|----------------|
-| `registerwerk_rpc_nodes_unhealthy_total` | Recuento de filas `RpcNode` actualmente marcadas como no saludables | > 0 para 2m = WARN (`RpcNodesUnhealthy`) |
+| `registerwerk_rpc_nodes_unhealthy` | Recuento de filas `RpcNode` actualmente marcadas como no saludables | > 0 para 2m = WARN (`RpcNodesUnhealthy`) |
 
 ### Reconciliación en cadena de OrgIdentity (módulo `orgidentity`) { #orgidentity-onchain-reconciliation-orgidentity-module }
 
@@ -84,8 +84,8 @@ esto refleja con precisión la "deriva abierta actualmente" sin necesidad de un 
 
 | Métrica | Descripción | Umbral de alerta |
 |--------|-------------|----------------|
-| `registerwerk_org_chain_drift_open_total` | Registros de organizaciones/billeteras de miembros que no están de acuerdo con la cadena `OrgRegistry` en el barrido más reciente | > 0 = CRITICAL (`OrgChainDriftDetected`) |
-| `registerwerk_permission_chain_drift_open_total` | Concesiones de permisos que no están de acuerdo con `PermissionRegistry` en cadena, incl. cambios de restricción de roles | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
+| `registerwerk_org_chain_drift_open` | Registros de organizaciones/billeteras de miembros que no están de acuerdo con la cadena `OrgRegistry` en el barrido más reciente | > 0 = CRITICAL (`OrgChainDriftDetected`) |
+| `registerwerk_permission_chain_drift_open` | Concesiones de permisos que no están de acuerdo con `PermissionRegistry` en cadena, incl. cambios de restricción de roles | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
 
 ### Fechas límite de informes DORA (módulo `dora`) { #dora-reporting-deadlines-dora-module }
 
@@ -97,13 +97,13 @@ esto refleja con precisión la "deriva abierta actualmente" sin necesidad de un 
 
 | Métrica | Descripción | Umbral de alerta |
 |--------|-------------|----------------|
-| `registerwerk_regreport_stale_submissions_total` | Recuento de filas de borrador `TRANSPORTED_UNVERIFIED` que carecen de evidencia de autoridad verificada más allá del umbral configurado | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
+| `registerwerk_regreport_stale_submissions` | Recuento de filas de borrador `TRANSPORTED_UNVERIFIED` que carecen de evidencia de autoridad verificada más allá del umbral configurado | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
 
 ### Regla de viaje (módulo `travelrule`) { #travel-rule-travelrule-module }
 
 | Métrica | Descripción | Umbral de alerta |
 |--------|-------------|----------------|
-| `registerwerk_travelrule_failed_messages_recent_total` | Recuento de filas `travel_rule_message` con estado=FAILED en las últimas 24 horas | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
+| `registerwerk_travelrule_failed_messages_recent` | Recuento de filas `travel_rule_message` con estado=FAILED en las últimas 24 horas | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
 
 ### Entrega de notificación (módulo `notification`) { #notification-delivery-notification-module }
 

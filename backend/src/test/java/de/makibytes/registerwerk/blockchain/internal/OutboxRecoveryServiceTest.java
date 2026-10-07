@@ -14,6 +14,8 @@ import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -209,6 +211,41 @@ class OutboxRecoveryServiceTest {
                 .thenReturn(BigInteger.valueOf(7));
         when(evmContractService.signer(chainId)).thenReturn(signer);
         when(signer.address()).thenReturn(sender);
+    }
+
+    @Test
+    void refreshGaugesExposeOldestPreparedAgeAndStuckCountUnderTheNamesTheAlertsRead() {
+        PrometheusMeterRegistry prometheus = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        OutboxRecoveryService svc = new OutboxRecoveryService(repository, transactions, chainConfigRepository,
+                clientRegistry, evmContractService, txService, submissions, events, new OutboxProperties(),
+                prometheus, isolated);
+        EvmSignedSubmissionRepository.SignerBacklog backlog = org.mockito.Mockito.mock(
+                EvmSignedSubmissionRepository.SignerBacklog.class);
+        when(backlog.getChainId()).thenReturn(new java.math.BigDecimal("11155111"));
+        when(backlog.getSenderAddress()).thenReturn(sender);
+        when(backlog.getPreparedCount()).thenReturn(3L);
+        when(backlog.getOldestCreatedAt()).thenReturn(java.time.Instant.now().minusSeconds(720));
+        when(repository.preparedBacklogPerSigner()).thenReturn(java.util.List.of(backlog))
+                .thenReturn(java.util.List.of());
+        EvmSignedSubmission stuck = row("registerIdentity", EvmSignedSubmission.Status.PREPARED);
+        when(repository.findAllStuck(any())).thenReturn(java.util.List.of(stuck, stuck))
+                .thenReturn(java.util.List.of());
+
+        svc.refreshGauges();
+
+        // EvmOutboxPreparedStuck (> 600) and EvmOutboxBroadcastStuck (> 0) read exactly these series
+        String scrape = prometheus.scrape();
+        assertThat(scrape).contains("registerwerk_outbox_oldest_prepared_age_seconds{chain_id=\"11155111\",signer=\"" + sender + "\"}");
+        assertThat(scrape).contains("registerwerk_outbox_stuck_count{chain_id=\"11155111\",signer=\"" + sender + "\"} 2.0");
+        assertThat(prometheus.get("registerwerk.outbox.oldest_prepared_age_seconds").gauge().value())
+                .isBetween(719.0, 730.0);
+        assertThat(prometheus.get("registerwerk.outbox.prepared_count").gauge().value()).isEqualTo(3.0);
+
+        // a signer that drained reads 0, not its last value (the alert must resolve)
+        svc.refreshGauges();
+        assertThat(prometheus.get("registerwerk.outbox.oldest_prepared_age_seconds").gauge().value()).isZero();
+        assertThat(prometheus.get("registerwerk.outbox.prepared_count").gauge().value()).isZero();
+        assertThat(prometheus.get("registerwerk.outbox.stuck_count").gauge().value()).isZero();
     }
 
     private ChainConfig chain() {

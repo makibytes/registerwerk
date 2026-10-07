@@ -74,10 +74,52 @@ class AuditAnchorService {
                 sink.ifPresent(s -> s.publish(new AuditAnchor(LocalDate.now(), seq.longValue(),
                         h.formatHex(hash), sig != null ? h.formatHex(sig) : null)));
             } catch (RuntimeException e) {
-                log.error("Publishing the audit anchor to the external sink failed (kept locally)", e);
+                // Never blocks anchoring or audit writes; the sink counts the failure (alert metric) and
+                // publishPending() retries the local anchor hourly.
+                log.error("Publishing the audit anchor to the external sink failed (kept locally, will retry)", e);
             }
             log.info("Audit chain anchored at sequence_no={}", seq);
         }
         return inserted == 1;
+    }
+
+    /** Most recent local daily anchors re-offered to the sink per run (bounds a long outage's backlog). */
+    static final int PENDING_LIMIT = 31;
+
+    @SchedulerLock(name = "auditAnchorSinkRetry", lockAtMostFor = "PT10M")
+    @Scheduled(cron = "0 35 * * * *")
+    void retryPending() {
+        sink.ifPresent(this::publishPending);
+    }
+
+    /**
+     * Publishes the newest {@link #PENDING_LIMIT} local DAILY anchors that are newer than the external
+     * store's newest one, oldest first, stopping at the first failure. Sinks publish idempotently, so an unreadable sink (empty {@code latest()})
+     * only causes harmless re-offers. Returns the number published.
+     */
+    int publishPending(AuditAnchorSink target) {
+        LocalDate after = target.latest().map(AuditAnchor::anchorDate).orElse(LocalDate.of(1970, 1, 1));
+        HexFormat h = HexFormat.of();
+        var pending = jdbc.query("""
+                SELECT anchor_date, sequence_no, entry_hash, sig FROM audit_chain_anchor
+                WHERE kind = 'DAILY' AND anchor_date > ? ORDER BY anchor_date DESC LIMIT ?
+                """, (rs, i) -> {
+                    byte[] sig = rs.getBytes("sig");
+                    return new AuditAnchor(rs.getObject("anchor_date", LocalDate.class), rs.getLong("sequence_no"),
+                            h.formatHex(rs.getBytes("entry_hash")), sig != null ? h.formatHex(sig) : null);
+                }, after, PENDING_LIMIT);
+        pending = new java.util.ArrayList<>(pending);
+        java.util.Collections.reverse(pending);
+        int published = 0;
+        for (AuditAnchor a : pending) {
+            try {
+                target.publish(a);
+                published++;
+            } catch (RuntimeException e) {
+                log.error("Retrying the audit anchor for {} against the external sink failed; will try again", a.anchorDate(), e);
+                break;
+            }
+        }
+        return published;
     }
 }

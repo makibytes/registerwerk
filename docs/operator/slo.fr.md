@@ -60,7 +60,7 @@ histogram_quantile(0.95,
 time() - registerwerk_indexer_last_sync_timestamp_seconds
 
 # Open drift events
-registerwerk_chain_drift_open_total
+registerwerk_chain_drift_open
 ```
 
 ---

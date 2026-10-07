@@ -35,8 +35,12 @@ spring:
 
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/registerwerk}
-    username: ${DB_USER:registerwerk}
-    password: ${DB_PASSWORD:changeme}
+    # Runtime login (DML only; T6-17). Falls back to DB_USER/DB_PASSWORD so an un-split local run still boots;
+    # production-mode readiness refuses that (AuditReadinessCheck). Flyway's own owner/migrator login is
+    # supplied only by SPRING_FLYWAY_USER / SPRING_FLYWAY_PASSWORD (deliberately not declared here: a default
+    # would override test-container credentials).
+    username: ${DB_APP_USER:${DB_USER:registerwerk}}
+    password: ${DB_APP_PASSWORD:${DB_PASSWORD:changeme}}
     connection-fetch: lazy
     hikari:
       maximum-pool-size: 20
@@ -343,8 +347,20 @@ registerwerk:
     # P4C-5: soft-deleted wallets keep their encrypted key material this long before WalletPurgeJob destroys it.
     retention-days: ${REGISTERWERK_WALLET_RETENTION_DAYS:90}
     kek-provider: ${REGISTERWERK_WALLET_KEK_PROVIDER:}
+    # T7-05: where EVM signing keys live. Blank/software = today's behaviour (software keystores and the
+    # PKCS#11 HSM below); kms = non-exportable keys in a cloud KMS (stateless, any replica count), which
+    # counts as the production HSM/KMS target. Wallets are enrolled via POST /api/v1/admin/wallets/attach-kms.
+    signer: ${REGISTERWERK_WALLET_SIGNER:}
     kms:
-      key-id: ${REGISTERWERK_WALLET_KMS_KEY_ID:}
+      key-id: ${REGISTERWERK_WALLET_KMS_KEY_ID:}   # KEK provider only (kek-provider=GCP_KMS), not the signer
+      # Cloud-KMS signer: no credentials here - Application Default Credentials / workload identity.
+      provider: ${REGISTERWERK_WALLET_KMS_PROVIDER:gcp}
+      # GCP: projects/P/locations/L/keyRings/R/cryptoKeys/K/cryptoKeyVersions/N (EC_SIGN_SECP256K1_SHA256)
+      key-version: ${REGISTERWERK_WALLET_KMS_KEY_VERSION:}
+      timeout: ${REGISTERWERK_WALLET_KMS_TIMEOUT:5s}
+      max-attempts: ${REGISTERWERK_WALLET_KMS_MAX_ATTEMPTS:3}
+      retry-backoff: ${REGISTERWERK_WALLET_KMS_RETRY_BACKOFF:200ms}
+      health-check-timeout: ${REGISTERWERK_WALLET_KMS_HEALTH_CHECK_TIMEOUT:10s}
     hsm:
       # One PKCS#11 token/session per Registerwerk instance. The SunPKCS11 file selects the
       # actual vendor library and slot. Profiles keep vendor quirks behind an adapter.
@@ -882,3 +898,21 @@ registerwerk:
       seed: ${REGISTERWERK_AUDIT_SIGNING_SEED:}
       gcp-kms:
         key-version: ${REGISTERWERK_AUDIT_SIGNING_GCP_KMS_KEY_VERSION:}
+    # External anchor store (T6-17). NOOP (default) keeps the daily signed tip anchor only in
+    # audit_chain_anchor. s3 = immutable object in an S3-compatible bucket created WITH Object Lock
+    # (AWS S3, MinIO, ...): <prefix><yyyy-MM-dd>.json with COMPLIANCE|GOVERNANCE retention. Blank
+    # access/secret key = default AWS credential chain (IRSA / Workload Identity). path-style=true for MinIO.
+    # create-bucket is a local-demo convenience only; production buckets are provisioned out of band.
+    anchor-sink: ${REGISTERWERK_AUDIT_ANCHOR_SINK:none}
+    anchor:
+      s3:
+        bucket: ${REGISTERWERK_AUDIT_ANCHOR_S3_BUCKET:}
+        prefix: ${REGISTERWERK_AUDIT_ANCHOR_S3_PREFIX:audit-anchors/}
+        endpoint: ${REGISTERWERK_AUDIT_ANCHOR_S3_ENDPOINT:}
+        region: ${REGISTERWERK_AUDIT_ANCHOR_S3_REGION:eu-central-1}
+        access-key: ${REGISTERWERK_AUDIT_ANCHOR_S3_ACCESS_KEY:}
+        secret-key: ${REGISTERWERK_AUDIT_ANCHOR_S3_SECRET_KEY:}
+        path-style: ${REGISTERWERK_AUDIT_ANCHOR_S3_PATH_STYLE:false}
+        retention-mode: ${REGISTERWERK_AUDIT_ANCHOR_S3_RETENTION_MODE:COMPLIANCE}
+        retention-days: ${REGISTERWERK_AUDIT_ANCHOR_S3_RETENTION_DAYS:3650}
+        create-bucket: ${REGISTERWERK_AUDIT_ANCHOR_S3_CREATE_BUCKET:false}

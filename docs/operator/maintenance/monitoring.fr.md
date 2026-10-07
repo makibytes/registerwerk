@@ -46,14 +46,14 @@ Ce sont les métriques Micrometer réelles enregistrées dans le backend (chacun
 | Métrique | Descriptif | Seuil d'alerte |
 |--------|-------------|----------------|
 | `registerwerk_indexer_last_sync_timestamp_seconds{chain_config_id,indexer_type}` | Époque Unix de la dernière synchronisation réussie de chaque indexeur ; 0 si jamais synchronisé | `time() - metric` > 30 min = WARN, > 2h = CRITICAL |
-| `registerwerk_chain_drift_open_total` | Nombre de lignes OPEN `chain_drift_event` actuellement (divergence entre le solde du registre et le solde on-chain, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
+| `registerwerk_chain_drift_open` | Nombre de lignes OPEN `chain_drift_event` actuellement (divergence entre le solde du registre et le solde on-chain, eWpG §16) | > 0 = CRITICAL (`ChainDriftDetected`) |
 
 ### Sanctions/contrôle (module `screening`)
 
 | Métrique | Descriptif | Seuil d'alerte |
 |--------|-------------|----------------|
 | `registerwerk_sanctions_oldest_open_hit_seconds` | Âge en secondes de la plus ancienne alerte sanctions/PEP ouverte et non résolue ; 0 si aucune n'est ouverte | > 4h = CRITICAL (`SanctionsHitOpenTooLong`, GwG §10) |
-| `registerwerk_screening_errors_recent_total` | Nombre de lignes `ScreeningRun` avec le statut = ERROR au cours des dernières 24 heures – échecs d'appel au fournisseur, distincts de la jauge d'âge des alertes ci-dessus | > 5 = CRITICAL (`ScreeningErrorsElevated`) — `ScreeningGateImpl` échoue en mode fermé (fail closed), bloquant silencieusement les approbations de nouvelles entités |
+| `registerwerk_screening_errors_recent` | Nombre de lignes `ScreeningRun` avec le statut = ERROR au cours des dernières 24 heures – échecs d'appel au fournisseur, distincts de la jauge d'âge des alertes ci-dessus | > 5 = CRITICAL (`ScreeningErrorsElevated`) — `ScreeningGateImpl` échoue en mode fermé (fail closed), bloquant silencieusement les approbations de nouvelles entités |
 | `registerwerk_screening_periodic_refresh_last_failures` | Entités dont le réexamen a échoué lors de l'actualisation périodique quotidienne la plus récente | > 0 = WARN (`ScreeningPeriodicRefreshFailures`) |
 
 ### Rapprochement des jetons confidentiels (module `blockchain`)
@@ -64,14 +64,14 @@ pas une requête de base de données en direct.
 
 | Métrique | Descriptif | Seuil d'alerte |
 |--------|-------------|----------------|
-| `registerwerk_confidential_reconciliation_mismatch_total` | Somme du nombre de non-concordances le plus récent sur tous les actifs confidentiels | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
+| `registerwerk_confidential_reconciliation_mismatch` | Somme du nombre de non-concordances le plus récent sur tous les actifs confidentiels | > 0 = CRITICAL (`ConfidentialReconciliationMismatchDetected`) |
 | `registerwerk_confidential_reconciliation_last_run_timestamp_seconds` | Époque Unix de l'exécution de rapprochement la plus récente (n'importe quel actif) | `time() - metric` > 1h = WARN (`ConfidentialReconciliationStale`) — détecte un relais Zama mal configuré interrompant silencieusement le balayage |
 
 ### État du nœud RPC (module `blockchain`)
 
 | Métrique | Descriptif | Seuil d'alerte |
 |--------|-------------|----------------|
-| `registerwerk_rpc_nodes_unhealthy_total` | Nombre de lignes `RpcNode` actuellement marquées comme non saines | > 0 pendant 2 min = WARN (`RpcNodesUnhealthy`) |
+| `registerwerk_rpc_nodes_unhealthy` | Nombre de lignes `RpcNode` actuellement marquées comme non saines | > 0 pendant 2 min = WARN (`RpcNodesUnhealthy`) |
 
 ### Réconciliation en chaîne d'identité d'organisation (module `orgidentity`)
 
@@ -81,8 +81,8 @@ cela reflète avec précision "la dérive actuellement ouverte" sans avoir besoi
 
 | Métrique | Descriptif | Seuil d'alerte |
 |--------|-------------|----------------|
-| `registerwerk_org_chain_drift_open_total` | Inscriptions d'organisations/portefeuilles de membres en désaccord avec l'`OrgRegistry` on-chain lors du balayage le plus récent | > 0 = CRITICAL (`OrgChainDriftDetected`) |
-| `registerwerk_permission_chain_drift_open_total` | Octrois d'autorisations en désaccord avec le `PermissionRegistry` on-chain, incl. retournements de restriction de rôle | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
+| `registerwerk_org_chain_drift_open` | Inscriptions d'organisations/portefeuilles de membres en désaccord avec l'`OrgRegistry` on-chain lors du balayage le plus récent | > 0 = CRITICAL (`OrgChainDriftDetected`) |
+| `registerwerk_permission_chain_drift_open` | Octrois d'autorisations en désaccord avec le `PermissionRegistry` on-chain, incl. retournements de restriction de rôle | > 0 = CRITICAL (`PermissionChainDriftDetected`) |
 
 ### Délais de reporting DORA (module `dora`)
 
@@ -94,13 +94,13 @@ cela reflète avec précision "la dérive actuellement ouverte" sans avoir besoi
 
 | Métrique | Descriptif | Seuil d'alerte |
 |--------|-------------|----------------|
-| `registerwerk_regreport_stale_submissions_total` | Nombre de lignes brouillon `TRANSPORTED_UNVERIFIED` dépourvues de preuves d'autorité vérifiées au-delà du seuil configuré | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
+| `registerwerk_regreport_stale_submissions` | Nombre de lignes brouillon `TRANSPORTED_UNVERIFIED` dépourvues de preuves d'autorité vérifiées au-delà du seuil configuré | > 0 = CRITICAL (`RegReportSubmissionsStale`) |
 
 ### Travel Rule (module `travelrule`)
 
 | Métrique | Descriptif | Seuil d'alerte |
 |--------|-------------|----------------|
-| `registerwerk_travelrule_failed_messages_recent_total` | Nombre de lignes `travel_rule_message` avec le statut = FAILED au cours des dernières 24 heures | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
+| `registerwerk_travelrule_failed_messages_recent` | Nombre de lignes `travel_rule_message` avec le statut = FAILED au cours des dernières 24 heures | > 0 = CRITICAL (`TravelRuleMessageSendFailures`, TFR Art. 14) |
 
 ### Envoi de notifications (module `notification`)
 

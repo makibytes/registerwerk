@@ -12,20 +12,26 @@ description: Borrador de manual operativo para la restauración de Postgres y de
     contractuales y de infraestructura vigentes.
 
 **Servicio:** Registro eWpG Registerwerk  
-**Objetivo de RTO:** ≤4 horas (eWpRV §6)  
-**RPO:** última copia de seguridad base diaria correcta (hasta 24 horas) — el WAL **no** se archiva hoy; un objetivo de ≤15 minutos no está implementado (decisión abierta T7-04)  
+**RTO:** medido 2.3 s en la base de datos casi vacía del simulacro (2026-10-07, `scripts/pitr-drill.sh`); no medido con datos del tamaño de producción, por lo que no se promete ningún RTO  
+**RPO:** objetivo ≤ 15 minutos con el archivado de WAL activado (`archive_timeout` 300 s); el último simulacro (2026-10-07) midió 286.8 s entre la última fila confirmada y su segmento WAL archivado. Sin archivado de WAL (base de datos integrada de desarrollo/pruebas), el RPO es la última copia base diaria, hasta 24 horas  
 **Responsable:** Equipo de Operaciones del Registro  
-**Clasificación DORA:** incidente MAJOR si el tiempo de inactividad supera las 4 h
+**Clasificación DORA:** véase la tabla ilustrativa de la sección 1
 
 ---
 
 ## 1. Clasificación de gravedad del incidente (DORA, art. 17) { #1-incident-severity-classification-dora-art-17 }
 
-| Gravedad | Criterios | Acción | Plazo |
-|---|---|---|---|
-| MINOR | Un solo servicio caído, &lt;30 min, sin pérdida de datos | Alerta interna | — |
-| MAJOR | Multiservicio, 30 min–4 h, posible impacto en los datos | Informe inicial a BaFin/CSSF/AMF/FMA | 72 h desde la detección |
-| CRITICAL | Interrupción total >4 h O vulneración de la integridad de los datos | Informe inicial a la autoridad competente | 4 h desde la detección |
+| Gravedad | Criterios | Acción |
+|---|---|---|
+| MINOR | Un solo servicio caído, sin pérdida de datos | Alerta interna |
+| MAJOR | Caída de varios servicios, posible impacto en los datos | Evaluar la obligación de notificación según el art. 19 DORA |
+| CRITICAL | Caída total O vulneración de la integridad de los datos | Evaluar la obligación de notificación según el art. 19 DORA |
+
+Esta tabla es una clasificación ilustrativa, no una determinación jurídica. Verifíquela con el art. 19 DORA y con los actos
+delegados sobre la clasificación de incidentes (Reglamento Delegado (UE) 2024/1772) y sobre el contenido y los plazos de las
+notificaciones (Reglamento Delegado (UE) 2025/301). Los umbrales de duración y los plazos de notificación no se fijan aquí
+a propósito: son política propia del operador (decisión aplazada T9-06), y los plazos legales corren desde los momentos que
+fijan esos actos, no desde la «detección».
 
 `POST /api/v1/dora/incidents` registra un incidente interno; no presenta un informe DORA. Toda
 autoridad, plazo, formulario y canal indicados a continuación es un dato de referencia que debe
@@ -37,33 +43,55 @@ verificarse externamente:
 
 ---
 
-## 2. Restauración completa de Postgres (RPO = última copia base) { #2-postgres-full-restore-rpo-15-min }
+## 2. Restauración completa de Postgres (PITR con WAL-G, RPO = último segmento WAL archivado)
 
-!!! warning "Sin probar para WAL"
-    El chart de Helm de copias de seguridad solo realiza una **copia base** diaria de WAL-G. En este repositorio no hay `archive_command` ni `archive_mode` configurados, por lo que no existe un archivo WAL continuo ni recuperación a un punto en el tiempo más allá de la copia base. Los pasos siguientes describen la mecánica de PG18 y no se han probado en un simulacro real de restauración con wal-g. El mecanismo de archivado es una decisión aparcada (T7-04).
+!!! note "Probado de verdad"
+    La sección 2a se ejercita con `scripts/pitr-drill.sh` en contenedores desechables (nunca en la base de datos de demostración): copia base, archivo WAL continuo, pérdida total del volumen de datos, restauración a una hora objetivo elegida y verificación fila a fila. Última ejecución 2026-10-07: PASSED, muestra de RPO 286.8 s, RTO 2.3 s (de ellos `wal-g backup-fetch` 1.5 s) en una base casi vacía. El RTO crece con el tamaño de la copia base y el WAL a reproducir; vuelva a medirlo con datos del tamaño de producción antes de comprometerse.
 
-### 2a. Restaurar desde la copia de seguridad de wal-g (ruta principal) { #2a-restore-from-wal-g-backup-primary-path }
+!!! warning "Solo con el archivado de WAL activado"
+    La recuperación a un punto en el tiempo necesita un archivo WAL: el overlay opcional `docker-compose.wal.yml` (WAL-G), un PostgreSQL gestionado con PITR o CloudNativePG con Barman Cloud (véase [Copias de seguridad y recuperación](../maintenance/backups.md)). La base integrada de desarrollo/pruebas y la demo estándar de Compose no archivan nada; allí el punto de recuperación es la última copia base o el último pg_dump.
+
+### 2a. Restauración a un punto en el tiempo desde WAL-G (ruta principal) { #2a-point-in-time-restore-from-wal-g-primary-path }
+
+Mecánica de PostgreSQL 18: `PGDATA` es `/var/lib/postgresql/18/docker` en la imagen oficial (que declara `VOLUME /var/lib/postgresql`), la recuperación se solicita con un archivo `recovery.signal` vacío y el objetivo se fija en `postgresql.auto.conf`. Ya no existe `recovery.conf`.
+
 ```bash
-# 1. Provision a new Postgres 18.6 instance
-docker run -d --name postgres-restore postgres:18.6-alpine
+# 0. Stop writers; keep the failed volume for forensics if it still exists
+docker compose stop backend
 
-# 2. Restore base backup
-docker exec postgres-restore wal-g backup-fetch /var/lib/postgresql LATEST \
-  --walg-s3-prefix s3://registerwerk-backups/wal-g
+# 1. Fresh, empty data volume; the archive volume (or the same S3 settings) is reused as is
+docker volume create pgdata-restore
 
-# 3. Señal de recuperación (PG12+: recovery.conf ya no existe): crear recovery.signal en PGDATA.
-#    Añadir restore_command solo si el WAL se archiva realmente (hoy no es así);
-#    si no, se recupera hasta el final de la copia base y se promueve.
-docker exec postgres-restore touch /var/lib/postgresql/18/docker/recovery.signal
+# 2. Fetch the base backup and write the recovery settings (what scripts/pitr-drill.sh does)
+docker run --rm -i --user postgres -e RECOVERY_TARGET='2026-01-01 12:00:00+00' \
+  -v pgdata-restore:/var/lib/postgresql -v <project>_pgarchive:/wal-archive \
+  --entrypoint sh registerwerk/postgres-wal:18.6 -s <<'EOS'
+set -eu
+. /usr/local/bin/walg-env.sh                 # PGDATA + the WALG_* archive location
+install -d -m 0700 "$PGDATA"
+wal-g backup-fetch "$PGDATA" LATEST </dev/null
+touch "$PGDATA/recovery.signal"
+cat >> "$PGDATA/postgresql.auto.conf" <<CONF
+restore_command = 'wal-g wal-fetch %f %p'
+recovery_target_time = '${RECOVERY_TARGET}'   # UTC; omit the line to replay all archived WAL
+recovery_target_action = 'promote'
+CONF
+EOS
 
-# 4. Start Postgres and wait for recovery
-docker start postgres-restore
-docker logs -f postgres-restore | grep "recovery is complete"
+# 3. Start Postgres on the restored volume and wait for recovery to finish
+docker run -d --name postgres-restore -e POSTGRES_USER=registerwerk -e POSTGRES_DB=registerwerk \
+  -e POSTGRES_PASSWORD=<password> -v pgdata-restore:/var/lib/postgresql \
+  -v <project>_pgarchive:/wal-archive registerwerk/postgres-wal:18.6
+docker logs -f postgres-restore 2>&1 | grep -E "recovery stopping|archive recovery complete|ready to accept"
 
-# 5. Validate row counts
-psql -h localhost -U registerwerk -c "SELECT count(*) FROM audit_event;"
+# 4. Validate
+psql -h localhost -U registerwerk -c "SELECT pg_is_in_recovery();"      # f once promoted
 psql -h localhost -U registerwerk -c "SELECT max(occurred_at) FROM audit_event;"
 ```
+
+Con almacenamiento S3, sustituya los montajes `-v ..._pgarchive` por las variables `WALG_S3_PREFIX` / `AWS_*` del servidor de origen. Tras la promoción, la instancia funciona en una nueva línea temporal: haga de inmediato una copia base nueva (`pg-backup once`). Para las formas de producción use el PITR de la plataforma: PostgreSQL gestionado (p. ej. `gcloud sql instances clone <source> <target> --point-in-time <UTC timestamp>`) o un clúster de recuperación de CloudNativePG (`deploy/helm/registerwerk/examples/cnpg-cluster.yaml`, al final). El script de este repositorio no ejercita esas dos vías; realice su propio simulacro de restauración.
+
+Se pierden los datos confirmados después del objetivo de recuperación (o después del último segmento archivado). Compare `max(occurred_at)` con la hora del incidente para cuantificar la pérdida real y concilie después con los indexadores de cadena.
 
 ### 2b. Restaurar desde pg_dump (alternativa — RPO = último volcado) { #2b-restore-from-pgdump-fallback-rpo-last-dump }
 ```bash
@@ -71,6 +99,8 @@ pg_restore -h new-host -U registerwerk -d registerwerk \
   --clean --if-exists \
   /backups/registerwerk_$(date +%Y%m%d).dump
 ```
+
+**`scripts/pitr-drill.sh` ejercita la ruta WAL-G (2a).** Construye la misma imagen `postgres-wal` que el overlay de Compose, arranca un servidor desechable con `archive_mode=on`, hace una copia base, inserta filas antes y después de una hora objetivo registrada, espera sin forzar un cambio de segmento a que se archive el segmento de la última fila (la muestra de RPO), elimina el contenedor y su volumen, restaura copia base más WAL a la hora objetivo y comprueba que existen exactamente las filas confirmadas hasta entonces. Imprime el RPO y el RTO y dura unos 6 minutos con `archive_timeout` 300 s. Con `--record <backend-base-url> <operator-bearer-token>` registra el resultado como entrada `SCENARIO_BASED` mediante `POST /api/v1/dora/resilience-tests` (desactivado por defecto).
 
 ### 2d. Filas en una partición DEFAULT
 
@@ -113,13 +143,14 @@ curl http://localhost:48080/actuator/health | jq .status
 
 ## 4. Verificación de la cadena de auditoría tras la restauración { #4-audit-chain-verification-after-restore }
 ```bash
-# Trigger audit chain verification via actuator
-curl -H "Authorization: Bearer $ADMIN_TOKEN" \
-  http://localhost:48080/actuator/health/auditChainVerificationService | jq .
-
-# If BROKEN: do NOT resume operations. Escalate to DORA CRITICAL incident.
-# The hash chain violation must be investigated before the registry resumes.
+# Trigger the verification: a POST (reading /actuator/health/auditChainVerificationService only
+# reports the last verdict, it triggers nothing). Requires REGISTRY_ADMIN; scripts/dr-restore-drill.sh
+# --verify-audit-chain shows the full login + XSRF-TOKEN flow.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:48080/api/v1/audit/chain/verify | jq .
 ```
+
+Si el veredicto es BROKEN: NO reanude las operaciones. Escale como incidente CRITICAL; la ruptura de la cadena de hashes debe investigarse antes de que el registro reanude. Un veredicto BROKEN mantiene `/actuator/health` en DOWN (la disponibilidad no se ve afectada) hasta que una ejecución POSTERIOR sea válida Y el veredicto erróneo se reconozca con doble control: `POST /api/v1/audit/verification/{id}/ack` (REGISTRY_ADMIN, step-up, un segundo aprobador, motivo `AUDIT_CHAIN_VERIFICATION_ACK`, `note` opcional); la página del registro de auditoría del portal de operador tiene el botón correspondiente. El disparo es un POST; leer `/actuator/health/auditChainVerificationService` solo muestra el último veredicto.
 
 ---
 
@@ -143,19 +174,21 @@ aws kms decrypt \
 ---
 
 ## 6. Restauración de Kong / la puerta de enlace { #6-kong-gateway-restore }
+Kong funciona sin base de datos (DB-less): toda su configuración es `gateway/kong.yml`, cargada al arrancar (`KONG_DECLARATIVE_CONFIG`). No hay base de datos que restaurar ni ruta de escritura por la API de administración, así que `deck sync` no aplica. Restaure el archivo desde el control de versiones, valídelo y recree el contenedor:
 ```bash
-deck gateway sync gateway/kong.yml \
-  --kong-addr http://localhost:48001
+docker compose run --rm kong kong config parse /etc/kong/kong.yml
+docker compose up -d --force-recreate kong
 ```
+En Kubernetes el mismo archivo se entrega como `deploy/helm/registerwerk/files/kong.yml` (ConfigMap `registerwerk-kong-config`): ejecute `helm upgrade` y vuelva a desplegar Kong.
 
 ---
 
 ## 7. Lista de verificación posterior a la recuperación { #7-post-recovery-checklist }
 - [ ] Estado de Postgres: `pg_isready`
 - [ ] Estado del backend: `/actuator/health` → UP
-- [ ] Cadena de auditoría: `/actuator/health/auditChainVerificationService` → UP
-- [ ] Liveness del indexador: `/actuator/health/indexerMonitor` → UP
+- [ ] Cadena de auditoría: `POST /api/v1/audit/chain/verify` devuelve `valid: true` (sección 4); después `/actuator/health` → UP
+- [ ] Actividad de los indexadores: `GET /api/v1/indexers` muestra todos los indexadores al día y no hay ninguna alerta `IndexerStaleCritical` / `IndexerStaleWarning` activa
 - [ ] Deriva de cadena: confirmar que no hay filas `chain_drift_event` abiertas con severity=CRITICAL
 - [ ] Filtrado de sanciones: confirmar que no hay filas `screening_hit` abiertas con más de 4 h de antigüedad
 - [ ] Resumen del registro: verificar que los importes nominales totales coincidan con la instantánea previa al incidente
-- [ ] Presentar el informe final DORA dentro del mes siguiente a la resolución del incidente
+- [ ] Si el incidente se clasificó como grave, presentar las notificaciones DORA dentro de los plazos del acto delegado (verificar el texto vigente, sección 1)

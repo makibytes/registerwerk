@@ -55,6 +55,44 @@ groups:
           summary: "Audit chain tip has not advanced for 30+ minutes"
           description: "The chain tip is older than 30 minutes while audit events are still waiting to be appended. The appender is stalled."
 
+      # Audit integrity hardening (T6-17). The WORM REVOKEs/triggers only bind a runtime login that neither
+      # owns audit_event nor can modify it; the gauge is 1 when it does (AuditReadinessCheck), 0 when restricted.
+      - alert: AuditRuntimeRoleNotRestricted
+        expr: |
+          registerwerk_audit_runtime_role_owns_table{job="registerwerk-backend"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "The application's DB login can alter the audit log"
+          description: "The backend runs as a database login that owns or can UPDATE/DELETE/TRUNCATE audit_event (or run DDL), so the append-only defences do not bind it. Run the application as DB_APP_USER (registerwerk_app) and keep the owner login for Flyway only; see the AuditReadinessCheck message."
+
+      # Only emitted when registerwerk.audit.anchor-sink=s3. Counts failed writes, reads and Object Lock
+      # misconfiguration against the external anchor store; audit writes are never blocked by it.
+      - alert: AuditAnchorSinkFailing
+        expr: |
+          increase(registerwerk_audit_anchor_sink_failures_total{job="registerwerk-backend"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Audit anchors are not reaching the external Object Lock store"
+          description: "The S3 audit-anchor sink failed (operation label: publish or read). Anchors stay in audit_chain_anchor and are retried hourly, but the tamper-evidence outside the database is degraded until this clears. Check bucket Object Lock, credentials and connectivity."
+
+      - alert: AuditAnchorSinkStale
+        expr: |
+          registerwerk_audit_anchor_sink_last_success_timestamp_seconds{job="registerwerk-backend"} > 0
+          and time() - registerwerk_audit_anchor_sink_last_success_timestamp_seconds{job="registerwerk-backend"} > 129600
+        for: 0m
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "No audit anchor written to the external store for 36+ hours"
+          description: "The daily anchor job normally writes once per day; the newest external anchor is older than 36 hours."
+
       # ── Indexer liveness ──────────────────────────────────────────────────
       # registerwerk_indexer_last_sync_timestamp_seconds is a Unix-epoch timestamp gauge
       # (IndexerMonitorService), not a precomputed age — time() - metric is the idiomatic
@@ -81,11 +119,11 @@ groups:
           description: "Indexer type {{ $labels.indexer_type }} (chain_config_id={{ $labels.chain_config_id }}) has not synced for more than 30 minutes."
 
       # ── Chain drift ───────────────────────────────────────────────────────
-      # registerwerk_chain_drift_open_total (ChainDriftDetectionJob) is a live COUNT of OPEN
+      # registerwerk_chain_drift_open (ChainDriftDetectionJob) is a live COUNT of OPEN
       # rows, not a counter — alerts on the count being nonzero rather than increase().
       - alert: ChainDriftDetected
         expr: |
-          registerwerk_chain_drift_open_total{job="registerwerk-backend"} > 0
+          registerwerk_chain_drift_open{job="registerwerk-backend"} > 0
         for: 0m
         labels:
           severity: critical
@@ -409,8 +447,8 @@ groups:
 
       # ── Audit signing key age ─────────────────────────────────────────────
       # Renamed from "JwtSigningKeyAgeWarning": the JWT decoder's HS256 secret is a static
-      # config value with no real "created at" concept to track. registerwerk_audit_signing_key
-      # _age_seconds (AuditChainVerificationService) tracks the audit hash-chain's Ed25519
+      # config value with no real "created at" concept to track.
+      # registerwerk_audit_signing_key_age_seconds (AuditChainVerificationService) tracks the audit hash-chain's Ed25519
       # signing key instead — a real rotatable key where "hasn't been rotated in 90+ days" is
       # meaningful .
       - alert: AuditSigningKeyAgeWarning
@@ -451,6 +489,54 @@ groups:
           summary: "No backup success metric for 2 days"
           description: "backup_last_success_timestamp has not existed for 2 days. Backups may be running but unreported, or not running at all."
 
+      # ── WAL archive lag (T7-04, RPO target <= 15 min) ─────────────────────
+      # Continuous WAL archiving (archive_timeout 300 s) is what makes the RPO target real; the daily
+      # base-backup rules above only cover the restore starting point. Two metric sources, same meaning
+      # ("seconds since the last WAL segment was archived"):
+      #   pg_wal_archive_last_archive_age_seconds           postgres_exporter custom query on pg_stat_archiver
+      #                                                     (queries in docs/operator/maintenance/backups.md)
+      #   cnpg_pg_stat_archiver_seconds_since_last_archival CloudNativePG built-in (primary only)
+      # The registry always has write activity (heartbeats, audit, jobs), so archive_timeout keeps switching
+      # segments and an age above 15 min means archiving is broken or stalled, not that the DB is idle.
+      - alert: WalArchiveLag
+        expr: |
+          max(pg_wal_archive_last_archive_age_seconds) > 900
+          or
+          max(cnpg_pg_stat_archiver_seconds_since_last_archival) > 900
+        for: 5m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "No PostgreSQL WAL segment archived for over 15 minutes"
+          description: "The WAL archive is lagging beyond the 15 minute RPO target: a loss of the database disk now loses everything since the last archived segment. Check archive_command failures (pg_stat_archiver.last_failed_wal), storage credentials/quota and connectivity."
+
+      - alert: WalArchiveFailing
+        expr: |
+          sum(increase(pg_wal_archive_failed_count[15m])) > 0
+          or
+          sum(increase(cnpg_pg_stat_archiver_failed_count[15m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "PostgreSQL archive_command keeps failing"
+          description: "pg_stat_archiver.failed_count has grown for 10 minutes. WAL piles up on the primary disk until archiving works again; fix it before the volume fills."
+
+      # Dead-on-arrival guard: neither source is scraped, so WalArchiveLag can never fire. Fires on the
+      # bundled dev/test shape and the Docker Compose demo too (no WAL archive there), like BackupStale.
+      - alert: WalArchiveMetricAbsent
+        expr: |
+          absent(pg_wal_archive_last_archive_age_seconds) and absent(cnpg_pg_stat_archiver_seconds_since_last_archival)
+        for: 30m
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "No WAL archive metric is being scraped"
+          description: "Neither pg_wal_archive_last_archive_age_seconds nor cnpg_pg_stat_archiver_seconds_since_last_archival exists, so WAL archive lag is unmonitored (or WAL archiving is not enabled: the bundled/demo database has none)."
+
   - name: registerwerk.availability
     interval: 1m
     rules:
@@ -475,7 +561,7 @@ groups:
       # (unlike chain_drift_event), so this is an in-memory last-run snapshot, not a live query.
       - alert: ConfidentialReconciliationMismatchDetected
         expr: |
-          registerwerk_confidential_reconciliation_mismatch_total{job="registerwerk-backend"} > 0
+          registerwerk_confidential_reconciliation_mismatch{job="registerwerk-backend"} > 0
         for: 0m
         labels:
           severity: critical
@@ -524,7 +610,7 @@ groups:
       # table either; reset-then-recount-per-sweep gauges, same rationale as above.
       - alert: OrgChainDriftDetected
         expr: |
-          registerwerk_org_chain_drift_open_total{job="registerwerk-backend"} > 0
+          registerwerk_org_chain_drift_open{job="registerwerk-backend"} > 0
         for: 0m
         labels:
           severity: critical
@@ -534,7 +620,7 @@ groups:
 
       - alert: PermissionChainDriftDetected
         expr: |
-          registerwerk_permission_chain_drift_open_total{job="registerwerk-backend"} > 0
+          registerwerk_permission_chain_drift_open{job="registerwerk-backend"} > 0
         for: 0m
         labels:
           severity: critical
@@ -546,7 +632,7 @@ groups:
       # unresolved HITS, not provider-call failures) ──────────────────────────
       - alert: ScreeningErrorsElevated
         expr: |
-          registerwerk_screening_errors_recent_total{job="registerwerk-backend"} > 5
+          registerwerk_screening_errors_recent{job="registerwerk-backend"} > 5
         for: 0m
         labels:
           severity: critical
@@ -591,7 +677,7 @@ groups:
       # ── Regulatory-report staleness ──────────────────────────────────────────
       - alert: RegReportSubmissionsStale
         expr: |
-          registerwerk_regreport_stale_submissions_total{job="registerwerk-backend"} > 0
+          registerwerk_regreport_stale_submissions{job="registerwerk-backend"} > 0
         for: 0m
         labels:
           severity: critical
@@ -602,7 +688,7 @@ groups:
       # ── Travel Rule (TFR Art. 14) ─────────────────────────────────────────────
       - alert: TravelRuleMessageSendFailures
         expr: |
-          registerwerk_travelrule_failed_messages_recent_total{job="registerwerk-backend"} > 0
+          registerwerk_travelrule_failed_messages_recent{job="registerwerk-backend"} > 0
         for: 0m
         labels:
           severity: critical
@@ -626,7 +712,7 @@ groups:
       # ── RPC node health ───────────────────────────────────────────────────────
       - alert: RpcNodesUnhealthy
         expr: |
-          registerwerk_rpc_nodes_unhealthy_total{job="registerwerk-backend"} > 0
+          registerwerk_rpc_nodes_unhealthy{job="registerwerk-backend"} > 0
         for: 2m
         labels:
           severity: warning
@@ -688,7 +774,7 @@ groups:
           severity: warning
         annotations:
           summary: "A scheduled job has failed more than 3 times in the last hour"
-          description: "job={{ $labels.job }} outcome=failure — see application logs for the exception; ShedLock ensures this reflects only actual executions on the leader replica, not skipped ticks."
+          description: "job={{ $labels.exported_job }} outcome=failure — see application logs for the exception; ShedLock ensures this reflects only actual executions on the leader replica, not skipped ticks."
 
       # ── Reorg depth (ReorgGuard) ──────────────────────────────────────────────
       - alert: DeepReorgDetected
@@ -790,13 +876,19 @@ groups:
           description: "No indexer reports a last-sync timestamp; IndexerStale* alerts cannot fire without the series."
 
       - alert: OutboxMetricAbsent
-        expr: absent_over_time(registerwerk_outbox_stuck_count{job="registerwerk-backend"}[15m])
+        # The per-signer outbox gauges (registerwerk_outbox_stuck_count, ..._oldest_prepared_age_seconds)
+        # are only registered once a signer has a prepared/stuck row, so a healthy outbox exposes none
+        # of them and absent_over_time() on them would fire forever. What keeps them truthful is the
+        # recovery sweep that refreshes them every minute (ShedLock: one replica per tick), so the
+        # sweep's own execution timer is the liveness signal. The scheduled-job timer's `job` tag
+        # collides with the scrape label and is exported as `exported_job`.
+        expr: absent_over_time(registerwerk_scheduled_job_seconds_count{job="registerwerk-backend", exported_job="evmOutboxRecoverySweep"}[15m])
         for: 0m
         labels:
           severity: warning
         annotations:
-          summary: "EVM outbox gauge missing for 15 minutes"
-          description: "registerwerk_outbox_stuck_count is absent; outbox stuck alerts are blind."
+          summary: "EVM outbox recovery sweep has not run for 15 minutes"
+          description: "No replica executed evmOutboxRecoverySweep, which refreshes registerwerk_outbox_stuck_count / registerwerk_outbox_oldest_prepared_age_seconds and re-broadcasts stuck payloads; outbox stuck alerts are blind. Check the ShedLock row for evmOutboxRecoverySweep and the backend logs."
 
       - alert: DoraMetricAbsent
         expr: absent_over_time(registerwerk_dora_deadline_breaches{job="registerwerk-backend"}[15m])

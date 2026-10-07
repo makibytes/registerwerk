@@ -58,9 +58,13 @@ class ProductionReadinessCheckTest {
     }
 
     private ProductionReadinessCheck check() {
+        return check(true);
+    }
+
+    private ProductionReadinessCheck check(boolean hsmEnabled) {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         SeededAdminPolicy policy = new SeededAdminPolicy(props, users, encoder, registry, env);
-        return new ProductionReadinessCheck(props, "", "AWS_KMS", true, false,
+        return new ProductionReadinessCheck(props, "", "AWS_KMS", hsmEnabled, false,
                 "", "", "", false, "", users, encoder, env, beans, events, policy, registry);
     }
 
@@ -104,6 +108,23 @@ class ProductionReadinessCheckTest {
         assertThatThrownBy(() -> check().check()).hasMessageContaining("DB_PASSWORD");
         env.setProperty("spring.datasource.password", "");
         assertThatThrownBy(() -> check().check()).hasMessageContaining("DB_PASSWORD");
+    }
+
+    @Test
+    @DisplayName("production + published default for the runtime or migrator DB login is refused (T6-17)")
+    void weakSplitLoginPasswords() {
+        env.setProperty("spring.datasource.password", "registerwerk_app");
+        assertThatThrownBy(() -> check().check()).hasMessageContaining("DB_PASSWORD");
+        env.setProperty("spring.datasource.password", "a-long-random-runtime-secret-9f3");
+        env.setProperty("spring.flyway.user", "registerwerk");
+        env.setProperty("spring.flyway.password", "changeme");
+        assertThatThrownBy(() -> check().check()).hasMessageContaining("SPRING_FLYWAY_PASSWORD");
+        env.setProperty("spring.flyway.password", "");
+        assertThatThrownBy(() -> check().check()).hasMessageContaining("SPRING_FLYWAY_PASSWORD");
+        env.setProperty("spring.datasource.username", "same-login");
+        env.setProperty("spring.flyway.user", "same-login");
+        env.setProperty("spring.flyway.password", "a-long-random-migrator-secret-71c");
+        assertThatThrownBy(() -> check().check()).hasMessageContaining("must differ");
     }
 
     @Test
@@ -177,6 +198,25 @@ class ProductionReadinessCheckTest {
         env.setProperty("registerwerk.wallet.hsm.pin", "123456");
         assertThatThrownBy(() -> org.springframework.test.util.ReflectionTestUtils.invokeMethod(c, "checkHsm"))
                 .hasMessageContaining("PIN");
+    }
+
+    @Test
+    @DisplayName("T7-05: a cloud-KMS signer is a valid production custody target; without it PKCS#11 is still required")
+    void kmsSignerSatisfiesCustodyGate() {
+        // no HSM, no KMS: refused, and the message points at both options
+        assertThatThrownBy(() -> check(false).checkSigningCustody())
+                .hasMessageContaining("REGISTERWERK_HSM_ENABLED").hasMessageContaining("registerwerk.wallet.signer=kms");
+        // KMS signer: no PKCS#11 token (and so no allow-software-token acknowledgement) needed, even with
+        // the demo SoftHSM profile left at its default
+        env.setProperty("registerwerk.wallet.signer", "kms");
+        env.setProperty("registerwerk.wallet.hsm.profile", "SOFTHSM");
+        env.setProperty("registerwerk.wallet.hsm.pin", "123456");
+        assertThatCode(() -> check(false).checkSigningCustody()).doesNotThrowAnyException();
+        // a PKCS#11 token that is ALSO enabled is still held to the SoftHSM / demo-PIN rules
+        assertThatThrownBy(() -> check(true).checkSigningCustody()).hasMessageContaining("SOFTHSM");
+        // 'software' (or blank) is today's behaviour
+        env.setProperty("registerwerk.wallet.signer", "software");
+        assertThatThrownBy(() -> check(false).checkSigningCustody()).hasMessageContaining("REGISTERWERK_HSM_ENABLED");
     }
 
     @Test

@@ -1,0 +1,78 @@
+# ─── Opt-in WAL archiving + point-in-time recovery (T7-04) ───────────────────────────────────────
+# NOT part of the default `docker compose up`: the stock `postgres` service is untouched unless this
+# file is layered on. Enable it with
+#
+#   docker compose -f docker-compose.yml -f docker-compose.wal.yml up -d postgres
+#   docker compose -f docker-compose.yml -f docker-compose.wal.yml --profile backup up -d pg-backup
+#   # or: COMPOSE_FILE=docker-compose.yml:docker-compose.wal.yml  (then plain `docker compose ...`)
+#
+# What it does
+#   * swaps the postgres image for registerwerk/postgres-wal:18.6 (postgres-wal/: the same
+#     postgres:18.6-alpine base plus WAL-G built from a pinned tag), so the existing pg18data volume
+#     keeps working — same libc, same major version, no dump/restore;
+#   * turns on archive_mode=on, archive_command='wal-g wal-push %p' and archive_timeout
+#     (PG_ARCHIVE_TIMEOUT, default 300 s => RPO target <= 15 min with ample headroom);
+#   * archives to the `pgarchive` named volume by default (WALG_FILE_PREFIX, demo only: same host,
+#     so it protects against logical loss and corruption, NOT against losing the machine) or to any
+#     S3-compatible bucket when WALG_S3_PREFIX is set (see the S3 block below; the optional `minio`
+#     service of the audit-anchor profile works for a local demo);
+#   * `pg-backup` (profile `backup`) takes the base backups: `wal-g backup-push` every
+#     BACKUP_INTERVAL_SECONDS (default daily) + retention, optionally pushing
+#     backup_last_success_timestamp to BACKUP_PUSHGATEWAY_URL. One-shot:
+#       docker compose -f docker-compose.yml -f docker-compose.wal.yml --profile backup run --rm pg-backup once
+#
+# archive_mode and archive_command need a postgres restart: layering this file recreates the postgres
+# CONTAINER (the data volume is reused as is). Restore + drill: docs/operator/dr/runbook.md,
+# scripts/pitr-drill.sh (runs on throwaway volumes, never on pg18data).
+x-walg-env: &walg-env
+  WALG_FILE_PREFIX: ${WALG_FILE_PREFIX:-/wal-archive}
+  # S3-compatible archive (wins over the file prefix when set), e.g. against the minio demo service:
+  #   WALG_S3_PREFIX=s3://registerwerk-wal/pg  AWS_ENDPOINT=http://minio:9000  AWS_S3_FORCE_PATH_STYLE=true
+  #   AWS_ACCESS_KEY_ID=...  AWS_SECRET_ACCESS_KEY=...  AWS_REGION=us-east-1   (bucket must already exist)
+  WALG_S3_PREFIX: ${WALG_S3_PREFIX:-}
+  AWS_ENDPOINT: ${AWS_ENDPOINT:-}
+  AWS_REGION: ${AWS_REGION:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-}
+
+services:
+  postgres:
+    image: registerwerk/postgres-wal:18.6
+    build:
+      context: ./postgres-wal
+    environment:
+      <<: *walg-env
+      PG_ARCHIVE_MODE: ${PG_ARCHIVE_MODE:-on}
+      PG_ARCHIVE_TIMEOUT: ${PG_ARCHIVE_TIMEOUT:-300}
+    volumes:
+      - pgarchive:/wal-archive
+
+  pg-backup:
+    profiles: [backup]
+    image: registerwerk/postgres-wal:18.6
+    build:
+      context: ./postgres-wal
+    user: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *walg-env
+      PGHOST: postgres
+      PGUSER: ${DB_USER:-registerwerk}
+      PGPASSWORD: ${DB_PASSWORD:-registerwerk}
+      PGDATABASE: registerwerk
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETAIN_FULL: ${BACKUP_RETAIN_FULL:-7}
+      BACKUP_PUSHGATEWAY_URL: ${BACKUP_PUSHGATEWAY_URL:-}
+    volumes:
+      # WAL-G reads the data files itself, so the job mounts the data volume (read-only) next to the archive.
+      - pg18data:/var/lib/postgresql:ro
+      - pgarchive:/wal-archive
+    entrypoint: ["/usr/local/bin/pg-backup.sh"]
+    command: ["loop"]
+    restart: unless-stopped
+
+volumes:
+  pgarchive:
