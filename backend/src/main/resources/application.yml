@@ -886,6 +886,9 @@ registerwerk:
     # contracts (lending markets, DvP escrow, desk, facility) are held in. Blank = lending markets
     # are not auto-registered; their collateral asset's sync then turns BLOCKED until an operator
     # registers the pool address manually (asset detail -> "Register pool address").
+    # Demo mode (registerwerk.seed-demo-data=true) needs no value: bootstrap.DemoNomineePoolSeeder
+    # creates the demo entity DEMO-NP-001 and the service falls back to it. A value set here always
+    # wins, and production (no demo seeder) keeps requiring it.
     nominee-pool-entity-id: ${SYNC_NOMINEE_POOL_ENTITY_ID:}
   audit:
     # Phase 6 / K4: capture + resubmission. legacy-listener drains event publications created before

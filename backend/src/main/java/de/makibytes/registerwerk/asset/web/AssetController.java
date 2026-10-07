@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.kyc.KycApi;
 import de.makibytes.registerwerk.kyc.api.KycComplianceService;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
 import de.makibytes.registerwerk.shared.web.DocumentStatusResponse;
@@ -95,15 +96,19 @@ public class AssetController {
      * is always scoped to their own entity's assets — {@code issuerId} is ignored (forced
      * to the caller's own entity) rather than trusted from the query string, otherwise any
      * authenticated customer could browse every other issuer's assets across the registry.
+     * {@code tokenStandard} (invalid value: 400) and {@code search} (name / ISIN / asset number,
+     * case-insensitive contains, at most 200 characters) narrow the result for every caller.
      */
     @GetMapping
     public ResponseEntity<PageResponse<AssetResponse>> listAssets(
             @RequestParam(required = false) UUID issuerId,
             @RequestParam(required = false) AssetStatus status,
+            @RequestParam(required = false) TokenStandard tokenStandard,
+            @RequestParam(required = false) String search,
             Authentication auth,
             Pageable pageable) {
         UUID effectiveIssuerId = SecurityUtils.isAdminOrAudit(auth) ? issuerId : SecurityUtils.extractEntityId(auth);
-        Page<Asset> page = assetService.listAssets(effectiveIssuerId, status, pageable);
+        Page<Asset> page = assetService.listAssets(effectiveIssuerId, status, tokenStandard, search, pageable);
         return ResponseEntity.ok(PageResponse.of(page.map(asset -> toResponse(asset, auth, false))));
     }
 

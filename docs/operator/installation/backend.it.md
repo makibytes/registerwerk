@@ -22,10 +22,10 @@ Le migrazioni vengono eseguite automaticamente all'avvio. Tutti i file di migraz
 backend/src/main/resources/db/migration/
 ```
 
-Versioni attuali dello schema:
-| Versione | Descrizione |
-|---|---|
-| V1 | Schema iniziale consolidato che copre soggetti giuridici, KYC, token di onboarding, risorse, distribuzioni, titolari, pista di controllo, configurazione della catena, trasferimenti di token, cursori di stato dell'indicizzatore, ONCHAINID e attestazioni, tabelle della suite ERC-3643 T-REX, catene Fhenix e Inco e tabelle correlate |
+Lo schema è un'unica baseline di installazione pulita, `V1__initial_schema.sql`, che copre ogni tabella, indice, trigger e funzione (incluso il log di audit con il relativo partizionamento e i privilegi esclusivamente DML del login di runtime `registerwerk_app`). Le modifiche successive vengono aggiunte come `V{n}__description.sql` e non vengono mai modificate dopo il rilascio.
+
+!!! note
+    I database creati da build di sviluppo precedenti alla nuova consolidazione della baseline hanno una cronologia Flyway incompatibile e non possono essere aggiornati sul posto; ricrearli.
 
 ## Salute e monitoraggio { #health-and-monitoring }
 

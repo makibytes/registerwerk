@@ -14,7 +14,7 @@
 # why turning it on without also wiring Kong's rate-limiting plugin would be a regression, not a
 # hardening step.
 #
-# What this file deliberately does NOT do: it does not turn `changeme`/`<placeholder>` values in
+# What this file deliberately does NOT do: it does not turn the sample credential values in
 # .env.example into real ones — those only apply to the Docker Compose path (CLAUDE.md: "Helm/
 # Kubernetes is the production reference"), and no real secret value belongs in a values file
 # committed to git regardless of path. Grafana/mail/DB/admin secrets for whichever path you

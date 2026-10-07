@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.customer.api.EntityMergeRecord;
 import de.makibytes.registerwerk.customer.api.EntityNameHistory;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
+import de.makibytes.registerwerk.customer.api.KycStatus;
 import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
@@ -74,16 +75,19 @@ public class CustomerController {
     }
 
     /**
-     * Returns a paginated list of entities, with optional type and status filters.
+     * Returns a paginated list of entities, with optional type, status, KYC-status and free-text
+     * search filters (legal name contains / entity number prefix; at most 200 characters).
      */
     @GetMapping
     @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT', 'SUPPORT_AGENT')")
     public ResponseEntity<PageResponse<EntityResponse>> listEntities(
             @RequestParam(required = false) EntityType type,
             @RequestParam(required = false) EntityStatus status,
+            @RequestParam(required = false) KycStatus kycStatus,
+            @RequestParam(required = false) String search,
             Authentication auth,
             Pageable pageable) {
-        Page<LegalEntity> page = legalEntityService.listEntities(type, status, pageable);
+        Page<LegalEntity> page = legalEntityService.listEntities(type, status, kycStatus, search, pageable);
         return ResponseEntity.ok(PageResponse.of(page.map(entity -> toResponse(entity, auth))));
     }
 

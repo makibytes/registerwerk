@@ -3,6 +3,8 @@ package de.makibytes.registerwerk.integration;
 import de.makibytes.registerwerk.auth.api.JwtMintingService;
 
 import de.makibytes.registerwerk.customer.api.EntityType;
+import de.makibytes.registerwerk.customer.api.KycStatus;
+import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.customer.web.dto.EntityCreateRequest;
 import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
 import de.makibytes.registerwerk.customer.web.dto.EntityUpdateRequest;
@@ -65,6 +67,9 @@ class LegalEntityApiIT {
 
     @Autowired
     private TestRestTemplate restTemplate;
+
+    @Autowired
+    private LegalEntityRepository legalEntityRepository;
 
     @LocalServerPort
     private int port;
@@ -179,6 +184,66 @@ class LegalEntityApiIT {
         assertThat(body).isNotNull();
         assertThat(body).containsKey("content");
         assertThat(body).containsKey("totalElements");
+    }
+
+    private Map<String, Object> list(String query) {
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+            url("/api/v1/entities?" + query),
+            HttpMethod.GET,
+            new HttpEntity<>(authHeaders()),
+            new ParameterizedTypeReference<>() {}
+        );
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return response.getBody();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static java.util.List<String> names(Map<String, Object> page) {
+        return ((java.util.List<Map<String, Object>>) page.get("content")).stream()
+            .map(e -> (String) e.get("currentName")).toList();
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/entities honours the kycStatus and search filters the operator portal sends")
+    void listEntities_filtersByKycStatusAndSearch() {
+        String tag = "Zq" + UUID.randomUUID().toString().substring(0, 8);
+        UUID pending = createEntity(tag + " Pending GmbH").getBody().id();
+        createEntity(tag + " Untouched AG");
+        var pendingEntity = legalEntityRepository.findById(pending).orElseThrow();
+        pendingEntity.setKycStatus(KycStatus.IN_PROGRESS);
+        legalEntityRepository.save(pendingEntity);
+
+        // kycStatus: only the IN_PROGRESS entity (the dashboard 'Pending KYC' tile reads totalElements)
+        Map<String, Object> inProgress = list("kycStatus=IN_PROGRESS&size=50");
+        assertThat(names(inProgress)).contains(tag + " Pending GmbH").doesNotContain(tag + " Untouched AG");
+        assertThat(((Number) inProgress.get("totalElements")).longValue()).isEqualTo(names(inProgress).size());
+        Map<String, Object> notStarted = list("kycStatus=NOT_STARTED&size=50");
+        assertThat(names(notStarted)).contains(tag + " Untouched AG").doesNotContain(tag + " Pending GmbH");
+
+        // search: case-insensitive contains on the legal name, combinable with the other filters
+        assertThat(names(list("search=" + tag.toLowerCase() + "&size=50")))
+            .containsExactlyInAnyOrder(tag + " Pending GmbH", tag + " Untouched AG");
+        assertThat(names(list("search=" + tag + " pend&kycStatus=IN_PROGRESS&size=50")))
+            .containsExactly(tag + " Pending GmbH");
+        assertThat(names(list("search=" + tag + " pend&kycStatus=NOT_STARTED&size=50"))).isEmpty();
+
+        // search: entity number (prefix, case-insensitive)
+        String number = legalEntityRepository.findById(pending).orElseThrow().getEntityNumber();
+        assertThat(names(list("search=" + number.toLowerCase() + "&size=50"))).contains(tag + " Pending GmbH");
+
+        // LIKE wildcards in the search term are literals, not patterns
+        assertThat(names(list("search=%25&size=50"))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/entities rejects an unknown kycStatus and an oversized search term with 400")
+    void listEntities_rejectsInvalidFilterValues() {
+        for (String query : new String[] {"kycStatus=NOPE", "search=" + "x".repeat(201)}) {
+            ResponseEntity<String> response = restTemplate.exchange(
+                url("/api/v1/entities?" + query), HttpMethod.GET,
+                new HttpEntity<>(authHeaders()), String.class);
+            assertThat(response.getStatusCode()).as(query).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
     }
 
     @Test

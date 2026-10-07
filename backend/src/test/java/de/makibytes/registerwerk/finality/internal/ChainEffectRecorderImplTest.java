@@ -95,7 +95,7 @@ class ChainEffectRecorderImplTest {
     }
 
     @Test
-    @DisplayName("a receipt-confirmed effect settles atomically even before the block stream catches up")
+    @DisplayName("a receipt-confirmed effect is recorded as final even before the block stream catches up")
     void recordFinalizedSettlesWithoutIndependentBlockObservation() {
         UUID insertedId = UUID.randomUUID();
         when(jdbcTemplate.queryForObject(any(String.class), eq(UUID.class), any(Object[].class)))

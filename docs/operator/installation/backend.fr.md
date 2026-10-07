@@ -22,10 +22,10 @@ Les migrations s'exécutent automatiquement au démarrage. Tous les fichiers de 
 backend/src/main/resources/db/migration/
 ```
 
-Versions actuelles du schéma :
-| Version | Description |
-|---|---|
-| V1 | Schéma initial consolidé couvrant les entités juridiques, KYC, les jetons d'intégration, les actifs, les déploiements, les détenteurs, le journal d'audit, la configuration de la chaîne, les transferts de jetons, les curseurs d'état de l'indexeur, ONCHAINID et les attestations, les tables de suite ERC-3643 T-REX, les chaînes Fhenix et Inco et les tables associées |
+Le schéma est une unique base de référence d'installation propre, `V1__initial_schema.sql`, couvrant chaque table, index, déclencheur et fonction (y compris le journal d'audit avec son partitionnement et les privilèges DML uniquement du login d'exécution `registerwerk_app`). Les modifications ultérieures sont ajoutées sous la forme `V{n}__description.sql` et ne sont jamais modifiées après publication.
+
+!!! note
+    Les bases de données créées à partir de builds de développement antérieurs à la nouvelle consolidation de la base de référence portent un historique Flyway incompatible et ne peuvent pas être mises à niveau sur place ; recréez-les.
 
 ## Santé et surveillance
 

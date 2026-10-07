@@ -9,6 +9,8 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import jakarta.persistence.criteria.Predicate;
 import org.hibernate.Hibernate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,9 +18,13 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -65,22 +71,54 @@ public class AssetService {
             .orElseThrow(() -> new EntityNotFoundException("Asset", id));
     }
 
+    /** Upper bound for the free-text {@code search} term of {@link #listAssets}. */
+    static final int MAX_SEARCH_LENGTH = 200;
+
+    /**
+     * Returns a filtered, paginated list of assets. Every filter is optional and they combine with
+     * AND; {@code search} (trimmed) matches the asset name, ISIN and asset number
+     * case-insensitively anywhere in the value, and LIKE wildcards in the term are literals.
+     *
+     * @throws IllegalArgumentException if {@code search} is longer than {@value #MAX_SEARCH_LENGTH}
+     *                                  characters (mapped to 400)
+     */
     @Transactional(readOnly = true)
-    public Page<Asset> listAssets(UUID issuerId, AssetStatus status, Pageable pageable) {
-        Page<Asset> assets;
-        if (issuerId != null && status != null) {
-            assets = assetRepository.findByIssuerIdAndStatus(issuerId, status, pageable);
-        } else if (issuerId != null) {
-            assets = assetRepository.findByIssuerId(issuerId, pageable);
-        } else if (status != null) {
-            assets = assetRepository.findByStatus(status, pageable);
-        } else {
-            assets = assetRepository.findAll(pageable);
+    public Page<Asset> listAssets(UUID issuerId, AssetStatus status, TokenStandard tokenStandard,
+                                  String search, Pageable pageable) {
+        String term = search == null ? "" : search.trim();
+        if (term.length() > MAX_SEARCH_LENGTH) {
+            throw new IllegalArgumentException("search must be at most " + MAX_SEARCH_LENGTH + " characters");
         }
+        Page<Asset> assets = assetRepository.findAll(assetFilter(issuerId, status, tokenStandard, term), pageable);
         // The web layer maps the returned entities after this transaction closes
         // (spring.jpa.open-in-view=false). Initialize every relationship that AssetResponse
         // needs here rather than letting a controller or JSON mapper trigger lazy I/O later.
         return assets.map(this::initializeTargetMarketCategories);
+    }
+
+    private static Specification<Asset> assetFilter(UUID issuerId, AssetStatus status,
+                                                    TokenStandard tokenStandard, String term) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (issuerId != null) {
+                predicates.add(cb.equal(root.get("issuerId"), issuerId));
+            }
+            if (status != null) {
+                predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (tokenStandard != null) {
+                predicates.add(cb.equal(root.get("tokenStandard"), tokenStandard));
+            }
+            if (!term.isEmpty()) {
+                String like = "%" + term.toLowerCase(Locale.ROOT)
+                        .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("name")), like, '\\'),
+                        cb.like(cb.lower(root.get("isin")), like, '\\'),
+                        cb.like(cb.lower(root.get("assetNumber")), like, '\\')));
+            }
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
     }
 
     private Asset initializeTargetMarketCategories(Asset asset) {

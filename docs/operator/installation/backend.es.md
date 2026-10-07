@@ -22,10 +22,10 @@ Las migraciones se ejecutan automáticamente al inicio. Todos los archivos de mi
 backend/src/main/resources/db/migration/
 ```
 
-Versiones de esquema actuales:
-| Versión | Descripción |
-|---|---|
-| V1 | Esquema inicial consolidado que cubre entidades jurídicas, KYC, tokens de incorporación, activos, implementaciones, titulares, registro de auditoría, configuración de cadena, transferencias de tokens, cursores de estado del indexador, ONCHAINID y atestaciones, tablas de la suite ERC-3643 T-REX, cadenas Fhenix e Inco, y tablas relacionadas |
+El esquema es una única línea base de instalación limpia, `V1__initial_schema.sql`, que cubre todas las tablas, índices, disparadores y funciones (incluido el registro de auditoría con su particionado y los privilegios exclusivamente DML del login de ejecución `registerwerk_app`). Los cambios posteriores se añaden como `V{n}__description.sql` y nunca se editan tras su publicación.
+
+!!! note
+    Las bases de datos creadas a partir de compilaciones de desarrollo anteriores a la nueva consolidación de la línea base tienen un historial de Flyway incompatible y no pueden actualizarse in situ; vuelva a crearlas.
 
 ## Salud y monitorización { #health-and-monitoring }
 

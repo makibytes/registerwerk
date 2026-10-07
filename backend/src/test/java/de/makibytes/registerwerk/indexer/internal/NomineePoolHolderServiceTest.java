@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 import de.makibytes.registerwerk.deployment.api.HolderKind;
+import de.makibytes.registerwerk.indexer.api.DemoNomineePoolEntity;
 import de.makibytes.registerwerk.indexer.events.NomineePoolHolderRegisteredEvent;
 import de.makibytes.registerwerk.lending.api.LendingMarket;
 import de.makibytes.registerwerk.lending.api.LendingMarketRepository;
@@ -41,9 +42,19 @@ class NomineePoolHolderServiceTest {
     private final UUID assetId = UUID.randomUUID();
     private final UUID operatorEntity = UUID.randomUUID();
 
+    private final DemoNomineePoolEntity demoEntity = new DemoNomineePoolEntity();
+
     private NomineePoolHolderService service(String configuredEntity) {
         return new NomineePoolHolderService(holderRepository, assetLookupPort, lendingMarketRepository, events,
-                configuredEntity);
+                demoEntity, configuredEntity);
+    }
+
+    private LendingMarket givenMarket(UUID marketId) {
+        LendingMarket market = new LendingMarket();
+        market.setMarketAddress("0xMarket");
+        market.setCollateralAssetId(assetId);
+        when(lendingMarketRepository.findById(marketId)).thenReturn(Optional.of(market));
+        return market;
     }
 
     private void givenAssetWithHolders(AssetHolder... holders) {
@@ -103,6 +114,44 @@ class NomineePoolHolderServiceTest {
         market.setMarketAddress("0xMarket");
         market.setCollateralAssetId(assetId);
         when(lendingMarketRepository.findById(marketId)).thenReturn(Optional.of(market));
+
+        assertThat(service("").registerLendingMarket(marketId, null, "SYSTEM")).isFalse();
+        verify(holderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("demo mode: the seeded demo nominee-pool entity is used when the property is blank, so the market is entered")
+    void lendingMarketUsesDemoEntityWhenPropertyBlank() {
+        UUID demo = UUID.randomUUID();
+        demoEntity.set(demo);
+        UUID marketId = UUID.randomUUID();
+        givenMarket(marketId);
+        givenAssetWithHolders();
+        when(holderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        NomineePoolHolderService service = service("");
+        assertThat(service.defaultNomineeEntityId()).contains(demo);
+        assertThat(service.registerLendingMarket(marketId, null, "SYSTEM")).isTrue();
+
+        ArgumentCaptor<AssetHolder> saved = ArgumentCaptor.forClass(AssetHolder.class);
+        verify(holderRepository).save(saved.capture());
+        assertThat(saved.getValue().getInvestorId()).isEqualTo(demo);
+        assertThat(saved.getValue().getHolderKind()).isEqualTo(HolderKind.NOMINEE_POOL);
+    }
+
+    @Test
+    @DisplayName("an explicitly configured entity wins over the demo entity")
+    void configuredEntityWinsOverDemoEntity() {
+        demoEntity.set(UUID.randomUUID());
+        assertThat(service(operatorEntity.toString()).defaultNomineeEntityId()).contains(operatorEntity);
+    }
+
+    @Test
+    @DisplayName("production behaviour unchanged: blank property and no demo entity -> no default entity, the market is not entered")
+    void noDefaultEntityWithoutPropertyOrDemoSeeder() {
+        assertThat(service("").defaultNomineeEntityId()).isEmpty();
+        UUID marketId = UUID.randomUUID();
+        givenMarket(marketId);
 
         assertThat(service("").registerLendingMarket(marketId, null, "SYSTEM")).isFalse();
         verify(holderRepository, never()).save(any());

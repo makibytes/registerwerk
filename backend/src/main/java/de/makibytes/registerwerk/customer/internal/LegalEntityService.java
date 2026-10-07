@@ -36,10 +36,12 @@ import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.customer.api.RiskTolerance;
 import de.makibytes.registerwerk.customer.api.SuitabilityAssessment;
 import de.makibytes.registerwerk.customer.api.SuitabilityAssessmentRepository;
+import jakarta.persistence.criteria.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -121,20 +123,49 @@ public class LegalEntityService {
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", id));
     }
 
+    /** Upper bound for the free-text {@code search} term of {@link #listEntities}. */
+    static final int MAX_SEARCH_LENGTH = 200;
+
     /**
-     * Returns a filtered, paginated list of entities.
-     * If both type and status are provided, filters on both; otherwise filters on whichever is non-null.
+     * Returns a filtered, paginated list of entities. Every filter is optional and they combine
+     * with AND; {@code search} (trimmed) matches the legal name case-insensitively anywhere and the
+     * entity number case-insensitively as a prefix. LIKE wildcards in the term are literals.
+     *
+     * @throws IllegalArgumentException if {@code search} is longer than {@value #MAX_SEARCH_LENGTH}
+     *                                  characters (mapped to 400)
      */
     @Transactional(readOnly = true)
-    public Page<LegalEntity> listEntities(EntityType type, EntityStatus status, Pageable pageable) {
-        if (type != null && status != null) {
-            return legalEntityRepository.findByTypeAndStatus(type, status, pageable);
-        } else if (type != null) {
-            return legalEntityRepository.findByType(type, pageable);
-        } else if (status != null) {
-            return legalEntityRepository.findByStatus(status, pageable);
+    public Page<LegalEntity> listEntities(EntityType type, EntityStatus status, KycStatus kycStatus,
+                                          String search, Pageable pageable) {
+        String term = search == null ? "" : search.trim();
+        if (term.length() > MAX_SEARCH_LENGTH) {
+            throw new IllegalArgumentException("search must be at most " + MAX_SEARCH_LENGTH + " characters");
         }
-        return legalEntityRepository.findAll(pageable);
+        return legalEntityRepository.findAll(entityFilter(type, status, kycStatus, term), pageable);
+    }
+
+    private static Specification<LegalEntity> entityFilter(EntityType type, EntityStatus status,
+                                                           KycStatus kycStatus, String term) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (type != null) {
+                predicates.add(cb.equal(root.get("type"), type));
+            }
+            if (status != null) {
+                predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (kycStatus != null) {
+                predicates.add(cb.equal(root.get("kycStatus"), kycStatus));
+            }
+            if (!term.isEmpty()) {
+                String escaped = term.toLowerCase(java.util.Locale.ROOT)
+                        .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("currentName")), "%" + escaped + "%", '\\'),
+                        cb.like(cb.lower(root.get("entityNumber")), escaped + "%", '\\')));
+            }
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
     }
 
     /** Master-data fields whose change is risk relevant: re-screen and (for APPROVED entities) re-KYC. */

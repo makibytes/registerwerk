@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
 import de.makibytes.registerwerk.deployment.api.EntryType;
 import de.makibytes.registerwerk.deployment.api.HolderKind;
+import de.makibytes.registerwerk.indexer.api.DemoNomineePoolEntity;
 import de.makibytes.registerwerk.indexer.events.NomineePoolHolderRegisteredEvent;
 import de.makibytes.registerwerk.lending.api.LendingMarket;
 import de.makibytes.registerwerk.lending.api.LendingMarketRepository;
@@ -48,23 +49,33 @@ public class NomineePoolHolderService {
     private final LendingMarketRepository lendingMarketRepository;
     private final ApplicationEventPublisher events;
     private final UUID defaultNomineeEntityId;
+    private final DemoNomineePoolEntity demoNomineePoolEntity;
 
     NomineePoolHolderService(AssetHolderRepository holderRepository,
                              AssetLookupPort assetLookupPort,
                              LendingMarketRepository lendingMarketRepository,
                              ApplicationEventPublisher events,
+                             DemoNomineePoolEntity demoNomineePoolEntity,
                              @Value("${registerwerk.sync.nominee-pool-entity-id:}") String defaultNomineeEntityId) {
         this.holderRepository = holderRepository;
         this.assetLookupPort = assetLookupPort;
         this.lendingMarketRepository = lendingMarketRepository;
         this.events = events;
+        this.demoNomineePoolEntity = demoNomineePoolEntity;
         this.defaultNomineeEntityId = defaultNomineeEntityId == null || defaultNomineeEntityId.isBlank()
                 ? null : UUID.fromString(defaultNomineeEntityId.trim());
     }
 
-    /** The configured operator legal entity pool rows are held in, if any. */
+    /**
+     * The legal entity pool rows are held in, if any: the configured operator entity, else — only
+     * when the demo seeder created one ({@link DemoNomineePoolEntity}, never in production) — the
+     * demo nominee-pool entity.
+     */
     public Optional<UUID> defaultNomineeEntityId() {
-        return Optional.ofNullable(defaultNomineeEntityId);
+        if (defaultNomineeEntityId != null) {
+            return Optional.of(defaultNomineeEntityId);
+        }
+        return demoNomineePoolEntity.get();
     }
 
     /**
@@ -84,7 +95,7 @@ public class NomineePoolHolderService {
             throw new IllegalArgumentException("poolKind must be one of " + POOL_KINDS);
         }
         assetLookupPort.findById(assetId).orElseThrow(() -> new EntityNotFoundException("Asset", assetId));
-        UUID holderEntity = investorId != null ? investorId : defaultNomineeEntityId;
+        UUID holderEntity = investorId != null ? investorId : defaultNomineeEntityId().orElse(null);
         if (holderEntity == null) {
             throw new IllegalArgumentException("No legal entity for the nominee-pool row: pass investorId or "
                     + "configure registerwerk.sync.nominee-pool-entity-id (the operator's legal entity)");
@@ -134,7 +145,7 @@ public class NomineePoolHolderService {
     public boolean registerLendingMarket(UUID marketId, UUID actorId, String actorRole) {
         LendingMarket market = lendingMarketRepository.findById(marketId)
                 .orElseThrow(() -> new EntityNotFoundException("LendingMarket", marketId));
-        if (defaultNomineeEntityId == null) {
+        if (defaultNomineeEntityId().isEmpty()) {
             log.error("Lending market {} ({}) was not entered as a nominee-pool holder of asset {}: "
                             + "registerwerk.sync.nominee-pool-entity-id is not configured. Holder sync for the "
                             + "asset will be BLOCKED once collateral is pledged — register the pool address manually.",
