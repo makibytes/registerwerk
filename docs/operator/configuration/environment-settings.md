@@ -58,6 +58,9 @@ After a Foundry deployment, each contract address is configured per chain throug
 | `REGISTERWERK_WALLET_DIR` | `/data/wallets` | Keystore directory (`FILESYSTEM` only) | Persistent volume |
 | `REGISTERWERK_WALLET_RETENTION_DAYS` | `90` | Soft-deleted wallets keep their encrypted key material this long before it is destroyed | Review |
 | `REGISTERWERK_WALLET_KMS_KEY_ID` | blank | The KEK key (not the signer) when `REGISTERWERK_WALLET_KEK_PROVIDER` is `GCP_KMS`, `AWS_KMS` or `AZURE_KEY_VAULT` | Required with a KEK provider |
+| `KEK_REWRAP_ENABLED` | `true` | Nightly re-wrap of every envelope-encrypted secret (wallet keys, TOTP, webhook, Travel Rule) onto the active KEK version after a rotation; see [KEK rotation](../security/kek-rotation.md) | Leave on; `false` means re-wrapping by hand via `POST /api/v1/admin/kek/rewrap` |
+| `KEK_REWRAP_CRON` | `0 30 3 * * *` | Schedule of that job (Spring cron, one node via ShedLock) | |
+| `KEK_REWRAP_BATCH_SIZE` | `100` | Rows read per page; each row is its own transaction | |
 | `REGISTERWERK_WALLET_KMS_PROVIDER`, `_KEY_VERSION`, `_TIMEOUT`, `_MAX_ATTEMPTS`, `_RETRY_BACKOFF`, `_HEALTH_CHECK_TIMEOUT` | `gcp`, blank, `5s`, `3`, `200ms`, `10s` | Cloud-KMS signer, see [Cloud-KMS signer setup](../security/kms-signer.md) | Refused if malformed or unreachable while `REGISTERWERK_WALLET_SIGNER=kms` |
 
 ## Sign-in and access

@@ -37,6 +37,10 @@ public class WalletProperties {
     private static final Logger log = LoggerFactory.getLogger(WalletProperties.class);
 
     private String masterKey;
+    /** Label of the key version {@link #masterKey} represents (dev/test env-var KEK ring). */
+    private String masterKeyVersion = "v1";
+    /** Retired-but-still-readable master keys by version label ({@code registerwerk.wallet.previous-master-keys.v1=...}). */
+    private java.util.Map<String, String> previousMasterKeys = new java.util.LinkedHashMap<>();
     private String storageDir = "/data/wallets";
     private String storageBackend = "FILESYSTEM";
 
@@ -90,6 +94,13 @@ public class WalletProperties {
         } else {
             log.info("Wallet storage: backend={}, master-key=<set, {} chars>", storageBackend, masterKey.length());
         }
+    }
+
+    public String getMasterKeyVersion() { return masterKeyVersion; }
+    public void setMasterKeyVersion(String v) { this.masterKeyVersion = (v == null || v.isBlank()) ? "v1" : v.trim(); }
+    public java.util.Map<String, String> getPreviousMasterKeys() { return previousMasterKeys; }
+    public void setPreviousMasterKeys(java.util.Map<String, String> m) {
+        this.previousMasterKeys = m == null ? new java.util.LinkedHashMap<>() : new java.util.LinkedHashMap<>(m);
     }
 
     public String getMasterKey() { return masterKey; }

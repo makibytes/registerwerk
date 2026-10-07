@@ -5,7 +5,7 @@
     in `backend/src/main/java`. Do not edit it by hand; a CI check (`--check`) fails when it is stale.
     English only. See [Step-up authentication and four-eyes](step-up-mfa.md) for how the controls work.
 
-168 annotated routes, 133 distinct reasons, plus 9 reasons enforced inside services through `DualControlGate`.
+170 annotated routes, 135 distinct reasons, plus 9 reasons enforced inside services through `DualControlGate`.
 
 Columns:
 
@@ -282,6 +282,8 @@ Columns:
 | Endpoint | Reason | Max age | Second approver | Body bound | Roles | Handler |
 |---|---|---|---|---|---|---|
 | `DELETE /api/v1/admin/wallets/{id}` | `WALLET_DELETE` | 10 | yes | yes | REGISTRY_ADMIN | `WalletController.delete` |
+| `POST /api/v1/admin/kek/rewrap` | `KEK_REWRAP` | 10 | yes | yes | REGISTRY_ADMIN | `KekController.rewrap` |
+| `POST /api/v1/admin/kek/versions/{version}/retire` | `KEK_VERSION_RETIRE` | 10 | yes | yes | REGISTRY_ADMIN | `KekController.retire` |
 | `POST /api/v1/admin/wallets/{id}/export-keystore` | `WALLET_KEYSTORE_EXPORT` | 10 | yes | no (method, path, query only) | REGISTRY_ADMIN | `WalletController.exportKeystore` |
 | `POST /api/v1/admin/wallets/{id}/restore` | `WALLET_RESTORE` | 10 | yes | yes | REGISTRY_ADMIN | `WalletController.restore` |
 | `POST /api/v1/admin/wallets/{id}/rotate-kek` | `WALLET_KEK_ROTATION` | 10 | no | n/a | REGISTRY_ADMIN | `WalletController.rotateKek` |

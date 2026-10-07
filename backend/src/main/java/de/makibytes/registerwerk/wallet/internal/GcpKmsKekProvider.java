@@ -33,6 +33,23 @@ class GcpKmsKekProvider implements KekProvider {
     @Override
     public String name() { return "GCP_KMS"; }
 
+    /** Cloud KMS reports only whether the primary version decrypted a ciphertext: "primary" or "previous". */
+    @Override
+    public java.util.Optional<String> activeVersion() { return java.util.Optional.of("primary"); }
+
+    @Override
+    public java.util.Set<String> configuredVersions() { return java.util.Set.of("primary", "previous"); }
+
+    @Override
+    public java.util.Optional<String> versionOf(byte[] wrappedDek) {
+        try (KeyManagementServiceClient client = KeyManagementServiceClient.create()) {
+            boolean primary = client.decrypt(resourceName, ByteString.copyFrom(wrappedDek)).getUsedPrimary();
+            return java.util.Optional.of(primary ? "primary" : "previous");
+        } catch (IOException e) {
+            throw new UncheckedIOException("GCP KMS version lookup failed for key " + resourceName, e);
+        }
+    }
+
     @Override
     public byte[] wrap(byte[] plaintextDek) {
         try (KeyManagementServiceClient client = KeyManagementServiceClient.create()) {

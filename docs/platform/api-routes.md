@@ -6,7 +6,7 @@
     English only. It lists every mapped REST route with the role expression of its `@PreAuthorize` and whether it demands step-up (**S**) or step-up plus a second approver (**S+4**; the reason is in the [step-up matrix](../compliance/step-up-matrix.md)).
     A route without a role expression is only protected by authentication (or is public, under `/api/v1/public/**`).
 
-607 routes in 106 controllers. For request and response schemas use the OpenAPI document (`SWAGGER_ENABLED=true`, see [REST API overview](api.md)).
+610 routes in 107 controllers. For request and response schemas use the OpenAPI document (`SWAGGER_ENABLED=true`, see [REST API overview](api.md)).
 
 
 ## accessreview
@@ -1173,6 +1173,14 @@
 | POST | `/api/v1/compliance/travel-rule/wallet-proofs/challenges` | REGISTRY_ADMIN, COMPLIANCE_OFFICER |  |
 
 ## wallet
+
+### KekController
+
+| Method | Path | Roles | Step-up |
+|---|---|---|---|
+| POST | `/api/v1/admin/kek/rewrap` | REGISTRY_ADMIN | S+4 |
+| GET | `/api/v1/admin/kek/status` | REGISTRY_ADMIN |  |
+| POST | `/api/v1/admin/kek/versions/{version}/retire` | REGISTRY_ADMIN | S+4 |
 
 ### WalletController
 

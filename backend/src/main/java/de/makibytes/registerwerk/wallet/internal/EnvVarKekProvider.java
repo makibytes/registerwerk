@@ -29,6 +29,9 @@ class EnvVarKekProvider implements KekProvider {
     private static final int GCM_TAG_LEN = 128;
 
     private final byte[] rawKey;
+    private final String activeVersion;
+    /** Retired master keys that may still unwrap old data keys, by version label (insertion order). */
+    private final java.util.Map<String, byte[]> previousKeys = new java.util.concurrent.ConcurrentHashMap<>();
 
     EnvVarKekProvider(WalletProperties props) {
         String masterKey = props.getMasterKey();
@@ -44,7 +47,45 @@ class EnvVarKekProvider implements KekProvider {
                 throw new IllegalStateException("SHA-256 unavailable", e);
             }
         }
+        this.activeVersion = props.getMasterKeyVersion();
+        props.getPreviousMasterKeys().forEach((label, key) -> previousKeys.put(label, derive(key)));
         log.warn("Using EnvVarKekProvider — suitable only for dev/test. Set a KMS provider for production.");
+    }
+
+    private static byte[] derive(String masterKey) {
+        try {
+            return Arrays.copyOf(MessageDigest.getInstance("SHA-256")
+                    .digest(masterKey.getBytes(StandardCharsets.UTF_8)), 32);
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    @Override
+    public java.util.Optional<String> activeVersion() {
+        return java.util.Optional.of(activeVersion);
+    }
+
+    @Override
+    public java.util.Set<String> configuredVersions() {
+        java.util.Set<String> all = new java.util.LinkedHashSet<>();
+        all.add(activeVersion);
+        all.addAll(new java.util.TreeSet<>(previousKeys.keySet()));
+        return all;
+    }
+
+    @Override
+    public java.util.Optional<String> versionOf(byte[] wrappedDek) {
+        if (open(rawKey, wrappedDek) != null) {
+            return java.util.Optional.of(activeVersion);
+        }
+        return previousKeys.entrySet().stream().filter(e -> open(e.getValue(), wrappedDek) != null)
+                .map(java.util.Map.Entry::getKey).findFirst();
+    }
+
+    @Override
+    public boolean disableVersion(String version) {
+        return !version.equals(activeVersion) && previousKeys.remove(version) != null;
     }
 
     @Override
@@ -68,6 +109,21 @@ class EnvVarKekProvider implements KekProvider {
 
     @Override
     public byte[] unwrap(byte[] wrappedDek) {
+        byte[] dek = open(rawKey, wrappedDek);
+        for (byte[] key : previousKeys.values()) {
+            if (dek != null) {
+                break;
+            }
+            dek = open(key, wrappedDek);
+        }
+        if (dek == null) {
+            throw new IllegalStateException("KEK unwrap failed");
+        }
+        return dek;
+    }
+
+    /** The data key, or null when {@code key} did not wrap this value. */
+    private static byte[] open(byte[] key, byte[] wrappedDek) {
         try {
             ByteBuffer buf = ByteBuffer.wrap(wrappedDek);
             byte[] iv = new byte[GCM_IV_LEN];
@@ -75,10 +131,10 @@ class EnvVarKekProvider implements KekProvider {
             byte[] ciphertext = new byte[buf.remaining()];
             buf.get(ciphertext);
             Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
-            c.init(Cipher.DECRYPT_MODE, new SecretKeySpec(rawKey, "AES"), new GCMParameterSpec(GCM_TAG_LEN, iv));
+            c.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"), new GCMParameterSpec(GCM_TAG_LEN, iv));
             return c.doFinal(ciphertext);
         } catch (Exception e) {
-            throw new IllegalStateException("KEK unwrap failed", e);
+            return null;
         }
     }
 }

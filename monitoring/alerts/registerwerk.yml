@@ -960,3 +960,25 @@ groups:
         annotations:
           summary: "trusted-proxies is the built-in default"
           description: "registerwerk.auth.trusted-proxies still covers all private ranges; set REGISTERWERK_AUTH_TRUSTED_PROXIES to your proxy network."
+
+      - alert: KekSecretsOnOldVersion
+        expr: |
+          registerwerk_kek_secrets_on_old_version{job="registerwerk-backend"} > 0
+        for: 36h
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Secrets still wrapped by an old KEK version"
+          description: "{{ $value }} {{ $labels.type }} secret(s) are not on the active KEK version for 36 hours, so the nightly re-wrap did not clear them (job disabled, failing, or an in-flight secure link). The old KEK version must not be disabled yet. POST /api/v1/admin/kek/rewrap, then GET /api/v1/admin/kek/status."
+
+      - alert: KekRewrapFailures
+        expr: |
+          increase(registerwerk_kek_rewrap_failures_total{job="registerwerk-backend"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "A KEK re-wrap could not process some secrets"
+          description: "{{ $value }} {{ $labels.type }} secret(s) failed to re-wrap in the last hour (provider permissions, unreachable KMS, or a ciphertext no configured KEK version can open). No secret material is logged; see the row ids in the application log."

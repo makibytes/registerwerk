@@ -25,8 +25,10 @@ class AzureKeyVaultKekProvider implements KekProvider {
     private static final KeyWrapAlgorithm ALGORITHM = KeyWrapAlgorithm.RSA_OAEP_256;
 
     private final CryptographyClient crypto;
+    private final String keyId;
 
     AzureKeyVaultKekProvider(@Value("${registerwerk.wallet.kms.key-id}") String keyId) {
+        this.keyId = keyId;
         this.crypto = new CryptographyClientBuilder()
                 .keyIdentifier(keyId)
                 .credential(new DefaultAzureCredentialBuilder().build())
@@ -36,6 +38,13 @@ class AzureKeyVaultKekProvider implements KekProvider {
 
     @Override
     public String name() { return "AZURE_KEY_VAULT"; }
+
+    /** The configured key id pins one version; only that version can unwrap, so every readable DEK is on it. */
+    @Override
+    public java.util.Optional<String> activeVersion() { return java.util.Optional.of(keyId); }
+
+    @Override
+    public java.util.Optional<String> versionOf(byte[] wrappedDek) { return java.util.Optional.of(keyId); }
 
     @Override
     public byte[] wrap(byte[] plaintextDek) {

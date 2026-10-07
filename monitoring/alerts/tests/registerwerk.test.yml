@@ -330,3 +330,35 @@ tests:
             exp_annotations:
               summary: "A scheduled job has failed more than 3 times in the last hour"
               description: "job=holderSync outcome=failure — see application logs for the exception; ShedLock ensures this reflects only actual executions on the leader replica, not skipped ticks."
+
+  # KEK: secrets that stay on an old version for 36h raise a warning; one that is cleared does not.
+  - interval: 1m
+    input_series:
+      - series: 'registerwerk_kek_secrets_on_old_version{job="registerwerk-backend", type="TOTP_SECRET", instance="a"}'
+        values: "2x2399"
+      - series: 'registerwerk_kek_secrets_on_old_version{job="registerwerk-backend", type="WEBHOOK_SECRET", instance="a"}'
+        values: "2x239 0x2160"
+    alert_rule_test:
+      - eval_time: 10h
+        alertname: KekSecretsOnOldVersion
+        exp_alerts: []
+      - eval_time: 39h
+        alertname: KekSecretsOnOldVersion
+        exp_alerts:
+          - exp_labels: {severity: warning, dora_category: DATA_INTEGRITY, job: registerwerk-backend, type: TOTP_SECRET, instance: a}
+            exp_annotations:
+              summary: "Secrets still wrapped by an old KEK version"
+              description: "2 TOTP_SECRET secret(s) are not on the active KEK version for 36 hours, so the nightly re-wrap did not clear them (job disabled, failing, or an in-flight secure link). The old KEK version must not be disabled yet. POST /api/v1/admin/kek/rewrap, then GET /api/v1/admin/kek/status."
+
+  - interval: 1m
+    input_series:
+      - series: 'registerwerk_kek_rewrap_failures_total{job="registerwerk-backend", type="WEBHOOK_SECRET", instance="a"}'
+        values: "0 0 0 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: KekRewrapFailures
+        exp_alerts:
+          - exp_labels: {severity: warning, dora_category: DATA_INTEGRITY, job: registerwerk-backend, type: WEBHOOK_SECRET, instance: a}
+            exp_annotations:
+              summary: "A KEK re-wrap could not process some secrets"
+              description: "1 WEBHOOK_SECRET secret(s) failed to re-wrap in the last hour (provider permissions, unreachable KMS, or a ciphertext no configured KEK version can open). No secret material is logged; see the row ids in the application log."

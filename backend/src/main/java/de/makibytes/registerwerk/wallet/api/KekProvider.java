@@ -31,4 +31,18 @@ public interface KekProvider extends de.makibytes.registerwerk.shared.EnvelopeCi
     default byte[] rewrap(byte[] wrappedDek) {
         return wrap(unwrap(wrappedDek));
     }
+
+    /** Key-version labels this provider currently knows (active first); empty when it exposes no versions. */
+    default java.util.Set<String> configuredVersions() {
+        return activeVersion().map(java.util.Set::of).orElse(java.util.Set.of());
+    }
+
+    /**
+     * Stops using {@code version} for unwrapping, in this process, once the KEK-retire guard has verified that
+     * nothing references it. Providers whose versions are managed in the cloud console return false: the operator
+     * then disables the version there.
+     */
+    default boolean disableVersion(String version) {
+        return false;
+    }
 }

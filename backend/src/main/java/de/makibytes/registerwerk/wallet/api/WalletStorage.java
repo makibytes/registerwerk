@@ -382,6 +382,27 @@ public class WalletStorage {
         }
     }
 
+    /**
+     * The wrapped (still KEK-encrypted) data key of a keystore, for version attribution only; empty for legacy
+     * keystores that predate envelope encryption. Never returns plaintext key material.
+     */
+    public java.util.Optional<byte[]> wrappedDekOf(String relativePath, boolean isEvm) {
+        try {
+            if (isEvm) {
+                String dekPath = relativePath.replace(".json", ".dek.bin");
+                return blobStore.exists(dekPath) ? java.util.Optional.of(blobStore.read(dekPath)) : java.util.Optional.empty();
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, String> envelope = MAPPER.readValue(
+                    new String(blobStore.read(relativePath), StandardCharsets.UTF_8), Map.class);
+            return "2".equals(envelope.get("version"))
+                    ? java.util.Optional.of(HexFormat.of().parseHex(envelope.get("wrappedDek")))
+                    : java.util.Optional.empty();
+        } catch (Exception e) {
+            throw new WalletStorageException("Failed to read wrapped DEK of keystore at " + relativePath, e);
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**

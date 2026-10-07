@@ -37,6 +37,13 @@ class AwsKmsKekProvider implements KekProvider {
     @Override
     public String name() { return "AWS_KMS"; }
 
+    /** Decrypt names the configured key id, so every decryptable DEK is on the pinned key. */
+    @Override
+    public java.util.Optional<String> activeVersion() { return java.util.Optional.of(keyId); }
+
+    @Override
+    public java.util.Optional<String> versionOf(byte[] wrappedDek) { return java.util.Optional.of(keyId); }
+
     @Override
     public byte[] wrap(byte[] plaintextDek) {
         var response = kms.encrypt(EncryptRequest.builder()

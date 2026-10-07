@@ -340,6 +340,14 @@ registerwerk:
       testnet:
         rpc-url: ${OPTIMISM_SEPOLIA_RPC:https://sepolia.optimism.io}
         chain-id: 11155420
+  # KEK lifecycle: re-wrap of every envelope-encrypted secret (wallet keys, TOTP, webhook, Travel Rule peer keys)
+  # onto the active KEK version after a rotation, so that old versions can be retired (docs: operator/security/kek-rotation).
+  kek:
+    rewrap:
+      enabled: ${KEK_REWRAP_ENABLED:true}
+      cron: ${KEK_REWRAP_CRON:0 30 3 * * *}
+      batch-size: ${KEK_REWRAP_BATCH_SIZE:100}
+
   wallet:
     master-key: ${REGISTERWERK_WALLET_MASTER_KEY:}
     storage-dir: ${REGISTERWERK_WALLET_DIR:/data/wallets}
