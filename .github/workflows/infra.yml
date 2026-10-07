@@ -145,6 +145,7 @@ jobs:
           # Required values must fail when missing.
           if helm template test . -f values.yaml 2>/dev/null; then echo 'defaults must not render'; exit 1; fi
           if helm template test . -f values.yaml -f ci/test-values.yaml --set kong.adminAllowCidrs=null 2>/dev/null; then echo 'adminAllowCidrs must be required'; exit 1; fi
+          if helm template test . -f values.yaml -f ci/test-values.yaml --set env.REGISTERWERK_AUTH_TRUSTED_PROXIES= 2>/dev/null; then echo 'trusted proxies must be required (no private-range default)'; exit 1; fi
           if helm template test . -f values.yaml -f ci/test-values.yaml --set kong.enabled=false 2>/dev/null; then echo 'ingress without Kong must need backendService'; exit 1; fi
           # Generic hooks render.
           helm template test . -f values.yaml -f ci/test-values.yaml \

@@ -35,6 +35,13 @@ public class JwtMintingService {
     /** {@code use} of a login / impersonation session token. */
     public static final String USE_SESSION = "session";
     /**
+     * {@code use} of the restricted token a login returns while {@code app_user.must_change_password} is set: it
+     * carries no roles and the session guard lets it reach {@code POST /api/v1/auth/change-password} only.
+     */
+    public static final String USE_PASSWORD_CHANGE = "password_change";
+    /** Lifetime of a {@link #USE_PASSWORD_CHANGE} token (seconds); capped by the normal session TTL. */
+    public static final long PASSWORD_CHANGE_TTL_SECONDS = 900;
+    /**
      * {@code use} of a dual-control approver token (the second approver's single-use approval of one
      * concrete request). Such a token is only ever valid in the {@code X-Dual-Control-Token} header: it is
      * minted for the approver, so presented as the caller's own Bearer it would run the request <em>as</em>
@@ -138,6 +145,17 @@ public class JwtMintingService {
         claims.put("jti", newJti());
         claims.put(CLAIM_USE, USE_SESSION);
         return mintLocal(user.getId().toString(), tokenTtlSeconds, claims);
+    }
+
+    /** Mints the restricted, role-less token a login hands out while the account must change its password first. */
+    public String mintPasswordChange(AppUser user) {
+        Map<String, Object> claims = new LinkedHashMap<>();
+        claims.put("roles", List.of());
+        claims.put("email", user.getEmail());
+        claims.put("name", user.getFullName());
+        claims.put("jti", newJti());
+        claims.put(CLAIM_USE, USE_PASSWORD_CHANGE);
+        return mintLocal(user.getId().toString(), Math.min(tokenTtlSeconds, PASSWORD_CHANGE_TTL_SECONDS), claims);
     }
 
     /**

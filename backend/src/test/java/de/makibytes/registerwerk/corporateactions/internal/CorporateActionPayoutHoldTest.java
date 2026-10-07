@@ -23,8 +23,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -49,7 +47,6 @@ import static org.mockito.Mockito.when;
  * issuer's non-payment (coupon OVERDUE / MISSED).
  */
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("Corporate-action payout: per-holder eligibility, system holds (H6)")
 class CorporateActionPayoutHoldTest {
 
@@ -77,12 +74,12 @@ class CorporateActionPayoutHoldTest {
                 couponPaymentRepository, proposalValidator, events, partyGate, entityTasks, finalityGate, freshnessGate,
                 bondTermsRepository, CorporateActionTestSupport.systemRegisterClock(),
                 CorporateActionTestSupport.directTransactions());
-        when(repository.save(any(CorporateAction.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(freshnessGate.blockedReason(any(), any())).thenReturn(Optional.empty());
-        when(finalityGate.check(any(), any(), any(), any())).thenReturn(new FinalityDecision.Allowed(FinalityLevel.FINALIZED));
-        when(repository.findReadyToCompute(any())).thenReturn(List.of());
-        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
-        when(repository.findOverdueCoupons(any())).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(repository.save(any(CorporateAction.class))).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.lenient().when(freshnessGate.blockedReason(any(), any())).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient().when(finalityGate.check(any(), any(), any(), any())).thenReturn(new FinalityDecision.Allowed(FinalityLevel.FINALIZED));
+        org.mockito.Mockito.lenient().when(repository.findReadyToCompute(any())).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(repository.findOverdueCoupons(any())).thenReturn(List.of());
     }
 
     private CorporateAction dueAction(CorporateAction.Status status) {
@@ -257,7 +254,7 @@ class CorporateActionPayoutHoldTest {
         AssetCouponPayment payment = new AssetCouponPayment();
         payment.setCouponStatus(CouponStatus.SCHEDULED);
         payment.setAssetId(assetId);
-        when(couponPaymentRepository.findById(ca.getCouponPaymentId())).thenReturn(Optional.of(payment));
+        org.mockito.Mockito.lenient().when(couponPaymentRepository.findById(ca.getCouponPaymentId())).thenReturn(Optional.of(payment));
         return ca;
     }
 

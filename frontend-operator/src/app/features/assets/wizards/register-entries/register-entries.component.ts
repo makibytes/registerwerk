@@ -13,7 +13,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import {
-  HolderChangeRequest, INSTRUCTING_PARTIES, InstructingParty, RegisterEntry, RegisterEntryService,
+  AttributeChangeBody, HolderChangeRequest, INSTRUCTING_PARTIES, InstructingParty, RegisterEntry, RegisterEntryService,
 } from '../../../../core/api/register-entry.service';
 import { StepUpDialogComponent, StepUpDialogResult } from '../../../../shared/components/step-up/step-up-dialog.component';
 import { DualControlTokens } from '../../../../core/api/dual-control-headers';
@@ -211,9 +211,9 @@ import { DualControlTokens } from '../../../../core/api/dual-control-headers';
     .re-row.entries { grid-template-columns: 2fr 2fr 1fr 1.4fr 70px; }
     .row-actions { display: flex; justify-content: flex-end; gap: 4px; align-items: center; }
     .status { font-size: .6875rem; font-weight: 700; }
-    .status.requested { color: #f59e0b; }
-    .status.executed { color: #4ade80; }
-    .status.rejected { color: #f87171; }
+    .status.requested { color: var(--rw-text-warning); }
+    .status.executed { color: var(--rw-text-success); }
+    .status.rejected { color: var(--rw-text-danger); }
     .flag { font-size: 16px; height: 16px; width: 16px; vertical-align: middle; margin-left: 4px; }
     .dlg { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; min-width: 420px; }
   `],
@@ -321,19 +321,23 @@ export class RegisterEntriesComponent implements OnInit {
     const entry = this.editing;
     if (!entry || !this.editValid()) return;
     this.dialog.closeAll();
+    // One body feeds both the approval target and the request, so the approver binds exactly what is sent.
+    const body: AttributeChangeBody = {
+      thirdPartyRights: this.edit.thirdPartyRights.trim() || undefined,
+      disposalRestrictions: this.edit.disposalRestrictions.trim() || undefined,
+      legalCapacityNote: this.edit.legalCapacityNote.trim() || undefined,
+      clearThirdPartyRights: this.edit.clearThirdPartyRights,
+      clearDisposalRestrictions: this.edit.clearDisposalRestrictions,
+      instructingParty: this.instruction.party as InstructingParty,
+      instructionReference: this.instruction.reference.trim(),
+    };
     this.withStepUp(true, 'REGISTER_ENTRY_RIGHTS_CHANGE', `Change §17(2) attributes of entry ${entry.holderReference ?? entry.id}`, (result) =>
-      this.service.updateAttributes(this.assetId, entry.id, {
-        thirdPartyRights: this.edit.thirdPartyRights.trim() || undefined,
-        disposalRestrictions: this.edit.disposalRestrictions.trim() || undefined,
-        legalCapacityNote: this.edit.legalCapacityNote.trim() || undefined,
-        clearThirdPartyRights: this.edit.clearThirdPartyRights,
-        clearDisposalRestrictions: this.edit.clearDisposalRestrictions,
-        instructingParty: this.instruction.party as InstructingParty,
-        instructionReference: this.instruction.reference.trim(),
-      }, { stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken! }).subscribe({
+      this.service.updateAttributes(this.assetId, entry.id, body,
+        { stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken! }).subscribe({
         next: () => { this.snackBar.open('Attributes changed. Instruction and before/after recorded.', 'Dismiss', { duration: 5000 }); this.load(); },
         error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to change the entry.', 'Dismiss', { duration: 8000 }),
-      }));
+      }),
+      { target: `PATCH /api/v1/assets/${this.assetId}/holders/${entry.id}/single-entry-attributes`, targetBody: body });
   }
 
   execute(request: HolderChangeRequest): void {
@@ -344,7 +348,8 @@ export class RegisterEntriesComponent implements OnInit {
           next: () => { this.snackBar.open('Request executed.', 'Dismiss', { duration: 5000 }); this.load(); },
           error: (err) => this.snackBar.open(err?.error?.message ?? 'Failed to execute the request.', 'Dismiss', { duration: 8000 }),
         });
-      });
+      },
+      { target: `POST /api/v1/assets/${this.assetId}/holders/change-requests/${request.id}/execute`, targetBody: {} });
   }
 
   openReject(request: HolderChangeRequest): void {
@@ -363,9 +368,16 @@ export class RegisterEntriesComponent implements OnInit {
     });
   }
 
-  private withStepUp(dual: boolean, action: string, reason: string, run: (result: StepUpDialogResult) => void): void {
+  /**
+   * `approval` is the exact request that follows (method, path and the body it sends): required whenever `dual`,
+   * because the approver token is bound to it.
+   */
+  private withStepUp(
+    dual: boolean, action: string, reason: string, run: (result: StepUpDialogResult) => void,
+    approval?: { target: string; targetBody?: unknown },
+  ): void {
     this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: dual, reason, action },
+      data: { requireDualControl: dual, reason, action, ...approval },
       width: '500px',
       disableClose: true,
     }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {

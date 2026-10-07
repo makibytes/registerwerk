@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.corporateactions.web;
 
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.corporateactions.internal.SteuerbescheinigungService;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.springframework.http.ContentDisposition;
@@ -23,8 +24,10 @@ import java.util.UUID;
 public class SteuerbescheinigungController {
 
     private final SteuerbescheinigungService service;
+    private final RegisterClock registerClock;
 
-    SteuerbescheinigungController(SteuerbescheinigungService service) {
+    SteuerbescheinigungController(SteuerbescheinigungService service, RegisterClock registerClock) {
+        this.registerClock = registerClock;
         this.service = service;
     }
 
@@ -44,7 +47,7 @@ public class SteuerbescheinigungController {
     }
 
     private ResponseEntity<byte[]> buildPdfResponse(UUID entityId, int year) {
-        int currentYear = LocalDate.now().getYear();
+        int currentYear = registerClock.today().getYear();
         if (year < 2020 || year > currentYear) {
             return ResponseEntity.badRequest().build();
         }

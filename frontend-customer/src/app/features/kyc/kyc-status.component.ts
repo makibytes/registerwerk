@@ -15,6 +15,7 @@ import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { KycService } from '../../core/api/kyc.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { downloadBlob } from '../../core/utils/download.util';
+import { kycRejectionText, toKycRejectionCategory } from '@registerwerk/ui';
 import {
   KycDocument,
   KycComplianceResponse,
@@ -85,10 +86,14 @@ const ALL_DOC_TYPES = [
                         <mat-icon class="ci err">cancel</mat-icon>
                         <span class="decision-label">KYC rejected for {{ jur.label }}</span>
                       </div>
-                      @if (approval.rejectionReason) {
-                        <p class="decision-reason">{{ approval.rejectionReason }}</p>
+                      @if (rejectionText(approval.rejectionReason); as reason) {
+                        <p class="decision-reason">{{ reason }}</p>
                       }
-                      <p class="decision-hint">Address the issue above and re-upload the affected document(s) below.</p>
+                      @if (rejectionActionable(approval.rejectionReason)) {
+                        <p class="decision-hint">Address the issue above and re-upload the affected document(s) below.</p>
+                      } @else {
+                        <p class="decision-hint">Our compliance team can tell you what is needed: contact support from the Support page.</p>
+                      }
                     </mat-card-content>
                   </mat-card>
                 } @else if (approval.status === 'APPROVED') {
@@ -400,6 +405,13 @@ export class KycStatusComponent implements OnInit {
   documentsLoadError = false;
 
   readonly allJurisdictions = ALL_JURISDICTIONS;
+  /** The reason is a fixed category; unknown values never render as raw text. */
+  readonly rejectionText = kycRejectionText;
+  /** Re-uploading helps for the three document/information categories, not for CONTACT_SUPPORT. */
+  rejectionActionable(value: string | null): boolean {
+    const category = toKycRejectionCategory(value);
+    return category !== null && category !== 'CONTACT_SUPPORT';
+  }
   readonly allDocTypes = ALL_DOC_TYPES;
   readonly docColumns = ['type', 'jurisdiction', 'fileName', 'size', 'uploadedAt', 'actions'];
 

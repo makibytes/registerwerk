@@ -47,9 +47,9 @@ import { AuthService } from '../../core/auth/auth.service';
       font-size: 12px;
       color: var(--rw-text-secondary);
       padding: 10px 12px;
-      background: rgba(239,68,68,0.07);
+      background: var(--rw-rejected-bg);
       border-radius: 6px;
-      border: 1px solid rgba(239,68,68,0.18);
+      border: 1px solid color-mix(in srgb, var(--rw-rejected-fg) 30%, transparent);
       margin: 0 0 4px;
     }
     .error-cell {

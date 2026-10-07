@@ -61,10 +61,14 @@ public class ImpersonationSessionService {
         ImpersonationSession session = found.get();
         if (sessions.consumeHandoff(hash, now) != 1) {
             // Replayed, expired or already ended: a replayed code means the URL leaked, so the
-            // session it belongs to is ended rather than left usable by the first holder.
-            if (session.getHandoffConsumedAt() != null && session.isActive(now)) {
-                end(session.getId(), null, "HANDOFF_REPLAY");
-            }
+            // session it belongs to is ended rather than left usable by the first holder. The row loaded above
+            // is stale when a concurrent winner committed in between (the losing UPDATE saw the committed
+            // consumption, our earlier SELECT did not), so decide on a locked, freshly read row.
+            sessions.findByIdForUpdate(session.getId()).ifPresent(fresh -> {
+                if (fresh.getHandoffConsumedAt() != null && fresh.isActive(now)) {
+                    end(fresh.getId(), null, "HANDOFF_REPLAY");
+                }
+            });
             return Optional.empty();
         }
         ImpersonationSession live = sessions.findById(session.getId()).orElseThrow();

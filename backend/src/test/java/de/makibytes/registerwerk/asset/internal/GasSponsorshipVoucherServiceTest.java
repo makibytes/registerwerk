@@ -18,8 +18,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.web3j.crypto.Credentials;
@@ -53,7 +51,6 @@ import static org.mockito.Mockito.when;
  * and the monthly cap — and produce a signature the contract accepts.
  */
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("GasSponsorshipVoucherService")
 class GasSponsorshipVoucherServiceTest {
 
@@ -94,36 +91,36 @@ class GasSponsorshipVoucherServiceTest {
         deployment.setChainConfigId(chainId);
         deployment.setContractAddress(TOKEN);
         deployment.setAssetId(assetId);
-        when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        org.mockito.Mockito.lenient().when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
 
         policy = new GasSponsorshipPolicy();
         policy.setId(UUID.randomUUID());
         policy.setSponsor(GasSponsorshipPolicy.Sponsor.ISSUER);
         policy.setMonthlyCapEth(new BigDecimal("0.1"));
         policy.setActive(true);
-        when(gasSponsorshipService.resolveEffectivePolicy(deploymentId)).thenReturn(Optional.of(policy));
+        org.mockito.Mockito.lenient().when(gasSponsorshipService.resolveEffectivePolicy(deploymentId)).thenReturn(Optional.of(policy));
 
         ChainConfig chain = new ChainConfig();
         chain.setId(chainId);
         chain.setIdentifier("ETHEREUM_TESTNET");
         chain.setChainId(11155111L);
-        when(chainConfigService.getById(chainId)).thenReturn(chain);
+        org.mockito.Mockito.lenient().when(chainConfigService.getById(chainId)).thenReturn(chain);
 
         OrgMemberWallet wallet = new OrgMemberWallet();
         wallet.setWalletAddress(SENDER.toUpperCase().replace("0X", "0x"));
         wallet.setChainConfigId(chainId);
-        when(memberWalletRepository.findActiveByLegalEntityId(entityId)).thenReturn(List.of(wallet));
+        org.mockito.Mockito.lenient().when(memberWalletRepository.findActiveByLegalEntityId(entityId)).thenReturn(List.of(wallet));
 
         holderRow = new AssetHolder();
         holderRow.setAssetId(assetId);
         holderRow.setInvestorId(entityId);
         holderRow.setWalletAddress(SENDER);
-        when(assetHolderRepository.findActiveByInvestorId(entityId)).thenReturn(List.of(holderRow));
+        org.mockito.Mockito.lenient().when(assetHolderRepository.findActiveByInvestorId(entityId)).thenReturn(List.of(holderRow));
 
-        when(voucherRepository.sumMaxCostSince(any(), any())).thenReturn(null);
-        when(voucherRepository.sumMaxCostSinceForEntity(any(), any(), any())).thenReturn(null);
-        when(voucherRepository.findByPolicyIdAndSenderAndUserOpNonce(any(), any(), any())).thenReturn(Optional.empty());
-        when(voucherRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.lenient().when(voucherRepository.sumMaxCostSince(any(), any())).thenReturn(null);
+        org.mockito.Mockito.lenient().when(voucherRepository.sumMaxCostSinceForEntity(any(), any(), any())).thenReturn(null);
+        org.mockito.Mockito.lenient().when(voucherRepository.findByPolicyIdAndSenderAndUserOpNonce(any(), any(), any())).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient().when(voucherRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     static byte[] execute(String target, long value) {

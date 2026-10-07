@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.corporateactions.web;
 
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.corporateactions.internal.PositionStatementService;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.springframework.http.ContentDisposition;
@@ -22,8 +23,10 @@ import java.util.UUID;
 public class PositionStatementController {
 
     private final PositionStatementService service;
+    private final RegisterClock registerClock;
 
-    PositionStatementController(PositionStatementService service) {
+    PositionStatementController(PositionStatementService service, RegisterClock registerClock) {
+        this.registerClock = registerClock;
         this.service = service;
     }
 
@@ -45,7 +48,7 @@ public class PositionStatementController {
 
     private ResponseEntity<byte[]> buildPdfResponse(UUID entityId) {
         byte[] pdf = service.generateForEntity(entityId);
-        String filename = "depotauszug-" + entityId + "-" + LocalDate.now() + ".pdf";
+        String filename = "depotauszug-" + entityId + "-" + registerClock.today() + ".pdf";
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION,

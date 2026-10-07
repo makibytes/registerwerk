@@ -55,11 +55,22 @@ public interface SanctionsScreeningPort {
             /** "SANCTIONS" | "PEP" | "ADVERSE_MEDIA"; null if the provider can't tell — treated as SANCTIONS. */
             String category,
             /** Provider's stable id of the matched record (basis of the hit fingerprint); null if unknown. */
-            String externalId
+            String externalId,
+            /**
+             * Version/content digest of the provider's matched record (e.g. its {@code last_change} or a hash of
+             * the matched properties); part of the hit fingerprint, so a list entry that changed after a
+             * reviewer's false-positive decision is a NEW hit. Null when the provider reports nothing.
+             */
+            String recordVersion
     ) {
         public ScreeningHitDto(String listSource, String matchedField, String matchedValue, double matchScore,
+                               String details, String category, String externalId) {
+            this(listSource, matchedField, matchedValue, matchScore, details, category, externalId, null);
+        }
+
+        public ScreeningHitDto(String listSource, String matchedField, String matchedValue, double matchScore,
                                String details, String category) {
-            this(listSource, matchedField, matchedValue, matchScore, details, category, null);
+            this(listSource, matchedField, matchedValue, matchScore, details, category, null, null);
         }
     }
 

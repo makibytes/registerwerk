@@ -496,6 +496,23 @@ class SubscriptionOrderServiceTest {
         assertThat(result.getPaymentConfirmedBy()).isEqualTo(actorId);
     }
 
+    @Test
+    @DisplayName("confirmPayment(): a half-cent amount due rounds HALF_UP (Wave 5a, one policy)")
+    void confirmPayment_halfCentAmountDueRoundsUp() {
+        UUID orderId = UUID.randomUUID();
+        SubscriptionOrder order = allocatedOrder();
+        order.setAcceptedAt(Instant.now());
+        when(repository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
+        stubAsset(approvedAsset());
+        stubBondTerms("1", "1.00000625"); // 800 x 1 x 1.00000625 = 800.005 -> 800.01 (HALF_EVEN would give 800.00)
+
+        assertThatThrownBy(() -> service.confirmPayment(orderId, new BigDecimal("800.00"), "REF", null, actorId, "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("underpayment");
+        SubscriptionOrder result = service.confirmPayment(orderId, new BigDecimal("800.01"), "REF-2",
+                LocalDate.of(2026, 3, 2), actorId, "REGISTRY_ADMIN");
+        assertThat(result.getAmountDue()).isEqualByComparingTo("800.01");
+    }
+
     // ── settle ────────────────────────────────────────────────────────────────
 
     private SubscriptionOrder paidOrder(UUID orderId) {

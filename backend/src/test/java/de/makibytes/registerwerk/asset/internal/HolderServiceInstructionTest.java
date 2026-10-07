@@ -41,7 +41,8 @@ class HolderServiceInstructionTest {
     private final AssetDeploymentRepository deployments = mock(AssetDeploymentRepository.class);
     private final HolderChangeRepository changes = mock(HolderChangeRepository.class);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
-    private final HolderService service = new HolderService(holders, assets, events, entities, deployments, changes);
+    private final HolderService service = new HolderService(holders, assets, events, entities, deployments, changes,
+            new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemDefaultZone(), java.time.ZoneId.systemDefault()));
 
     private final UUID assetId = UUID.randomUUID();
     private final UUID investorId = UUID.randomUUID();

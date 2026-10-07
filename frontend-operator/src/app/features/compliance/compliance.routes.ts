@@ -63,6 +63,15 @@ export const COMPLIANCE_ROUTES: Routes = [
       ),
   },
   {
+    path: 'travel-rule-peers',
+    canActivate: [roleGuard],
+    data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
+    loadComponent: () =>
+      import('./travel-rule-peers/travel-rule-peers.component').then(
+        (m) => m.TravelRulePeersComponent,
+      ),
+  },
+  {
     path: 'entity-tasks',
     canActivate: [roleGuard],
     data: { roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },

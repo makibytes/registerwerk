@@ -227,7 +227,7 @@ export class SponsoredTxService {
       account: eoaAddress,
       to: params.to,
       data: params.callData,
-      chain: null,
+      chain: walletClient.chain ?? null,
     });
     return {
       hash,
@@ -241,12 +241,14 @@ export class SponsoredTxService {
       throw new Error('No browser wallet detected.');
     }
     const injected = this.wallet.injectedProvider as Parameters<typeof custom>[0];
-    const walletClient = createWalletClient({ transport: custom(injected) });
+    // Same pinned chain as WalletService: viem then verifies the wallet's network at send time.
+    const chain = this.wallet.pinnedViemChain;
+    const walletClient = createWalletClient({ chain, transport: custom(injected) });
     const [eoaAddress] = await walletClient.requestAddresses();
     if (!eoaAddress) {
       throw new Error('Wallet returned no accounts.');
     }
-    const publicClient = createPublicClient({ transport: custom(injected) });
+    const publicClient = createPublicClient({ chain, transport: custom(injected) });
     return { walletClient, publicClient, eoaAddress };
   }
 }

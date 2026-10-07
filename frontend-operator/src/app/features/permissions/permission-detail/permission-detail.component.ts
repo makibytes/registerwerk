@@ -23,10 +23,7 @@ import { PermissionService } from '../../../core/api/permission.service';
 import { OrgIdentityService } from '../../../core/api/org-identity.service';
 import { OrgRegistrationView, PermissionDefinitionView, PermissionGrantView } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
-import {
-  StepUpDialogComponent,
-  StepUpDialogResult,
-} from '../../../shared/components/step-up/step-up-dialog.component';
+import { withDualControl } from '../../../shared/components/step-up/with-dual-control';
 
 @Component({
   selector: 'app-permission-detail',
@@ -226,7 +223,7 @@ export class PermissionDetailComponent implements OnInit {
     const orgId = this.selectedOrgId!;
     this.dialog.closeAll();
 
-    this.withStepUp('Permission grant to organization', (token, dualControlToken) =>
+    this.withStepUp('Permission grant to organization', `POST /api/v1/permissions/${this.definitionId}/org-grants`, { orgRegistrationId: orgId }, (token, dualControlToken) =>
       this.permissionService.grantToOrg(this.definitionId, orgId, token, dualControlToken).subscribe({
         next: () => {
           this.snackBar.open('Grant submitted.', 'Dismiss', { duration: 5000 });
@@ -242,7 +239,7 @@ export class PermissionDetailComponent implements OnInit {
   }
 
   revoke(grant: PermissionGrantView): void {
-    this.withStepUp('Permission grant revocation', (token, dualControlToken) =>
+    this.withStepUp('Permission grant revocation', `DELETE /api/v1/permissions/org-grants/${grant.id}`, undefined, (token, dualControlToken) =>
       this.permissionService.revokeGrant(grant.id, token, dualControlToken).subscribe({
         next: () => {
           this.snackBar.open('Revocation submitted.', 'Dismiss', { duration: 5000 });
@@ -257,19 +254,17 @@ export class PermissionDetailComponent implements OnInit {
     );
   }
 
-  /** Both actions here are dual-control (requireSecondApprover=true) on the backend. */
-  private withStepUp(reason: string, action: (stepUpToken: string, dualControlToken: string) => void): void {
-    this.dialog
-      .open(StepUpDialogComponent, {
-        data: { requireDualControl: true, reason, action: reason },
-        width: '500px',
-        disableClose: true,
-      })
-      .afterClosed()
-      .subscribe((result: StepUpDialogResult | undefined) => {
-        if (result?.stepUpToken && result.dualControlToken) {
-          action(result.stepUpToken, result.dualControlToken);
-        }
-      });
+  /**
+   * Both actions here are dual-control (requireSecondApprover=true) on the backend. `target` and `targetBody` are
+   * exactly the request the service then sends (the approver token is bound to its method, path and canonical body).
+   */
+  private withStepUp(
+    reason: string,
+    target: string,
+    targetBody: unknown,
+    action: (stepUpToken: string, dualControlToken: string) => void,
+  ): void {
+    withDualControl(this.dialog, { action: reason, reason, target, targetBody }, (tokens) =>
+      action(tokens.stepUpToken, tokens.dualControlToken));
   }
 }

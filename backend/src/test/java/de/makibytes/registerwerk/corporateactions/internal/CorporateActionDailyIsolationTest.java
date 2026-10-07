@@ -21,8 +21,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -49,7 +47,6 @@ import static org.mockito.Mockito.when;
  * and settlements (the pattern of {@code TradeTimeoutProcessor}).
  */
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("Corporate-action daily job: one transaction per item (H8)")
 class CorporateActionDailyIsolationTest {
 
@@ -72,18 +69,18 @@ class CorporateActionDailyIsolationTest {
     @BeforeEach
     void setUp() {
         txManager = mock(PlatformTransactionManager.class);
-        when(txManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+        org.mockito.Mockito.lenient().when(txManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
         service = new CorporateActionService(repository, entryRepository, positionResolver, settlementWriter,
                 couponPaymentRepository, proposalValidator, events, partyGate, entityTasks, finalityGate, freshnessGate,
                 bondTermsRepository, CorporateActionTestSupport.systemRegisterClock(),
                 new IsolatedTransactionExecutor(txManager));
-        when(repository.save(any(CorporateAction.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(freshnessGate.blockedReason(any(), any())).thenReturn(Optional.empty());
-        when(finalityGate.check(any(), any(), any(), any())).thenReturn(new FinalityDecision.Allowed(FinalityLevel.FINALIZED));
-        when(repository.findReadyToCompute(any())).thenReturn(List.of());
-        when(repository.findDueForSettlement(any())).thenReturn(List.of());
-        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
-        when(repository.findOverdueCoupons(any())).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(repository.save(any(CorporateAction.class))).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.lenient().when(freshnessGate.blockedReason(any(), any())).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient().when(finalityGate.check(any(), any(), any(), any())).thenReturn(new FinalityDecision.Allowed(FinalityLevel.FINALIZED));
+        org.mockito.Mockito.lenient().when(repository.findReadyToCompute(any())).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(repository.findDueForSettlement(any())).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(repository.findOverdueCoupons(any())).thenReturn(List.of());
     }
 
     private CorporateAction action(CorporateAction.Status status) {

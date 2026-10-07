@@ -15,3 +15,5 @@ export * from './lib/page-header/page-header.component';
 export * from './lib/endpoint-manager/endpoint-form-dialog.component';
 export * from './lib/qr-code/qr-code.component';
 export * from './lib/approval-queue/approval-queue';
+export * from './lib/decimal';
+export * from './lib/kyc-rejection';

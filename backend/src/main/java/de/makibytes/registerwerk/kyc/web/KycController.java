@@ -284,7 +284,7 @@ public class KycController {
             @RequestBody @Valid KycRejectionRequest body,
             Authentication auth) {
         KycJurisdictionApproval saved = kycService.rejectKycForJurisdiction(
-            entityId, jurisdiction, body.reason().trim(), extractActorId(auth));
+            entityId, jurisdiction, body.reason().trim(), body.customerReasonCode(), extractActorId(auth));
         return ResponseEntity.ok(KycJurisdictionApprovalResponse.from(saved));
     }
 

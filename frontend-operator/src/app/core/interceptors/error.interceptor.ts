@@ -19,6 +19,13 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
         if (!req.url.includes('/public/auth/login')) {
           void router.navigate(['/login']);
         }
+      } else if (error.status === 403 && (error.error as { code?: string } | null)?.code === 'PASSWORD_CHANGE_REQUIRED') {
+        // Not a permission failure: the account must set a new password first. Route to that screen
+        // (once) instead of toasting "access denied" for every request the page fires.
+        authService.markPasswordChangeRequired();
+        if (!router.url.startsWith('/change-password')) {
+          void router.navigate(['/change-password']);
+        }
       } else if (error.status === 403) {
         snackBar.open(
           'Access denied. You do not have permission to perform this action.',

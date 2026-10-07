@@ -89,7 +89,7 @@ import { ExternalReferenceSubjectType } from '../../core/models';
 
     .error-text {
       margin-top: 4px;
-      color: #b91c1c;
+      color: var(--rw-text-danger);
       font-size: 12px;
     }
   `],

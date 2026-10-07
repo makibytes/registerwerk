@@ -59,9 +59,10 @@ class WebhookSecretCipherTest {
     }
 
     @Test
-    @DisplayName("a value without the prefix is a legacy plaintext row and is read as-is")
-    void legacyPlaintextPassesThrough() {
+    @DisplayName("a value without the prefix is refused (the startup backfill is the only way off plaintext)")
+    void plaintextIsRefused() {
         assertThat(WebhookSecretCipher.isEncrypted("plain")).isFalse();
-        assertThat(cipher.decrypt("plain", subscriptionId)).isEqualTo("plain");
+        assertThatThrownBy(() -> cipher.decrypt("plain", subscriptionId)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("decryption failed");
     }
 }

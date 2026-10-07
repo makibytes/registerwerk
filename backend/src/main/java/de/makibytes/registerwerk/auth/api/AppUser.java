@@ -125,6 +125,18 @@ public class AppUser {
         this.tokensValidAfter = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).plusSeconds(1);
     }
 
+    /**
+     * Voluntary/forced password change by the account holder: stores the new hash, clears the
+     * must-change flag and rejects every token issued before the CURRENT second. Unlike
+     * {@link #setPasswordHash} (cut-off = next second) the token minted right after the change stays
+     * valid; the presenting token is revoked by {@code jti} by the caller.
+     */
+    public void changePassword(String newHash) {
+        this.passwordHash = newHash;
+        this.mustChangePassword = false;
+        this.tokensValidAfter = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    }
+
     /** Bump only for persisted accounts: creating or initialising a new row must not revoke its first login. */
     private void bumpIfPersisted() {
         if (this.id != null) {

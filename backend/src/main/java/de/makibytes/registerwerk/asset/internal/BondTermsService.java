@@ -18,6 +18,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Map;
@@ -31,6 +32,10 @@ public class BondTermsService {
     private final AssetBondTermsRepository bondTermsRepository;
     private final ApplicationEventPublisher events;
     private final CouponScheduleService couponScheduleService;
+
+    /** Ceiling for {@code couponRate} (a fraction; 1 = 100 %), {@code registerwerk.corporate-actions.max-coupon-rate}. */
+    @org.springframework.beans.factory.annotation.Value("${registerwerk.corporate-actions.max-coupon-rate:1}")
+    private BigDecimal maxCouponRate = CouponRateLimit.DEFAULT_MAX;
 
     /** Statuses in which terms may still be set wholesale; afterwards only a 4-eyes amendment. */
     static final EnumSet<AssetStatus> TERMS_EDITABLE =
@@ -59,6 +64,8 @@ public class BondTermsService {
             throw new InvalidStateTransitionException("Bond terms of a " + asset.getStatus()
                     + " asset are locked; use POST /api/v1/assets/" + assetId + "/terms-amendments");
         }
+
+        CouponRateLimit.require(request.couponRate(), maxCouponRate);
 
         AssetBondTerms terms = bondTermsRepository.findById(assetId).orElseGet(() -> {
             AssetBondTerms created = new AssetBondTerms();

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, type Mock, type MockedObject, vi } from "vitest";
 import { TestBed } from '@angular/core/testing';
 import { Router, UrlTree } from '@angular/router';
-import { Observable, of } from 'rxjs';
-import { authGuard, roleGuard } from './auth.guard';
+import { Observable, firstValueFrom, of } from 'rxjs';
+import { authGuard, changePasswordGuard, roleGuard } from './auth.guard';
 import { AuthService } from './auth.service';
 
 describe('authGuard', () => {
-    let authServiceSpy: MockedObject<Pick<AuthService, 'ensureInitialized' | 'hasRole'>>;
+    let authServiceSpy: MockedObject<Pick<AuthService, 'ensureInitialized' | 'hasRole' | 'isPasswordChangeRequired'>>;
     let router: Router;
     let urlTree: UrlTree;
 
@@ -21,7 +21,8 @@ describe('authGuard', () => {
     beforeEach(() => {
         authServiceSpy = {
             ensureInitialized: vi.fn().mockName("AuthService.ensureInitialized"),
-            hasRole: vi.fn().mockName("AuthService.hasRole")
+            hasRole: vi.fn().mockName("AuthService.hasRole"),
+            isPasswordChangeRequired: vi.fn().mockName("AuthService.isPasswordChangeRequired").mockReturnValue(false),
         };
 
         TestBed.configureTestingModule({
@@ -40,6 +41,30 @@ describe('authGuard', () => {
             expect(value).toBe(true);
             ;
         });
+    });
+
+    it('sends a must_change_password session to /change-password', async () => {
+        authServiceSpy.ensureInitialized.mockReturnValue(of(true));
+        authServiceSpy.isPasswordChangeRequired.mockReturnValue(true);
+
+        const value = await firstValueFrom(runGuard());
+
+        expect(value).toBe(urlTree);
+        expect(router.createUrlTree).toHaveBeenCalledWith(['/change-password']);
+    });
+
+    it('changePasswordGuard needs a session but not a clean one', async () => {
+        authServiceSpy.ensureInitialized.mockReturnValue(of(true));
+        authServiceSpy.isPasswordChangeRequired.mockReturnValue(true);
+        const open = await firstValueFrom(TestBed.runInInjectionContext(
+            () => changePasswordGuard({} as never, {} as never) as Observable<boolean | UrlTree>));
+        expect(open).toBe(true);
+
+        authServiceSpy.ensureInitialized.mockReturnValue(of(false));
+        const closed = await firstValueFrom(TestBed.runInInjectionContext(
+            () => changePasswordGuard({} as never, {} as never) as Observable<boolean | UrlTree>));
+        expect(closed).toBe(urlTree);
+        expect(router.createUrlTree).toHaveBeenCalledWith(['/login']);
     });
 
     it('redirects to /login when the session is not authenticated', async () => {

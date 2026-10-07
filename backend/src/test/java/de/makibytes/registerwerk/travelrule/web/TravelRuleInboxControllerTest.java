@@ -70,6 +70,21 @@ class TravelRuleInboxControllerTest {
     }
 
     @Test
+    void legacySharedKeyIsRefusedWhenProductionModeComesFromTheDashDProperty() {
+        // Wave 5a: the controller used @Value("${REGISTERWERK_PRODUCTION_MODE}"), which a
+        // -Dregisterwerk.production-mode=true (property, not env var) never reached
+        properties.setLegacySharedKey(true);
+        var env = new org.springframework.mock.env.MockEnvironment()
+                .withProperty(de.makibytes.registerwerk.shared.ProductionMode.PROPERTY_NAME, "true");
+        var production = new TravelRuleInboxController(service, peers, properties, mapper, "secret", env);
+        assertThatThrownBy(() -> production.receive("did:example:vasp1", null, null, "secret", body))
+                .isInstanceOf(AccessDeniedException.class);
+        var dev = new TravelRuleInboxController(service, peers, properties, mapper, "secret",
+                new org.springframework.mock.env.MockEnvironment());
+        assertThat(dev.receive("did:example:vasp1", null, null, "secret", body).getStatusCode().value()).isEqualTo(202);
+    }
+
+    @Test
     void authenticatedPeerIdentityIsWhatIsStored() {
         when(peers.authenticate("DID:EXAMPLE:VASP1", "1", "sig", body)).thenReturn("did:example:vasp1");
 

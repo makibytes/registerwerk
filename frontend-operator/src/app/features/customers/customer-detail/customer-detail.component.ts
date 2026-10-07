@@ -656,7 +656,8 @@ interface OnchainIdentityView {
                      }
                      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
                        @for (claim of identity.activeClaims; track claim.topic) {
-                         <span [style.background]="claim.isRevoked ? '#ffebee' : '#e8f5e9'"
+                         <span [style.background]="claim.isRevoked ? 'var(--rw-rejected-bg)' : 'var(--rw-approved-bg)'"
+                              [style.color]="claim.isRevoked ? 'var(--rw-rejected-fg)' : 'var(--rw-approved-fg)'"
                               style="padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500">
                           {{ claim.topicLabel || ('Topic '+claim.topic) }}
                           {{ claim.isRevoked ? '✗' : '✓' }}

@@ -201,13 +201,13 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
       gap: 10px;
       padding: 12px 16px;
       border-radius: 6px;
-      border-left: 3px solid #F59E0B;
+      border-left: 3px solid var(--rw-text-warning);
       background: rgba(245,158,11,0.07);
       color: var(--rw-text-secondary);
       font-size: 13px;
       margin-bottom: 16px;
 
-      mat-icon { color: #F59E0B; flex-shrink: 0; }
+      mat-icon { color: var(--rw-text-warning); flex-shrink: 0; }
     }
 
     .source-badge {
@@ -220,7 +220,7 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
       border-radius: 4px;
 
       &.upload { background: rgba(99,102,241,0.12); color: #6366f1; }
-      &.onchain { background: rgba(16,185,129,0.12); color: #10b981; }
+      &.onchain { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
     }
   `],
   template: `
@@ -359,9 +359,9 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                 <mat-icon style="font-size:16px">policy</mat-icon>
                 KYC Compliance — {{ jurisdictionLabel(asset.jurisdiction) }}
                 @if (kycCompliance?.fullyCompliant) {
-                  <span style="font-size:11px;padding:2px 7px;border-radius:4px;background:rgba(16,185,129,0.12);color:#10b981">COMPLIANT</span>
+                  <span style="font-size:11px;padding:2px 7px;border-radius:4px;background:var(--rw-approved-bg);color:var(--rw-approved-fg)">COMPLIANT</span>
                 } @else if (kycCompliance) {
-                  <span style="font-size:11px;padding:2px 7px;border-radius:4px;background:rgba(245,158,11,0.12);color:#f59e0b">INCOMPLETE</span>
+                  <span style="font-size:11px;padding:2px 7px;border-radius:4px;background:var(--rw-pending-bg);color:var(--rw-pending-fg)">INCOMPLETE</span>
                 }
               </div>
               @if (kycComplianceLoading) {
@@ -373,11 +373,11 @@ import { RedeemAssetDialogComponent, RedeemAssetDialogResult } from './redeem-as
                       @if (!doc.mandatory) {
                         <mat-icon class="comp-icon" style="color:var(--rw-text-muted)">radio_button_unchecked</mat-icon>
                       } @else if (doc.present && !doc.expired && !doc.tooOld) {
-                        <mat-icon class="comp-icon" style="color:#10b981">check_circle</mat-icon>
+                        <mat-icon class="comp-icon" style="color:var(--rw-text-success)">check_circle</mat-icon>
                       } @else if (doc.tooOld) {
-                        <mat-icon class="comp-icon" style="color:#f59e0b">schedule</mat-icon>
+                        <mat-icon class="comp-icon" style="color:var(--rw-text-warning)">schedule</mat-icon>
                       } @else {
-                        <mat-icon class="comp-icon" style="color:#ef4444">cancel</mat-icon>
+                        <mat-icon class="comp-icon" style="color:var(--rw-text-danger)">cancel</mat-icon>
                       }
                       <span class="comp-name">{{ doc.localName }}</span>
                       <span class="comp-note">
@@ -1459,11 +1459,14 @@ export class AssetDetailComponent implements OnInit {
           if (this.asset?.onchainLevel === 'CONTROL') {
             this.loadMintRules(d[0].id);
           }
-          if (this.isErc3643 && !this.isConfidential) {
+          // The suite row is created when a deployment is CONFIRMED: asking for a PENDING / FAILED one
+          // (or a stale first row) is a guaranteed 404 on every asset page.
+          const suiteDeployment = d.find(x => x.deploymentStatus === 'CONFIRMED');
+          if (this.isErc3643 && !this.isConfidential && suiteDeployment) {
             // T-REX suite/identity-registry/compliance/trusted-issuers/claim-topics are
             // plaintext-only — confidential deployments never get an Erc3643Suite row (see
             // ConfidentialService for the endpoints that actually apply to CONF_ERC3643).
-            this.loadErc3643Data(d[0].id);
+            this.loadErc3643Data(suiteDeployment.id);
           }
           if (this.isVaultStandard) {
             this.loadLatestVaultNav(d[0].id);

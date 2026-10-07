@@ -43,9 +43,13 @@ class BondTermsServiceTest {
     }
 
     private BondTermsRequest request() {
+        return request(new BigDecimal("0.03"));
+    }
+
+    private BondTermsRequest request(BigDecimal couponRate) {
         LocalDate issue = LocalDate.of(2026, 9, 1);
         return new BondTermsRequest(new BigDecimal("1000"), "eur", issue,
-                issue.plusYears(5), new BigDecimal("0.03"), " EURIBOR_3M ",
+                issue.plusYears(5), couponRate, " EURIBOR_3M ",
                 new BigDecimal("-0.001"), DayCountConvention.ACT_360,
                 PaymentFrequency.QUARTERLY, true,
                 List.of(new BondTermsRequest.CallScheduleEntry(
@@ -65,6 +69,25 @@ class BondTermsServiceTest {
                 .hasMessageContaining("terms-amendments");
         verify(termsRepository, never()).save(any());
         verify(couponScheduleService, never()).regenerate(any(), any(), any(), any());
+    }
+
+    @Test
+    void couponRateAboveTheConfiguredCeilingIsRefusedWithAClearMessage() {
+        UUID assetId = UUID.randomUUID();
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(new Asset()));
+
+        // @Digits(2,8) accepts 99 (= 9 900 %); the default ceiling is 1 (= 100 %)
+        assertThatThrownBy(() -> service().upsert(assetId, request(new BigDecimal("99")), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("couponRate 99 exceeds the maximum of 1 (100 %)")
+                .hasMessageContaining("0.042");
+        verify(termsRepository, never()).save(any());
+
+        // ... and the ceiling is configurable
+        BondTermsService relaxed = service();
+        org.springframework.test.util.ReflectionTestUtils.setField(relaxed, "maxCouponRate", new BigDecimal("0.02"));
+        assertThatThrownBy(() -> relaxed.upsert(assetId, request(new BigDecimal("0.03")), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("maximum of 0.02 (2 %)");
     }
 
     @Test

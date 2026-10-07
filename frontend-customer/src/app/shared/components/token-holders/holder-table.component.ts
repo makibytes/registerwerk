@@ -156,13 +156,13 @@ import { AddressComponent } from '../address.component';
     }
 
     .whitelisted {
-      background: rgba(56, 142, 60, 0.1);
-      color: #388e3c;
+      background: var(--rw-approved-bg);
+      color: var(--rw-text-success);
     }
 
     .not-whitelisted {
-      background: rgba(229, 57, 53, 0.1);
-      color: #e53935;
+      background: var(--rw-rejected-bg);
+      color: var(--rw-text-danger);
     }
 
     .table-footer {

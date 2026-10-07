@@ -30,8 +30,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Bool;
@@ -60,7 +58,6 @@ import static org.mockito.Mockito.when;
  * undeployable.
  */
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("Erc3643DeploymentService — deploy idempotency (T3-19)")
 class Erc3643DeploymentServiceIdempotencyTest {
 
@@ -112,30 +109,30 @@ class Erc3643DeploymentServiceIdempotencyTest {
         deployment.setAssetId(assetId);
         deployment.setChainConfigId(chainConfigId);
         deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
-        when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        org.mockito.Mockito.lenient().when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
 
         ChainConfig chainConfig = new ChainConfig();
         org.springframework.test.util.ReflectionTestUtils.setField(chainConfig, "id", chainConfigId);
         chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
         chainConfig.setNetworkType(ChainConfig.NetworkType.TESTNET);
-        when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
-        when(contractAddressConfig.requireTrexFactory("ETHEREUM_SEPOLIA")).thenReturn(FACTORY);
-        when(contractAddressConfig.requireClaimIssuer("ETHEREUM_SEPOLIA")).thenReturn(OTHER);
-        when(clientRegistry.getEvmClientByIdentifier("ETHEREUM_SEPOLIA")).thenReturn(web3j);
-        when(evmContractService.signer(chainConfigId)).thenReturn(signer);
-        when(signer.address()).thenReturn(SIGNER);
-        when(assetLookupPort.findById(assetId)).thenReturn(Optional.of(new AssetLookupPort.AssetInfo(
+        org.mockito.Mockito.lenient().when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
+        org.mockito.Mockito.lenient().when(contractAddressConfig.requireTrexFactory("ETHEREUM_SEPOLIA")).thenReturn(FACTORY);
+        org.mockito.Mockito.lenient().when(contractAddressConfig.requireClaimIssuer("ETHEREUM_SEPOLIA")).thenReturn(OTHER);
+        org.mockito.Mockito.lenient().when(clientRegistry.getEvmClientByIdentifier("ETHEREUM_SEPOLIA")).thenReturn(web3j);
+        org.mockito.Mockito.lenient().when(evmContractService.signer(chainConfigId)).thenReturn(signer);
+        org.mockito.Mockito.lenient().when(signer.address()).thenReturn(SIGNER);
+        org.mockito.Mockito.lenient().when(assetLookupPort.findById(assetId)).thenReturn(Optional.of(new AssetLookupPort.AssetInfo(
                 assetId, "Green Bond", null, TokenStandard.ERC3643, null, null, null, null, "APPROVED")));
-        when(suiteRepository.findByAssetDeploymentId(deploymentId)).thenReturn(Optional.empty());
-        when(suiteRepository.save(any())).thenAnswer(inv -> {
+        org.mockito.Mockito.lenient().when(suiteRepository.findByAssetDeploymentId(deploymentId)).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient().when(suiteRepository.save(any())).thenAnswer(inv -> {
             Erc3643Suite s = inv.getArgument(0);
             if (s.getId() == null) {
                 org.springframework.test.util.ReflectionTestUtils.setField(s, "id", UUID.randomUUID());
             }
             return s;
         });
-        when(deploymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(evmContractService.call(any(), any(), any(Function.class))).thenAnswer(inv -> {
+        org.mockito.Mockito.lenient().when(deploymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.lenient().when(evmContractService.call(any(), any(), any(Function.class))).thenAnswer(inv -> {
             Function fn = inv.getArgument(2);
             List<Type> out = new ArrayList<>();
             switch (fn.getName()) {
@@ -205,7 +202,6 @@ class Erc3643DeploymentServiceIdempotencyTest {
         earlierFailed.setAssetId(assetId);
         earlierFailed.setChainConfigId(chainConfigId);
         earlierFailed.setDeploymentStatus(AssetDeployment.DeploymentStatus.FAILED);
-        when(deploymentRepository.findById(earlierFailed.getId())).thenReturn(Optional.of(earlierFailed));
         when(evmContractService.submit(eq(chainConfigId), any(), any(), eq(FACTORY), any(Function.class)))
                 .thenReturn("0xtx");
         when(evmContractService.waitForReceipt(any(), eq("0xtx"))).thenThrow(new RuntimeException("slow"));

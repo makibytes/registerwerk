@@ -474,9 +474,11 @@ services:
       JWT_AUDIENCE: ${JWT_AUDIENCE:-}
       ENTRA_ENABLED: ${ENTRA_ENABLED:-false}
       REGISTERWERK_PRODUCTION_MODE: ${REGISTERWERK_PRODUCTION_MODE:-false}
-      # Explicit (narrower than application.yml's built-in "all RFC1918" default): the peers that
-      # may assert X-Forwarded-For are Kong and the operator nginx, both on the compose bridge
-      # network. Narrow further to your network's CIDR in production.
+      # Local-demo default (loopback + Docker bridge ranges; narrower than application.yml's built-in
+      # "all RFC1918" default): the peers that may assert X-Forwarded-For are Kong and the operator
+      # nginx, both on the compose bridge network. Not a production value: the Helm chart has no
+      # default and refuses to render until env.REGISTERWERK_AUTH_TRUSTED_PROXIES names only the pods
+      # in front of the backend.
       REGISTERWERK_AUTH_TRUSTED_PROXIES: ${REGISTERWERK_AUTH_TRUSTED_PROXIES:-172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+|127\.\d+\.\d+\.\d+|0:0:0:0:0:0:0:1|::1}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}

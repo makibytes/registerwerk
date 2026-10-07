@@ -17,8 +17,8 @@ import { MatIconModule } from '@angular/material/icon';
     mat-form-field { width: 100%; }
     .type-row { display: flex; gap: 20px; margin-bottom: 16px; align-items: center; }
     .type-label { font-size: 13px; color: var(--rw-text-secondary); margin-bottom: 4px; }
-    .warning-banner { background: rgba(245,158,11,.1); border-left: 3px solid #f59e0b; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 12px; color: var(--rw-text-secondary); display: flex; gap: 8px; align-items: flex-start; }
-    .warning-banner mat-icon { font-size: 16px; width: 16px; height: 16px; color: #d97706; flex-shrink: 0; margin-top: 1px; }
+    .warning-banner { background: rgba(245,158,11,.1); border-left: 3px solid var(--rw-text-warning); padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 12px; color: var(--rw-text-secondary); display: flex; gap: 8px; align-items: flex-start; }
+    .warning-banner mat-icon { font-size: 16px; width: 16px; height: 16px; color: var(--rw-text-warning); flex-shrink: 0; margin-top: 1px; }
     .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
   `],
   template: `

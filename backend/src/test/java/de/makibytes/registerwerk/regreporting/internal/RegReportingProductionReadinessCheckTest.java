@@ -18,7 +18,7 @@ class RegReportingProductionReadinessCheckTest {
     @DisplayName("disabled prototype outside production mode does not throw")
     void disabledPrototype_outsideProduction_doesNotThrow() {
         ReportingProperties props = new ReportingProperties();
-        RegReportingProductionReadinessCheck check = new RegReportingProductionReadinessCheck(props);
+        RegReportingProductionReadinessCheck check = new RegReportingProductionReadinessCheck(props, false);
 
         assertThatCode(check::check).doesNotThrowAnyException();
     }
@@ -29,7 +29,7 @@ class RegReportingProductionReadinessCheckTest {
         ReportingProperties props = new ReportingProperties();
         props.setGateway("SFTP");
         props.setPrototypeEnabled(true);
-        RegReportingProductionReadinessCheck check = new RegReportingProductionReadinessCheck(props);
+        RegReportingProductionReadinessCheck check = new RegReportingProductionReadinessCheck(props, false);
 
         assertThatCode(check::check).doesNotThrowAnyException();
     }
@@ -39,7 +39,7 @@ class RegReportingProductionReadinessCheckTest {
     void noopPrototype_outsideProduction_doesNotThrow() {
         ReportingProperties props = new ReportingProperties();
         props.setPrototypeEnabled(true);
-        RegReportingProductionReadinessCheck check = new RegReportingProductionReadinessCheck(props);
+        RegReportingProductionReadinessCheck check = new RegReportingProductionReadinessCheck(props, false);
 
         assertThatCode(check::check).doesNotThrowAnyException();
     }
@@ -51,7 +51,7 @@ class RegReportingProductionReadinessCheckTest {
         props.setGateway("SFTP");
         props.setPrototypeEnabled(true);
         RegReportingProductionReadinessCheck check =
-                new RegReportingProductionReadinessCheck(props, () -> true);
+                new RegReportingProductionReadinessCheck(props, true);
 
         assertThatThrownBy(check::check)
                 .isInstanceOf(IllegalStateException.class)
@@ -63,7 +63,7 @@ class RegReportingProductionReadinessCheckTest {
     void disabledPrototype_inProduction_doesNotThrow() {
         ReportingProperties props = new ReportingProperties();
         RegReportingProductionReadinessCheck check =
-                new RegReportingProductionReadinessCheck(props, () -> true);
+                new RegReportingProductionReadinessCheck(props, true);
 
         assertThatCode(check::check).doesNotThrowAnyException();
     }

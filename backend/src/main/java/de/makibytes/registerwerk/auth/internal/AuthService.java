@@ -105,7 +105,10 @@ public class AuthService {
         Instant now = Instant.now();
         users.touchLastLogin(user.getId(), now);
         user.setLastLoginAt(now);
-        String token = minter.mint(user);
+        // must_change_password (seeded/reset accounts, production mode): the login succeeds, but only to a
+        // role-less token that the session guard lets reach POST /api/v1/auth/change-password and nothing else.
+        boolean mustChange = user.isMustChangePassword();
+        String token = mustChange ? minter.mintPasswordChange(user) : minter.mint(user);
         return new LoginResult(
             token,
             user.getId(),
@@ -113,12 +116,19 @@ public class AuthService {
             user.getEmail(),
             user.getFullName(),
             user.getLegalEntityId(),
-            props.getTokenTtlSeconds()
+            mustChange ? Math.min(props.getTokenTtlSeconds(), JwtMintingService.PASSWORD_CHANGE_TTL_SECONDS)
+                       : props.getTokenTtlSeconds(),
+            mustChange
         );
     }
 
     public record LoginResult(
         String token, UUID userId, List<String> roles,
-        String email, String name, UUID entityId, long ttlSeconds
-    ) {}
+        String email, String name, UUID entityId, long ttlSeconds, boolean passwordChangeRequired
+    ) {
+        public LoginResult(String token, UUID userId, List<String> roles, String email, String name, UUID entityId,
+                           long ttlSeconds) {
+            this(token, userId, roles, email, name, entityId, ttlSeconds, false);
+        }
+    }
 }

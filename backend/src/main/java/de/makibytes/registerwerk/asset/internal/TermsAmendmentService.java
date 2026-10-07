@@ -62,6 +62,10 @@ public class TermsAmendmentService {
         this.events = events;
     }
 
+    /** Ceiling for {@code couponRate} (a fraction; 1 = 100 %), {@code registerwerk.corporate-actions.max-coupon-rate}. */
+    @org.springframework.beans.factory.annotation.Value("${registerwerk.corporate-actions.max-coupon-rate:1}")
+    private java.math.BigDecimal maxCouponRate = CouponRateLimit.DEFAULT_MAX;
+
     @CacheEvict(value = "assets", key = "#assetId")
     public Asset amend(UUID assetId, TermsAmendmentRequest request, UUID actorId, String actorRole,
                        UUID dualControlApproverId) {
@@ -71,6 +75,7 @@ public class TermsAmendmentService {
                 || asset.getStatus().isRegisterFrozen()) {
             throw new InvalidStateTransitionException("Terms of a " + asset.getStatus() + " asset cannot be amended");
         }
+        CouponRateLimit.require(request.couponRate(), maxCouponRate);
         AssetBondTerms terms = bondTermsRepository.findById(assetId).orElse(null);
         if (terms == null && request.touchesBondTerms()
                 && (request.faceValue() != null || request.couponRate() != null || request.referenceRate() != null

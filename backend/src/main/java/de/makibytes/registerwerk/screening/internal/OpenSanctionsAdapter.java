@@ -186,10 +186,66 @@ class OpenSanctionsAdapter implements SanctionsScreeningPort {
                     score.doubleValue(),
                     id,
                     categoryOf(entry),
-                    id
+                    id,
+                    recordVersionOf(entry)
             ));
         }
         return hits;
+    }
+
+    /**
+     * Version digest of a matched record: its {@code last_change} plus a hash over the content that makes the
+     * entry what it is (properties, topics, datasets). The per-query volatile parts (score, features) are
+     * excluded, so the same unchanged record always yields the same value. Null for an empty entry.
+     */
+    static String recordVersionOf(Map<String, Object> entry) {
+        Object lastChange = entry.get("last_change");
+        StringBuilder content = new StringBuilder();
+        for (String key : new String[]{"properties", "topics", "datasets", "schema"}) {
+            if (entry.get(key) != null) {
+                content.append(key).append('=');
+                canonical(entry.get(key), content);
+                content.append(';');
+            }
+        }
+        if (lastChange == null && content.length() == 0) {
+            return null;
+        }
+        String hash = "";
+        if (content.length() > 0) {
+            try {
+                hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(content.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            } catch (java.security.NoSuchAlgorithmException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+        return (lastChange == null ? "" : lastChange + ":") + hash;
+    }
+
+    /** Deterministic rendering: map keys sorted, list members sorted as strings (the provider does not order them). */
+    private static void canonical(Object value, StringBuilder out) {
+        if (value instanceof Map<?, ?> m) {
+            out.append('{');
+            new java.util.TreeMap<String, Object>(m.entrySet().stream()
+                    .collect(java.util.stream.Collectors.toMap(e -> String.valueOf(e.getKey()), Map.Entry::getValue,
+                            (a, b) -> a))).forEach((k, v) -> {
+                out.append(k).append(':');
+                canonical(v, out);
+                out.append(',');
+            });
+            out.append('}');
+        } else if (value instanceof List<?> l) {
+            out.append('[');
+            l.stream().map(x -> {
+                StringBuilder sb = new StringBuilder();
+                canonical(x, sb);
+                return sb.toString();
+            }).sorted().forEach(x -> out.append(x).append(','));
+            out.append(']');
+        } else {
+            out.append(value);
+        }
     }
 
     /**

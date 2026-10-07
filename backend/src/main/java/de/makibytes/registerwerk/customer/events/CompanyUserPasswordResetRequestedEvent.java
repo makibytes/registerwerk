@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.audit.api.AuditableEvent;
 import java.util.Map;
 import java.util.UUID;
 
+/** {@code resetLink} is sealed ({@code shared.SecureLinkPort}); the plaintext token is never published. */
 public record CompanyUserPasswordResetRequestedEvent(
         UUID entityId, UUID userId, UUID actorId, String actorRole,
         String email, String resetLink) implements AuditableEvent {

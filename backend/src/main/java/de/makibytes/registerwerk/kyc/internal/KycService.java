@@ -290,10 +290,15 @@ public class KycService {
     }
 
     /**
-     * Rejects KYC for a specific jurisdiction.
+     * Rejects KYC for a specific jurisdiction. Like {@link #rejectKyc}: the operator's free text
+     * ({@code internalReason}) goes to the audit trail only; the customer-visible {@code rejection_reason}
+     * column and every response built from it carry just the fixed {@code customerReasonCode} category
+     * (GwG s.47 tipping-off; default CONTACT_SUPPORT).
      */
     public KycJurisdictionApproval rejectKycForJurisdiction(
-            UUID entityId, Jurisdiction jurisdiction, String reason, UUID actorId) {
+            UUID entityId, Jurisdiction jurisdiction, String internalReason, KycRejectionCategory customerReasonCode,
+            UUID actorId) {
+        KycRejectionCategory category = customerReasonCode != null ? customerReasonCode : KycRejectionCategory.CONTACT_SUPPORT;
 
         legalEntityRepository.findById(entityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
@@ -308,12 +313,13 @@ public class KycService {
             });
 
         approval.setStatus(KycJurisdictionApproval.Status.REJECTED);
-        approval.setRejectionReason(reason);
+        approval.setRejectionReason(category.name());
         approval.setApprovedBy(actorId);
         approval.setApprovedAt(Instant.now());
 
         KycJurisdictionApproval saved = jurisdictionApprovalRepository.save(approval);
-        eventPublisher.publishEvent(new KycJurisdictionRejectedEvent(entityId, actorId, null, java.util.Map.of("jurisdiction", jurisdiction.name(), "reason", reason != null ? reason : "")));
+        eventPublisher.publishEvent(new KycJurisdictionRejectedEvent(entityId, actorId, null, java.util.Map.of("jurisdiction", jurisdiction.name(),
+            "internalReason", internalReason != null ? internalReason : "", "reasonCode", category.name())));
         log.info("KYC rejected for entityId={}, jurisdiction={}", entityId, jurisdiction);
         return saved;
     }

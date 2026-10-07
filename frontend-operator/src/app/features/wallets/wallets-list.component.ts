@@ -21,6 +21,7 @@ import { ImportKeystoreDialogComponent } from './dialogs/import-keystore-dialog.
 import { ExportDialogComponent } from './dialogs/export-dialog.component';
 import { SetDefaultDialogComponent } from './dialogs/set-default-dialog.component';
 import { AttachHsmDialogComponent } from './dialogs/attach-hsm-dialog.component';
+import { AttachKmsDialogComponent } from './dialogs/attach-kms-dialog.component';
 
 @Component({
   selector: 'app-wallets-list',
@@ -49,10 +50,10 @@ import { AttachHsmDialogComponent } from './dialogs/attach-hsm-dialog.component'
     .type-chip.evm { background: rgba(98,126,234,.12); color: #627EEA; }
     .type-chip.solana { background: rgba(153,69,255,.12); color: #9945FF; }
     .type-chip.canton { background: rgba(255,107,53,.12); color: #FF6B35; }
-    .custody-chip { display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(16,185,129,.1);color:#047857; }
+    .custody-chip { display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;background:var(--rw-approved-bg);color:var(--rw-approved-fg); }
 
     .default-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-    .default-chip { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; background: rgba(34,197,94,.1); color: #16a34a; }
+    .default-chip { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; background: rgba(34,197,94,.1); color: var(--rw-text-success); }
 
     .empty-state { padding: 60px 24px; text-align: center; }
     .empty-state mat-icon { font-size: 40px; width: 40px; height: 40px; color: var(--rw-text-muted); margin-bottom: 12px; }
@@ -81,6 +82,7 @@ import { AttachHsmDialogComponent } from './dialogs/attach-hsm-dialog.component'
           <mat-icon>add</mat-icon> Generate wallet
         </button>
         <button type="button" mat-stroked-button (click)="openAttachHsm()"><mat-icon>security</mat-icon> Attach HSM key</button>
+        <button type="button" mat-stroked-button (click)="openAttachKms()"><mat-icon>cloud_lock</mat-icon> Attach KMS key</button>
       </div>
     </div>
 
@@ -121,7 +123,7 @@ import { AttachHsmDialogComponent } from './dialogs/attach-hsm-dialog.component'
                 <td><a class="wallet-name-link" [routerLink]="['/wallets', wallet.id]">{{ wallet.name }}</a></td>
                 <td><span class="type-chip" [class.evm]="wallet.type === 'EVM'" [class.solana]="wallet.type === 'SOLANA'" [class.canton]="wallet.type === 'CANTON'">{{ wallet.type }}</span></td>
                 <td><app-address [address]="wallet.address" /></td>
-                <td><span class="custody-chip"><mat-icon style="font-size:14px;width:14px;height:14px">{{ wallet.custodyType === 'PKCS11' ? 'security' : 'encrypted' }}</mat-icon>{{ wallet.custodyType }}</span></td>
+                <td><span class="custody-chip"><mat-icon style="font-size:14px;width:14px;height:14px">{{ wallet.custodyType === 'PKCS11' ? 'security' : wallet.custodyType === 'KMS' ? 'cloud_lock' : 'encrypted' }}</mat-icon>{{ wallet.custodyType }}</span></td>
                 <td>
                   <div class="default-chips">
                     @for (chainId of wallet.defaultForChains; track chainId) {
@@ -140,9 +142,9 @@ import { AttachHsmDialogComponent } from './dialogs/attach-hsm-dialog.component'
                   <mat-menu #actionMenu>
                     <button type="button" mat-menu-item [routerLink]="['/wallets', wallet.id]"><mat-icon>open_in_new</mat-icon> View details</button>
                     <button type="button" mat-menu-item (click)="openSetDefault(wallet)"><mat-icon>star</mat-icon> Set as default</button>
-                    <button type="button" mat-menu-item (click)="exportKeystore(wallet)" [disabled]="wallet.type !== 'EVM' || wallet.custodyType === 'PKCS11'"><mat-icon>download</mat-icon> Export keystore</button>
+                    <button type="button" mat-menu-item (click)="exportKeystore(wallet)" [disabled]="wallet.type !== 'EVM' || wallet.custodyType !== 'SOFTWARE'"><mat-icon>download</mat-icon> Export keystore</button>
                     <button type="button" mat-menu-item (click)="rename(wallet)"><mat-icon>edit</mat-icon> Rename</button>
-                    <button type="button" mat-menu-item (click)="delete(wallet)" style="color: #ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
+                    <button type="button" mat-menu-item (click)="delete(wallet)" style="color: var(--rw-text-danger)"><mat-icon>delete_outline</mat-icon> Delete</button>
                   </mat-menu>
                 </td>
               </tr>
@@ -226,6 +228,16 @@ export class WalletsListComponent implements OnInit {
         next: () => { this.load(); this.snackBar.open('HSM key verified and attached', 'OK', { duration: 3500 }); },
         error: e => this.snackBar.open(e.error?.message ?? 'HSM key verification failed', 'OK', { duration: 5000 }),
       }), `POST /api/v1/admin/wallets/attach-hsm`, { name: r.name, keyAlias: r.keyAlias, address: r.address });
+    });
+  }
+
+  openAttachKms() {
+    this.dialog.open(AttachKmsDialogComponent, { width: '520px', maxWidth: '95vw' }).afterClosed().subscribe(r => {
+      if (!r) return;
+      this.withDualControl('WALLET_ATTACH_KMS', `Attach KMS key "${r.name}"`, tokens => this.walletService.attachKms(r, tokens).subscribe({
+        next: () => { this.load(); this.snackBar.open('KMS key verified and attached', 'OK', { duration: 3500 }); },
+        error: e => this.snackBar.open(e.error?.message ?? 'KMS key verification failed', 'OK', { duration: 5000 }),
+      }), `POST /api/v1/admin/wallets/attach-kms`, r);
     });
   }
 

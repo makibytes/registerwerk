@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.auth.web;
 import de.makibytes.registerwerk.auth.api.EntityDisplayNameResolver;
 import de.makibytes.registerwerk.auth.internal.ImpersonationSessionService;
 import de.makibytes.registerwerk.auth.internal.SessionCookieService;
+import de.makibytes.registerwerk.auth.api.JwtMintingService;
 import de.makibytes.registerwerk.auth.web.dto.LoginResponse;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
@@ -67,7 +68,9 @@ public class SessionController {
                 entityName,
                 impersonating,
                 expiresAt,
-                impersonating && auth.getPrincipal() instanceof Jwt j ? j.getClaimAsString("imp_mode") : null
+                impersonating && auth.getPrincipal() instanceof Jwt j ? j.getClaimAsString("imp_mode") : null,
+                auth.getPrincipal() instanceof Jwt pj
+                        && JwtMintingService.USE_PASSWORD_CHANGE.equals(pj.getClaimAsString(JwtMintingService.CLAIM_USE))
         ));
     }
 

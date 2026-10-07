@@ -1,4 +1,4 @@
-import { Observable } from 'rxjs';
+import { Observable, throwError } from 'rxjs';
 
 /**
  * Where the app's bearer token comes from. Two implementations exist —
@@ -88,4 +88,21 @@ export abstract class TokenSource {
 
   /** True when the app can hand out impersonation sessions at all. */
   abstract supportsImpersonation(): boolean;
+
+  // ── must_change_password (built-in login only) ───────────────────────────────
+  // Defaults suit Entra: the backend never flags those accounts and owns no password to change.
+
+  /** True while the signed-in account must set a new password first (restricted session). */
+  isPasswordChangeRequired(): boolean {
+    return false;
+  }
+
+  /** Flags the open session as restricted after a 403 `PASSWORD_CHANGE_REQUIRED` on some endpoint. */
+  markPasswordChangeRequired(): void {
+    // nothing to track under Entra
+  }
+
+  changePassword(_currentPassword: string, _newPassword: string): Observable<void> {
+    return throwError(() => new Error('Password changes are unavailable with Microsoft Entra sign-in.'));
+  }
 }

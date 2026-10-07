@@ -83,9 +83,9 @@ import { VaultNavStrike } from '../../../../core/models';
   styles: [`
     :host {
       display: block;
-      --accent: var(--rw-accent, #F59E0B);
-      --surface: #0e1124;
-      --border: rgba(245,158,11,.18);
+      --accent: var(--rw-accent);
+      --surface: var(--rw-surface);
+      --border: var(--rw-border);
     }
 
     .nav-shell { padding: 1.5rem 0; }
@@ -104,7 +104,7 @@ import { VaultNavStrike } from '../../../../core/models';
       font-size: .625rem;
       letter-spacing: .2em;
       color: var(--accent);
-      background: rgba(245,158,11,.1);
+      background: var(--rw-accent-subtle);
       border: 1px solid var(--border);
       border-radius: 2px;
       padding: .2rem .625rem;
@@ -112,12 +112,12 @@ import { VaultNavStrike } from '../../../../core/models';
 
     .current-nav {
       font-size: .8125rem;
-      color: #7b8aac;
+      color: var(--rw-text-secondary);
     }
 
     .nav-val {
       font-family: 'IBM Plex Mono', monospace;
-      color: #4ade80;
+      color: var(--rw-text-success);
       font-weight: 700;
     }
 
@@ -125,7 +125,7 @@ import { VaultNavStrike } from '../../../../core/models';
       font-family: 'Manrope Variable', sans-serif;
       font-size: 1.25rem;
       font-weight: 700;
-      color: #e2e8f8;
+      color: var(--rw-text-primary);
       margin: 0;
     }
 
@@ -150,12 +150,12 @@ import { VaultNavStrike } from '../../../../core/models';
     .field-suffix {
       font-family: 'IBM Plex Mono', monospace;
       font-size: .75rem;
-      color: #7b8aac;
+      color: var(--rw-text-secondary);
     }
 
     .btn-strike {
       background: var(--accent) !important;
-      color: #07091A !important;
+      color: var(--rw-accent-contrast) !important;
       font-weight: 700;
       display: flex;
       align-items: center;
@@ -170,7 +170,7 @@ import { VaultNavStrike } from '../../../../core/models';
       font-family: 'Manrope Variable', sans-serif;
       font-size: .9375rem;
       font-weight: 700;
-      color: #cbd5e1;
+      color: var(--rw-text-primary);
       margin: 0 0 .75rem;
     }
 
@@ -181,7 +181,7 @@ import { VaultNavStrike } from '../../../../core/models';
       grid-template-columns: 60px 120px 1fr 1fr;
       gap: 1rem;
       padding: .625rem .75rem;
-      border-bottom: 1px solid rgba(255,255,255,.04);
+      border-bottom: 1px solid var(--rw-border-subtle);
       font-size: .8125rem;
       align-items: center;
     }
@@ -190,24 +190,24 @@ import { VaultNavStrike } from '../../../../core/models';
       font-family: 'IBM Plex Mono', monospace;
       font-size: .6875rem;
       letter-spacing: .08em;
-      color: #7b8aac;
-      background: rgba(255,255,255,.02);
+      color: var(--rw-text-secondary);
+      background: var(--rw-surface-soft);
       border-radius: 4px 4px 0 0;
     }
 
-    .h-row.latest { background: rgba(245,158,11,.04); }
+    .h-row.latest { background: var(--rw-accent-subtle); }
 
     .mono { font-family: 'IBM Plex Mono', monospace; }
-    .nav-num { color: #4ade80; font-weight: 600; }
-    .dimmed { color: #7b8aac; }
+    .nav-num { color: var(--rw-text-success); font-weight: 600; }
+    .dimmed { color: var(--rw-text-secondary); }
     .addr { font-size: .75rem; }
 
-    .empty-note { color: #7b8aac; font-size: .875rem; }
+    .empty-note { color: var(--rw-text-secondary); font-size: .875rem; }
 
     .spinner {
       width: 1rem; height: 1rem;
-      border: 2px solid rgba(7,9,26,.4);
-      border-top-color: #07091A;
+      border: 2px solid var(--rw-border);
+      border-top-color: var(--rw-accent-contrast);
       border-radius: 50%;
       animation: spin .6s linear infinite;
       display: inline-block;
@@ -221,8 +221,8 @@ import { VaultNavStrike } from '../../../../core/models';
       border-color: var(--border) !important;
     }
 
-    ::ng-deep .mat-mdc-form-field input { color: #e2e8f8 !important; }
-    ::ng-deep .mat-mdc-form-field .mat-mdc-floating-label { color: #7b8aac !important; }
+    ::ng-deep .mat-mdc-form-field input { color: var(--rw-text-primary) !important; }
+    ::ng-deep .mat-mdc-form-field .mat-mdc-floating-label { color: var(--rw-text-secondary) !important; }
   `]
 })
 export class NavStrikeComponent implements OnInit {

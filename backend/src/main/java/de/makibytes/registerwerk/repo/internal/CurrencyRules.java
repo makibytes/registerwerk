@@ -1,10 +1,11 @@
 package de.makibytes.registerwerk.repo.internal;
 
+import de.makibytes.registerwerk.shared.Money;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
-import java.util.Currency;
 import java.util.Locale;
 import java.util.Set;
 
@@ -18,30 +19,14 @@ final class CurrencyRules {
 
     private CurrencyRules() {}
 
-    static Currency currency(String code) {
-        try {
-            return Currency.getInstance(code.toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Unknown ISO 4217 currency: " + code);
-        }
-    }
-
-    static int minorUnits(String code) {
-        return Math.max(0, currency(code).getDefaultFractionDigits());
-    }
-
     static int dayCountBasis(String code) {
         return ACT_365.contains(code.toUpperCase(Locale.ROOT)) ? 365 : 360;
     }
 
-    static BigDecimal round(String code, BigDecimal amount) {
-        return amount.setScale(minorUnits(code), RoundingMode.HALF_UP);
-    }
-
     static void requireMinorUnitScale(String code, BigDecimal amount, String field) {
-        if (amount.stripTrailingZeros().scale() > minorUnits(code)) {
+        if (amount.stripTrailingZeros().scale() > Money.minorUnits(code)) {
             throw new IllegalArgumentException(field + " has more decimals than " + code + " allows ("
-                    + minorUnits(code) + ")");
+                    + Money.minorUnits(code) + ")");
         }
     }
 
@@ -51,6 +36,6 @@ final class CurrencyRules {
         long days = ChronoUnit.DAYS.between(start, end);
         BigDecimal interest = cash.multiply(ratePercent).multiply(BigDecimal.valueOf(days))
                 .divide(BigDecimal.valueOf(basis).multiply(BigDecimal.valueOf(100)), 18, RoundingMode.HALF_UP);
-        return round(code, cash.add(round(code, interest)));
+        return Money.round(cash.add(Money.round(interest, code)), code);
     }
 }

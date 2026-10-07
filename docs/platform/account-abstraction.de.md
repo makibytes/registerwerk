@@ -169,8 +169,8 @@ registrieren muss.
   Sponsortyp), und eine Überschreibung auf Deployment-Ebene für Meridians Green-Bond-Flaggschiff
   (`OPERATOR`, zeigt den Vorrang der Überschreibung vor dem Standard).
 - Tests: `contracts/test/ecosystem/EwpgPaymaster.t.sol` führt jeden gesponserten Pfad durch
-  `handleOps` des **echten EntryPoint v0.8.0** (nur für Tests vendort unter
-  `contracts/test/aa-v08/`), einschließlich Regressionstests für die unten beim Rollout genannten
+  `handleOps` des **echten EntryPoint v0.8.0** (nur für Tests, angepinntes Git-Submodul
+  `contracts/lib/account-abstraction` am Tag v0.8.0; GPL-3.0, nie von `src/` oder `script/` importiert), einschließlich Regressionstests für die unten beim Rollout genannten
   Drain-Szenarien. `backend/.../asset/internal/GasSponsorshipVoucherServiceTest.java` und
   `unit/GasSponsorshipVoucherDigestTest.java` binden den Java-Digest über einen gemeinsamen
   Testvektor an den Solidity-Digest.

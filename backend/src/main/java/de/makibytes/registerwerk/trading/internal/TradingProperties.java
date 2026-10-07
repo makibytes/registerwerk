@@ -1,7 +1,10 @@
 package de.makibytes.registerwerk.trading.internal;
 
 import de.makibytes.registerwerk.trading.api.TradingVenueCode;
+import de.makibytes.registerwerk.shared.ProductionMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.EnvironmentAware;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.util.EnumMap;
@@ -10,7 +13,7 @@ import java.util.Map;
 
 @Component
 @ConfigurationProperties(prefix = "registerwerk.trading")
-public class TradingProperties {
+public class TradingProperties implements EnvironmentAware {
 
     private boolean enabled = true;
     private Map<TradingVenueCode, VenueProperties> venues = new EnumMap<>(TradingVenueCode.class);
@@ -58,8 +61,8 @@ public class TradingProperties {
     /** Reference of the legal opinion supporting {@link #venueClassification} (mandatory unless DEMO_ONLY). */
     private String legalOpinionRef = "";
 
-    /** True when {@code REGISTERWERK_PRODUCTION_MODE=true} (same switch the readiness checks use). */
-    private boolean productionMode = "true".equalsIgnoreCase(System.getenv("REGISTERWERK_PRODUCTION_MODE"));
+    /** The one shared production switch ({@link ProductionMode}: env var or {@code -D} property); no own property. */
+    private ProductionMode productionMode = ProductionMode.of(false);
 
     /** 5A-06: buyer and seller linked by a shared beneficial owner / member / wallet may trade only if {@code true}. */
     private boolean allowRelatedPartyTrades = false;
@@ -89,11 +92,12 @@ public class TradingProperties {
     }
 
     public boolean isProductionMode() {
-        return productionMode;
+        return productionMode.enabled();
     }
 
-    public void setProductionMode(boolean productionMode) {
-        this.productionMode = productionMode;
+    @Override
+    public void setEnvironment(Environment environment) {
+        this.productionMode = ProductionMode.of(environment);
     }
 
     public boolean isAllowRelatedPartyTrades() {

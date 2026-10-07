@@ -32,7 +32,7 @@ class RepoTradeServiceTest {
     RepoTradeService service; RepoTrade trade; UUID borrower=UUID.randomUUID(),lender=UUID.randomUUID(); UUID user=UUID.randomUUID();
 
     @BeforeEach void setUp(){RepoDeskProperties p=new RepoDeskProperties();p.setEnabled(true);p.setReleaseApproved(true);
-        service=new RepoTradeService(p,trades,events,entities,assets,substitutions,controls,publisher);trade=new RepoTrade();trade.setId(UUID.randomUUID());
+        service=new RepoTradeService(p,trades,events,entities,assets,substitutions,controls,publisher,new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemUTC(), java.time.ZoneOffset.UTC));trade=new RepoTrade();trade.setId(UUID.randomUUID());
         trade.setCashBorrowerEntityId(borrower);trade.setCashLenderEntityId(lender);trade.setCollateralAssetId(UUID.randomUUID());
         trade.setCollateralQuantity(new BigDecimal("100"));trade.setCashAmount(new BigDecimal("90000"));
         trade.setCashCurrency("EUR");trade.setHaircutBps(500);

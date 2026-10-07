@@ -66,6 +66,27 @@ export interface ReconcileCollateralRequest {
   legalBasis: string;
 }
 
+/** One market's outcome of the legacy borrow-pause sweep (`SUBMITTED`, `ALREADY_PAUSED`, `NOT_CHECKED`, ...). */
+export interface LegacyPauseEnforcement {
+  marketId: string;
+  marketAddress: string;
+  outcome: string;
+  txHash: string | null;
+}
+
+/** One-line summary for the snackbar; markets that could not be checked are called out, never counted as paused. */
+export function summarizeLegacyPause(results: LegacyPauseEnforcement[]): string {
+  if (results.length === 0) return 'No unverified or legacy markets need an on-chain pause.';
+  const count = (o: string) => results.filter((r) => r.outcome === o).length;
+  const submitted = count('SUBMITTED');
+  const unchecked = count('NOT_CHECKED');
+  const other = results.length - submitted - unchecked;
+  const parts = [`${submitted} pause transaction${submitted === 1 ? '' : 's'} submitted`];
+  if (other > 0) parts.push(`${other} already paused or not applicable`);
+  if (unchecked > 0) parts.push(`${unchecked} could not be read on-chain and were NOT paused`);
+  return parts.join('; ') + '.';
+}
+
 /**
  * Operator side of the lending read-model. The mutating calls are `@RequiresIdempotencyKey` (the
  * idempotency interceptor adds the header) and step-up protected; registration, reconcile and borrow-pause
@@ -106,6 +127,15 @@ export class LendingAdminService {
   ): Observable<{ txHash: string }> {
     return this.http.post<{ txHash: string }>(
       `${this.base}/markets/${marketId}/borrow-paused`, { paused, reason }, { headers: dualControlHeaders(tokens) });
+  }
+
+  /**
+   * H11: submits `setBorrowPaused(true)` for every unverified / legacy market that is not paused on-chain.
+   * Only ever pauses; step-up + second approver (`Lending legacy market borrow pause`).
+   */
+  legacyBorrowPause(tokens: DualControlTokens): Observable<LegacyPauseEnforcement[]> {
+    return this.http.post<LegacyPauseEnforcement[]>(
+      `${this.base}/markets/legacy-borrow-pause`, {}, { headers: dualControlHeaders(tokens) });
   }
 
   private getPreservingBigInts<T>(url: string): Observable<T> {

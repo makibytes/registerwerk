@@ -131,13 +131,13 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
       border-radius: 999px;
       font-size: 10px;
       font-weight: 700;
-      background: rgba(34,197,94,0.12);
-      color: #15803d;
+      background: var(--rw-approved-bg);
+      color: var(--rw-text-success);
     }
 
     .status-pill.disabled {
-      background: rgba(239,68,68,0.12);
-      color: #b91c1c;
+      background: var(--rw-rejected-bg);
+      color: var(--rw-text-danger);
     }
 
     .pending-tag {
@@ -155,8 +155,8 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
     }
 
     .menu-delete {
-      color: #dc2626;
-      mat-icon { color: #dc2626; }
+      color: var(--rw-text-danger);
+      mat-icon { color: var(--rw-text-danger); }
     }
 
     .empty-row td {

@@ -21,13 +21,15 @@ import {
   StepUpDialogComponent, StepUpDialogResult,
 } from '../../../../shared/components/step-up/step-up-dialog.component';
 
+import { RwDecimalPipe } from '@registerwerk/ui';
+
 @Component({
   selector: 'app-vault-requests',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule, MatButtonModule, MatIconModule, MatCheckboxModule, MatDialogModule, MatFormFieldModule,
-    MatInputModule, MatTooltipModule, DatePipe, DecimalPipe, SlicePipe,
+    MatInputModule, MatTooltipModule, DatePipe, DecimalPipe, SlicePipe, RwDecimalPipe,
   ],
   template: `
     <div class="req-shell">
@@ -129,9 +131,9 @@ import {
 
               <span class="right mono amount">
                 @if (req.requestType === 'DEPOSIT') {
-                  {{ req.assetAmount | number }}
+                  {{ req.assetAmount | rwDecimal }}
                 } @else {
-                  {{ req.shareAmount | number }} shares
+                  {{ req.shareAmount | rwDecimal }} shares
                 }
               </span>
 
@@ -215,8 +217,8 @@ import {
                   <span class="status-chip hold" [matTooltip]="req.reviewNote ?? ''">Needs review</span>
                 }
               </span>
-              <span class="right mono">{{ req.shareAmount | number }}</span>
-              <span class="right mono">{{ req.assetAmount | number }}</span>
+              <span class="right mono">{{ req.shareAmount | rwDecimal }}</span>
+              <span class="right mono">{{ req.assetAmount | rwDecimal }}</span>
               <span class="right dimmed small">{{ req.fulfilledAt | date:'dd MMM HH:mm' }}</span>
             </div>
           }
@@ -279,9 +281,9 @@ import {
   styles: [`
     :host {
       display: block;
-      --accent: var(--rw-accent, #F59E0B);
-      --surface: #0e1124;
-      --border: rgba(245,158,11,.18);
+      --accent: var(--rw-accent);
+      --surface: var(--rw-surface);
+      --border: var(--rw-border);
     }
 
     .req-shell { padding: 1.5rem 0; }
@@ -299,7 +301,7 @@ import {
       font-size: .625rem;
       letter-spacing: .2em;
       color: var(--accent);
-      background: rgba(245,158,11,.1);
+      background: var(--rw-accent-subtle);
       border: 1px solid var(--border);
       border-radius: 2px;
       padding: .2rem .625rem;
@@ -309,7 +311,7 @@ import {
       font-family: 'Manrope Variable', sans-serif;
       font-size: 1rem;
       font-weight: 700;
-      color: #e2e8f8;
+      color: var(--rw-text-primary);
       margin: 0;
       flex: 1;
     }
@@ -322,21 +324,21 @@ import {
 
     .req-count {
       font-size: .8125rem;
-      color: #7b8aac;
+      color: var(--rw-text-secondary);
       font-family: 'IBM Plex Mono', monospace;
     }
 
-    .btn-refresh { border-color: var(--border); color: #a0aec0; }
+    .btn-refresh { border-color: var(--border); color: var(--rw-text-secondary); }
 
     .nav-warning {
       display: flex;
       align-items: center;
       gap: .625rem;
       padding: .75rem 1rem;
-      background: rgba(245,158,11,.06);
-      border: 1px solid rgba(245,158,11,.25);
+      background: var(--rw-accent-subtle);
+      border: 1px solid var(--rw-pending-fg);
       border-radius: 6px;
-      color: #f0c040;
+      color: var(--rw-text-warning);
       font-size: .8125rem;
       margin-bottom: 1rem;
     }
@@ -346,12 +348,12 @@ import {
       flex-direction: column;
       align-items: center;
       padding: 3rem 0;
-      color: #7b8aac;
+      color: var(--rw-text-secondary);
     }
 
     .empty-icon {
       font-size: 3rem; height: 3rem; width: 3rem;
-      color: #4ade80;
+      color: var(--rw-text-success);
       margin-bottom: .75rem;
     }
 
@@ -363,31 +365,31 @@ import {
       gap: .5rem;
       align-items: center;
       padding: .625rem .5rem;
-      border-bottom: 1px solid rgba(255,255,255,.04);
+      border-bottom: 1px solid var(--rw-border-subtle);
       font-size: .8125rem;
       border-radius: 4px;
       transition: background .1s;
     }
 
-    .req-row:hover { background: rgba(255,255,255,.02); }
+    .req-row:hover { background: var(--rw-surface-soft); }
 
-    .req-row.checked { background: rgba(245,158,11,.04); }
+    .req-row.checked { background: var(--rw-accent-subtle); }
 
     .req-row.header {
       font-family: 'IBM Plex Mono', monospace;
       font-size: .6875rem;
       letter-spacing: .06em;
-      color: #7b8aac;
-      background: rgba(255,255,255,.02);
+      color: var(--rw-text-secondary);
+      background: var(--rw-surface-soft);
       border-radius: 4px 4px 0 0;
     }
 
     .mono { font-family: 'IBM Plex Mono', monospace; }
-    .dimmed { color: #7b8aac; }
+    .dimmed { color: var(--rw-text-secondary); }
     .small { font-size: .75rem; }
     .addr { font-size: .8125rem; }
     .right { text-align: right; }
-    .amount { color: #e2e8f8; font-weight: 600; }
+    .amount { color: var(--rw-text-primary); font-weight: 600; }
 
     .type-badge {
       display: inline-flex;
@@ -400,20 +402,20 @@ import {
       font-weight: 700;
     }
 
-    .type-badge.deposit { background: rgba(74,222,128,.12); color: #4ade80; }
-    .type-badge.redeem { background: rgba(251,191,36,.12); color: #fbbf24; }
+    .type-badge.deposit { background: var(--rw-approved-bg); color: var(--rw-text-success); }
+    .type-badge.redeem { background: var(--rw-pending-bg); color: var(--rw-text-warning); }
 
     .row-actions { display: flex; gap: .25rem; justify-content: flex-end; }
 
-    .btn-fulfill { color: #4ade80; }
-    .btn-cancel { color: #f87171; }
+    .btn-fulfill { color: var(--rw-text-success); }
+    .btn-cancel { color: var(--rw-text-danger); }
 
     .bulk-bar {
       display: flex;
       align-items: center;
       gap: 1rem;
       padding: 1rem;
-      background: rgba(245,158,11,.06);
+      background: var(--rw-accent-subtle);
       border: 1px solid var(--border);
       border-radius: 0 0 6px 6px;
       margin-top: .5rem;
@@ -428,7 +430,7 @@ import {
 
     .btn-bulk-fulfill {
       background: var(--accent) !important;
-      color: #07091A !important;
+      color: var(--rw-accent-contrast) !important;
       font-weight: 700;
       display: flex;
       align-items: center;

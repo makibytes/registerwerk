@@ -161,8 +161,8 @@ signataire.
   sponsor), et une dérogation au niveau déploiement sur le Green Bond phare de Meridian
   (`OPERATOR`, illustrant la priorité d'une dérogation sur une valeur par défaut).
 - Tests : `contracts/test/ecosystem/EwpgPaymaster.t.sol` fait passer chaque chemin sponsorisé par
-  `handleOps` du **véritable EntryPoint v0.8.0** (vendorisé pour les tests uniquement sous
-  `contracts/test/aa-v08/`), avec des tests de régression pour les scénarios de siphonnage cités
+  `handleOps` du **véritable EntryPoint v0.8.0** (pour les tests uniquement, sous-module git épinglé
+  `contracts/lib/account-abstraction` au tag v0.8.0 ; GPL-3.0, jamais importé par `src/` ni `script/`), avec des tests de régression pour les scénarios de siphonnage cités
   dans le déploiement ci-dessous. `backend/.../asset/internal/GasSponsorshipVoucherServiceTest.java`
   et `unit/GasSponsorshipVoucherDigestTest.java` lient le condensé Java à celui de Solidity par un
   vecteur de test partagé.

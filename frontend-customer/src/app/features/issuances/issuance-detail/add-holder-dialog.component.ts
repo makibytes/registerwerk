@@ -98,7 +98,7 @@ interface DialogData {
   styles: [`
     .full-width { width: 100%; margin-bottom: 12px; }
     .hint { font-size: 13px; color: var(--rw-text-secondary); margin: 0 0 12px; }
-    .error-message { color: #c62828; font-size: 13px; }
+    .error-message { color: var(--rw-text-danger); font-size: 13px; }
     mat-dialog-content { display: flex; flex-direction: column; gap: 4px; padding-top: 16px !important; }
   `]
 })

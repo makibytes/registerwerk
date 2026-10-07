@@ -34,12 +34,13 @@ class WebhookSecretCipher {
     }
 
     /**
-     * Decrypts a stored secret. A value without the {@code enc:} prefix is a legacy plaintext row
-     * (written before V28) and is returned as-is until the startup maintenance re-encrypts it.
+     * Decrypts a stored secret. A value without the {@code enc:} prefix is refused (H14 / Wave 5b): the
+     * one-off {@link WebhookStartupMaintenance} backfill reads the raw column itself and is the only way off
+     * plaintext, so the read path never keeps a plaintext secret working.
      */
     String decrypt(String stored, UUID subscriptionId) {
         try {
-            return cipher.decryptAllowingLegacyPlaintext(stored, aad(subscriptionId));
+            return cipher.decrypt(stored, aad(subscriptionId));
         } catch (IllegalStateException e) {
             throw new IllegalStateException("Webhook secret decryption failed", e.getCause());
         }

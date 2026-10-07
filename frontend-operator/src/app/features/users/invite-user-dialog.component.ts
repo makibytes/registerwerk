@@ -42,7 +42,7 @@ const COMPANY_ROLES: { value: AppUserRole; label: string }[] = [
   ],
   styles: [`
     .full-width { width: 100%; margin-bottom: 8px; }
-    .error-message { color: #c62828; font-size: 13px; }
+    .error-message { color: var(--rw-text-danger); font-size: 13px; }
     mat-dialog-content { display: flex; flex-direction: column; padding-top: 16px !important; }
     .scope-hint { font-size: 12px; color: var(--rw-text-muted); margin: -4px 0 8px; }
   `],

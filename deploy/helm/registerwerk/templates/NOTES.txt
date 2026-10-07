@@ -93,8 +93,9 @@ failing the install itself.
    Javadoc) for a real external chain-of-custody anchor.
 
 5. Required network inputs (the chart refuses to render without them): ingress.trustedCidrs,
-   kong.env.trusted_ips and kong.adminAllowCidrs, plus env.REGISTERWERK_AUTH_TRUSTED_PROXIES set
-   to a regex of your pod CIDR. The API ingress targets Kong, not the backend, and answers 404 for
+   kong.env.trusted_ips, kong.adminAllowCidrs and env.REGISTERWERK_AUTH_TRUSTED_PROXIES. The last is
+   a regex of ONLY the pods that front the backend (Kong, operator nginx): a whole private range
+   lets any in-cluster client pick its own login-throttle bucket via X-Forwarded-For. The API ingress targets Kong, not the backend, and answers 404 for
    /actuator/* except health (README.md, "Blocking /actuator at the ingress").
 {{- if .Values.zamaRelayer.enabled }}
 

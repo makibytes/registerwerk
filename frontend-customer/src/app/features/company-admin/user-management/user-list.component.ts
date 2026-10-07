@@ -305,13 +305,13 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
       border-radius: 999px;
       font-size: 11px;
       font-weight: 700;
-      background: rgba(34, 197, 94, 0.12);
-      color: #15803d;
+      background: var(--rw-approved-bg);
+      color: var(--rw-text-success);
     }
 
     .status-pill.status-disabled {
-      background: rgba(239, 68, 68, 0.12);
-      color: #b91c1c;
+      background: var(--rw-rejected-bg);
+      color: var(--rw-text-danger);
     }
 
     .pending-copy {

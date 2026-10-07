@@ -32,7 +32,8 @@ import static org.mockito.Mockito.when;
 class RegisterExtractRendererTest {
 
     private final DocumentSigningService signingService = mock(DocumentSigningService.class);
-    private final RegisterExtractRenderer renderer = new RegisterExtractRenderer(signingService);
+    private final RegisterExtractRenderer renderer = new RegisterExtractRenderer(signingService,
+            new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemDefaultZone(), java.time.ZoneId.systemDefault()));
 
     private static Asset asset(String name, String isin) {
         Asset asset = new Asset();

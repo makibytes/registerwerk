@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, type MockedObject, vi } fr
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
 import { CookieTokenSource } from './cookie-token-source';
 import { environment } from '../../../environments/environment';
@@ -86,6 +87,44 @@ describe('CookieTokenSource', () => {
             await result;
             expect(source.isAuthenticated()).toBe(true);
             expect(source.getProfile()!['entityId']).toBe('ent-1');
+        });
+    });
+
+    describe('password change (must_change_password)', () => {
+        const changeUrl = `${environment.apiUrl}/auth/change-password`;
+
+        it('exposes the restricted-session flag from the login response', async () => {
+            const done = firstValueFrom(source.loginWithCredentials('a@example.com', 'changeme'));
+            httpMock.expectOne(loginUrl).flush({ ...profile, passwordChangeRequired: true });
+            await done;
+            expect(source.isPasswordChangeRequired()).toBe(true);
+        });
+
+        it('POSTs both passwords and replaces the restricted profile by the fresh session', async () => {
+            const login = firstValueFrom(source.loginWithCredentials('a@example.com', 'changeme'));
+            httpMock.expectOne(loginUrl).flush({ ...profile, passwordChangeRequired: true });
+            await login;
+
+            const changed = firstValueFrom(source.changePassword('changeme', 'a-much-better-secret'));
+            const req = httpMock.expectOne(changeUrl);
+            expect(req.request.method).toBe('POST');
+            expect(req.request.body).toEqual({ currentPassword: 'changeme', newPassword: 'a-much-better-secret' });
+            req.flush({ ...profile, passwordChangeRequired: false });
+            await changed;
+
+            expect(source.isPasswordChangeRequired()).toBe(false);
+            expect(source.isAuthenticated()).toBe(true);
+        });
+
+        it('markPasswordChangeRequired() flags an open session after a 403 PASSWORD_CHANGE_REQUIRED', async () => {
+            const login = firstValueFrom(source.loginWithCredentials('a@example.com', 'x'));
+            httpMock.expectOne(loginUrl).flush(profile);
+            await login;
+            expect(source.isPasswordChangeRequired()).toBe(false);
+
+            source.markPasswordChangeRequired();
+
+            expect(source.isPasswordChangeRequired()).toBe(true);
         });
     });
 

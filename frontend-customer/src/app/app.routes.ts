@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authGuard } from './core/auth/auth.guard';
+import { authGuard, changePasswordGuard } from './core/auth/auth.guard';
 import { roleGuard } from './core/auth/role.guard';
 import { lendingFeatureGuard } from './core/feature/lending-feature.guard';
 import { repoDeskFeatureGuard } from './core/feature/repo-desk-feature.guard';
@@ -105,6 +105,11 @@ export const routes: Routes = [
         loadComponent: () => import('./features/support/support-detail.component').then(m => m.SupportDetailComponent)
       }
     ]
+  },
+  {
+    path: 'change-password',
+    canActivate: [changePasswordGuard],
+    loadComponent: () => import('./core/auth/change-password.component').then(m => m.ChangePasswordComponent)
   },
   {
     path: 'login',

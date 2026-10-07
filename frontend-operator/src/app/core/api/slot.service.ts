@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
+import { parseJsonPreservingBigNumbers } from '@registerwerk/ui';
 import { environment } from '../../../environments/environment';
 import { AssetSlot } from '../models';
 import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
@@ -11,7 +12,9 @@ export class SlotService {
   private readonly base = `${environment.apiUrl}`;
 
   getSlots(deploymentId: string): Observable<AssetSlot[]> {
-    return this.http.get<AssetSlot[]>(`${this.base}/deployments/${deploymentId}/slots`);
+    // slotId / supplyCap are BigIntegers that can exceed 2^53: keep them exact (strings).
+    return this.http.get(`${this.base}/deployments/${deploymentId}/slots`, { responseType: 'text' })
+      .pipe(map((text) => parseJsonPreservingBigNumbers(text) as AssetSlot[]));
   }
 
   /** Step-up + second approver (`ERC3525_SLOT_CREATE`): the slot carries its supply cap. */

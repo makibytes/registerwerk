@@ -39,7 +39,8 @@ class InvestorLimitServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new InvestorLimitService(repository, events);
+        service = new InvestorLimitService(repository, events,
+                new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemDefaultZone(), java.time.ZoneId.systemDefault()));
         lenient().when(repository.save(any(InvestorLimit.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 

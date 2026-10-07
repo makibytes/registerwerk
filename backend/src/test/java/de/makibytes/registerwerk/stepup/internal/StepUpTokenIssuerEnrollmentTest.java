@@ -55,6 +55,16 @@ class StepUpTokenIssuerEnrollmentTest {
         }
     };
 
+    /** Records whether a transaction (= a held pooled connection) is open at any moment. */
+    private final java.util.concurrent.atomic.AtomicBoolean txOpen = new java.util.concurrent.atomic.AtomicBoolean();
+    private final org.springframework.transaction.PlatformTransactionManager txManager =
+            new org.springframework.transaction.support.AbstractPlatformTransactionManager() {
+                @Override protected Object doGetTransaction() { return new Object(); }
+                @Override protected void doBegin(Object transaction, org.springframework.transaction.TransactionDefinition d) { txOpen.set(true); }
+                @Override protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) { txOpen.set(false); }
+                @Override protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus status) { txOpen.set(false); }
+            };
+
     private StepUpTokenIssuer issuer;
     private final UUID userId = UUID.randomUUID();
 
@@ -63,7 +73,7 @@ class StepUpTokenIssuerEnrollmentTest {
         RegisterwerkAuthProperties props = new RegisterwerkAuthProperties();
         props.setDevSecret("test-secret-at-least-32-bytes-long!!");
         issuer = new StepUpTokenIssuer(userRepository, new JwtMintingService(props), new TotpSecretStore(XOR_KEK),
-                state, passwordEncoder, new DualControlProperties(), events, false);
+                state, passwordEncoder, new DualControlProperties(), events, false, txManager);
         lenient().when(userRepository.save(any(AppUser.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
         lenient().when(state.acceptStep(any(), org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
@@ -406,5 +416,33 @@ class StepUpTokenIssuerEnrollmentTest {
 
         assertThat(secret).matches("[A-Z2-7]+");
         assertThat(StepUpTokenIssuer.decodeBase32(secret)).hasSize(20);
+    }
+
+    @Test
+    @DisplayName("Wave 5b: enrolment holds no connection while it reserves attempts and runs BCrypt; only the write is transactional")
+    void enrolmentOpensItsTransactionOnlyForTheWrite() {
+        AppUser user = freshUser();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        java.util.List<String> violations = new java.util.ArrayList<>();
+        when(state.reserveAttempt(any())).thenAnswer(inv -> {
+            if (txOpen.get()) violations.add("reserveAttempt inside a transaction");
+            return true;
+        });
+        when(passwordEncoder.matches("pw", "hash")).thenAnswer(inv -> {
+            if (txOpen.get()) violations.add("BCrypt inside a transaction");
+            return true;
+        });
+        when(userRepository.save(any(AppUser.class))).thenAnswer(inv -> {
+            if (!txOpen.get()) violations.add("save outside a transaction");
+            return inv.getArgument(0);
+        });
+        org.mockito.Mockito.doAnswer(inv -> {
+            if (!txOpen.get()) violations.add("audit event published outside a transaction (would be dropped)");
+            return null;
+        }).when(events).publishEvent(any(Object.class));
+
+        issuer.enroll(userId, "pw");
+
+        assertThat(violations).isEmpty();
     }
 }

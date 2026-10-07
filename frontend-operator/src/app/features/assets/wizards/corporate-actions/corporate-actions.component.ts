@@ -187,14 +187,14 @@ import { StepUpDialogComponent } from '../../../../shared/components/step-up/ste
       font-weight: 700;
       width: fit-content;
     }
-    .status-badge.proposed { background: rgba(59,130,246,.15); color: #3b82f6; }
+    .status-badge.proposed { background: var(--rw-draft-bg); color: var(--rw-draft-fg); }
     .status-badge.announced, .status-badge.record_date_set, .status-badge.computed {
-      background: rgba(148,163,184,.15); color: #94a3b8;
+      background: var(--rw-neutral-bg); color: var(--rw-neutral-fg);
     }
-    .status-badge.awaiting_settlement { background: rgba(245,158,11,.15); color: #f59e0b; }
-    .status-badge.settled, .status-badge.closed { background: rgba(74,222,128,.15); color: #4ade80; }
+    .status-badge.awaiting_settlement { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
+    .status-badge.settled, .status-badge.closed { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
     .status-badge.cancelled, .status-badge.rejected, .status-badge.snapshot_blocked {
-      background: rgba(248,113,113,.15); color: #f87171;
+      background: var(--rw-rejected-bg); color: var(--rw-rejected-fg);
     }
 
     .row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .375rem; }

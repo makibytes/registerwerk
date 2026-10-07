@@ -136,7 +136,7 @@ class WebhookHardeningIT {
         String json = rest.exchange(url("/api/v1/me/webhooks/" + id + "/deliveries"), HttpMethod.GET,
                 req(null, false, "COMPANY_ADMIN"), String.class).getBody();
         assertThat(json).contains("\"outcome\":\"RECEIVER_ERROR\"").contains("\"eventId\"").contains("\"nextAttemptAt\"")
-                .doesNotContain("responseCode").doesNotContain("503");
+                .doesNotContain("responseCode").doesNotContainPattern("\\b503\\b"); // word-bounded: a microsecond like ".503562Z" is not the code
 
         // sweep claim: due rows are locked with SKIP LOCKED and leased
         List<UUID> claimed = tx.execute(s -> deliveries.claimDue(Instant.now(), 100).stream().map(WebhookDelivery::getId).toList());

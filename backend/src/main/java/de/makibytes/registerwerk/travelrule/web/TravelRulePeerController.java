@@ -58,6 +58,17 @@ public class TravelRulePeerController {
         return ResponseEntity.noContent().build();
     }
 
+    /** Explicit re-enable of a DISABLED peer (re-registering a peer never reactivates it). */
+    @PostMapping("/peers/{vaspId}/enable")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "TRAVEL_RULE_PEER_ENABLE")
+    public ResponseEntity<Void> enable(@PathVariable String vaspId, Authentication auth,
+            @RequestAttribute(name = StepUpAttributes.DUAL_CONTROL_APPROVER_ID, required = false) UUID approverId) {
+        peers.enable(vaspId, SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"),
+                approverId);
+        return ResponseEntity.noContent().build();
+    }
+
     /** Messages needing attention: FAILED/PENDING_SEND outbound, INCOMPLETE/CONFLICT/REJECTED_CASP inbound. */
     @GetMapping("/open")
     public List<Map<String, Object>> open() {

@@ -234,6 +234,7 @@ public class ScreeningService {
         List<ScreeningHitDto> reportable = new java.util.ArrayList<>();
         boolean anyBlocking = false;
         Instant now = Instant.now();
+        String subjectDigest = HitFingerprint.subjectDigest(subject);
         for (ScreeningHitDto h : hits) {
             ScreeningHit hit = new ScreeningHit();
             hit.setRunId(run.getId());
@@ -243,7 +244,8 @@ public class ScreeningService {
             hit.setMatchScore(BigDecimal.valueOf(h.matchScore()));
             hit.setCategory(parseCategory(h.category()));
             hit.setExternalId(h.externalId());
-            hit.setFingerprint(HitFingerprint.of(provider, h.listSource(), h.externalId(), h.matchedValue()));
+            hit.setFingerprint(HitFingerprint.of(provider, h.listSource(), h.externalId(), h.matchedValue(),
+                    h.recordVersion(), subjectDigest));
 
             ScreeningHit source = findCarryForwardSource(subject, hit, now);
             if (source != null) {
@@ -268,7 +270,8 @@ public class ScreeningService {
 
     /**
      * The original decision a new hit may inherit, or null. Carried only when ALL hold: same subject
-     * and fingerprint; the original is a false-positive acceptance with an accepting officer AND a
+     * and fingerprint (the fingerprint covers the provider record's version and the subject's identifying
+     * data, so a changed list entry or a changed subject never inherits); the original is a false-positive acceptance with an accepting officer AND a
      * second approver on file (SRE veto); it is younger than {@code accept-validity-days} counted from
      * the original decision; same category; and the new score is not above the original score plus
      * the tolerance. A confirmed PEP is inherited as a confirmation only (the hit stays unresolved).

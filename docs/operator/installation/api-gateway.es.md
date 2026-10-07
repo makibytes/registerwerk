@@ -56,7 +56,7 @@ El rate limiting, la `ip-restriction` de administración y la limitación de ini
 
 - Los nginx **sobrescriben** `X-Forwarded-For` con el par TCP observado (nunca añaden). Detrás del ingress de Helm, nginx restaura antes la dirección real mediante `ingress.trustedCidrs`.
 - Kong solo confía en `X-Forwarded-For` desde la red de nginx/ingress (`KONG_TRUSTED_IPS`, `KONG_REAL_IP_HEADER=X-Forwarded-For`, `KONG_REAL_IP_RECURSIVE=off`; en el chart `kong.env.trusted_ips`).
-- El backend solo confía en la cabecera desde `REGISTERWERK_AUTH_TRUSTED_PROXIES` (definido explícitamente en Compose y el chart).
+- El backend solo confía en la cabecera desde `REGISTERWERK_AUTH_TRUSTED_PROXIES` (Compose fija un valor por defecto para la demo local; el chart no tiene ninguno y no se renderiza hasta que nombre solo los pods de Kong y del nginx del operador, nunca un rango privado completo).
 - La lista de permitidos de administración de Compose incluye `192.168.0.0/16` y `::1` para la demo local. En Helm se genera a partir de `kong.adminAllowCidrs` (obligatorio, sin valor por defecto).
 
 `scripts/check-client-ip.sh` comprueba en una pila en ejecución que valores `X-Forwarded-For` falsificados no reinician el contador de límite. El ingress de API de Helm apunta a Kong, nunca al backend, y responde 404 a `/actuator/*` salvo health.

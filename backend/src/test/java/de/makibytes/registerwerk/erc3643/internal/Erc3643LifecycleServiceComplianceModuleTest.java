@@ -24,8 +24,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.datatypes.Address;
@@ -58,7 +56,6 @@ import static org.mockito.Mockito.when;
  * left bound with no limits after the operator saw an error.
  */
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class Erc3643LifecycleServiceComplianceModuleTest {
 
     private static final String COMPLIANCE = "0x00000000000000000000000000000000000000c0";
@@ -105,7 +102,7 @@ class Erc3643LifecycleServiceComplianceModuleTest {
         suite.setId(suiteId);
         suite.setAssetDeploymentId(deploymentId);
         suite.setComplianceAddress(COMPLIANCE);
-        when(suiteRepository.findById(suiteId)).thenReturn(Optional.of(suite));
+        org.mockito.Mockito.lenient().when(suiteRepository.findById(suiteId)).thenReturn(Optional.of(suite));
 
         AssetDeployment dep = new AssetDeployment();
         dep.setId(deploymentId);
@@ -113,15 +110,15 @@ class Erc3643LifecycleServiceComplianceModuleTest {
         dep.setChain(Chain.ETHEREUM);
         dep.setNetwork(Network.MAINNET);
         dep.setAssetId(assetId);
-        when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(dep));
-        when(holderRepository.findActiveByAssetId(eq(assetId), any(org.springframework.data.domain.Pageable.class)))
+        org.mockito.Mockito.lenient().when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(dep));
+        org.mockito.Mockito.lenient().when(holderRepository.findActiveByAssetId(eq(assetId), any(org.springframework.data.domain.Pageable.class)))
                 .thenReturn(org.springframework.data.domain.Page.empty());
-        when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
+        org.mockito.Mockito.lenient().when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
         EvmSigner signer = mock(EvmSigner.class);
-        when(signer.address()).thenReturn(SIGNER);
-        when(evmContractService.signer(any(ChainDescriptor.class))).thenReturn(signer);
+        org.mockito.Mockito.lenient().when(signer.address()).thenReturn(SIGNER);
+        org.mockito.Mockito.lenient().when(evmContractService.signer(any(ChainDescriptor.class))).thenReturn(signer);
 
-        when(evmContractService.call(eq(web3j), anyString(), any(Function.class))).thenAnswer(inv -> {
+        org.mockito.Mockito.lenient().when(evmContractService.call(eq(web3j), anyString(), any(Function.class))).thenAnswer(inv -> {
             Function fn = inv.getArgument(2);
             return switch (fn.getName()) {
                 case "owner" -> List.<Type>of(new Address(onChainOwner));
@@ -131,7 +128,7 @@ class Erc3643LifecycleServiceComplianceModuleTest {
                 default -> throw new IllegalArgumentException("unexpected call " + fn.getName());
             };
         });
-        when(complianceModuleRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.lenient().when(complianceModuleRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     private static String methodId(String signature) {

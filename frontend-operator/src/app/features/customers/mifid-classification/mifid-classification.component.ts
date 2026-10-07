@@ -183,10 +183,10 @@ import {
       display: inline-flex; align-items: center; padding: .25rem .625rem; border-radius: 4px;
       font-size: .75rem; font-weight: 700; letter-spacing: .02em;
     }
-    .category-badge.retail { background: rgba(96,165,250,.15); color: #60a5fa; }
-    .category-badge.professional { background: rgba(74,222,128,.15); color: #4ade80; }
+    .category-badge.retail { background: var(--rw-draft-bg); color: var(--rw-draft-fg); }
+    .category-badge.professional { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
     .category-badge.eligible_counterparty { background: rgba(167,139,250,.15); color: #a78bfa; }
-    .category-badge.unclassified { background: rgba(245,158,11,.15); color: #f59e0b; }
+    .category-badge.unclassified { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
 
     .mc-table { display: flex; flex-direction: column; }
     .mc-row {

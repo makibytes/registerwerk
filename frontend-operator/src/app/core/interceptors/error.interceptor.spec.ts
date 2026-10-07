@@ -10,13 +10,14 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 describe('errorInterceptor', () => {
     let httpMock: HttpTestingController;
     let http: HttpClient;
-    let authServiceSpy: MockedObject<Pick<AuthService, 'clearSession'>>;
+    let authServiceSpy: MockedObject<Pick<AuthService, 'clearSession' | 'markPasswordChangeRequired'>>;
     let snackBarSpy: MockedObject<Pick<MatSnackBar, 'open'>>;
     let router: Router;
 
     beforeEach(() => {
         authServiceSpy = {
-            clearSession: vi.fn().mockName("AuthService.clearSession")
+            clearSession: vi.fn().mockName("AuthService.clearSession"),
+            markPasswordChangeRequired: vi.fn().mockName("AuthService.markPasswordChangeRequired"),
         };
         snackBarSpy = {
             open: vi.fn().mockName("MatSnackBar.open")
@@ -59,6 +60,21 @@ describe('errorInterceptor', () => {
 
         expect(authServiceSpy.clearSession).toHaveBeenCalled();
         expect(router.navigate).not.toHaveBeenCalled();
+    });
+
+    it('treats 403 PASSWORD_CHANGE_REQUIRED as a routing signal, not an access-denied failure', () => {
+        let errored = false;
+        http.get('/api/v1/assets').subscribe({ error: () => (errored = true) });
+
+        httpMock.expectOne('/api/v1/assets').flush(
+            { status: 403, code: 'PASSWORD_CHANGE_REQUIRED', message: 'The password must be changed' },
+            { status: 403, statusText: 'Forbidden' });
+
+        expect(errored).toBe(true);
+        expect(authServiceSpy.markPasswordChangeRequired).toHaveBeenCalled();
+        expect(router.navigate).toHaveBeenCalledWith(['/change-password']);
+        expect(snackBarSpy.open).not.toHaveBeenCalled();
+        expect(authServiceSpy.clearSession).not.toHaveBeenCalled();
     });
 
     it('does not log out on a 403, but still propagates the error', () => {

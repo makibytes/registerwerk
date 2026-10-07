@@ -186,20 +186,16 @@ class WebhookDispatchServiceTest {
     }
 
     @Test
-    @DisplayName("legacy plaintext secret (pre-V28 row) still signs until the maintenance job encrypts it")
-    void legacyPlaintextSecretStillSigns() {
+    @DisplayName("Wave 5b: a plaintext secret column value is refused - no delivery is signed with it")
+    void plaintextSecretIsRefused() {
         subscription.setSecret("legacy-plain");
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<Map<String, String>> headers = ArgumentCaptor.forClass(Map.class);
-        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        when(sender.post(anyString(), body.capture(), headers.capture())).thenReturn(ok());
 
         service.dispatch(entityId, WebhookEventType.KYC_APPROVED, Map.of());
 
-        Map<String, String> h = headers.getValue();
-        assertThat(h.get("X-Registerwerk-Signature")).isEqualTo("v1=" + signingService.sign(
-                Long.parseLong(h.get("X-Registerwerk-Timestamp")), UUID.fromString(h.get("X-Registerwerk-Delivery")),
-                body.getValue(), "legacy-plain"));
+        WebhookDelivery delivery = deliveries.values().iterator().next();
+        assertThat(delivery.getOutcome()).isEqualTo(WebhookDeliveryOutcome.UNREACHABLE);
+        assertThat(delivery.getAttemptCount()).isEqualTo(1);
+        verify(sender, never()).post(anyString(), anyString(), anyMap());
     }
 
     @Test

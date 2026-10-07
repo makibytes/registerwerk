@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.asset.internal;
 
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.asset.api.RegisterFreezeGuard;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -45,14 +46,17 @@ public class HolderService {
     private final LegalEntityRepository legalEntityRepository;
     private final AssetDeploymentRepository deploymentRepository;
     private final HolderChangeRepository changeRepository;
+    private final RegisterClock registerClock;
 
     public HolderService(AssetHolderRepository assetHolderRepository,
                          de.makibytes.registerwerk.asset.api.AssetRepository assetRepository,
                          ApplicationEventPublisher eventPublisher,
                          LegalEntityRepository legalEntityRepository,
                          AssetDeploymentRepository deploymentRepository,
-                         HolderChangeRepository changeRepository) {
+                         HolderChangeRepository changeRepository,
+                         RegisterClock registerClock) {
         this.assetHolderRepository = assetHolderRepository;
+        this.registerClock = registerClock;
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
         this.legalEntityRepository = legalEntityRepository;
@@ -165,7 +169,7 @@ public class HolderService {
         holder.setInvestorId(investorId);
         holder.setWalletAddress(wallet);
         holder.setNominalAmount(nominalAmount != null ? nominalAmount : BigDecimal.ZERO);
-        holder.setAcquisitionDate(LocalDate.now());
+        holder.setAcquisitionDate(registerClock.today());
         AssetHolder saved = assetHolderRepository.save(holder);
         log.info("Added holder: assetId={}, investorId={}, wallet={}", assetId, investorId, walletAddress);
         Map<String, Object> after = attributeState(saved);
@@ -215,7 +219,7 @@ public class HolderService {
         holder.setInvestorId(investorId);
         holder.setWalletAddress(wallet);
         holder.setNominalAmount(amount);
-        holder.setAcquisitionDate(LocalDate.now());
+        holder.setAcquisitionDate(registerClock.today());
         if (individual) {
             holder.setEntryType(de.makibytes.registerwerk.deployment.api.EntryType.INDIVIDUAL);
             holder.setHolderReference(generateHolderReference());
@@ -249,7 +253,7 @@ public class HolderService {
         holder.setInvestorId(investorId);
         holder.setWalletAddress(wallet);
         holder.setNominalAmount(BigDecimal.ZERO);
-        holder.setAcquisitionDate(LocalDate.now());
+        holder.setAcquisitionDate(registerClock.today());
         AssetHolder saved = assetHolderRepository.save(holder);
         eventPublisher.publishEvent(new HolderEnteredEvent(saved.getId(), actorId, actorRole, correlationId));
         return saved;
@@ -281,7 +285,7 @@ public class HolderService {
         holder.setInvestorId(investorId);
         holder.setWalletAddress(wallet);
         holder.setNominalAmount(nominalAmount != null ? nominalAmount : BigDecimal.ZERO);
-        holder.setAcquisitionDate(LocalDate.now());
+        holder.setAcquisitionDate(registerClock.today());
         holder.setEntryType(de.makibytes.registerwerk.deployment.api.EntryType.INDIVIDUAL);
         holder.setHolderReference(generateHolderReference());
         holder.setIsConsumer(isConsumer);

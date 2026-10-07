@@ -162,7 +162,7 @@ import { Chain, Network, OnchainLevel, TokenStandard, Jurisdiction, Jurisdiction
                   </div>
                   @if (selectedTermSheetFile) {
                     <div class="termsheet-file-selected">
-                      <mat-icon style="color:#10b981">check_circle</mat-icon>
+                      <mat-icon style="color:var(--rw-text-success)">check_circle</mat-icon>
                       <span>{{ selectedTermSheetFile.name }}</span>
                       <button mat-icon-button type="button" (click)="clearTermSheet()">
                         <mat-icon>close</mat-icon>

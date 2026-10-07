@@ -32,7 +32,15 @@ describe('VaultService', () => {
         service.getVaultState('dep-1').subscribe();
         const req = httpMock.expectOne(`${base}/vault-state`);
         expect(req.request.method).toBe('GET');
-        req.flush({ assetId: 'a-1', latestNavPerShare: 1.05 });
+        req.flush(JSON.stringify({ assetId: 'a-1', latestNavPerShare: 1.05 }));
+    });
+
+    it('getVaultRequests() keeps BigInteger base units above 2^53 exact', () => {
+        let amounts: unknown[] = [];
+        service.getVaultRequests('dep-1').subscribe((rows) => (amounts = [rows[0].assetAmount, rows[0].shareAmount]));
+        httpMock.expectOne(r => r.url === `${base}/vault-requests`).flush(
+            '[{"id":"r","assetAmount":12345678901234567890123,"shareAmount":5000000000000000000}]');
+        expect(amounts).toEqual(['12345678901234567890123', '5000000000000000000']);
     });
 
     it('forceCancelRequest() POSTs destination + legal basis with step-up and dual-control tokens', () => {

@@ -1,6 +1,7 @@
 import { Injectable, computed, signal } from '@angular/core';
 import {
   type Address,
+  type Chain,
   type Hash,
   type PublicClient,
   type TypedDataDomain,
@@ -8,6 +9,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  defineChain,
 } from 'viem';
 import { erc20Abi } from './abi/repo-market.abi';
 
@@ -25,6 +27,7 @@ export class WalletService {
   readonly error = this._error.asReadonly();
   readonly isConnected = computed(() => this._address() !== null);
 
+  private pinnedChain: Chain | null = null;
   private walletClient: WalletClient | null = null;
   private publicClient: PublicClient | null = null;
   private detachListeners: (() => void) | null = null;
@@ -47,14 +50,13 @@ export class WalletService {
     this._error.set(null);
     try {
       const injected = this.injectedProvider as Parameters<typeof custom>[0];
-      const walletClient = createWalletClient({ transport: custom(injected) });
-      const [address] = await walletClient.requestAddresses();
+      const probe = createWalletClient({ transport: custom(injected) });
+      const [address] = await probe.requestAddresses();
       if (!address) {
         throw new Error('Wallet returned no accounts.');
       }
-      const chainId = await walletClient.getChainId();
-      this.walletClient = walletClient;
-      this.publicClient = createPublicClient({ transport: custom(injected) });
+      const chainId = await probe.getChainId();
+      this.pinChain(injected, chainId);
       this._address.set(address);
       this._chainId.set(chainId);
       this.attachListeners(injected);
@@ -73,6 +75,7 @@ export class WalletService {
     this.detachListeners = null;
     this.walletClient = null;
     this.publicClient = null;
+    this.pinnedChain = null;
     this._address.set(null);
     this._chainId.set(null);
   }
@@ -133,6 +136,36 @@ export class WalletService {
     if (current !== expectedChainId) {
       throw new Error(`Switch your wallet to ${label} to continue.`);
     }
+    // From here on viem re-checks the wallet's chain against this one at send time, so a switch between
+    // this check and the signature prompt fails closed instead of sending on the wrong network.
+    this.pinChain(this.injectedProvider as Parameters<typeof custom>[0], expectedChainId);
+  }
+
+  /** The chain the clients are pinned to (the connected chain until {@link ensureChain} pins a market's). */
+  get pinnedChainId(): number | null {
+    return this.pinnedChain?.id ?? null;
+  }
+
+  /** The viem chain object the clients are pinned to; other viem clients created for a send must use it too. */
+  get pinnedViemChain(): Chain | undefined {
+    return this.pinnedChain ?? undefined;
+  }
+
+  /**
+   * (Re)creates the viem clients WITH a `chain`: without one viem never compares the wallet's chain with the
+   * intended one when sending. Deliberately NOT done from `chainChanged`: a wallet that moves away from the
+   * pinned chain must make sends fail until `ensureChain` runs again, not silently retarget the clients.
+   */
+  private pinChain(injected: Parameters<typeof custom>[0], chainId: number): void {
+    const chain = defineChain({
+      id: chainId,
+      name: `Chain ${chainId}`,
+      nativeCurrency: { name: 'Native token', symbol: 'ETH', decimals: 18 },
+      rpcUrls: { default: { http: [] } },
+    });
+    this.pinnedChain = chain;
+    this.walletClient = createWalletClient({ chain, transport: custom(injected) });
+    this.publicClient = createPublicClient({ chain, transport: custom(injected) });
   }
 
   /** Signs a plain message (`personal_sign`) — e.g. the org-identity wallet-binding challenge. */
@@ -267,6 +300,14 @@ export class WalletService {
    * `ContractFunctionRevertedError.data` (somewhere in the `cause` chain) only when the error is in
    * the ABI passed to the call; the default `shortMessage` is a raw signature otherwise.
    */
+  private isChainMismatch(err: unknown): boolean {
+    for (let e: unknown = err, depth = 0; e && typeof e === 'object' && depth < 10; depth++) {
+      if ((e as { name?: string }).name === 'ChainMismatchError') return true;
+      e = (e as { cause?: unknown }).cause;
+    }
+    return false;
+  }
+
   private knownRevertMessage(err: unknown): string | null {
     for (let e: unknown = err, depth = 0; e && typeof e === 'object' && depth < 10; depth++) {
       const data = (e as { data?: { errorName?: string; args?: readonly unknown[] } }).data;
@@ -285,6 +326,9 @@ export class WalletService {
   private extractMessage(err: unknown, fallback: string): string {
     const known = this.knownRevertMessage(err);
     if (known) return known;
+    if (this.isChainMismatch(err)) {
+      return 'Your wallet is on a different network than this action needs. Switch the network and try again.';
+    }
     if (err && typeof err === 'object') {
       const withShort = err as { shortMessage?: string; message?: string };
       return withShort.shortMessage ?? withShort.message ?? fallback;

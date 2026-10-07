@@ -18,6 +18,7 @@ public record TravelRuleControlEvent(String eventType, String subjectType, UUID 
     public static final String WALLET_PROOF_REVOKED = "TRAVEL_RULE_WALLET_PROOF_REVOKED";
     public static final String PEER_CREATED = "TRAVEL_RULE_PEER_CREATED";
     public static final String PEER_DISABLED = "TRAVEL_RULE_PEER_DISABLED";
+    public static final String PEER_ENABLED = "TRAVEL_RULE_PEER_ENABLED";
     public static final String INBOUND_REJECTED = "TRAVEL_RULE_INBOUND_REJECTED";
     public static final String INBOUND_CONFLICT = "TRAVEL_RULE_INBOUND_CONFLICT";
     public static final String INBOUND_INCOMPLETE = "TRAVEL_RULE_INBOUND_INCOMPLETE";

@@ -42,13 +42,14 @@ class TravelRulePeerServiceTest {
         service = new TravelRulePeerService(jdbc, kek, mock(ApplicationEventPublisher.class),
                 new TravelRuleProperties(), Clock.fixed(NOW, ZoneOffset.UTC));
         // capture the encrypted key the service stores on registration
-        when(jdbc.update(anyString(), any(Object[].class))).thenAnswer(inv -> {
-            Object[] a = inv.getArguments();
-            for (Object o : a) {
-                if (o instanceof String s && s.startsWith("enc:v1:")) storedCiphertext = s;
-            }
-            return 1;
-        });
+        when(jdbc.queryForObject(anyString(), org.mockito.ArgumentMatchers.eq(Boolean.class), any(Object[].class)))
+                .thenAnswer(inv -> {
+                    Object[] a = inv.getArguments();
+                    for (Object o : a) {
+                        if (o instanceof String s && s.startsWith("enc:v1:")) storedCiphertext = s;
+                    }
+                    return Boolean.TRUE;
+                });
         when(jdbc.query(anyString(), org.mockito.ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Object>>any(),
                 any(Object[].class))).thenReturn(List.of(new TravelRulePeerService.PeerView(
                 "did:example:vasp1", "VASP One", null, "ACTIVE", NOW)));

@@ -4,9 +4,12 @@ import de.makibytes.registerwerk.travelrule.api.Ivms101;
 import de.makibytes.registerwerk.travelrule.internal.TravelRuleProperties;
 import de.makibytes.registerwerk.travelrule.internal.TravelRulePeerService;
 import de.makibytes.registerwerk.travelrule.internal.TravelRuleService;
+import de.makibytes.registerwerk.shared.ProductionMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
@@ -36,11 +39,18 @@ public class TravelRuleInboxController {
     private final byte[] legacyKey;
     private final boolean productionMode;
 
+    @Autowired
     TravelRuleInboxController(
             TravelRuleService service, TravelRulePeerService peers, TravelRuleProperties properties,
             ObjectMapper objectMapper,
             @Value("${registerwerk.travel-rule.inbox-api-key:}") String apiKey,
-            @Value("${REGISTERWERK_PRODUCTION_MODE:false}") boolean productionMode) {
+            Environment environment) {
+        this(service, peers, properties, objectMapper, apiKey, ProductionMode.resolve(environment));
+    }
+
+    TravelRuleInboxController(
+            TravelRuleService service, TravelRulePeerService peers, TravelRuleProperties properties,
+            ObjectMapper objectMapper, String apiKey, boolean productionMode) {
         this.service = service;
         this.peers = peers;
         this.properties = properties;

@@ -118,6 +118,32 @@ describe('WalletService chain/account tracking', () => {
     await expect(service.ensureChain(137, 'Polygon')).rejects.toThrow('Switch your wallet to Polygon (id 137)');
   });
 
+  it('pins the viem clients to a chain, so a send re-checks the wallet network at send time', async () => {
+    await service.connect();
+    expect(service.pinnedChainId).toBe(1);
+    await service.ensureChain(11155111, 'Sepolia');
+    expect(service.pinnedChainId).toBe(11155111);
+
+    // the wallet moves to Polygon after the check and before the signature prompt
+    handlers['chainChanged']('0x89');
+    chain = 137;
+    const client = (service as unknown as { walletClient: { sendTransaction(a: unknown): Promise<unknown> } }).walletClient;
+    const failure = await client.sendTransaction({ account: OWNER, to: TOKEN, value: 0n }).catch((e: unknown) => e);
+    const names: string[] = [];
+    for (let e: unknown = failure; e && typeof e === 'object'; e = (e as { cause?: unknown }).cause) names.push((e as { name: string }).name);
+    expect(names).toContain('ChainMismatchError');
+    expect(requests).not.toContain('eth_sendTransaction');
+    // and the user-facing message says what to do
+    expect((service as unknown as { extractMessage(e: unknown, f: string): string }).extractMessage(failure, 'x')).toMatch(/Switch the network/);
+  });
+
+  it('a chainChanged event never retargets the pinned chain', async () => {
+    await service.connect();
+    handlers['chainChanged']('0x89');
+    expect(service.chainId()).toBe(137);
+    expect(service.pinnedChainId).toBe(1);
+  });
+
   it('ensureChain fails closed for a market without a chain id', async () => {
     await service.connect();
     await expect(service.ensureChain(undefined)).rejects.toThrow(/unknown/);

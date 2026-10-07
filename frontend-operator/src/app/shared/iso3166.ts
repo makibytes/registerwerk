@@ -3,7 +3,7 @@
  * EwpgComplianceModule country block list use the numeric code; KYC records store alpha-2.
  * Mirrors the backend's {@code shared.Iso3166} table.
  */
-const ISO3166_NUMERIC: ReadonlyArray<readonly [string, number]> = [
+const ISO3166_NUMERIC: readonly (readonly [string, number])[] = [
   ['AD', 20],
   ['AE', 784],
   ['AF', 4],

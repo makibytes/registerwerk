@@ -70,6 +70,7 @@ class CorporateActionSnapshotGateTest {
         ca.setAssetId(UUID.randomUUID());
         ca.setStatus(status);
         ca.setAmountPerUnit(new BigDecimal("0.05"));
+        ca.setCurrency("EUR");
         ca.setRecordDate(LocalDate.now());
         ca.setPaymentDate(LocalDate.now().plusDays(5));
         return ca;

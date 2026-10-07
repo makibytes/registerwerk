@@ -94,6 +94,7 @@ class CorporateActionServiceTest {
         UUID actionId = UUID.randomUUID();
         CorporateAction ca = actionWithId(actionId, CorporateAction.Status.ANNOUNCED);
         ca.setAmountPerUnit(new BigDecimal("0.045")); // 4.5% coupon per unit of nominal
+        ca.setCurrency("EUR"); // Wave 5a: a cash action needs a valid currency (no silent 2-digit fallback)
         ca.setRecordDate(LocalDate.now());
         ca.setPaymentDate(LocalDate.now().plusDays(5));
 
@@ -283,7 +284,7 @@ class CorporateActionServiceTest {
     }
 
     @Test
-    @DisplayName("T3-05: entitlements are rounded HALF_EVEN to the currency minor unit; the residual is kept")
+    @DisplayName("T3-05: entitlements are rounded HALF_UP to the currency minor unit; the residual is kept")
     void snapshotRoundsPerHolderAndKeepsResidual() {
         init();
         UUID actionId = UUID.randomUUID();
@@ -304,6 +305,53 @@ class CorporateActionServiceTest {
         // 12.3456789 -> 12.35 ; 12.3580245789 -> 12.36
         assertThat(ca.getTotalAmount()).isEqualByComparingTo("24.71");
         assertThat(ca.getRoundingResidual()).isEqualByComparingTo("-0.0062965211");
+    }
+
+    @Test
+    @DisplayName("Wave 5a: half-cent entitlements round HALF_UP (0.025 -> 0.03, 0.075 -> 0.08), residual is exact")
+    void snapshotRoundsHalfCentsUp() {
+        init();
+        UUID actionId = UUID.randomUUID();
+        CorporateAction ca = actionWithId(actionId, CorporateAction.Status.ANNOUNCED);
+        ca.setAmountPerUnit(new BigDecimal("0.025"));
+        ca.setCurrency("EUR");
+        ca.setRecordDate(LocalDate.now().minusDays(1));
+        when(repository.findReadyToCompute(any())).thenReturn(List.of(ca));
+        when(repository.findDueForSettlement(any())).thenReturn(List.of());
+        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
+        when(entryRepository.existsByCorporateActionId(actionId)).thenReturn(false);
+        when(positionResolver.resolve(org.mockito.ArgumentMatchers.eq(ca.getAssetId()), any()))
+                .thenReturn(CorporateActionTestSupport.positionsOf(List.of(
+                        holder(UUID.randomUUID(), new BigDecimal("1")), holder(UUID.randomUUID(), new BigDecimal("3")))));
+
+        service.processDailyTransitions();
+
+        // HALF_EVEN (the old policy) paid 0.02 + 0.08 = 0.10
+        assertThat(ca.getTotalAmount()).isEqualByComparingTo("0.11");
+        assertThat(ca.getRoundingResidual()).isEqualByComparingTo("-0.010");
+    }
+
+    @Test
+    @DisplayName("Wave 5a: a cash action with an unknown currency is refused, not paid at a guessed 2 digits")
+    void snapshotRefusesAnUnknownCurrency() {
+        init();
+        UUID actionId = UUID.randomUUID();
+        CorporateAction ca = actionWithId(actionId, CorporateAction.Status.ANNOUNCED);
+        ca.setAmountPerUnit(new BigDecimal("1.00"));
+        ca.setCurrency("XXQ");
+        ca.setRecordDate(LocalDate.now().minusDays(1));
+        when(repository.findReadyToCompute(any())).thenReturn(List.of(ca));
+        when(repository.findDueForSettlement(any())).thenReturn(List.of());
+        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
+        when(entryRepository.existsByCorporateActionId(actionId)).thenReturn(false);
+        when(positionResolver.resolve(org.mockito.ArgumentMatchers.eq(ca.getAssetId()), any()))
+                .thenReturn(CorporateActionTestSupport.positionsOf(List.of(
+                        holder(UUID.randomUUID(), new BigDecimal("1000")))));
+
+        service.processDailyTransitions();
+
+        assertThat(ca.getStatus()).isNotEqualTo(CorporateAction.Status.COMPUTED);
+        verify(entryRepository, never()).save(any());
     }
 
     @Test

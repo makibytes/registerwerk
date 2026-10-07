@@ -163,10 +163,10 @@ class UserLifecycleIT {
     // ── 6-04 ─────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("the seeder creates the admin once with must_change_password and never touches it again")
+    @DisplayName("the seeder creates the admin once (no forced change in demo mode) and never touches it again")
     void seederIsCreateIfAbsentOnly() {
         AppUser admin = seededAdmin();
-        assertThat(admin.isMustChangePassword()).isTrue();
+        assertThat(admin.isMustChangePassword()).as("demo/dev mode keeps admin@local usable").isFalse();
         String originalHash = admin.getPasswordHash();
         String rotated = encoder.encode("Rotated-by-the-operator-1");
         jdbc.update("UPDATE app_user SET password_hash = ?, enabled = false, must_change_password = false WHERE id = ?",
@@ -180,7 +180,7 @@ class UserLifecycleIT {
                     .isNotEqualTo(originalHash);
             assertThat(after.isMustChangePassword()).isFalse();
         } finally {
-            jdbc.update("UPDATE app_user SET password_hash = ?, enabled = true, must_change_password = true WHERE id = ?",
+            jdbc.update("UPDATE app_user SET password_hash = ?, enabled = true, must_change_password = false WHERE id = ?",
                     originalHash, admin.getId());
         }
     }

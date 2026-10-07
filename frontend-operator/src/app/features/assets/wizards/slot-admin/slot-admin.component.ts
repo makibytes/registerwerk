@@ -10,7 +10,6 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatDialog } from '@angular/material/dialog';
 import { StepUpDialogComponent, StepUpDialogResult } from '../../../../shared/components/step-up/step-up-dialog.component';
-import { DecimalPipe } from '@angular/common';
 import { SlotService } from '../../../../core/api/slot.service';
 import { AssetSlot } from '../../../../core/models';
 
@@ -20,11 +19,13 @@ import { AssetSlot } from '../../../../core/models';
  * forced value transfer) that eWpG §17 / GwG §40 require the registry to be able
  * to execute.
  */
+import { RwDecimalPipe } from '@registerwerk/ui';
+
 @Component({
   selector: 'app-slot-admin',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, MatButtonModule, MatFormFieldModule, MatInputModule, MatIconModule, DecimalPipe],
+  imports: [FormsModule, MatButtonModule, MatFormFieldModule, MatInputModule, MatIconModule, RwDecimalPipe],
   template: `
     <div class="slot-shell">
       <header class="slot-header">
@@ -53,7 +54,7 @@ import { AssetSlot } from '../../../../core/models';
             <div class="s-row">
               <span class="mono">#{{ s.slotId }}</span>
               <span>{{ s.name || '—' }}</span>
-              <span class="mono">{{ s.supplyCap ? (+s.supplyCap | number) : '∞' }}</span>
+              <span class="mono">{{ s.supplyCap ? (s.supplyCap | rwDecimal:'1.0-0') : '∞' }}</span>
               <span [class.paused]="s.paused">{{ s.paused ? 'PAUSED' : 'ACTIVE' }}</span>
               <span class="actions">
                 @if (s.paused) {
@@ -161,8 +162,8 @@ import { AssetSlot } from '../../../../core/models';
   styles: [`
     :host {
       display: block;
-      --accent: var(--rw-accent, #F59E0B);
-      --border: rgba(245,158,11,.18);
+      --accent: var(--rw-accent);
+      --border: var(--rw-border);
     }
     .slot-shell { padding: 1.5rem 0; }
     .slot-header { margin-bottom: 1rem; }
@@ -171,15 +172,15 @@ import { AssetSlot } from '../../../../core/models';
       font-size: .625rem;
       letter-spacing: .2em;
       color: var(--accent);
-      background: rgba(245,158,11,.1);
+      background: var(--rw-accent-subtle);
       border: 1px solid var(--border);
       border-radius: 2px;
       padding: .2rem .625rem;
     }
     .slot-title { margin: .5rem 0 .25rem; font-size: 1.125rem; }
     .section-title { margin: 1.5rem 0 .5rem; font-size: .9375rem; }
-    .hint { font-size: .8125rem; color: var(--rw-text-secondary, #7b8aac); margin: 0 0 .75rem; max-width: 640px; }
-    .empty-note { color: var(--rw-text-secondary, #7b8aac); font-size: .875rem; }
+    .hint { font-size: .8125rem; color: var(--rw-text-secondary); margin: 0 0 .75rem; max-width: 640px; }
+    .empty-note { color: var(--rw-text-secondary); font-size: .875rem; }
     .slot-table { border: 1px solid var(--border); border-radius: 4px; }
     .s-row {
       display: grid;
@@ -188,16 +189,16 @@ import { AssetSlot } from '../../../../core/models';
       align-items: center;
       padding: .5rem .75rem;
       font-size: .8125rem;
-      border-bottom: 1px solid rgba(255,255,255,.04);
+      border-bottom: 1px solid var(--rw-border-subtle);
     }
-    .s-row.header { font-weight: 600; font-size: .75rem; color: var(--rw-text-secondary, #7b8aac); }
+    .s-row.header { font-weight: 600; font-size: .75rem; color: var(--rw-text-secondary); }
     .s-row:last-child { border-bottom: none; }
     .mono { font-family: 'IBM Plex Mono', monospace; }
-    .paused { color: #f87171; font-weight: 600; }
+    .paused { color: var(--rw-text-danger); font-weight: 600; }
     .actions { display: flex; gap: .5rem; }
     .inline-form { display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap; padding: .5rem 0; }
     .grow { flex: 1 1 220px; }
-    .btn-accent { background: var(--accent); color: #0e1124; }
+    .btn-accent { background: var(--accent); color: var(--rw-accent-contrast); }
   `],
 })
 export class SlotAdminComponent implements OnInit {

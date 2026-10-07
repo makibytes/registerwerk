@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.trading.internal;
 
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.trading.events.TradeListingCreatedEvent;
 import de.makibytes.registerwerk.trading.events.TradeExecutedEvent;
 import de.makibytes.registerwerk.trading.events.TradeListingCancelledEvent;
@@ -10,6 +11,7 @@ import de.makibytes.registerwerk.trading.events.TradeRefundedEvent;
 import de.makibytes.registerwerk.trading.events.TradeUnresolvedResolvedEvent;
 import de.makibytes.registerwerk.trading.events.TraderSettingsUpdatedEvent;
 import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.shared.Money;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.InvestorLimitGate;
@@ -55,6 +57,7 @@ public class TradingService {
     private static final Logger log = LoggerFactory.getLogger(TradingService.class);
 
     private final TradingProperties tradingProperties;
+    private final RegisterClock registerClock;
     private final CompanyTraderSettingsRepository settingsRepository;
     private final CompanyTraderWalletDefaultRepository walletDefaultRepository;
     private final TradeListingRepository tradeListingRepository;
@@ -101,8 +104,10 @@ public class TradingService {
             OrgMemberWalletRepository orgMemberWalletRepository,
             TradeCurrencyPolicy currencyPolicy,
             RelatedPartyCheck relatedPartyCheck,
-            RelatedPartyAlerts relatedPartyAlerts) {
+            RelatedPartyAlerts relatedPartyAlerts,
+            RegisterClock registerClock) {
         this.tradingProperties = tradingProperties;
+        this.registerClock = registerClock;
         this.settingsRepository = settingsRepository;
         this.walletDefaultRepository = walletDefaultRepository;
         this.tradeListingRepository = tradeListingRepository;
@@ -1030,13 +1035,13 @@ public class TradingService {
                     holder.setInvestorId(execution.getBuyerEntityId());
                     holder.setWalletAddress(execution.getWalletAddress());
                     holder.setNominalAmount(BigDecimal.ZERO);
-                    holder.setAcquisitionDate(LocalDate.now());
+                    holder.setAcquisitionDate(registerClock.today());
                     holder.setWhitelisted(false);
                     return holder;
                 });
         boolean newHolder = buyerHolder.getId() == null;
         buyerHolder.setNominalAmount(buyerHolder.getNominalAmount().add(execution.getExecutedQuantity()));
-        buyerHolder.setAcquisitionDate(LocalDate.now());
+        buyerHolder.setAcquisitionDate(registerClock.today());
         AssetHolder savedBuyer = assetHolderRepository.save(buyerHolder);
         // A brand-new buyer position is an initial entry (§19(2) no. 1); an
         // existing one that grew is a register change (§19(2) no. 2).

@@ -20,5 +20,16 @@ public record LoginResponse(
     boolean impersonating,
     long expiresAt,
     /** READ_ONLY or ACT_ON_BEHALF while {@code impersonating}, else null. The customer app shows a banner and disables writes in READ_ONLY. */
-    String impersonationMode
-) {}
+    String impersonationMode,
+    /**
+     * True when the account must change its password first ({@code must_change_password}): the session is
+     * restricted to {@code POST /api/v1/auth/change-password}, every other endpoint answers 403
+     * {@code PASSWORD_CHANGE_REQUIRED}.
+     */
+    boolean passwordChangeRequired
+) {
+    public LoginResponse(String userId, List<String> roles, String email, String name, String entityId,
+                         String entityName, boolean impersonating, long expiresAt, String impersonationMode) {
+        this(userId, roles, email, name, entityId, entityName, impersonating, expiresAt, impersonationMode, false);
+    }
+}

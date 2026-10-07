@@ -2,14 +2,20 @@ package de.makibytes.registerwerk.auth.api;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
+import de.makibytes.registerwerk.shared.ProductionMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.EnvironmentAware;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
 
 @Component
 @Validated
 @ConfigurationProperties(prefix = "registerwerk.auth")
-public class RegisterwerkAuthProperties {
+public class RegisterwerkAuthProperties implements EnvironmentAware {
+
+    /** Resolved through the one shared {@link ProductionMode}; a bare {@code new} (unit tests) is non-production. */
+    private ProductionMode productionMode = ProductionMode.of(false);
 
     private boolean entraEnabled = false;
     @NotBlank(message = "registerwerk.auth.dev-secret must not be blank")
@@ -109,7 +115,12 @@ public class RegisterwerkAuthProperties {
         if (linkByEmailWithoutVerification != null) {
             return linkByEmailWithoutVerification;
         }
-        return !"true".equalsIgnoreCase(System.getenv("REGISTERWERK_PRODUCTION_MODE"));
+        return !productionMode.enabled();
+    }
+
+    @Override
+    public void setEnvironment(Environment environment) {
+        this.productionMode = ProductionMode.of(environment);
     }
 
     public DefaultAdmin getDefaultAdmin() { return defaultAdmin; }

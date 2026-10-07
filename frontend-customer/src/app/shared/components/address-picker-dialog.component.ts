@@ -106,7 +106,7 @@ export interface AddressPickerDialogData {
       border-radius: 4px;
       flex-shrink: 0;
 
-      &.wallet { background: rgba(16,185,129,0.12); color: #10b981; }
+      &.wallet { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
       &.contract { background: rgba(99,102,241,0.12); color: #6366f1; }
     }
 
@@ -125,9 +125,9 @@ export interface AddressPickerDialogData {
       border-radius: 4px;
       flex-shrink: 0;
 
-      &.LOW { background: rgba(16,185,129,0.12); color: #10b981; }
-      &.MEDIUM { background: rgba(245,158,11,0.12); color: #f59e0b; }
-      &.HIGH { background: rgba(239,68,68,0.12); color: #ef4444; }
+      &.LOW { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+      &.MEDIUM { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
+      &.HIGH { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }
     }
 
     .empty-state {

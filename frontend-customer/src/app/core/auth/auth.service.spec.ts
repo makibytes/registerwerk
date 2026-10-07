@@ -29,7 +29,10 @@ describe('AuthService', () => {
             exitImpersonation: vi.fn().mockName("TokenSource.exitImpersonation"),
             getImpersonationMeta: vi.fn().mockName("TokenSource.getImpersonationMeta"),
             supportsImpersonation: vi.fn().mockName("TokenSource.supportsImpersonation"),
-            getProfile: vi.fn().mockName("TokenSource.getProfile")
+            getProfile: vi.fn().mockName("TokenSource.getProfile"),
+            isPasswordChangeRequired: vi.fn().mockName("TokenSource.isPasswordChangeRequired"),
+            markPasswordChangeRequired: vi.fn().mockName("TokenSource.markPasswordChangeRequired"),
+            changePassword: vi.fn().mockName("TokenSource.changePassword"),
         };
 
         TestBed.configureTestingModule({

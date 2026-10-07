@@ -34,8 +34,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
@@ -65,7 +63,6 @@ import static org.mockito.Mockito.when;
  * {@code addClaimTopic} ({@code onlyOwner}) reverted on every freshly deployed suite.
  */
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class Erc3643SuiteOwnershipTest {
 
     private static final String TOKEN = "0x00000000000000000000000000000000000000a1";
@@ -140,8 +137,8 @@ class Erc3643SuiteOwnershipTest {
             }
             return List.<Type>of(new Address(onChainOwner));
         });
-        when(trustedIssuerRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(claimTopicRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.lenient().when(trustedIssuerRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.lenient().when(claimTopicRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     private static Function named(String name) {
@@ -213,7 +210,7 @@ class Erc3643SuiteOwnershipTest {
                 mock(ExplorerUrlBuilder.class), mock(ChainConfigRepository.class), evmContractService,
                 evmTransactions, mock(ContractAddressConfig.class), mock(ClaimSigningService.class), txService);
         // One failing contract must not stop the others (or the deployment).
-        when(evmContractService.send(any(), any(), any(), eq(IR), any(Function.class)))
+        when(evmContractService.send(eq(chainConfigId), eq(web3j), eq(signer), eq(IR), any(Function.class)))
                 .thenThrow(new RuntimeException("rpc down"));
 
         deploymentService.acceptSuiteOwnership(chainConfigId, web3j, signer, suite);

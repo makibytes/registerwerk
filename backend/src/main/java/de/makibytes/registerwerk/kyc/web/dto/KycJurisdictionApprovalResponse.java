@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.kyc.api.KycJurisdictionApproval;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import de.makibytes.registerwerk.kyc.events.KycRejectionCategory;
 import java.util.UUID;
 
 /**
@@ -26,6 +27,22 @@ public record KycJurisdictionApprovalResponse(
             a.getId(), a.getEntityId(), a.getJurisdiction().name(),
             a.getJurisdiction().displayName, a.getStatus().name(),
             a.getApprovedBy(), a.getApprovedAt(), a.getExpiresAt(),
-            a.getRejectionReason(), a.getOverrideNote());
+            customerVisibleReason(a.getRejectionReason()), a.getOverrideNote());
+    }
+
+    /**
+     * The rejection reason is shown to the customer, so only a fixed {@link KycRejectionCategory} may leave the
+     * platform. Rows written before that rule hold the operator's free text; those read as CONTACT_SUPPORT.
+     */
+    static String customerVisibleReason(String stored) {
+        if (stored == null || stored.isBlank()) {
+            return null;
+        }
+        for (KycRejectionCategory c : KycRejectionCategory.values()) {
+            if (c.name().equals(stored)) {
+                return stored;
+            }
+        }
+        return KycRejectionCategory.CONTACT_SUPPORT.name();
     }
 }

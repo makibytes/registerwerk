@@ -147,6 +147,19 @@ export class AuthService {
     this.tokens.logout();
   }
 
+  /** True while the account must set a new password before anything else works (restricted session). */
+  isPasswordChangeRequired(): boolean {
+    return this.tokens.isPasswordChangeRequired();
+  }
+
+  markPasswordChangeRequired(): void {
+    this.tokens.markPasswordChangeRequired();
+  }
+
+  changePassword(currentPassword: string, newPassword: string): Observable<void> {
+    return this.tokens.changePassword(currentPassword, newPassword);
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────────
 
   private payload(): Record<string, unknown> | null {

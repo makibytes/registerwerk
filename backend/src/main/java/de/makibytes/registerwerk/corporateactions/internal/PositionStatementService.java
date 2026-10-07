@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.corporateactions.internal;
 
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.asset.api.RegisterReconciliationGuard;
@@ -47,11 +48,14 @@ public class PositionStatementService {
     private final AssetRepository assetRepository;
     private final LegalEntityRepository entityRepository;
     private final DocumentSigningService signingService;
+    private final RegisterClock registerClock;
 
     PositionStatementService(AssetHolderRepository holderRepository,
                               AssetRepository assetRepository,
                               LegalEntityRepository entityRepository,
-                              DocumentSigningService signingService) {
+                              DocumentSigningService signingService,
+                              RegisterClock registerClock) {
+        this.registerClock = registerClock;
         this.holderRepository = holderRepository;
         this.assetRepository = assetRepository;
         this.entityRepository = entityRepository;
@@ -106,7 +110,7 @@ public class PositionStatementService {
             PdfHelper.writeText(content, MARGIN, y, fontBold, 18, "Depotauszug / Position Statement");
             y -= 25;
 
-            PdfHelper.writeText(content, MARGIN, y, fontRegular, 10, "Datum / Date: " + LocalDate.now().format(DATE_FMT));
+            PdfHelper.writeText(content, MARGIN, y, fontRegular, 10, "Datum / Date: " + registerClock.today().format(DATE_FMT));
             y -= 15;
 
             y -= 10;

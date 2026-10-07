@@ -67,7 +67,7 @@ import { CompanyUser, UserRole } from '../../../core/models';
   `,
   styles: [`
     .full-width { width: 100%; margin-bottom: 8px; }
-    .error-message { color: #c62828; font-size: 13px; }
+    .error-message { color: var(--rw-text-danger); font-size: 13px; }
     mat-dialog-content { display: flex; flex-direction: column; padding-top: 16px !important; }
   `]
 })

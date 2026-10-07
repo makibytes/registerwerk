@@ -42,6 +42,14 @@ class UserSessionGuardFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(UserSessionGuardFilter.class);
     static final String REASON_DUAL_CONTROL_TOKEN = "dual_control_token";
+    /** Stable machine-readable code of the 403 a must-change-password session gets on every other endpoint. */
+    static final String CODE_PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED";
+    static final String REASON_PASSWORD_CHANGE = "password_change_required";
+    static final String CHANGE_PASSWORD_PATH = "/api/v1/auth/change-password";
+    /** Session rehydration stays reachable so the SPA can show the change-password screen after a reload. */
+    static final String SESSION_PATH = "/api/v1/auth/session";
+    /** Logout stays reachable so a restricted session can always be dropped. */
+    static final String LOGOUT_PATH = "/api/v1/public/auth/logout";
 
     private final SessionStateService state;
     private final MeterRegistry meters;
@@ -62,6 +70,9 @@ class UserSessionGuardFilter extends OncePerRequestFilter {
             return;
         }
         String reason = rejectionReason(jwtAuth.getToken());
+        if (REASON_PASSWORD_CHANGE.equals(reason) && isPasswordChangeEndpoint(request)) {
+            reason = null;
+        }
         if (reason != null) {
             SecurityContextHolder.clearContext();
             meters.counter("registerwerk_session_rejections_total", "reason", reason).increment();
@@ -75,12 +86,30 @@ class UserSessionGuardFilter extends OncePerRequestFilter {
                         "{\"status\":403,\"message\":\"A dual-control approver token is not a session token\"}");
                 return;
             }
+            if (REASON_PASSWORD_CHANGE.equals(reason)) {
+                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                response.setContentType("application/json");
+                response.getWriter().write("{\"status\":403,\"code\":\"" + CODE_PASSWORD_CHANGE_REQUIRED
+                        + "\",\"message\":\"The password must be changed before this account can be used: "
+                        + "POST /api/v1/auth/change-password\"}");
+                return;
+            }
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setHeader("WWW-Authenticate",
                     "Bearer error=\"invalid_token\", error_description=\"session no longer valid\"");
             return;
         }
         chain.doFilter(request, response);
+    }
+
+    private static boolean isPasswordChangeEndpoint(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        if (path == null) {
+            return false;
+        }
+        return (CHANGE_PASSWORD_PATH.equals(path) && "POST".equals(request.getMethod()))
+                || (SESSION_PATH.equals(path) && "GET".equals(request.getMethod()))
+                || LOGOUT_PATH.equals(path);
     }
 
     /** @return a short metric-safe reason, or null when the session is acceptable */
@@ -116,6 +145,12 @@ class UserSessionGuardFilter extends OncePerRequestFilter {
         }
         if (user.entityTerminated()) {
             return "entity_closed";
+        }
+        // must_change_password: a locally minted session may do nothing but change the password - judged by the
+        // account state (covers any token minted before the flag was set) AND by the restricted token marker.
+        if (local && (user.mustChangePassword()
+                || JwtMintingService.USE_PASSWORD_CHANGE.equals(jwt.getClaimAsString(JwtMintingService.CLAIM_USE)))) {
+            return REASON_PASSWORD_CHANGE;
         }
         if (local && Boolean.TRUE.equals(jwt.getClaimAsBoolean("imp"))) {
             UUID sessionId = parse(jwt.getId());

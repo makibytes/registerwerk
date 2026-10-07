@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.chain.web.dto;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -26,4 +27,15 @@ public record ChainConfigCreateRequest(
         @Positive Integer avgBlockSeconds
         // No finalitySource field: it is fully auto-derived from the chain's node set — see
         // ChainConfig.FinalitySource's javadoc. There is nothing for an operator to set here.
-) {}
+) {
+    /**
+     * An EVM chain row without {@code chainId} would sign with whatever the node answers to
+     * {@code eth_chainId} (or refuse every submission, see {@code UnpinnedEvmChainPreflight}): the id pins the
+     * network the signer is allowed to sign for, so it is mandatory for EVM chains. Other chain families have no
+     * EIP-155 id and may omit it.
+     */
+    @AssertTrue(message = "chainId is required for EVM chains (it pins the network the signer may sign for)")
+    public boolean isChainIdProvidedForEvm() {
+        return chainType == null || !"EVM".equalsIgnoreCase(chainType) || chainId != null;
+    }
+}

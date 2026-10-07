@@ -14,8 +14,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -36,7 +34,6 @@ import static org.mockito.Mockito.when;
  * Fri 27 Jun (offset 1), announcement Fri 20 Jun (lead 5 business days).
  */
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("BondMaturityJob unit tests")
 class BondMaturityJobTest {
 
@@ -62,7 +59,7 @@ class BondMaturityJobTest {
         t.setMaturityDate(MATURITY);
         t.setFaceValue(new BigDecimal("1000"));
         t.setCurrencyIso("EUR");
-        when(bondTermsRepository.findByBondStatus(status)).thenReturn(List.of(t));
+        org.mockito.Mockito.lenient().when(bondTermsRepository.findByBondStatus(status)).thenReturn(List.of(t));
         when(bondTermsRepository.findById(t.getAssetId())).thenReturn(Optional.of(t));
         return t;
     }
@@ -133,7 +130,8 @@ class BondMaturityJobTest {
         jobOn(MATURITY.plusDays(7)).processMaturitiesAndDefaults();
         assertThat(t.getBondStatus()).isEqualTo(BondStatus.OVERDUE);
 
-        when(bondTermsRepository.findByBondStatus(BondStatus.OVERDUE)).thenReturn(List.of(t));
+        // lenient doReturn: re-stubs a method the job also calls with other statuses (strict stubs flag the mismatch)
+        org.mockito.Mockito.lenient().doReturn(List.of(t)).when(bondTermsRepository).findByBondStatus(BondStatus.OVERDUE);
         jobOn(MATURITY.plusDays(8)).processMaturitiesAndDefaults();
         assertThat(t.getBondStatus()).isEqualTo(BondStatus.DEFAULTED);
     }
@@ -314,7 +312,6 @@ class BondMaturityJobTest {
     @DisplayName("9A-04R: a redemption sitting in AWAITING_SETTLEMENT (manual-settle lag) is operator-side, never DEFAULTED")
     void awaitingSettlementIsNeverEscalated() {
         AssetBondTerms t = terms(BondStatus.OVERDUE);
-        when(corporateActionRepository.existsActiveRedemptionForAsset(t.getAssetId())).thenReturn(true);
         CorporateAction waiting = operatorWaitingRedemption(CorporateAction.Status.AWAITING_SETTLEMENT, true);
         when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of(waiting));
 
@@ -358,7 +355,7 @@ class BondMaturityJobTest {
         when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of(unsettled));
         jobOn(MATURITY.plusDays(1)).processMaturitiesAndDefaults();     // MATURED -> OVERDUE
         jobOn(MATURITY.plusDays(2)).processMaturitiesAndDefaults();     // still OVERDUE: no new event
-        when(bondTermsRepository.findByBondStatus(BondStatus.OVERDUE)).thenReturn(List.of(t));
+        org.mockito.Mockito.lenient().when(bondTermsRepository.findByBondStatus(BondStatus.OVERDUE)).thenReturn(List.of(t));
         jobOn(MATURITY.plusDays(8)).processMaturitiesAndDefaults();     // OVERDUE -> DEFAULTED
 
         assertThat(publishedAuditable()).extracting(e -> e.eventType())

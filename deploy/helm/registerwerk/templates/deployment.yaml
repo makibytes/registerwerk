@@ -1,6 +1,9 @@
 {{- if and .Values.postgresql.enabled .Values.cloudSqlProxy.enabled }}
 {{- fail "postgresql.enabled and cloudSqlProxy.enabled are mutually exclusive" }}
 {{- end }}
+{{- if not (index .Values.env "REGISTERWERK_AUTH_TRUSTED_PROXIES") }}
+{{- fail "env.REGISTERWERK_AUTH_TRUSTED_PROXIES is required (regex of the pods allowed to assert X-Forwarded-For to the backend: Kong and the operator nginx; never a whole private range)" }}
+{{- end }}
 {{- $ctx := dict "context" . "component" "backend" }}
 apiVersion: apps/v1
 kind: Deployment

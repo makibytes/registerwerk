@@ -145,7 +145,7 @@ import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/compo
       background: var(--rw-surface-soft, rgba(0,0,0,0.06));
       font-weight: 600;
     }
-    .chip.open { background: rgba(245,158,11,.15); color: #f59e0b; }
+    .chip.open { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
     .notes { font-size: 12px; color: var(--rw-text-secondary); cursor: help; }
     .hint { font-size: 13px; color: var(--rw-text-secondary); margin: 0; }
   `],

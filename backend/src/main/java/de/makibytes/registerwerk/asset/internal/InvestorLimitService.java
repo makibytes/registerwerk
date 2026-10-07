@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.asset.internal;
 
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.InvestorLimit;
 import de.makibytes.registerwerk.asset.api.InvestorLimitGate;
@@ -36,8 +37,11 @@ public class InvestorLimitService implements InvestorLimitGate {
 
     private final InvestorLimitRepository repository;
     private final ApplicationEventPublisher events;
+    private final RegisterClock registerClock;
 
-    public InvestorLimitService(InvestorLimitRepository repository, ApplicationEventPublisher events) {
+    public InvestorLimitService(InvestorLimitRepository repository, ApplicationEventPublisher events,
+                                RegisterClock registerClock) {
+        this.registerClock = registerClock;
         this.repository = repository;
         this.events = events;
     }
@@ -68,7 +72,7 @@ public class InvestorLimitService implements InvestorLimitGate {
     @Transactional(readOnly = true)
     public boolean isLockedUp(UUID assetId, UUID investorEntityId) {
         LocalDate until = lockupUntil(assetId, investorEntityId);
-        return until != null && LocalDate.now().isBefore(until);
+        return until != null && registerClock.today().isBefore(until);
     }
 
     /** Creates or replaces the override row for this (asset, investor) pair. */

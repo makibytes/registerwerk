@@ -76,7 +76,7 @@ import { AuthService } from '../../../core/auth/auth.service';
     <ng-template #createDialog>
       <h2 mat-dialog-title>Create Holder Block (Sperrvermerk)</h2>
       <mat-dialog-content style="display:flex;flex-direction:column;gap:12px;min-width:460px;padding-top:8px">
-        <div style="font-size:12px;color:var(--rw-text-secondary);padding:10px 12px;background:rgba(239,68,68,0.07);border-radius:6px;border:1px solid rgba(239,68,68,0.18)">
+        <div style="font-size:12px;color:var(--rw-text-secondary);padding:10px 12px;background:var(--rw-rejected-bg);border-radius:6px;border:1px solid color-mix(in srgb, var(--rw-rejected-fg) 30%, transparent)">
           This action requires <strong>step-up authentication and dual control (4-eyes)</strong>.
           The block will be confirmed in the next step.
         </div>

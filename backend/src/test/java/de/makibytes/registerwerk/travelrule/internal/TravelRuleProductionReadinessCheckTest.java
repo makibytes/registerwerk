@@ -7,6 +7,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class TravelRuleProductionReadinessCheckTest {
 
     @Test
+    void legacySharedKeyIsRefusedWhenProductionModeComesFromTheDashDProperty() {
+        // Wave 5a: the check used @Value("${REGISTERWERK_PRODUCTION_MODE}"); -Dregisterwerk.production-mode=true never reached it
+        TravelRuleProperties properties = new TravelRuleProperties();
+        withOwnVasp(properties);
+        properties.setProtocol("TRP");
+        properties.setLegacySharedKey(true);
+        var env = new org.springframework.mock.env.MockEnvironment()
+                .withProperty(de.makibytes.registerwerk.shared.ProductionMode.PROPERTY_NAME, "true");
+
+        assertThatThrownBy(new TravelRuleProductionReadinessCheck(properties, "", env)::check)
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void productionRejectsNoopTransport() {
         TravelRuleProperties properties = new TravelRuleProperties();
         withOwnVasp(properties);

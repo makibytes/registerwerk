@@ -50,6 +50,7 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
     .message.operator { align-self: flex-end; background: var(--rw-accent-bg, rgba(245,158,11,0.10)); }
     .message.customer { align-self: flex-start; background: var(--rw-border-subtle); }
     .message-meta { font-size: 11px; color: var(--rw-text-muted); margin-bottom: 4px; }
+    .read-only-note { margin: 8px 0 0; font-size: 12px; color: var(--rw-text-secondary); }
     .reply-row { display: flex; gap: 12px; align-items: flex-end; }
     .spinner-wrap { display: flex; justify-content: center; padding: 48px 0; }
     .load-error { display: grid; justify-items: center; gap: 10px; padding: 48px 16px; color: var(--rw-text-secondary); text-align: center; }
@@ -146,16 +147,20 @@ import { SupportTicket, SupportTicketMessage } from '../../../core/models';
           }
         </div>
 
-        <div class="reply-row">
-          <mat-form-field appearance="outline" style="flex:1">
-            <mat-label>Reply</mat-label>
-            <textarea matInput rows="2" [(ngModel)]="replyBody"></textarea>
-          </mat-form-field>
-          <button type="button" mat-raised-button color="primary" [disabled]="!replyBody.trim() || sending" (click)="sendReply()">
-            <mat-icon>send</mat-icon>
-            Send
-          </button>
-        </div>
+        @if (canManage) {
+          <div class="reply-row">
+            <mat-form-field appearance="outline" style="flex:1">
+              <mat-label>Reply</mat-label>
+              <textarea matInput rows="2" [(ngModel)]="replyBody"></textarea>
+            </mat-form-field>
+            <button type="button" mat-raised-button color="primary" [disabled]="!replyBody.trim() || sending" (click)="sendReply()">
+              <mat-icon>send</mat-icon>
+              Send
+            </button>
+          </div>
+        } @else {
+          <p class="read-only-note">Read-only role: replying, assigning and resolving tickets is reserved for registry administrators and compliance officers.</p>
+        }
       } @else if (loadError) {
         <div class="load-error" role="alert">
           <mat-icon>error_outline</mat-icon>
@@ -246,7 +251,7 @@ export class SupportTicketDetailComponent implements OnInit {
 
   sendReply(): void {
     const body = this.replyBody.trim();
-    if (!body) return;
+    if (!body || !this.canManage) return;
     this.sending = true;
     this.cdr.markForCheck();
     this.supportService.addMessage(this.id, body).subscribe({

@@ -20,7 +20,11 @@ remappings = [
     "forge-std/=lib/forge-std/src/",
     "@erc3643/=lib/erc3643/contracts/",
     "@onchain-id/solidity/=lib/onchain-id/",
-    "@fhevm/=lib/fhevm/"
+    "@fhevm/=lib/fhevm/",
+    # eth-infinitism/account-abstraction v0.8.0 (GPL-3.0 / MIT): a pinned submodule used ONLY by
+    # test/ecosystem/EwpgPaymaster.t.sol to instantiate the real EntryPoint; nothing in src/ or script/
+    # imports it, so it is never deployed or shipped with the repo's own (proprietary) sources.
+    "@account-abstraction/contracts/=lib/account-abstraction/contracts/"
 ]
 fs_permissions = [
     { access = "read-write", path = "./" },

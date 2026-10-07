@@ -1,3 +1,4 @@
+import { kycRejectionText } from '@registerwerk/ui';
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -364,7 +365,8 @@ export class KycReviewComponent implements OnInit {
 
   jurisdictionNote(jur: Jurisdiction): string {
     const a = this.review?.jurisdictionApprovals.find(x => x.jurisdiction === jur);
-    return a?.rejectionReason ?? a?.overrideNote ?? '';
+    // The stored rejection is a fixed category (the free-text reason lives in the audit trail only).
+    return kycRejectionText(a?.rejectionReason) ?? a?.overrideNote ?? '';
   }
 
   downloadDoc(doc: KycReviewDocument): void {

@@ -6,7 +6,7 @@ import { LoginComponent } from './login.component';
 import { AuthService } from './auth.service';
 
 describe('LoginComponent', () => {
-    let authServiceSpy: MockedObject<Pick<AuthService, 'loginWithCredentials'>>;
+    let authServiceSpy: MockedObject<Pick<AuthService, 'loginWithCredentials' | 'isPasswordChangeRequired'>>;
     let router: Router;
 
     function createComponent() {
@@ -17,7 +17,8 @@ describe('LoginComponent', () => {
 
     beforeEach(() => {
         authServiceSpy = {
-            loginWithCredentials: vi.fn().mockName("AuthService.loginWithCredentials")
+            loginWithCredentials: vi.fn().mockName("AuthService.loginWithCredentials"),
+            isPasswordChangeRequired: vi.fn().mockName("AuthService.isPasswordChangeRequired").mockReturnValue(false),
         };
 
         TestBed.configureTestingModule({
@@ -76,6 +77,18 @@ describe('LoginComponent', () => {
         expect(authServiceSpy.loginWithCredentials).toHaveBeenCalledWith('admin@example.com', 'hunter2');
         expect(fixture.componentInstance.loading).toBe(false);
         expect(router.navigate).toHaveBeenCalledWith(['/dashboard']);
+    });
+
+    it('submit() routes a must_change_password session to /change-password instead of the dashboard', () => {
+        authServiceSpy.loginWithCredentials.mockReturnValue(of(void 0));
+        authServiceSpy.isPasswordChangeRequired.mockReturnValue(true);
+        const fixture = createComponent();
+        fixture.componentInstance.form.setValue({ email: 'admin@example.com', password: 'changeme' });
+
+        fixture.componentInstance.submit();
+
+        expect(router.navigate).toHaveBeenCalledWith(['/change-password']);
+        expect(router.navigate).not.toHaveBeenCalledWith(['/dashboard']);
     });
 
     it('submit() sets loading synchronously before the auth call resolves', () => {

@@ -1,9 +1,12 @@
 package de.makibytes.registerwerk.travelrule.internal;
 
+import de.makibytes.registerwerk.shared.ProductionMode;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
@@ -18,10 +21,15 @@ class TravelRuleProductionReadinessCheck {
     private final String inboxApiKey;
     private final boolean productionMode;
 
+    @Autowired
     TravelRuleProductionReadinessCheck(
             TravelRuleProperties properties,
             @Value("${registerwerk.travel-rule.inbox-api-key:}") String inboxApiKey,
-            @Value("${REGISTERWERK_PRODUCTION_MODE:false}") boolean productionMode) {
+            Environment environment) {
+        this(properties, inboxApiKey, ProductionMode.resolve(environment));
+    }
+
+    TravelRuleProductionReadinessCheck(TravelRuleProperties properties, String inboxApiKey, boolean productionMode) {
         this.properties = properties;
         this.inboxApiKey = inboxApiKey;
         this.productionMode = productionMode;

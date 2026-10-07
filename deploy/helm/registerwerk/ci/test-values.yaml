@@ -8,3 +8,6 @@ kong:
   adminAllowCidrs: ["203.0.113.0/24"]
   env:
     trusted_ips: "10.8.0.0/14"
+env:
+  # Regex of the proxy pods fronting the backend (Kong + operator nginx), here the same example range.
+  REGISTERWERK_AUTH_TRUSTED_PROXIES: '10\.8\.\d+\.\d+'

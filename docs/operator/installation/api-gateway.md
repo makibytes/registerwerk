@@ -62,8 +62,9 @@ client address, so a client-supplied `X-Forwarded-For` must never be believed:
   `KONG_REAL_IP_HEADER=X-Forwarded-For`, `KONG_REAL_IP_RECURSIVE=off` in `docker-compose.yml`;
   `kong.env.trusted_ips` in the chart). A caller that reaches the published Kong port directly is
   limited by its own address.
-- The backend trusts the header only from `REGISTERWERK_AUTH_TRUSTED_PROXIES` (set explicitly in
-  Compose and the chart; narrow it to your network).
+- The backend trusts the header only from `REGISTERWERK_AUTH_TRUSTED_PROXIES` (Compose sets a
+  local-demo default; the chart has none and refuses to render until it names only the Kong and operator
+  nginx pods, never a whole private range).
 - The Compose admin allow list includes `192.168.0.0/16` and `::1` so the local demo works (on
   Docker Desktop the browser arrives from the VM gateway). In Helm the list is rendered from
   `kong.adminAllowCidrs` (required, no default): set your operator networks.

@@ -44,7 +44,7 @@ the actuator path (see below).
 
 The API ingress (`ingress.*`) targets Kong's proxy Service (`<release>-kong-proxy`), never the
 backend Service. With `kong.enabled=false` the chart refuses to render unless you name a Service in
-`ingress.backendService`. Three inputs have no default and make the chart fail to render until you
+`ingress.backendService`. Four inputs have no default and make the chart fail to render until you
 set them:
 
 - `ingress.trustedCidrs` — the ingress controller's pod CIDRs (the frontend nginx pods restore the
@@ -53,9 +53,10 @@ set them:
   customer-frontend pods). `real_ip_recursive` stays off because those hops overwrite the header.
 - `kong.adminAllowCidrs` — the operator networks allowed on `/api/v1/admin/**`; `files/kong.yml` is
   rendered from it.
-
-Set `env.REGISTERWERK_AUTH_TRUSTED_PROXIES` to a regex of your pod CIDR so the backend's login
-throttle sees the real client behind Kong.
+- `env.REGISTERWERK_AUTH_TRUSTED_PROXIES` — a Java regex matching only the pods that front the backend
+  (Kong and the operator nginx), so the login throttle sees the real client behind Kong. Never a whole
+  private range (`10/8`, `172.16/12`): every in-cluster client could then choose its own throttle
+  bucket with a forged `X-Forwarded-For`.
 
 ### Blocking /actuator at the ingress
 

@@ -35,6 +35,8 @@ class PositionStatementServiceTest {
     @Mock private AssetRepository assetRepository;
     @Mock private LegalEntityRepository entityRepository;
     @Mock private DocumentSigningService signingService;
+    @org.mockito.Spy private de.makibytes.registerwerk.shared.RegisterClock registerClock =
+            new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemDefaultZone(), java.time.ZoneId.systemDefault());
 
     @InjectMocks
     private PositionStatementService service;

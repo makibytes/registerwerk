@@ -140,8 +140,9 @@ export class IssuanceService {
 
   /**
    * Burn is a §26 Einziehung (T3-01): the backend requires an ASSET_TOKEN_ADMIN grant, step-up and a
-   * second approver. `approvalToken` is a registry administrator's step-up token scoped to
-   * `ISSUER_BURN_EWG26`; `stepUpToken` replaces the session bearer under built-in sign-in. Under
+   * second approver. `approvalToken` is the single-use token CLAIMED from the approval queue for exactly this
+   * request (action + method/path/query + body; never an unscoped or hand-pasted token); `stepUpToken` is the
+   * initiator's own ordinary step-up token and replaces the session bearer under built-in sign-in. Under
    * Entra it is omitted and the error interceptor answers the claims challenge.
    */
   burn(assetId: string, depId: string, body: { fromAddress: string; amount: string },

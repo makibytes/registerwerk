@@ -341,7 +341,8 @@ export class LoginComponent {
     this.authService.loginWithCredentials(email, password).subscribe({
       next: () => {
         this.loading = false;
-        this.router.navigate(['/dashboard']);
+        // must_change_password: the session only works for the change-password screen.
+        this.router.navigate([this.authService.isPasswordChangeRequired() ? '/change-password' : '/dashboard']);
       },
       error: (err: { status?: number; headers?: { get(name: string): string | null }; error?: { message?: string } }) => {
         this.loading = false;

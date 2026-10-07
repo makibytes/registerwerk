@@ -298,7 +298,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
                     @for (c of upcomingCoupons; track c.periodNo) {
                       <li>
                         {{ c.paymentDate | date:'mediumDate' }} —
-                        @if (c.amountPerUnit != null) {
+                        @if (c.amountPerUnit !== null && c.amountPerUnit !== undefined) {
                           {{ c.amountPerUnit | number:'1.2-6' }} {{ bondTerms.currencyIso }} per unit
                         } @else {
                           amount set when the reference rate is fixed
@@ -328,7 +328,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
             <mat-card-content>
               @if (identitySection.data) {
                 <div class="identity-row">
-                  <mat-icon [style.color]="identitySection.data.verified ? '#388e3c' : '#f59e0b'">
+                  <mat-icon [style.color]="identitySection.data.verified ? 'var(--rw-text-success)' : 'var(--rw-text-warning)'">
                     {{ identitySection.data.syncStatus === 'PENDING' ? 'hourglass_top' : 'check_circle' }}
                   </mat-icon>
                   <div>
@@ -774,7 +774,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     .identity-not-registered { display: flex; flex-direction: column; gap: 20px; }
     .idr-header { display: flex; gap: 12px; align-items: flex-start; }
     .idr-icon { font-size: 28px; width: 28px; height: 28px; flex-shrink: 0; margin-top: 2px; }
-    .idr-icon.warn { color: #f59e0b; }
+    .idr-icon.warn { color: var(--rw-text-warning); }
     .idr-steps { display: flex; flex-direction: column; gap: 16px; border-left: 2px solid var(--rw-border); padding-left: 20px; margin-left: 8px; }
     .idr-step { display: flex; gap: 14px; }
     .step-number {
@@ -790,7 +790,7 @@ import { ExternalIdEditorComponent } from '../../../shared/components/external-i
     .reg-form { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; max-width: 460px; }
     .request-sent {
       display: flex; align-items: center; gap: 8px;
-      font-size: 13px; color: #10b981; font-weight: 500;
+      font-size: 13px; color: var(--rw-text-success); font-weight: 500;
       margin-top: 8px; padding: 8px 12px;
       background: rgba(16,185,129,0.08); border-radius: 6px;
       border: 1px solid rgba(16,185,129,0.2);
@@ -1100,8 +1100,10 @@ export class InvestmentDetailComponent implements OnInit {
       next: (deployments) => {
         this.deploymentsSection = resolveAsyncSection(this.deploymentsSection, deployments);
         this.cdr.markForCheck();
-        if (this.isErc3643 && deployments.length > 0) {
-          this.loadIdentityStatus(assetId, deployments[0].id, walletAddress);
+        // The T-REX suite exists once a deployment is CONFIRMED; asking earlier is a guaranteed 404.
+        const suiteDeployment = deployments.find(d => d.deploymentStatus === 'CONFIRMED');
+        if (this.isErc3643 && suiteDeployment) {
+          this.loadIdentityStatus(assetId, suiteDeployment.id, walletAddress);
         }
       },
       error: () => {
@@ -1133,7 +1135,7 @@ export class InvestmentDetailComponent implements OnInit {
   }
 
   retryIdentityStatus(): void {
-    const deployment = this.deploymentsSection.data[0];
+    const deployment = this.deploymentsSection.data.find(d => d.deploymentStatus === 'CONFIRMED');
     if (this.record && deployment) {
       this.loadIdentityStatus(this.record.assetId, deployment.id, this.record.walletAddress);
     }

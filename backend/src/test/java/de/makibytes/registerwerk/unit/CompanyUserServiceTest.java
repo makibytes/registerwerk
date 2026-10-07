@@ -59,6 +59,18 @@ class CompanyUserServiceTest {
     @Mock ApplicationEventPublisher eventPublisher;
     @Mock private PrincipalResolver principalResolver;
 
+    /** Stand-in for the KEK-backed port: reversible, but the plaintext link is not a substring of the sealed form. */
+    private static final de.makibytes.registerwerk.shared.SecureLinkPort SEALER =
+        new de.makibytes.registerwerk.shared.SecureLinkPort() {
+            public String seal(String link, UUID userId) {
+                return "sealed:" + new StringBuilder(link).reverse() + ":" + userId;
+            }
+            public String open(String sealed, UUID userId) {
+                String body = sealed.substring("sealed:".length(), sealed.length() - (":" + userId).length());
+                return new StringBuilder(body).reverse().toString();
+            }
+        };
+
     private RegisterwerkAuthProperties authProperties;
     private CompanyUserService service;
     private UUID entityId;
@@ -77,6 +89,7 @@ class CompanyUserServiceTest {
             eventPublisher,
             authProperties,
             principalResolver,
+            SEALER,
             "http://localhost:4201",
             48L
         );
@@ -113,6 +126,41 @@ class CompanyUserServiceTest {
         assertThat(savedUser.getRoles()).containsExactlyInAnyOrder(AppUserRole.ISSUER, AppUserRole.COMPANY_ADMIN);
         verify(actionTokenRepository).save(any(AppUserActionToken.class));
         verify(eventPublisher).publishEvent(any(Object.class));
+    }
+
+    @Test
+    @DisplayName("Wave 5b: the invite and reset events carry a SEALED link, never the plaintext token")
+    void inviteAndResetEventsCarryOnlySealedLinks() {
+        LegalEntity entity = buildEntity();
+        when(appUserRepository.findByEmailIgnoreCase("bob@test.local")).thenReturn(Optional.empty());
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+        when(appUserRepository.save(any(AppUser.class))).thenAnswer(invocation -> {
+            AppUser user = invocation.getArgument(0);
+            if (user.getId() == null) {
+                user.setId(UUID.randomUUID());
+            }
+            return user;
+        });
+        service.inviteUser(authentication, new InviteCompanyUserRequest(
+            "bob@test.local", "Bob Example", Set.of(AppUserRole.TRADER)));
+
+        ArgumentCaptor<Object> published = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(published.capture());
+        var invited = (de.makibytes.registerwerk.customer.events.CompanyUserInvitedEvent) published.getValue();
+        assertThat(invited.inviteLink()).startsWith("sealed:").doesNotContain("/register/");
+        assertThat(SEALER.open(invited.inviteLink(), invited.userId())).startsWith("http://localhost:4201/register/");
+
+        AppUser target = buildCompanyAdmin();
+        when(appUserRepository.findByIdAndLegalEntityId(target.getId(), entityId)).thenReturn(Optional.of(target));
+        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+        org.mockito.Mockito.clearInvocations(eventPublisher);
+        service.sendPasswordReset(authentication, target.getId());
+
+        ArgumentCaptor<Object> reset = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(reset.capture());
+        var resetEvent = (de.makibytes.registerwerk.customer.events.CompanyUserPasswordResetRequestedEvent) reset.getValue();
+        assertThat(resetEvent.resetLink()).startsWith("sealed:").doesNotContain("/reset-password/");
+        assertThat(SEALER.open(resetEvent.resetLink(), resetEvent.userId())).contains("/reset-password/");
     }
 
     @Test

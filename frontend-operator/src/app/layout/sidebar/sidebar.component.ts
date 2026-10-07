@@ -293,6 +293,7 @@ export class SidebarComponent {
         { label: 'Holder Blocks', icon: 'gavel', route: '/compliance/holder-blocks', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'Token Admin Grants', icon: 'admin_panel_settings', route: '/compliance/token-admin-grants', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'CASP Register', icon: 'verified_user', route: '/compliance/casp-register', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
+        { label: 'Travel Rule Peers', icon: 'swap_horiz', route: '/compliance/travel-rule-peers', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'DORA', icon: 'security_update_warning', route: '/compliance/dora', roles: ['REGISTRY_ADMIN'] },
         { label: 'Access Reviews', icon: 'fact_check', route: '/compliance/access-reviews', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'Reporting', icon: 'assessment', route: '/compliance/reporting', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },

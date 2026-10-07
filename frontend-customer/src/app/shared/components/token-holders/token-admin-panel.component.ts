@@ -389,7 +389,7 @@ const APPROVAL_ACTIONS: Record<ApprovalKind, { action: string; segment: string }
     }
 
     .preview-box.warning mat-icon {
-      color: #f59e0b;
+      color: var(--rw-text-warning);
       font-size: 16px;
       height: 16px;
       width: 16px;

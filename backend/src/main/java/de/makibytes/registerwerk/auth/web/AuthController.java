@@ -198,7 +198,8 @@ public class AuthController {
                 null,
                 false,
                 Instant.now().plusSeconds(result.ttlSeconds()).getEpochSecond(),
-                null
+                null,
+                result.passwordChangeRequired()
         );
     }
 

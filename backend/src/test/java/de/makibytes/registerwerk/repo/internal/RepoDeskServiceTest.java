@@ -37,7 +37,8 @@ class RepoDeskServiceTest {
 
     @BeforeEach void setUp() {
         properties = new RepoDeskProperties(); properties.setEnabled(true); properties.setReleaseApproved(true);
-        service = new RepoDeskService(properties, rfqs, quotes, trades, events, entities, assets, controls, participants, corporateActions, bondTerms, holders, publisher);
+        service = new RepoDeskService(properties, rfqs, quotes, trades, events, entities, assets, controls, participants, corporateActions, bondTerms, holders, publisher,
+                new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemUTC(), java.time.ZoneOffset.UTC));
     }
 
     @Test void acceptedBorrowCashQuoteCreatesTradeWithAct360RepurchaseAmount() {
@@ -165,7 +166,7 @@ class RepoDeskServiceTest {
                 LocalDate.of(2026,9,1), LocalDate.of(2026,10,1), 360)).isEqualByComparingTo("100416.67");
         assertThat(CurrencyRules.dayCountBasis("GBP")).isEqualTo(365);
         assertThat(CurrencyRules.dayCountBasis("EUR")).isEqualTo(360);
-        assertThat(CurrencyRules.minorUnits("JPY")).isZero();
+        assertThat(de.makibytes.registerwerk.shared.Money.minorUnits("JPY")).isZero();
         assertThatThrownBy(() -> CurrencyRules.requireMinorUnitScale("EUR", new BigDecimal("1.005"), "Cash"))
                 .isInstanceOf(IllegalArgumentException.class);
     }

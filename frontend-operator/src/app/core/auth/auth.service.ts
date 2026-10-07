@@ -15,6 +15,11 @@ interface SessionProfile {
   name: string | null;
   entityId: string | null;
   expiresAt: number;
+  /**
+   * True while the account must change its password first (`must_change_password`): the session is
+   * restricted to `POST /auth/change-password`, every other endpoint answers 403 `PASSWORD_CHANGE_REQUIRED`.
+   */
+  passwordChangeRequired?: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -68,6 +73,39 @@ export class AuthService {
           this._profile = profile;
           this._isAuthenticated$.next(true);
           this._initialized$ = of(true); // short-circuits ensureInitialized() for this session
+        }),
+        map(() => void 0)
+      );
+  }
+
+  /** True when the signed-in account must set a new password before anything else works. */
+  isPasswordChangeRequired(): boolean {
+    return this._profile?.passwordChangeRequired === true;
+  }
+
+  /**
+   * Marks the session as restricted after an endpoint answered 403 `PASSWORD_CHANGE_REQUIRED`
+   * (the flag was raised while a session was already open), so the route guards send the user to
+   * the change-password screen instead of looping on the failing page.
+   */
+  markPasswordChangeRequired(): void {
+    if (this._profile) {
+      this._profile = { ...this._profile, passwordChangeRequired: true };
+    }
+  }
+
+  /**
+   * `POST /auth/change-password`: on success the backend revokes the restricted token and answers
+   * with a fresh unrestricted session (cookie + profile), which replaces the cached one.
+   */
+  changePassword(currentPassword: string, newPassword: string): Observable<void> {
+    return this.http
+      .post<SessionProfile>(`${environment.apiUrl}/auth/change-password`, { currentPassword, newPassword })
+      .pipe(
+        tap(profile => {
+          this._profile = { ...profile, passwordChangeRequired: false };
+          this._isAuthenticated$.next(true);
+          this._initialized$ = of(true);
         }),
         map(() => void 0)
       );

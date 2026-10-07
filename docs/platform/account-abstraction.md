@@ -162,8 +162,8 @@ returns the address each policy must register as its signer.
   deployment-level override on Meridian's flagship Green Bond deployment (`OPERATOR`,
   demonstrating override-over-default precedence).
 - Tests: `contracts/test/ecosystem/EwpgPaymaster.t.sol` runs every sponsored path through
-  the **real EntryPoint v0.8.0** `handleOps` (vendored test-only under
-  `contracts/test/aa-v08/`), including regressions for the drain scenarios listed under rollout below.
+  the **real EntryPoint v0.8.0** `handleOps` (test-only, the pinned git
+  submodule `contracts/lib/account-abstraction` at tag v0.8.0; GPL-3.0, never imported by `src/` or `script/`), including regressions for the drain scenarios listed under rollout below.
   `backend/.../asset/internal/GasSponsorshipVoucherServiceTest.java` and
   `unit/GasSponsorshipVoucherDigestTest.java` pin the Java digest to the Solidity one with a
   shared test vector.

@@ -172,7 +172,7 @@ type DecisionMode = 'approve' | 'reject';
       font-weight: 700;
       width: fit-content;
     }
-    .status-badge.requested { background: rgba(245,158,11,.15); color: #f59e0b; }
+    .status-badge.requested { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
     .status-badge.approved  { background: var(--rw-draft-bg); color: var(--rw-draft-fg); }
     .status-badge.fulfilled { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
     .status-badge.rejected  { background: var(--rw-rejected-bg); color: var(--rw-rejected-fg); }

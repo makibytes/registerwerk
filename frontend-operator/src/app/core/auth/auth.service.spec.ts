@@ -117,6 +117,52 @@ describe('AuthService', () => {
         });
     });
 
+    describe('password change (must_change_password)', () => {
+        it('exposes the restricted-session flag from the login response', () => {
+            service.loginWithCredentials('admin@local', 'changeme').subscribe();
+            httpMock.expectOne(`${environment.apiUrl}/public/auth/login`).flush({ ...profile, passwordChangeRequired: true });
+
+            expect(service.isPasswordChangeRequired()).toBe(true);
+        });
+
+        it('POSTs both passwords and replaces the restricted profile by the fresh session', () => {
+            service.loginWithCredentials('admin@local', 'changeme').subscribe();
+            httpMock.expectOne(`${environment.apiUrl}/public/auth/login`).flush({ ...profile, passwordChangeRequired: true });
+
+            let done = false;
+            service.changePassword('changeme', 'a-much-better-secret').subscribe(() => (done = true));
+            const req = httpMock.expectOne(`${environment.apiUrl}/auth/change-password`);
+            expect(req.request.method).toBe('POST');
+            expect(req.request.body).toEqual({ currentPassword: 'changeme', newPassword: 'a-much-better-secret' });
+            req.flush({ ...profile, passwordChangeRequired: false });
+
+            expect(done).toBe(true);
+            expect(service.isPasswordChangeRequired()).toBe(false);
+            expect(service.getUserRoles()).toEqual(['REGISTRY_ADMIN']);
+        });
+
+        it('keeps the restricted flag when the change is refused', () => {
+            service.loginWithCredentials('admin@local', 'changeme').subscribe();
+            httpMock.expectOne(`${environment.apiUrl}/public/auth/login`).flush({ ...profile, passwordChangeRequired: true });
+
+            service.changePassword('wrong', 'a-much-better-secret').subscribe({ error: () => undefined });
+            httpMock.expectOne(`${environment.apiUrl}/auth/change-password`)
+                .flush({ message: 'The current password is incorrect' }, { status: 400, statusText: 'Bad Request' });
+
+            expect(service.isPasswordChangeRequired()).toBe(true);
+        });
+
+        it('markPasswordChangeRequired() flags an already-open session after a 403 PASSWORD_CHANGE_REQUIRED', () => {
+            service.loginWithCredentials('admin@local', 'changeme').subscribe();
+            httpMock.expectOne(`${environment.apiUrl}/public/auth/login`).flush(profile);
+            expect(service.isPasswordChangeRequired()).toBe(false);
+
+            service.markPasswordChangeRequired();
+
+            expect(service.isPasswordChangeRequired()).toBe(true);
+        });
+    });
+
     describe('logout()', () => {
         it('POSTs to the logout endpoint, clears state, and redirects to /login', () => {
             service.loginWithCredentials('admin@example.com', 'hunter2').subscribe();

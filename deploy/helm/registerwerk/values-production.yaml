@@ -118,7 +118,7 @@ postgresql:
 #   env:
 #     trusted_ips: "<ingress controller + customer-frontend pod CIDR>"
 # env:
-#   REGISTERWERK_AUTH_TRUSTED_PROXIES: '<regex matching the pod CIDR>'
+#   REGISTERWERK_AUTH_TRUSTED_PROXIES: '<regex matching ONLY the Kong + operator nginx pods>'
 
 # ── Values the backend's production gate requires (ProductionReadinessCheck) ──────────────
 # CORS: at least one non-localhost origin (the two portal hosts).

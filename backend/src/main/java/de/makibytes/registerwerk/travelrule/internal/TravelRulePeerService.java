@@ -66,18 +66,23 @@ public class TravelRulePeerService {
         byte[] raw = new byte[32];
         random.nextBytes(raw);
         String key = Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
-        int n = jdbc.update("""
+        // Re-registering rotates the key but NEVER reactivates a DISABLED peer: that is the explicit enable() action
+        // (own dual-control + audit). "inserted" is xmax = 0 on the returned row, so "rotated" is truthful.
+        Boolean inserted = jdbc.queryForObject("""
             INSERT INTO travel_rule_peer (vasp_id, legal_name, lei, hmac_key_ciphertext, key_kid, status,
                                           created_by, second_approver_id)
             VALUES (?,?,?,?,?,'ACTIVE',?,?)
             ON CONFLICT (vasp_id) DO UPDATE SET hmac_key_ciphertext = EXCLUDED.hmac_key_ciphertext,
-                key_kid = EXCLUDED.key_kid, status = 'ACTIVE', legal_name = EXCLUDED.legal_name, lei = EXCLUDED.lei,
+                key_kid = EXCLUDED.key_kid, legal_name = EXCLUDED.legal_name, lei = EXCLUDED.lei,
                 created_by = EXCLUDED.created_by, second_approver_id = EXCLUDED.second_approver_id, updated_at = now()
-            """, id, legalName, lei, cipher.encrypt(key, aad(id)), kid, actorId, approverId);
+            RETURNING (xmax = 0)
+            """, Boolean.class, id, legalName, lei, cipher.encrypt(key, aad(id)), kid, actorId, approverId);
+        boolean rotated = !Boolean.TRUE.equals(inserted);
+        PeerView peer = view(id);
         events.publishEvent(new TravelRuleControlEvent(TravelRuleControlEvent.PEER_CREATED, "TravelRulePeer",
                 UUID.nameUUIDFromBytes(id.toLowerCase().getBytes(StandardCharsets.UTF_8)), actorId, actorRole,
-                approverId, Map.of("vaspId", id, "rotated", n > 0)));
-        return new CreatedPeer(view(id), key);
+                approverId, Map.of("vaspId", id, "rotated", rotated, "status", peer.status())));
+        return new CreatedPeer(peer, key);
     }
 
     @Transactional
@@ -90,6 +95,21 @@ public class TravelRulePeerService {
             throw new EntityNotFoundException("TravelRulePeer", UUID.nameUUIDFromBytes(vaspId.toLowerCase().getBytes(StandardCharsets.UTF_8)));
         }
         events.publishEvent(new TravelRuleControlEvent(TravelRuleControlEvent.PEER_DISABLED, "TravelRulePeer",
+                UUID.nameUUIDFromBytes(vaspId.toLowerCase().getBytes(StandardCharsets.UTF_8)), actorId, actorRole,
+                approverId, Map.of("vaspId", vaspId)));
+    }
+
+    /** The only way back from DISABLED (a plain re-registration rotates the key but keeps the status). */
+    @Transactional
+    public void enable(String vaspId, UUID actorId, String actorRole, UUID approverId) {
+        if (approverId == null) {
+            throw new AccessDeniedException("Enabling a Travel Rule peer requires a second approver");
+        }
+        int n = jdbc.update("UPDATE travel_rule_peer SET status='ACTIVE', updated_at=now() WHERE vasp_id=?", vaspId);
+        if (n == 0) {
+            throw new EntityNotFoundException("TravelRulePeer", UUID.nameUUIDFromBytes(vaspId.toLowerCase().getBytes(StandardCharsets.UTF_8)));
+        }
+        events.publishEvent(new TravelRuleControlEvent(TravelRuleControlEvent.PEER_ENABLED, "TravelRulePeer",
                 UUID.nameUUIDFromBytes(vaspId.toLowerCase().getBytes(StandardCharsets.UTF_8)), actorId, actorRole,
                 approverId, Map.of("vaspId", vaspId)));
     }

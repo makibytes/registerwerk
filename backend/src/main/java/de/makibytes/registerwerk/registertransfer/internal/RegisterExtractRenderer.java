@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.registertransfer.internal;
 
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.RegisterReconciliationGuard;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
@@ -36,9 +37,11 @@ class RegisterExtractRenderer {
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
     private final DocumentSigningService signingService;
+    private final RegisterClock registerClock;
 
-    RegisterExtractRenderer(DocumentSigningService signingService) {
+    RegisterExtractRenderer(DocumentSigningService signingService, RegisterClock registerClock) {
         this.signingService = signingService;
+        this.registerClock = registerClock;
     }
 
     byte[] render(Asset asset, List<AssetHolder> holders,
@@ -70,7 +73,7 @@ class RegisterExtractRenderer {
             y -= 26;
 
             write(c, margin, y, fontRegular, 10,
-                    "Ausgestellt am / Issued: " + LocalDate.now().format(DATE_FMT));
+                    "Ausgestellt am / Issued: " + registerClock.today().format(DATE_FMT));
             y -= 13;
             write(c, margin, y, fontRegular, 10, "Einsichtnehmer / Inspector: " + safe(requesterName));
             y -= 13;

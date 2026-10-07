@@ -529,7 +529,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
               }
             } @else if (isIssuer) {
               <div style="display:flex;align-items:center;gap:10px;padding:12px 0;color:var(--rw-text-secondary);font-size:13px">
-                <mat-icon style="color:#F59E0B">warning_amber</mat-icon>
+                <mat-icon style="color:var(--rw-text-warning)">warning_amber</mat-icon>
                 <span style="flex:1">No term sheet uploaded. eWpG requires a term sheet for this security.</span>
                 <label>
                   <input #tsFileInput type="file"
@@ -735,7 +735,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                     <td mat-cell *matCellDef="let h">
                       @let entry = identityFor(h.walletAddress);
                       @if (entry) {
-                        <mat-icon [style.color]="entry.active ? '#388e3c' : '#e53935'" style="font-size:18px;vertical-align:middle">
+                        <mat-icon [style.color]="entry.active ? 'var(--rw-text-success)' : 'var(--rw-text-danger)'" style="font-size:18px;vertical-align:middle">
                           {{ entry.active ? 'check_circle' : 'cancel' }}
                         </mat-icon>
                       } @else {
@@ -748,7 +748,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                     <td mat-cell *matCellDef="let h">
                       @let kycEntry = identityFor(h.walletAddress);
                       @if (kycEntry) {
-                        <mat-icon [style.color]="kycEntry.verified ? '#388e3c' : '#e53935'" style="font-size:18px;vertical-align:middle">
+                        <mat-icon [style.color]="kycEntry.verified ? 'var(--rw-text-success)' : 'var(--rw-text-danger)'" style="font-size:18px;vertical-align:middle">
                           {{ kycEntry.verified ? 'verified' : 'gpp_bad' }}
                         </mat-icon>
                       } @else {
@@ -1209,8 +1209,10 @@ export class IssuanceDetailComponent implements OnInit, OnDestroy {
         this.deployments = deployments;
         this.deploymentsState = resolveAsyncSection(this.deploymentsState, null);
         this.cdr.markForCheck();
-        if (this.isErc3643 && deployments.length > 0) {
-          this.loadErc3643Data(assetId, deployments[0].id);
+        // The T-REX suite exists once a deployment is CONFIRMED; asking earlier is a guaranteed 404.
+        const suiteDeployment = deployments.find(d => d.deploymentStatus === 'CONFIRMED');
+        if (this.isErc3643 && suiteDeployment) {
+          this.loadErc3643Data(assetId, suiteDeployment.id);
         }
         if (this.asset?.status === 'ISSUED' && deployments.length > 0) {
           this.loadLiveHolders();
@@ -1275,7 +1277,7 @@ export class IssuanceDetailComponent implements OnInit, OnDestroy {
   }
 
   retryErc3643Data(): void {
-    const deployment = this.deployments[0];
+    const deployment = this.deployments.find(d => d.deploymentStatus === 'CONFIRMED');
     if (this.asset && deployment) this.loadErc3643Data(this.asset.id, deployment.id);
   }
 

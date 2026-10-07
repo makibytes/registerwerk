@@ -17,6 +17,8 @@ interface SessionProfile {
   /** Set while impersonating: READ_ONLY blocks every write server-side (403 IMPERSONATION_READ_ONLY). */
   impersonationMode?: 'READ_ONLY' | 'ACT_ON_BEHALF' | null;
   expiresAt: number;
+  /** True while the account must change its password: the session reaches `/auth/change-password` only. */
+  passwordChangeRequired?: boolean;
   /** Lets this satisfy `Record<string, unknown>` for `getProfile()` — not otherwise used. */
   [key: string]: unknown;
 }
@@ -92,6 +94,29 @@ export class CookieTokenSource extends TokenSource {
       .post<SessionProfile>(`${environment.apiUrl}/public/auth/login`, { email, password })
       .pipe(
         tap(profile => { this.profile = profile; }),
+        map(() => void 0)
+      );
+  }
+
+  override isPasswordChangeRequired(): boolean {
+    return this.profile?.passwordChangeRequired === true;
+  }
+
+  override markPasswordChangeRequired(): void {
+    if (this.profile) {
+      this.profile = { ...this.profile, passwordChangeRequired: true };
+    }
+  }
+
+  /**
+   * `POST /auth/change-password`: the backend revokes the restricted token and answers with a fresh,
+   * unrestricted session (cookie + profile), which replaces the cached one.
+   */
+  override changePassword(currentPassword: string, newPassword: string): Observable<void> {
+    return this.http
+      .post<SessionProfile>(`${environment.apiUrl}/auth/change-password`, { currentPassword, newPassword })
+      .pipe(
+        tap(profile => { this.profile = { ...profile, passwordChangeRequired: false }; }),
         map(() => void 0)
       );
   }

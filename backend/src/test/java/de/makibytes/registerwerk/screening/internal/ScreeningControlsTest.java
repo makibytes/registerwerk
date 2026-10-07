@@ -17,8 +17,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 
@@ -39,7 +37,6 @@ import static org.mockito.Mockito.when;
 
 /** Phase 6 / K7: carry-forward (6-18), outage grace (6-18), CONFIRM_PEP (6-17). */
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class ScreeningControlsTest {
 
     @Mock SanctionsScreeningPort provider;
@@ -58,7 +55,7 @@ class ScreeningControlsTest {
     @BeforeEach
     void setUp() {
         when(provider.providerName()).thenReturn("P");
-        when(runRepository.save(any(ScreeningRun.class))).thenAnswer(i -> i.getArgument(0));
+        org.mockito.Mockito.lenient().when(runRepository.save(any(ScreeningRun.class))).thenAnswer(i -> i.getArgument(0));
         service = new ScreeningService(List.of(provider), runRepository, hitRepository, events,
                 legalEntityRepository, new SimpleMeterRegistry(), resolver, ScreeningPolicy.defaults());
         gate = new ScreeningGateImpl(runRepository, hitRepository, service, List.of(provider),
@@ -83,7 +80,7 @@ class ScreeningControlsTest {
         when(provider.screen(any())).thenReturn(new ScreeningResult(List.of(
                 new ScreeningHitDto("EU", "name", "Acme Ltd", score, "id1", "SANCTIONS", "id1")), "v1",
                 new BigDecimal("0.85")));
-        when(hitRepository.findCarryForwardSources(eq(entityId), any(), eq(HitResolution.FALSE_POSITIVE), any(Pageable.class)))
+        org.mockito.Mockito.lenient().when(hitRepository.findCarryForwardSources(eq(entityId), any(), eq(HitResolution.FALSE_POSITIVE), any(Pageable.class)))
                 .thenReturn(source == null ? List.of() : List.of(source));
     }
 
@@ -91,6 +88,27 @@ class ScreeningControlsTest {
         ArgumentCaptor<ScreeningRun> c = ArgumentCaptor.forClass(ScreeningRun.class);
         verify(runRepository, org.mockito.Mockito.atLeastOnce()).save(c.capture());
         return c.getValue();
+    }
+
+    @Test
+    void changedListEntryOrChangedSubjectLooksUpADifferentFingerprint() {
+        ArgumentCaptor<String> fingerprints = ArgumentCaptor.forClass(String.class);
+        when(provider.screen(any())).thenReturn(
+                new ScreeningResult(List.of(new ScreeningHitDto("EU", "name", "Acme Ltd", 0.88, "id1", "SANCTIONS",
+                        "id1", "2026-01-01:aaa")), "v1", new BigDecimal("0.85")),
+                new ScreeningResult(List.of(new ScreeningHitDto("EU", "name", "Acme Ltd", 0.88, "id1", "SANCTIONS",
+                        "id1", "2026-03-01:bbb")), "v1", new BigDecimal("0.85")),
+                new ScreeningResult(List.of(new ScreeningHitDto("EU", "name", "Acme Ltd", 0.88, "id1", "SANCTIONS",
+                        "id1", "2026-01-01:aaa")), "v1", new BigDecimal("0.85")));
+        when(hitRepository.findCarryForwardSources(eq(entityId), fingerprints.capture(),
+                eq(HitResolution.FALSE_POSITIVE), any(Pageable.class))).thenReturn(List.of());
+
+        service.screenEntity(entityId, "Acme Ltd", "DE", null, ScreeningTrigger.PERIODIC_REFRESH);
+        service.screenEntity(entityId, "Acme Ltd", "DE", null, ScreeningTrigger.PERIODIC_REFRESH);
+        service.screenEntity(entityId, "Acme Holding Ltd", "DE", null, ScreeningTrigger.PERIODIC_REFRESH);
+
+        List<String> seen = fingerprints.getAllValues();
+        assertThat(seen).hasSize(3).doesNotHaveDuplicates();
     }
 
     @Test

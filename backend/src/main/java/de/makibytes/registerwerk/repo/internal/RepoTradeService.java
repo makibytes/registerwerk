@@ -1,8 +1,10 @@
 package de.makibytes.registerwerk.repo.internal;
 
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.asset.api.*;
 import de.makibytes.registerwerk.customer.api.*;
 import de.makibytes.registerwerk.repo.api.*;
+import de.makibytes.registerwerk.shared.Money;
 import de.makibytes.registerwerk.repo.api.RepoTypes.*;
 import de.makibytes.registerwerk.repo.events.RepoAuditEvent;
 import de.makibytes.registerwerk.repo.events.RepoPartyNoticeEvent;
@@ -45,14 +47,15 @@ public class RepoTradeService {
     private final RepoSubstitutionRequestRepository substitutions;
     private final RepoControls controls;
     private final ApplicationEventPublisher publisher;
+    private final RegisterClock registerClock;
 
     public RepoTradeService(RepoDeskProperties properties, RepoTradeRepository trades,
                             RepoLifecycleEventRepository events, LegalEntityRepository entities,
                             AssetRepository assets, RepoSubstitutionRequestRepository substitutions,
-                            RepoControls controls, ApplicationEventPublisher publisher) {
+                            RepoControls controls, ApplicationEventPublisher publisher, RegisterClock registerClock) {
         this.properties = properties; this.trades = trades; this.events = events;
         this.entities = entities; this.assets = assets; this.substitutions = substitutions;
-        this.controls = controls; this.publisher = publisher;
+        this.controls = controls; this.publisher = publisher; this.registerClock = registerClock;
     }
 
     @Transactional(readOnly = true)
@@ -123,7 +126,7 @@ public class RepoTradeService {
             }
             throw new IllegalStateException("Opening settlement is not pending");
         }
-        if (LocalDate.now(ZoneOffset.UTC).isBefore(trade.getStartDate())) {
+        if (registerClock.today().isBefore(trade.getStartDate())) {
             throw new IllegalStateException("Opening settlement cannot be confirmed before the start date");
         }
         // 9A-07: the pledge becomes effective with the open legs - not on a register frozen for a handover
@@ -178,7 +181,7 @@ public class RepoTradeService {
         }
         BigDecimal adjusted = valuationAmount.multiply(BigDecimal.valueOf(10_000L - trade.getHaircutBps()))
                 .divide(BigDecimal.valueOf(10_000L), 18, RoundingMode.HALF_UP);
-        BigDecimal shortfall = CurrencyRules.round(trade.getCashCurrency(), trade.getRepurchaseAmount().subtract(adjusted));
+        BigDecimal shortfall = Money.round(trade.getRepurchaseAmount().subtract(adjusted), trade.getCashCurrency());
         if (shortfall.signum() <= 0) throw new IllegalArgumentException("The valuation shows no shortfall: collateral after haircut covers the repurchase amount");
         if (amount.compareTo(shortfall) > 0) {
             throw new IllegalArgumentException("Margin amount exceeds the shortfall of " + shortfall.toPlainString()
@@ -347,7 +350,7 @@ public class RepoTradeService {
         properties.requireReleased();
         RepoTrade trade = lockedPartyTrade(tradeId, entityId);
         if (trade.getStatus() != TradeStatus.OPEN) throw new IllegalStateException("Trade is not open");
-        if (LocalDate.now(ZoneOffset.UTC).isBefore(trade.getEndDate())) {
+        if (registerClock.today().isBefore(trade.getEndDate())) {
             throw new IllegalStateException("Early termination requires a separately agreed amendment");
         }
         requireNoLiveSubstitution(trade, "closing");
@@ -531,7 +534,7 @@ public class RepoTradeService {
                 && !trade.getMarginCallDueAt().isAfter(Instant.now())) {
             return Optional.of(DefaultGround.MARGIN_NOT_MET);
         }
-        if (trade.getStatus() == TradeStatus.PENDING_CLOSE && LocalDate.now(ZoneOffset.UTC).isAfter(trade.getEndDate())) {
+        if (trade.getStatus() == TradeStatus.PENDING_CLOSE && registerClock.today().isAfter(trade.getEndDate())) {
             if (!trade.isCloseCashConfirmed()) return Optional.of(DefaultGround.REPURCHASE_UNPAID);
             if (!trade.isCloseCollateralConfirmed()) return Optional.of(DefaultGround.COLLATERAL_RETURN_FAILURE);
         }

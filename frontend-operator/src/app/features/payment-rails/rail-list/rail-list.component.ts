@@ -14,6 +14,7 @@ import {
   StepUpDialogComponent,
   StepUpDialogResult,
 } from '../../../shared/components/step-up/step-up-dialog.component';
+import { withDualControl } from '../../../shared/components/step-up/with-dual-control';
 import { DualControlTokens } from '../../../core/api/dual-control-headers';
 import { RailFormDialogComponent, RailFormDialogData } from '../rail-form-dialog/rail-form-dialog.component';
 
@@ -168,7 +169,7 @@ export class RailListComponent implements OnInit {
       .afterClosed()
       .subscribe((body) => {
         if (!body) return;
-        this.withDualControlStepUp('Payment rail creation', (tokens) =>
+        this.withDualControlStepUp('Payment rail creation', 'POST /api/v1/payment-rails', body, (tokens) =>
           this.railService.create(body, tokens).subscribe({
             next: () => {
               this.snackBar.open('Payment rail created. It starts disabled; enable it (and attest it, for an EMT) separately.', 'Dismiss', { duration: 7000 });
@@ -191,7 +192,7 @@ export class RailListComponent implements OnInit {
       .afterClosed()
       .subscribe((body) => {
         if (!body) return;
-        this.withDualControlStepUp('Payment rail update', (tokens) =>
+        this.withDualControlStepUp('Payment rail update', `PUT /api/v1/payment-rails/${rail.id}`, body, (tokens) =>
           this.railService.update(rail.id, body, tokens).subscribe({
             next: () => {
               this.snackBar.open('Payment rail updated.', 'Dismiss', { duration: 5000 });
@@ -208,7 +209,7 @@ export class RailListComponent implements OnInit {
   }
 
   enable(rail: PaymentRailView): void {
-    this.withDualControlStepUp('Payment rail enablement', (tokens) =>
+    this.withDualControlStepUp('Payment rail enablement', `POST /api/v1/payment-rails/${rail.id}/enable`, {}, (tokens) =>
       this.railService.enable(rail.id, tokens).subscribe({
         next: () => {
           this.snackBar.open('Payment rail enabled.', 'Dismiss', { duration: 5000 });
@@ -240,7 +241,7 @@ export class RailListComponent implements OnInit {
   }
 
   verify(rail: PaymentRailView): void {
-    this.withDualControlStepUp('Payment rail MiCAR attestation', (tokens) =>
+    this.withDualControlStepUp('Payment rail MiCAR attestation', `POST /api/v1/payment-rails/${rail.id}/verify-micar`, {}, (tokens) =>
       this.railService.verifyMicar(rail.id, tokens).subscribe({
         next: () => {
           this.snackBar.open('MiCAR details attested. The attestation is bound to the current token address and issuer details.', 'Dismiss', { duration: 6000 });
@@ -298,19 +299,16 @@ export class RailListComponent implements OnInit {
       });
   }
 
-  /** Create, update, enable and MiCAR attestation are dual-control on the backend. */
-  private withDualControlStepUp(reason: string, action: (tokens: DualControlTokens) => void): void {
-    this.dialog
-      .open(StepUpDialogComponent, {
-        data: { requireDualControl: true, reason, action: reason },
-        width: '500px',
-        disableClose: true,
-      })
-      .afterClosed()
-      .subscribe((result: StepUpDialogResult | undefined) => {
-        if (result?.stepUpToken && result.dualControlToken) {
-          action({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
-        }
-      });
+  /**
+   * Create, update, enable and MiCAR attestation are dual-control on the backend. `target` and `body` are exactly
+   * the request the service then sends (the approver token is bound to its method, path and canonical body).
+   */
+  private withDualControlStepUp(
+    reason: string,
+    target: string,
+    body: unknown,
+    action: (tokens: DualControlTokens) => void,
+  ): void {
+    withDualControl(this.dialog, { action: reason, reason, target, targetBody: body }, action);
   }
 }

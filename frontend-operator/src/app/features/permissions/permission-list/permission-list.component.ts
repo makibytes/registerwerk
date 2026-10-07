@@ -29,10 +29,7 @@ import {
   PermissionDefinitionView,
 } from '../../../core/models';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
-import {
-  StepUpDialogComponent,
-  StepUpDialogResult,
-} from '../../../shared/components/step-up/step-up-dialog.component';
+import { withDualControl } from '../../../shared/components/step-up/with-dual-control';
 
 @Component({
   selector: 'app-permission-list',
@@ -328,7 +325,7 @@ export class PermissionListComponent implements OnInit {
     };
     this.dialog.closeAll();
 
-    this.withStepUp('Trusted claim issuer registration', (token, dualControlToken) =>
+    this.withStepUp('Trusted claim issuer registration', 'POST /api/v1/permissions/trusted-issuers', body, (token, dualControlToken) =>
       this.permissionService.addTrustedIssuer(body, token, dualControlToken).subscribe({
         next: () => {
           this.snackBar.open('Trusted issuer registration submitted.', 'Dismiss', { duration: 5000 });
@@ -344,7 +341,7 @@ export class PermissionListComponent implements OnInit {
   }
 
   removeIssuer(issuer: EcosystemTrustedIssuerView): void {
-    this.withStepUp('Trusted claim issuer removal', (token, dualControlToken) =>
+    this.withStepUp('Trusted claim issuer removal', `DELETE /api/v1/permissions/trusted-issuers/${issuer.id}`, undefined, (token, dualControlToken) =>
       this.permissionService.removeTrustedIssuer(issuer.id, token, dualControlToken).subscribe({
         next: () => {
           this.snackBar.open('Trusted issuer removal submitted.', 'Dismiss', { duration: 5000 });
@@ -359,19 +356,17 @@ export class PermissionListComponent implements OnInit {
     );
   }
 
-  /** Both actions here are dual-control (requireSecondApprover=true) on the backend. */
-  private withStepUp(reason: string, action: (stepUpToken: string, dualControlToken: string) => void): void {
-    this.dialog
-      .open(StepUpDialogComponent, {
-        data: { requireDualControl: true, reason, action: reason },
-        width: '500px',
-        disableClose: true,
-      })
-      .afterClosed()
-      .subscribe((result: StepUpDialogResult | undefined) => {
-        if (result?.stepUpToken && result.dualControlToken) {
-          action(result.stepUpToken, result.dualControlToken);
-        }
-      });
+  /**
+   * Both actions here are dual-control (requireSecondApprover=true) on the backend. `target` and `targetBody` are
+   * exactly the request the service then sends (the approver token is bound to its method, path and canonical body).
+   */
+  private withStepUp(
+    reason: string,
+    target: string,
+    targetBody: unknown,
+    action: (stepUpToken: string, dualControlToken: string) => void,
+  ): void {
+    withDualControl(this.dialog, { action: reason, reason, target, targetBody }, (tokens) =>
+      action(tokens.stepUpToken, tokens.dualControlToken));
   }
 }

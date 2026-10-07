@@ -36,8 +36,8 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
     .addr-cell { display: inline-flex; align-items: center; gap: 4px; }
     .addr-mono { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--rw-text-secondary); }
     .addr-copy { background: none; border: none; padding: 0 2px; cursor: pointer; color: var(--rw-text-muted); display: inline-flex; align-items: center; border-radius: 3px; mat-icon { font-size: 13px; width: 13px; height: 13px; } &:hover { color: var(--rw-text-primary); } }
-    .type-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; &.wallet { background: rgba(98,126,234,.12); color: #627EEA; } &.contract { background: rgba(245,158,11,.12); color: #D97706; } }
-    .risk-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; &.low { background: rgba(34,197,94,.12); color: #16a34a; } &.medium { background: rgba(245,158,11,.12); color: #D97706; } &.high { background: rgba(239,68,68,.12); color: #DC2626; } &.none { color: var(--rw-text-muted); font-weight: 400; } }
+    .type-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; &.wallet { background: rgba(98,126,234,.12); color: #627EEA; } &.contract { background: rgba(245,158,11,.12); color: var(--rw-text-warning); } }
+    .risk-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; &.low { background: var(--rw-approved-bg); color: var(--rw-approved-fg); } &.medium { background: var(--rw-pending-bg); color: var(--rw-pending-fg); } &.high { background: var(--rw-rejected-bg); color: var(--rw-text-danger); } &.none { color: var(--rw-text-muted); font-weight: 400; } }
     .notes-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--rw-text-secondary); font-size: 12px; }
     .empty-state { padding: 60px 24px; text-align: center; mat-icon { font-size: 40px; width: 40px; height: 40px; color: var(--rw-text-muted); margin-bottom: 12px; } p { color: var(--rw-text-muted); font-size: 14px; margin: 4px 0; } }
     @media (max-width: 620px) {
@@ -112,7 +112,7 @@ import { EndpointFormDialogComponent, EndpointFormDialogData, EndpointFormDialog
                   <button type="button" mat-icon-button [matMenuTriggerFor]="actionMenu" aria-label="More actions"><mat-icon>more_vert</mat-icon></button>
                   <mat-menu #actionMenu>
                     <button type="button" mat-menu-item (click)="openEdit(ep)"><mat-icon>edit</mat-icon> Edit</button>
-                    <button type="button" mat-menu-item (click)="confirmDelete(ep)" style="color:#ef4444"><mat-icon>delete_outline</mat-icon> Delete</button>
+                    <button type="button" mat-menu-item (click)="confirmDelete(ep)" style="color:var(--rw-text-danger)"><mat-icon>delete_outline</mat-icon> Delete</button>
                   </mat-menu>
                 </td>
               </tr>

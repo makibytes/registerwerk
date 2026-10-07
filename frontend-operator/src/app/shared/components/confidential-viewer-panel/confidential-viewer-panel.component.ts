@@ -96,7 +96,7 @@ const CONFIDENTIAL_BALANCE_ABI = [
           <ng-container matColumnDef="match">
             <th mat-header-cell *matHeaderCellDef>Match</th>
             <td mat-cell *matCellDef="let h">
-              <mat-icon [style.color]="h.matches ? '#388e3c' : '#e53935'">
+              <mat-icon [style.color]="h.matches ? 'var(--rw-text-success)' : 'var(--rw-text-danger)'">
                 {{ h.matches ? 'check_circle' : 'error' }}
               </mat-icon>
             </td>
@@ -264,7 +264,13 @@ export class ConfidentialViewerPanelComponent {
   removeViewer(): void {
     if (!this.viewerAddress) return;
     this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: true, reason: 'Remove confidential viewer', action: 'CONFIDENTIAL_VIEWER_REVOKE' },
+      data: {
+        requireDualControl: true,
+        reason: 'Remove confidential viewer',
+        action: 'CONFIDENTIAL_VIEWER_REVOKE',
+        target: `POST /api/v1/assets/${this.assetId}/deployments/${this.deploymentId}/admin/confidential-remove-viewer`,
+        targetBody: { viewerAddress: this.viewerAddress },
+      },
       width: '500px',
       disableClose: true,
     }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {

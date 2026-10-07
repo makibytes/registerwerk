@@ -10,10 +10,12 @@ import {
   AdminUserService,
   EntraMethodsResponse,
   OperatorUser,
+  TemporaryAccessPassRequest,
   TemporaryAccessPassResponse,
 } from '../../core/api/admin-user.service';
 import {
   StepUpDialogComponent,
+  StepUpDialogData,
   StepUpDialogResult,
 } from '../../shared/components/step-up/step-up-dialog.component';
 
@@ -266,7 +268,13 @@ export class User2faDialogComponent implements OnInit, OnDestroy {
 
   protected resetAll(): void {
     this.withStepUp(
-      { requireDualControl: true, reason: 'Reset all authentication methods', action: ACTION_RESET },
+      {
+        requireDualControl: true,
+        reason: 'Reset all authentication methods',
+        action: ACTION_RESET,
+        target: `POST /api/v1/admin/users/${this.user.id}/entra/methods/reset`,
+        targetBody: {},
+      },
       result => this.adminUsers
         .resetEntraMfa(this.user.id, result.stepUpToken, result.dualControlToken ?? '')
         .subscribe({
@@ -294,12 +302,20 @@ export class User2faDialogComponent implements OnInit, OnDestroy {
   }
 
   protected issueTap(): void {
+    // One object feeds both the approval target and the request, so the approver binds exactly what is sent.
+    const request: TemporaryAccessPassRequest = { lifetimeMinutes: 60, usableOnce: true };
     this.withStepUp(
-      { requireDualControl: true, reason: 'Issue a Temporary Access Pass', action: ACTION_TAP },
+      {
+        requireDualControl: true,
+        reason: 'Issue a Temporary Access Pass',
+        action: ACTION_TAP,
+        target: `POST /api/v1/admin/users/${this.user.id}/entra/temporary-access-pass`,
+        targetBody: request,
+      },
       result => this.adminUsers
         .issueTemporaryAccessPass(
           this.user.id,
-          { lifetimeMinutes: 60, usableOnce: true },
+          request,
           result.stepUpToken,
           result.dualControlToken ?? '',
         )
@@ -325,7 +341,7 @@ export class User2faDialogComponent implements OnInit, OnDestroy {
   }
 
   private withStepUp(
-    data: { requireDualControl: boolean; reason: string; action: string },
+    data: StepUpDialogData,
     run: (result: StepUpDialogResult) => void,
   ): void {
     this.dialog

@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.trading.internal;
 import de.makibytes.registerwerk.trading.api.TradingVenueCode;
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -18,6 +19,18 @@ class TradingProductionReadinessCheckTest {
         properties.setEnabled(tradingEnabled);
         properties.venue(TradingVenueCode.SIMULATED).setEnabled(simulatedEnabled);
         return properties;
+    }
+
+    @Test
+    void dashDProductionModePropertyActivatesTheGate() {
+        // Wave 5a: TradingProperties/the check read System.getenv only, so -Dregisterwerk.production-mode=true was ignored
+        TradingProperties properties = propertiesWithSimulated(true, true);
+        properties.setEnvironment(new org.springframework.mock.env.MockEnvironment()
+                .withProperty(de.makibytes.registerwerk.shared.ProductionMode.PROPERTY_NAME, "true"));
+
+        assertThat(properties.isProductionMode()).isTrue();
+        assertThatThrownBy(() -> new TradingProductionReadinessCheck(properties).check())
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

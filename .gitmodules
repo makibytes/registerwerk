@@ -22,3 +22,6 @@
 [submodule "docs/_chaincache"]
 	path = docs/_chaincache
 	url = ../chaincache
+[submodule "contracts/lib/account-abstraction"]
+	path = contracts/lib/account-abstraction
+	url = https://github.com/eth-infinitism/account-abstraction.git

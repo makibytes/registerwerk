@@ -166,8 +166,8 @@ devuelve la dirección que cada política debe registrar como firmante.
   y una excepción a nivel de despliegue en el Green Bond insignia de Meridian (`OPERATOR`, que
   muestra la precedencia de la excepción sobre el valor por defecto).
 - Pruebas: `contracts/test/ecosystem/EwpgPaymaster.t.sol` ejecuta cada ruta patrocinada a través de
-  `handleOps` del **EntryPoint v0.8.0 real** (incluido solo para pruebas en
-  `contracts/test/aa-v08/`), con pruebas de regresión para los escenarios de vaciado citados en el
+  `handleOps` del **EntryPoint v0.8.0 real** (solo para pruebas, submódulo git fijado
+  `contracts/lib/account-abstraction` en la etiqueta v0.8.0; GPL-3.0, nunca importado por `src/` ni `script/`), con pruebas de regresión para los escenarios de vaciado citados en el
   despliegue más abajo. `backend/.../asset/internal/GasSponsorshipVoucherServiceTest.java` y
   `unit/GasSponsorshipVoucherDigestTest.java` fijan el digest de Java al de Solidity con un vector de
   prueba compartido.

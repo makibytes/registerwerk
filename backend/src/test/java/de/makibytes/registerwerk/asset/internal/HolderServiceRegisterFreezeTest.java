@@ -27,7 +27,8 @@ class HolderServiceRegisterFreezeTest {
     private final HolderService service = new HolderService(holders, assets, mock(ApplicationEventPublisher.class),
             mock(de.makibytes.registerwerk.customer.api.LegalEntityRepository.class),
             mock(de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository.class),
-            mock(HolderChangeRepository.class));
+            mock(HolderChangeRepository.class),
+            new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemDefaultZone(), java.time.ZoneId.systemDefault()));
 
     private static final HolderInstruction INSTRUCTION = new HolderInstruction(InstructingParty.COURT, "AZ 1");
 

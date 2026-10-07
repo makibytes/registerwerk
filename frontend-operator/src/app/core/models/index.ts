@@ -108,6 +108,7 @@ export interface VaultRequest {
   ownerAddr: string;
   /** Who funded a deposit request — cancel refunds go here. */
   payerAddr?: string;
+  /** BigInteger base units; exact strings above 2^53 (see parseJsonPreservingBigNumbers). */
   assetAmount?: string;
   shareAmount?: string;
   requestStatus: 'PENDING' | 'FULFILLED' | 'CANCELLED' | 'FORCE_CANCELLED';
@@ -855,7 +856,8 @@ export interface WalletBalance {
   chainIdentifier: string;
   chainDisplayName: string;
   nativeCurrencySymbol: string;
-  balance: number | null;
+  /** A string when it has 16+ significant digits (exact), else a number. */
+  balance: number | string | null;
   error: string | null;
 }
 
@@ -864,7 +866,7 @@ export interface OperatorWallet {
   name: string;
   type: 'EVM' | 'SOLANA' | 'CANTON';
   address: string;
-  custodyType: 'SOFTWARE' | 'PKCS11';
+  custodyType: 'SOFTWARE' | 'PKCS11' | 'KMS';
   keyReference: string | null;
   defaultForChains: string[]; // chain config UUIDs
   createdAt: string;
@@ -1593,4 +1595,17 @@ export interface KycReview {
   screening: { entityHitUnresolved: boolean; beneficialOwnerHitUnresolved: boolean; relyingOnStaleResult: boolean };
   gaps: string[];
   decisions: KycDecisionRecord[];
+}
+
+/** Display label of a wallet's custody type; HSM and KMS keys never leave the module and cannot be exported. */
+export function custodyLabel(type: OperatorWallet['custodyType']): string {
+  switch (type) {
+    case 'PKCS11': return 'PKCS#11 HSM (non-exportable)';
+    case 'KMS': return 'Cloud KMS (non-exportable)';
+    default: return 'Encrypted software keystore';
+  }
+}
+
+export function isExportableCustody(type: OperatorWallet['custodyType']): boolean {
+  return type === 'SOFTWARE';
 }

@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.payment.api.PaymentRail;
 import de.makibytes.registerwerk.payment.api.PaymentRailRepository;
 import de.makibytes.registerwerk.payment.api.PaymentRailType;
+import de.makibytes.registerwerk.shared.Money;
 import de.makibytes.registerwerk.trading.api.PaymentOption;
 import org.springframework.stereotype.Component;
 
@@ -77,11 +78,20 @@ class TradeCurrencyPolicy {
         return new Resolved(currency, stable ? railCode : null);
     }
 
+    /** Display/rounding cap for a stablecoin rail (token decimals can be 18; the cash leg is shown to 6). */
+    static final int STABLECOIN_MAX_SCALE = 6;
+
+    /** Rounding scale for a stablecoin rail: its decimals (default 6), capped at 6. */
+    static int stablecoinScale(Integer railDecimals) {
+        int d = railDecimals != null ? railDecimals : STABLECOIN_MAX_SCALE;
+        return Math.max(0, Math.min(d, STABLECOIN_MAX_SCALE));
+    }
+
     /** Rounding scale of the selected payment option for a stored listing currency / rail. */
     int scaleFor(PaymentOption option, String currency, String railCode) {
         if (option == PaymentOption.STABLECOIN && railCode != null) {
             Integer decimals = railRepository.findByCode(railCode).map(PaymentRail::getDecimals).orElse(null);
-            return Money.stablecoinScale(decimals);
+            return stablecoinScale(decimals);
         }
         return Money.minorUnits(currency);
     }

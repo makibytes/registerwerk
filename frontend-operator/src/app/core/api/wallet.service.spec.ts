@@ -67,6 +67,17 @@ describe('WalletService', () => {
         req.flush({});
     });
 
+    it('attachKms() posts the key version with step-up bearer and second approver token', () => {
+        service.attachKms({ name: 'kms-1', keyVersion: 'projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1' },
+            { stepUpToken: 'su-token', dualControlToken: 'dc-token' }).subscribe();
+        const req = httpMock.expectOne(r => r.url.endsWith('/attach-kms'));
+        expect(req.request.method).toBe('POST');
+        expect(req.request.body).toEqual({ name: 'kms-1', keyVersion: 'projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1' });
+        expect(req.request.headers.get('Authorization')).toBe('Bearer su-token');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('dc-token');
+        req.flush({});
+    });
+
     it('exportKeystore() POSTs the password and expects a blob response', () => {
         service.exportKeystore('wallet-1', 'secret').subscribe();
         const req = httpMock.expectOne(`${base}/wallet-1/export-keystore`);
@@ -118,7 +129,7 @@ describe('WalletService', () => {
         service.getBalances('wallet-1').subscribe();
         const req = httpMock.expectOne(`${base}/wallet-1/balances`);
         expect(req.request.method).toBe('GET');
-        req.flush([]);
+        req.flush('[]');
     });
 
     it('listDefaults() GETs the wallet-defaults collection', () => {

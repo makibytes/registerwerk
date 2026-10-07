@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.audit.api.AuditableEvent;
 import java.util.Map;
 import java.util.UUID;
 
+/** {@code inviteLink} is sealed ({@code shared.SecureLinkPort}); the plaintext token is never published. */
 public record CompanyUserInvitedEvent(
         UUID entityId, UUID userId, UUID actorId, String actorRole,
         String email, String displayName, String inviteLink) implements AuditableEvent {

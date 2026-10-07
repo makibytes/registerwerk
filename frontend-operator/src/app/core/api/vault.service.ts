@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
+import { parseJsonPreservingBigNumbers } from '@registerwerk/ui';
 import { environment } from '../../../environments/environment';
 import { VaultNavStrike, VaultRequest, VaultStateSummary } from '../models';
 import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
@@ -24,12 +25,15 @@ export class VaultService {
 
   getVaultRequests(deploymentId: string, status = 'PENDING'): Observable<VaultRequest[]> {
     const params = new HttpParams().set('status', status);
-    return this.http.get<VaultRequest[]>(`${this.base}/deployments/${deploymentId}/vault-requests`, { params });
+    // assetAmount / shareAmount are BigInteger base units that exceed 2^53: keep them exact (strings).
+    return this.http.get(`${this.base}/deployments/${deploymentId}/vault-requests`, { params, responseType: 'text' })
+      .pipe(map((text) => parseJsonPreservingBigNumbers(text) as VaultRequest[]));
   }
 
   /** Confirmed vault state — the NAV a fulfilment settles at. */
   getVaultState(deploymentId: string): Observable<VaultStateSummary> {
-    return this.http.get<VaultStateSummary>(`${this.base}/deployments/${deploymentId}/vault-state`);
+    return this.http.get(`${this.base}/deployments/${deploymentId}/vault-state`, { responseType: 'text' })
+      .pipe(map((text) => parseJsonPreservingBigNumbers(text) as VaultStateSummary));
   }
 
   /** Settles at the NAV currently struck on-chain; the executed NAV is recorded from the event. */

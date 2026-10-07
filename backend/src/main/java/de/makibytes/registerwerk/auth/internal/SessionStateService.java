@@ -27,7 +27,12 @@ import org.springframework.stereotype.Component;
 class SessionStateService {
 
     record UserState(boolean enabled, Instant tokensValidAfter, UUID legalEntityId, boolean registryAdmin,
-                     boolean entityTerminated) {}
+                     boolean entityTerminated, boolean mustChangePassword) {
+        UserState(boolean enabled, Instant tokensValidAfter, UUID legalEntityId, boolean registryAdmin,
+                  boolean entityTerminated) {
+            this(enabled, tokensValidAfter, legalEntityId, registryAdmin, entityTerminated, false);
+        }
+    }
 
     record ImpersonationState(UUID actorId, UUID targetEntityId, ImpersonationMode mode, boolean active,
                               boolean targetTerminated) {}
@@ -64,7 +69,8 @@ class SessionStateService {
 
     private UserState toState(AppUser u) {
         return new UserState(u.isEnabled(), u.getTokensValidAfter(), u.getLegalEntityId(),
-                u.hasRole(AppUserRole.REGISTRY_ADMIN), entityActivity.isTerminated(u.getLegalEntityId()));
+                u.hasRole(AppUserRole.REGISTRY_ADMIN), entityActivity.isTerminated(u.getLegalEntityId()),
+                u.isMustChangePassword());
     }
 
     boolean isRevoked(String jti) {

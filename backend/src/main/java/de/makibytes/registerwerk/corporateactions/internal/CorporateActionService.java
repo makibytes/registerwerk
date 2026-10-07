@@ -33,6 +33,7 @@ import de.makibytes.registerwerk.customer.api.EntityTaskPort;
 import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
 import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.Money;
 import de.makibytes.registerwerk.shared.RegisterClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,11 +46,9 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Currency;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -730,8 +729,8 @@ public class CorporateActionService {
      * transfers before the cut-off not final, a wallet unmapped at the record date) the action is
      * SNAPSHOT_BLOCKED and retried, still against the same record date.
      *
-     * <p>Rounding (T3-05): each entitlement is {@code amountPerUnit × nominal} rounded HALF_EVEN to
-     * the currency's minor unit; {@code totalAmount} is the sum of the rounded payable entitlements
+     * <p>Rounding (T3-05): each entitlement is {@code amountPerUnit × nominal} rounded HALF_UP (Wave 5a,
+     * {@link Money}: ICMA Rule 251 / kaufmaennische Rundung) to the currency's minor unit; {@code totalAmount} is the sum of the rounded payable entitlements
      * and {@code roundingResidual} = Σ unrounded − Σ rounded is kept for the operator confirmation.
      *
      * <p>A nominee-pool holder's entry (T2-18) is snapshotted with its entitlement but marked
@@ -759,7 +758,9 @@ public class CorporateActionService {
         log.info("Corporate action record date set: id={} recordDate={}", ca.getId(), ca.getRecordDate());
 
         BigDecimal amountPerUnit = ca.getAmountPerUnit();
-        int minorUnits = minorUnits(ca.getCurrency());
+        // Wave 5a: a cash action with a missing/unknown currency is refused (Money.minorUnits throws), never
+        // paid at a guessed scale; non-cash actions (no amountPerUnit) need no currency.
+        int minorUnits = amountPerUnit != null ? Money.minorUnits(ca.getCurrency()) : 0;
         BigDecimal total = BigDecimal.ZERO;
         BigDecimal unroundedTotal = BigDecimal.ZERO;
         List<CorporateActionEntry> snapshot = new ArrayList<>();
@@ -777,7 +778,7 @@ public class CorporateActionService {
                     : CorporateActionEntry.PayoutStatus.PAYABLE);
             if (amountPerUnit != null) {
                 BigDecimal unrounded = amountPerUnit.multiply(nominal);
-                BigDecimal entitlement = unrounded.setScale(minorUnits, RoundingMode.HALF_EVEN);
+                BigDecimal entitlement = Money.round(unrounded, minorUnits);
                 entry.setEntitlementAmount(entitlement);
                 if (!held) {
                     total = total.add(entitlement);
@@ -799,19 +800,6 @@ public class CorporateActionService {
         repository.save(ca);
         log.info("Corporate action computed: id={} entries={} totalAmount={} roundingResidual={}", ca.getId(),
                 resolution.positions().size(), ca.getTotalAmount(), ca.getRoundingResidual());
-    }
-
-    /** ISO 4217 minor units of {@code currency}; 2 when unknown or not a fiat code. */
-    static int minorUnits(String currency) {
-        if (currency == null || currency.isBlank()) {
-            return 2;
-        }
-        try {
-            int digits = Currency.getInstance(currency.trim().toUpperCase()).getDefaultFractionDigits();
-            return digits >= 0 ? digits : 2;
-        } catch (IllegalArgumentException e) {
-            return 2;
-        }
     }
 
     private TokenStandard resolveTokenStandard(UUID corporateActionId) {

@@ -7,14 +7,16 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { WalletService } from '../../core/api/wallet.service';
-import { OperatorWallet, WalletBalance } from '../../core/models';
+import { OperatorWallet, WalletBalance, custodyLabel } from '../../core/models';
+
+import { RwDecimalPipe } from '@registerwerk/ui';
 
 @Component({
   selector: 'app-wallet-detail',
   standalone: true,
   imports: [
     CommonModule, RouterLink, MatIconModule, MatButtonModule,
-    MatProgressSpinnerModule, MatTooltipModule, MatSnackBarModule,
+    MatProgressSpinnerModule, MatTooltipModule, MatSnackBarModule, RwDecimalPipe,
   ],
   styles: [`
     .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
@@ -47,7 +49,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
 
     .balance-amount { font-size: 15px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
     .balance-symbol { font-size: 11px; font-weight: 600; color: var(--rw-text-muted); margin-left: 4px; }
-    .balance-error { color: #ef4444; font-size: 12px; display: flex; align-items: center; gap: 4px; }
+    .balance-error { color: var(--rw-text-danger); font-size: 12px; display: flex; align-items: center; gap: 4px; }
     .balance-loading { display: flex; align-items: center; gap: 8px; color: var(--rw-text-muted); font-size: 12px; }
 
     .chain-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
@@ -56,8 +58,8 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
     .chain-badge.canton { background: rgba(255,107,53,.08); color: #FF6B35; }
 
     .network-tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; letter-spacing: 0.4px; text-transform: uppercase; margin-left: 6px; }
-    .network-tag.mainnet { background: rgba(34,197,94,.1); color: #16a34a; }
-    .network-tag.testnet { background: rgba(245,158,11,.1); color: #d97706; }
+    .network-tag.mainnet { background: rgba(34,197,94,.1); color: var(--rw-text-success); }
+    .network-tag.testnet { background: rgba(245,158,11,.1); color: var(--rw-text-warning); }
 
     .loading-overlay { padding: 48px; text-align: center; color: var(--rw-text-muted); }
     .load-error { display: grid; justify-items: center; gap: 10px; color: var(--rw-text-danger); }
@@ -120,7 +122,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
             </div>
             <div class="meta-item">
               <span class="meta-label">Custody</span>
-              <span class="meta-value">{{ wallet()!.custodyType === 'PKCS11' ? 'PKCS#11 HSM (non-exportable)' : 'Encrypted software keystore' }}</span>
+              <span class="meta-value">{{ custodyLabel(wallet()!.custodyType) }}</span>
             </div>
             @if (wallet()!.keyReference) {
               <div class="meta-item"><span class="meta-label">Key reference</span><span class="meta-value">{{ wallet()!.keyReference }}</span></div>
@@ -189,7 +191,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
                         {{ b.error }}
                       </span>
                     } @else {
-                      <span class="balance-amount">{{ b.balance | number:'1.4-8' }}</span>
+                      <span class="balance-amount">{{ b.balance | rwDecimal:'1.4-8' }}</span>
                       <span class="balance-symbol">{{ b.nativeCurrencySymbol }}</span>
                     }
                   </td>
@@ -203,6 +205,7 @@ import { OperatorWallet, WalletBalance } from '../../core/models';
   `,
 })
 export class WalletDetailComponent implements OnInit {
+  protected readonly custodyLabel = custodyLabel;
   private readonly route         = inject(ActivatedRoute);
   private readonly walletService = inject(WalletService);
   private readonly snackBar = inject(MatSnackBar);

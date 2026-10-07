@@ -31,7 +31,7 @@ class TradingProductionReadinessCheck {
 
     @PostConstruct
     void check() {
-        check("true".equalsIgnoreCase(System.getenv("REGISTERWERK_PRODUCTION_MODE")));
+        check(tradingProperties.isProductionMode());
     }
 
     void check(boolean productionMode) {

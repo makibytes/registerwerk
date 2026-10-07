@@ -18,8 +18,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -45,7 +43,6 @@ import static org.mockito.Mockito.when;
  * propagation row may only complete once both are confirmed.
  */
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("KycChainPropagationListener — KYC lapse reaches the chain")
 class KycChainPropagationListenerTest {
 
@@ -75,19 +72,19 @@ class KycChainPropagationListenerTest {
                 taskPort, transactionManager, meterRegistry);
 
         // In-memory propagation table.
-        when(propagationRepository.save(any(KycChainPropagation.class))).thenAnswer(inv -> {
+        org.mockito.Mockito.lenient().when(propagationRepository.save(any(KycChainPropagation.class))).thenAnswer(inv -> {
             KycChainPropagation row = inv.getArgument(0);
             if (row.getId() == null) row.setId(UUID.randomUUID());
             rows.put(row.getId(), row);
             return row;
         });
-        when(propagationRepository.findById(any())).thenAnswer(inv -> Optional.ofNullable(rows.get(inv.getArgument(0))));
-        when(propagationRepository.findByLegalEntityIdAndChainConfigId(any(), any())).thenAnswer(inv ->
+        org.mockito.Mockito.lenient().when(propagationRepository.findById(any())).thenAnswer(inv -> Optional.ofNullable(rows.get(inv.getArgument(0))));
+        org.mockito.Mockito.lenient().when(propagationRepository.findByLegalEntityIdAndChainConfigId(any(), any())).thenAnswer(inv ->
                 rows.values().stream().filter(r -> r.getLegalEntityId().equals(inv.getArgument(0))
                         && r.getChainConfigId().equals(inv.getArgument(1))).findFirst());
-        when(propagationRepository.findByStatusIn(any())).thenAnswer(inv -> rows.values().stream()
+        org.mockito.Mockito.lenient().when(propagationRepository.findByStatusIn(any())).thenAnswer(inv -> rows.values().stream()
                 .filter(r -> ((java.util.Collection<?>) inv.getArgument(0)).contains(r.getStatus())).toList());
-        when(propagationRepository.countByStatus(any())).thenAnswer(inv ->
+        org.mockito.Mockito.lenient().when(propagationRepository.countByStatus(any())).thenAnswer(inv ->
                 rows.values().stream().filter(r -> r.getStatus() == inv.getArgument(0)).count());
 
         registration = new OrgRegistration();
@@ -95,14 +92,14 @@ class KycChainPropagationListenerTest {
         registration.setLegalEntityId(entityId);
         registration.setChainConfigId(chainId);
         registration.setStatus(OrgRegistrationStatus.ACTIVE);
-        when(registrationRepository.findByLegalEntityId(entityId)).thenReturn(List.of(registration));
-        when(registrationRepository.findByLegalEntityIdAndChainConfigId(entityId, chainId))
+        org.mockito.Mockito.lenient().when(registrationRepository.findByLegalEntityId(entityId)).thenReturn(List.of(registration));
+        org.mockito.Mockito.lenient().when(registrationRepository.findByLegalEntityIdAndChainConfigId(entityId, chainId))
                 .thenReturn(Optional.of(registration));
-        when(erc3643Api.identityChainIds(entityId)).thenReturn(List.of(chainId));
+        org.mockito.Mockito.lenient().when(erc3643Api.identityChainIds(entityId)).thenReturn(List.of(chainId));
 
         entity = new LegalEntity();
         entity.setKycStatus(KycStatus.EXPIRED);
-        when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+        org.mockito.Mockito.lenient().when(legalEntityRepository.findById(entityId)).thenReturn(Optional.of(entity));
     }
 
     private KycChainPropagation onlyRow() {

@@ -360,6 +360,11 @@ export class LoginComponent {
 
     this.auth.loginWithCredentials(email, this.password).subscribe({
       next: () => {
+        // must_change_password: the session only works for the change-password screen.
+        if (this.auth.isPasswordChangeRequired()) {
+          this.router.navigate(['/change-password']);
+          return;
+        }
         // REGISTRY_ADMIN / SUPPORT_AGENT (T6-05) with no entity context → company picker
         if ((this.auth.hasRole('REGISTRY_ADMIN') || this.auth.hasRole('SUPPORT_AGENT')) && !this.auth.getEntityId()) {
           this.router.navigate(['/select-company']);

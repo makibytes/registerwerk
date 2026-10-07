@@ -39,6 +39,8 @@ public class DefaultAdminSeeder implements ApplicationRunner {
     private final ApplicationEventPublisher events;
     private final TransactionTemplate tx;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    /** Production forces the bootstrap admin through a password change; demo/dev keeps admin@local / changeme usable. */
+    private final boolean mustChangePassword;
 
     public DefaultAdminSeeder(
             AppUserRepository users,
@@ -46,7 +48,9 @@ public class DefaultAdminSeeder implements ApplicationRunner {
             RegisterwerkAuthProperties props,
             ApplicationEventPublisher events,
             PlatformTransactionManager txManager,
-            org.springframework.jdbc.core.JdbcTemplate jdbc) {
+            org.springframework.jdbc.core.JdbcTemplate jdbc,
+            org.springframework.core.env.Environment environment) {
+        this.mustChangePassword = de.makibytes.registerwerk.shared.ProductionMode.of(environment).enabled();
         this.jdbc = jdbc;
         this.users = users;
         this.encoder = encoder;
@@ -92,9 +96,9 @@ public class DefaultAdminSeeder implements ApplicationRunner {
         u.setRole(AppUserRole.REGISTRY_ADMIN);
         u.setAuthProvider(UserAuthProvider.LOCAL);
         u.setEnabled(true);
-        u.setMustChangePassword(true);
+        u.setMustChangePassword(mustChangePassword);
         AppUser saved = users.save(u);
-        events.publishEvent(new DefaultAdminSeededEvent(saved.getId(), saved.getEmail()));
-        log.info("Default admin user seeded: {} (must change password)", email);
+        events.publishEvent(new DefaultAdminSeededEvent(saved.getId(), saved.getEmail(), mustChangePassword));
+        log.info("Default admin user seeded: {}{}", email, mustChangePassword ? " (must change password)" : "");
     }
 }

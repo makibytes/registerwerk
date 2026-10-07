@@ -333,10 +333,13 @@ import {
   styles: [`
     :host {
       display: block;
-      --accent: var(--rw-accent, #F59E0B);
+      --accent: var(--rw-accent);
       --bg-deep: var(--rw-sidebar-bg, #07091A);
-      --surface: #0e1124;
-      --border: rgba(245,158,11,.18);
+      --surface: var(--rw-surface);
+      --muted: var(--rw-text-secondary);
+      --tint: var(--rw-accent-subtle);
+      --strong: var(--rw-text-primary);
+      --border: var(--rw-border);
     }
 
     .wizard-shell {
@@ -354,7 +357,7 @@ import {
       font-size: .625rem;
       letter-spacing: .2em;
       color: var(--accent);
-      background: rgba(245,158,11,.1);
+      background: var(--tint);
       border: 1px solid var(--border);
       border-radius: 2px;
       padding: .25rem .75rem;
@@ -364,12 +367,12 @@ import {
       font-family: 'Manrope Variable', sans-serif;
       font-size: 2rem;
       font-weight: 800;
-      color: #f0f4ff;
+      color: var(--strong);
       margin: .75rem 0 .25rem;
     }
 
     .wizard-sub {
-      color: #7b8aac;
+      color: var(--muted);
       font-size: .875rem;
       margin: 0;
     }
@@ -383,7 +386,7 @@ import {
     }
 
     ::ng-deep .mat-step-header .mat-step-icon {
-      background-color: #1a1f3c;
+      background-color: var(--rw-surface-soft);
     }
 
     .step-body {
@@ -394,7 +397,7 @@ import {
       font-family: 'Manrope Variable', sans-serif;
       font-size: 1.125rem;
       font-weight: 700;
-      color: #e2e8f8;
+      color: var(--strong);
       margin: 0 0 1.25rem;
       display: flex;
       align-items: baseline;
@@ -404,7 +407,7 @@ import {
     .sub-heading {
       font-size: .875rem;
       font-weight: 700;
-      color: #e2e8f8;
+      color: var(--strong);
       margin: .5rem 0 .75rem;
       display: flex;
       align-items: baseline;
@@ -414,7 +417,7 @@ import {
     .heading-note {
       font-size: .75rem;
       font-weight: 400;
-      color: #7b8aac;
+      color: var(--muted);
     }
 
     .standard-grid {
@@ -438,11 +441,11 @@ import {
       text-align: left;
     }
 
-    .std-card:hover { border-color: rgba(245,158,11,.4); }
+    .std-card:hover { border-color: var(--rw-accent); }
 
     .std-card.selected {
       border-color: var(--accent);
-      background: rgba(245,158,11,.06);
+      background: var(--tint);
     }
 
     .std-tag {
@@ -454,7 +457,7 @@ import {
 
     .std-desc {
       font-size: .75rem;
-      color: #7b8aac;
+      color: var(--muted);
       line-height: 1.4;
     }
 
@@ -487,7 +490,7 @@ import {
 
     .call-row.header {
       font-size: .75rem;
-      color: #7b8aac;
+      color: var(--muted);
       font-family: 'IBM Plex Mono', monospace;
       letter-spacing: .05em;
     }
@@ -496,7 +499,7 @@ import {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 4px;
-      color: #e2e8f8;
+      color: var(--strong);
       padding: .5rem .75rem;
       font-family: 'IBM Plex Mono', monospace;
       font-size: .875rem;
@@ -504,7 +507,7 @@ import {
 
     .call-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
 
-    .call-remove { color: #ef4444; }
+    .call-remove { color: var(--rw-text-danger); }
 
     .btn-add-row {
       align-self: flex-start;
@@ -526,19 +529,19 @@ import {
       justify-content: space-between;
       align-items: center;
       padding: .625rem 0;
-      border-bottom: 1px solid rgba(255,255,255,.04);
+      border-bottom: 1px solid var(--rw-border-subtle);
     }
 
     .review-row:last-child { border-bottom: none; }
 
     .review-label {
       font-size: .8125rem;
-      color: #7b8aac;
+      color: var(--muted);
     }
 
     .review-value {
       font-size: .875rem;
-      color: #e2e8f8;
+      color: var(--strong);
       font-weight: 500;
     }
 
@@ -549,10 +552,10 @@ import {
       align-items: center;
       gap: .75rem;
       padding: .875rem 1rem;
-      background: rgba(245,158,11,.06);
-      border: 1px solid rgba(245,158,11,.3);
+      background: var(--tint);
+      border: 1px solid var(--rw-pending-fg);
       border-radius: 6px;
-      color: #f0c040;
+      color: var(--rw-text-warning);
       font-size: .8125rem;
       margin-bottom: 1.5rem;
     }
@@ -568,12 +571,12 @@ import {
 
     .btn-primary {
       background: var(--accent) !important;
-      color: #07091A !important;
+      color: var(--rw-accent-contrast) !important;
       font-weight: 700;
     }
 
     .btn-back {
-      color: #a0aec0;
+      color: var(--muted);
       border-color: var(--border);
     }
 
@@ -600,7 +603,7 @@ import {
     @keyframes spin { to { transform: rotate(360deg); } }
 
     .empty-note {
-      color: #7b8aac;
+      color: var(--muted);
       font-size: .875rem;
       padding: 1rem 0;
     }
@@ -621,10 +624,10 @@ import {
 
     ::ng-deep .mat-mdc-form-field input,
     ::ng-deep .mat-mdc-form-field .mat-mdc-select-value-text {
-      color: #e2e8f8 !important;
+      color: var(--strong) !important;
     }
 
-    ::ng-deep .mat-mdc-form-field .mat-mdc-floating-label { color: #7b8aac !important; }
+    ::ng-deep .mat-mdc-form-field .mat-mdc-floating-label { color: var(--muted) !important; }
     ::ng-deep .mat-mdc-form-field.mat-focused .mat-mdc-floating-label { color: var(--accent) !important; }
   `]
 })
@@ -710,7 +713,9 @@ export class BondIssuanceWizardComponent {
   deploy(): void {
     if (!this.selectedStandard) return;
     const assetId = this.route.snapshot.paramMap.get('id') ?? '';
-    const { assetName: _name, ...terms } = this.termsForm.value;
+    // The asset name belongs to the asset, not to the terms payload.
+    const terms = { ...this.termsForm.value };
+    delete terms.assetName;
     // The form takes rates in percent; the backend stores fractions (4 % → 0.04).
     const termsPayload = {
       ...terms,

@@ -16,6 +16,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
 import { DataTableComponent, PageHeaderComponent, TableColumn } from '@registerwerk/ui';
 import {
@@ -23,9 +24,12 @@ import {
   LendingMarketAdminView,
   LendingReconciliationTask,
   RegisterMarketRequest,
+  summarizeLegacyPause,
 } from '../../core/api/lending-admin.service';
 import { AsyncSectionStatus } from '../../core/async/async-section';
 import { StepUpDialogComponent, StepUpDialogResult } from '../../shared/components/step-up/step-up-dialog.component';
+import { withDualControl } from '../../shared/components/step-up/with-dual-control';
+import { DualControlTokens } from '../../core/api/dual-control-headers';
 import { MarketRegisterDialogComponent } from './market-register-dialog.component';
 import { pauseReasonText } from './lending-pause-reason';
 
@@ -48,6 +52,7 @@ import { pauseReasonText } from './lending-pause-reason';
     MatInputModule,
     MatSlideToggleModule,
     MatTabsModule,
+    MatTooltipModule,
     DataTableComponent,
     PageHeaderComponent,
   ],
@@ -76,6 +81,11 @@ import { pauseReasonText } from './lending-pause-reason';
               <button type="button" mat-stroked-button (click)="reverify()">
                 <mat-icon>verified</mat-icon>
                 Re-verify all
+              </button>
+              <button type="button" mat-stroked-button color="warn" (click)="pauseLegacyMarkets()"
+                      matTooltip="Pauses borrowing on-chain for every unverified or legacy-risk-parameter market. Run Re-verify all first. Lifting a pause stays a separate action.">
+                <mat-icon>pause_circle</mat-icon>
+                Pause borrowing (legacy markets)
               </button>
             </span>
           </rw-data-table>
@@ -261,7 +271,7 @@ export class LendingAdminComponent implements OnInit {
     this.dialog.open(MarketRegisterDialogComponent, { width: '560px', maxWidth: '95vw' })
       .afterClosed().subscribe((request: RegisterMarketRequest | undefined) => {
         if (!request) return;
-        this.withDualControl('Lending market registration', 'Lending market registration', (tokens) =>
+        this.withDualControl('Lending market registration', 'POST /api/v1/lending/markets', request, (tokens) =>
           this.service.registerMarket(request, tokens).subscribe({
             next: () => {
               this.snackBar.open('Market registered and verified against the factory, asset and payment rail.', 'Dismiss', { duration: 6000 });
@@ -315,7 +325,7 @@ export class LendingAdminComponent implements OnInit {
       legalBasis: this.reconcile.legalBasis.trim(),
     };
     this.dialog.closeAll();
-    this.withDualControl('Lending collateral reconciliation', 'Lending collateral reconciliation', (tokens) =>
+    this.withDualControl('Lending collateral reconciliation', `POST /api/v1/lending/markets/${marketId}/reconcile-collateral`, body, (tokens) =>
       this.service.reconcileCollateral(marketId, body, tokens).subscribe({
         next: () => {
           this.snackBar.open('Reconciliation submitted. The task closes once the market balance matches its record.', 'Dismiss', { duration: 7000 });
@@ -339,7 +349,7 @@ export class LendingAdminComponent implements OnInit {
     if (!market || !reason) return;
     const paused = this.pausing;
     this.dialog.closeAll();
-    this.withDualControl('Lending borrow pause', 'Lending borrow pause', (tokens) =>
+    this.withDualControl('Lending borrow pause', `POST /api/v1/lending/markets/${market.id}/borrow-paused`, { paused, reason }, (tokens) =>
       this.service.setBorrowPaused(market.id, paused, reason, tokens).subscribe({
         next: () => {
           this.snackBar.open(paused ? 'Borrow pause submitted.' : 'Borrow resume submitted.', 'Dismiss', { duration: 6000 });
@@ -349,16 +359,26 @@ export class LendingAdminComponent implements OnInit {
       }));
   }
 
-  /** The step-up scope must equal the endpoint's `@RequiresStepUp(reason)` exactly. */
-  private withDualControl(reason: string, action: string, run: (tokens: { stepUpToken: string; dualControlToken: string }) => void): void {
-    this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: true, reason, action },
-      width: '500px',
-      disableClose: true,
-    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
-      if (result?.stepUpToken && result.dualControlToken) {
-        run({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
-      }
-    });
+  /**
+   * Pauses borrowing on-chain for every unverified / legacy market (H11). Only pauses: the pause is lifted
+   * per market with the existing resume action. Step-up + second approver bound to the exact request.
+   */
+  pauseLegacyMarkets(): void {
+    this.withDualControl('Lending legacy market borrow pause', 'POST /api/v1/lending/markets/legacy-borrow-pause', {}, (tokens) =>
+      this.service.legacyBorrowPause(tokens).subscribe({
+        next: (results) => {
+          this.snackBar.open(summarizeLegacyPause(results), 'Dismiss', { duration: 10000 });
+          this.loadMarkets();
+        },
+        error: (err) => this.snackBar.open(err?.error?.message ?? 'The legacy-market pause failed.', 'Dismiss', { duration: 8000 }),
+      }));
+  }
+
+  /**
+   * The step-up scope must equal the endpoint's `@RequiresStepUp(reason)` exactly, and the approval is bound to
+   * the exact method, path and body that is sent next, so the caller passes the very objects it then sends.
+   */
+  private withDualControl(action: string, target: string, targetBody: unknown, run: (tokens: DualControlTokens) => void): void {
+    withDualControl(this.dialog, { action, reason: action, target, targetBody }, run);
   }
 }

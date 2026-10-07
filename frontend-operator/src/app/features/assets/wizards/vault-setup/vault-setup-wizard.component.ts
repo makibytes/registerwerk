@@ -161,9 +161,9 @@ import { TokenStandard } from '../../../../core/models';
   styles: [`
     :host {
       display: block;
-      --accent: var(--rw-accent, #F59E0B);
-      --surface: #0e1124;
-      --border: rgba(245,158,11,.18);
+      --accent: var(--rw-accent);
+      --surface: var(--rw-surface);
+      --border: var(--rw-border);
     }
 
     .vault-wizard { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem; }
@@ -175,7 +175,7 @@ import { TokenStandard } from '../../../../core/models';
       font-size: .625rem;
       letter-spacing: .2em;
       color: var(--accent);
-      background: rgba(245,158,11,.1);
+      background: var(--rw-accent-subtle);
       border: 1px solid var(--border);
       border-radius: 2px;
       padding: .2rem .625rem;
@@ -185,11 +185,11 @@ import { TokenStandard } from '../../../../core/models';
       font-family: 'Manrope Variable', sans-serif;
       font-size: 2rem;
       font-weight: 800;
-      color: #f0f4ff;
+      color: var(--rw-text-primary);
       margin: .75rem 0 .25rem;
     }
 
-    .vault-sub { color: #7b8aac; font-size: .875rem; margin: 0; }
+    .vault-sub { color: var(--rw-text-secondary); font-size: .875rem; margin: 0; }
 
     .vault-stepper { background: transparent; }
 
@@ -199,7 +199,7 @@ import { TokenStandard } from '../../../../core/models';
       font-family: 'Manrope Variable', sans-serif;
       font-size: 1.125rem;
       font-weight: 700;
-      color: #e2e8f8;
+      color: var(--rw-text-primary);
       margin: 0 0 1.25rem;
     }
 
@@ -222,7 +222,7 @@ import { TokenStandard } from '../../../../core/models';
       gap: .5rem;
     }
 
-    .type-card:hover { border-color: rgba(245,158,11,.35); }
+    .type-card:hover { border-color: var(--rw-accent); }
     .type-card.selected { border-color: var(--accent); background: rgba(245,158,11,.05); }
 
     .type-icon {
@@ -235,7 +235,7 @@ import { TokenStandard } from '../../../../core/models';
     .type-name {
       font-family: 'IBM Plex Mono', monospace;
       font-size: .875rem;
-      color: #e2e8f8;
+      color: var(--rw-text-primary);
       font-weight: 700;
       display: flex;
       align-items: center;
@@ -245,15 +245,15 @@ import { TokenStandard } from '../../../../core/models';
     .async-badge {
       font-size: .5625rem;
       padding: .1rem .35rem;
-      background: rgba(251,191,36,.15);
-      color: #fbbf24;
+      background: var(--rw-pending-bg);
+      color: var(--rw-text-warning);
       border-radius: 2px;
       letter-spacing: .08em;
     }
 
     .type-desc {
       font-size: .8125rem;
-      color: #7b8aac;
+      color: var(--rw-text-secondary);
       line-height: 1.5;
     }
 
@@ -261,7 +261,7 @@ import { TokenStandard } from '../../../../core/models';
       margin: .5rem 0 0;
       padding-left: 1rem;
       font-size: .75rem;
-      color: #4ade80;
+      color: var(--rw-text-success);
       line-height: 1.8;
     }
 
@@ -285,13 +285,13 @@ import { TokenStandard } from '../../../../core/models';
       display: flex;
       justify-content: space-between;
       padding: .5rem 0;
-      border-bottom: 1px solid rgba(255,255,255,.04);
+      border-bottom: 1px solid var(--rw-border-subtle);
       font-size: .875rem;
     }
 
     .rv-row:last-child { border-bottom: none; }
-    .rv-row > :first-child { color: #7b8aac; }
-    .rv-row > :last-child { color: #e2e8f8; }
+    .rv-row > :first-child { color: var(--rw-text-secondary); }
+    .rv-row > :last-child { color: var(--rw-text-primary); }
 
     .mono { font-family: 'IBM Plex Mono', monospace; }
 
@@ -304,13 +304,13 @@ import { TokenStandard } from '../../../../core/models';
 
     .btn-primary {
       background: var(--accent) !important;
-      color: #07091A !important;
+      color: var(--rw-accent-contrast) !important;
       font-weight: 700;
     }
 
     .btn-primary:disabled { opacity: .5; }
 
-    .btn-back { color: #a0aec0; border-color: var(--border); }
+    .btn-back { color: var(--rw-text-secondary); border-color: var(--border); }
 
     .btn-deploy {
       background: #dc2626 !important;
@@ -338,11 +338,11 @@ import { TokenStandard } from '../../../../core/models';
     ::ng-deep .mat-mdc-form-field .mdc-notched-outline__notch,
     ::ng-deep .mat-mdc-form-field .mdc-notched-outline__trailing { border-color: var(--border) !important; }
     ::ng-deep .mat-mdc-form-field input,
-    ::ng-deep .mat-mdc-form-field .mat-mdc-select-value-text { color: #e2e8f8 !important; }
-    ::ng-deep .mat-mdc-form-field .mat-mdc-floating-label { color: #7b8aac !important; }
+    ::ng-deep .mat-mdc-form-field .mat-mdc-select-value-text { color: var(--rw-text-primary) !important; }
+    ::ng-deep .mat-mdc-form-field .mat-mdc-floating-label { color: var(--rw-text-secondary) !important; }
     ::ng-deep .mat-mdc-form-field.mat-focused .mat-mdc-floating-label { color: var(--accent) !important; }
     ::ng-deep .mat-step-header .mat-step-icon-selected { background-color: var(--accent) !important; }
-    ::ng-deep .mat-step-header .mat-step-icon { background-color: #1a1f3c; }
+    ::ng-deep .mat-step-header .mat-step-icon { background-color: var(--rw-surface-soft); }
   `]
 })
 export class VaultSetupWizardComponent {

@@ -103,7 +103,8 @@ class TradingServiceTest {
                 List.of(venueAdapter), tradingAssetTypeResolver, eventPublisher,
                 legalEntityRepository, suitabilityAssessmentRepository, investorLimitGate, partyEligibilityGate,
                 finalityGate, encumbrance, transitions, orgMemberWalletRepository,
-                new TradeCurrencyPolicy(paymentRailRepository, tradingProperties), relatedPartyCheck, relatedPartyAlerts);
+                new TradeCurrencyPolicy(paymentRailRepository, tradingProperties), relatedPartyCheck, relatedPartyAlerts,
+                new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemDefaultZone(), java.time.ZoneId.systemDefault()));
         lenient().when(tradeListingRepository.save(any(TradeListing.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(tradeExecutionRepository.save(any(TradeExecution.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(assetHolderRepository.save(any(AssetHolder.class))).thenAnswer(inv -> {
@@ -425,7 +426,22 @@ class TradingServiceTest {
         assertThat(response.totalPrice().scale()).isEqualTo(2);
         assertThat(response.totalPriceUnrounded()).isEqualByComparingTo("333.33333333333333333");
         assertThat(response.priceRoundingScale()).isEqualTo((short) 2);
-        assertThat(response.priceRoundingMode()).isEqualTo("HALF_EVEN");
+        assertThat(response.priceRoundingMode()).isEqualTo("HALF_UP");
+    }
+
+    @Test
+    void buy_roundsAHalfCentTotalUp() {
+        // Wave 5a: one policy (HALF_UP) - 10 x 0.2345 = 2.345 was 2.34 under the old HALF_EVEN
+        UUID listingId = UUID.randomUUID();
+        TradeListing listing = openListing(BigDecimal.TEN, new BigDecimal("0.2345"), Set.of(PaymentOption.OFFCHAIN_SEPA));
+        listing.setCurrency("EUR");
+        when(tradeListingRepository.findByIdForUpdate(listingId)).thenReturn(Optional.of(listing));
+
+        var response = service.buy(BUYER, UUID.randomUUID(), listingId, sepaBuy(BigDecimal.TEN));
+
+        assertThat(response.totalPrice()).isEqualByComparingTo("2.35");
+        assertThat(response.totalPriceUnrounded()).isEqualByComparingTo("2.345");
+        assertThat(response.priceRoundingMode()).isEqualTo("HALF_UP");
     }
 
     @Test
@@ -555,7 +571,8 @@ class TradingServiceTest {
 
     @Test
     void demoOnlyClassification_refusesListingAndBuyInProductionMode() {
-        tradingProperties.setProductionMode(true);
+        tradingProperties.setEnvironment(new org.springframework.mock.env.MockEnvironment()
+                .withProperty(de.makibytes.registerwerk.shared.ProductionMode.PROPERTY_NAME, "true"));
         CreateTradeListingRequest req = new CreateTradeListingRequest(HOLDER_ID, BigDecimal.ONE, BigDecimal.TEN, false,
                 List.of(PaymentOption.OFFCHAIN_SEPA));
         assertThatThrownBy(() -> service.createListing(SELLER, UUID.randomUUID(), req))

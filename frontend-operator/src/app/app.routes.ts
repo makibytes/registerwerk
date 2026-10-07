@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authGuard, roleGuard } from './core/auth/auth.guard';
+import { authGuard, changePasswordGuard, roleGuard } from './core/auth/auth.guard';
 import { ShellComponent } from './layout/shell/shell.component';
 
 export const routes: Routes = [
@@ -234,6 +234,12 @@ export const routes: Routes = [
           ),
       },
     ],
+  },
+  {
+    path: 'change-password',
+    canActivate: [changePasswordGuard],
+    loadComponent: () =>
+      import('./core/auth/change-password.component').then((m) => m.ChangePasswordComponent),
   },
   {
     path: 'login',

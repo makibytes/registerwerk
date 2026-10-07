@@ -104,9 +104,9 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
       align-items: center;
       gap: 8px;
       font-size: 12px;
-      color: #10b981;
+      color: var(--rw-text-success);
       padding: 4px 8px;
-      background: rgba(16, 185, 129, 0.08);
+      background: var(--rw-approved-bg);
       border-radius: 4px;
     }
   `],
@@ -205,7 +205,7 @@ import { AsyncSectionStatus } from '../../../core/async/async-section';
             <mat-icon>gavel</mat-icon>
             Accept (False Positive)
           </button>
-          @if (hit.category === 'PEP' && run?.naturalPersonId) {
+          @if (hit.category === 'PEP' && run.naturalPersonId) {
             <button type="button" mat-stroked-button (click)="confirmPep(hit)"
                     matTooltip="Confirm this person as a PEP (not a false positive) — step-up + second approver">
               <mat-icon>policy</mat-icon>

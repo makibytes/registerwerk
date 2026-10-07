@@ -1,12 +1,12 @@
 package de.makibytes.registerwerk.regreporting.internal;
 
+import de.makibytes.registerwerk.shared.ProductionMode;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
-
-import java.util.function.BooleanSupplier;
 
 /**
  * Fail-fast guard for the draft/unvalidated regulatory-reporting prototype.
@@ -24,16 +24,14 @@ class RegReportingProductionReadinessCheck {
     private static final Logger log = LoggerFactory.getLogger(RegReportingProductionReadinessCheck.class);
 
     private final ReportingProperties reportingProperties;
-    private final BooleanSupplier productionMode;
+    private final boolean productionMode;
 
     @Autowired
-    RegReportingProductionReadinessCheck(ReportingProperties reportingProperties) {
-        this(reportingProperties,
-                () -> "true".equalsIgnoreCase(System.getenv("REGISTERWERK_PRODUCTION_MODE")));
+    RegReportingProductionReadinessCheck(ReportingProperties reportingProperties, Environment environment) {
+        this(reportingProperties, ProductionMode.resolve(environment));
     }
 
-    RegReportingProductionReadinessCheck(ReportingProperties reportingProperties,
-                                         BooleanSupplier productionMode) {
+    RegReportingProductionReadinessCheck(ReportingProperties reportingProperties, boolean productionMode) {
         this.reportingProperties = reportingProperties;
         this.productionMode = productionMode;
     }
@@ -44,7 +42,7 @@ class RegReportingProductionReadinessCheck {
                 + "exports are not a production filing integration. SFTP proves byte transport "
                 + "only; official schemas, reporting-entity/routing decisions, authenticated "
                 + "authority receipts/corrections, and legal sign-off are required.";
-        if (productionMode.getAsBoolean() && reportingProperties.isPrototypeEnabled()) {
+        if (productionMode && reportingProperties.isPrototypeEnabled()) {
             throw new IllegalStateException(message);
         }
         if (reportingProperties.isPrototypeEnabled()) {

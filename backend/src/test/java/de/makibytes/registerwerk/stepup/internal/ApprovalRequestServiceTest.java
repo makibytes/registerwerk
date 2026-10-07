@@ -16,8 +16,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -41,7 +39,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("Approval queue service (T8-02)")
 class ApprovalRequestServiceTest {
 
@@ -70,10 +67,10 @@ class ApprovalRequestServiceTest {
     void setUp() {
         service = new ApprovalRequestService(repository, catalog, properties, dualControl, issuer, enforcer, users,
                 events, txManager);
-        when(catalog.accepts(eq(ACTION), anyString(), eq(PATH))).thenReturn(true);
-        when(enforcer.mode()).thenReturn(StepUpMode.LOCAL_TOTP);
-        when(users.findById(approverId)).thenReturn(Optional.of(user(approverId, true, AppUserRole.COMPLIANCE_OFFICER)));
-        when(users.findById(requesterId)).thenReturn(Optional.of(user(requesterId, true, AppUserRole.REGISTRY_ADMIN)));
+        org.mockito.Mockito.lenient().when(catalog.accepts(eq(ACTION), anyString(), eq(PATH))).thenReturn(true);
+        org.mockito.Mockito.lenient().when(enforcer.mode()).thenReturn(StepUpMode.LOCAL_TOTP);
+        org.mockito.Mockito.lenient().when(users.findById(approverId)).thenReturn(Optional.of(user(approverId, true, AppUserRole.COMPLIANCE_OFFICER)));
+        org.mockito.Mockito.lenient().when(users.findById(requesterId)).thenReturn(Optional.of(user(requesterId, true, AppUserRole.REGISTRY_ADMIN)));
     }
 
     private static AppUser user(UUID id, boolean enabled, AppUserRole role) {

@@ -28,6 +28,7 @@ import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWallet;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.shared.AddressNormalizer;
+import de.makibytes.registerwerk.shared.Money;
 import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderCancelledEvent;
 import de.makibytes.registerwerk.asset.events.SubscriptionOrderConfirmedEvent;
@@ -51,7 +52,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -385,16 +385,7 @@ public class SubscriptionOrderService {
 
     private static BigDecimal amountDue(BigDecimal allocated, AssetBondTerms terms, String currency) {
         BigDecimal price = terms.getIssuePrice() != null ? terms.getIssuePrice() : BigDecimal.ONE;
-        return allocated.multiply(terms.getFaceValue()).multiply(price)
-                .setScale(minorUnits(currency), RoundingMode.HALF_UP);
-    }
-
-    private static int minorUnits(String currencyCode) {
-        try {
-            return currencyCode != null ? java.util.Currency.getInstance(currencyCode).getDefaultFractionDigits() : 2;
-        } catch (IllegalArgumentException e) {
-            return 2;
-        }
+        return Money.round(allocated.multiply(terms.getFaceValue()).multiply(price), currency);
     }
 
     /**

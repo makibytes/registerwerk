@@ -83,6 +83,7 @@ html { @include mat.all-component-themes($light); }
   --rw-issued-bg:    #F0FDF4; --rw-issued-fg:   #15803D;
   --rw-rejected-bg:  #FFF1F2; --rw-rejected-fg: #BE123C;
   --rw-revoked-bg:   #FAF5FF; --rw-revoked-fg:  #6D28D9;
+  --rw-neutral-bg:   #F1F5F9; --rw-neutral-fg:  #475569;
 
   // Radius
   --rw-radius-sm: 4px;
@@ -136,6 +137,7 @@ html { @include mat.all-component-themes($light); }
     --rw-issued-bg:    rgba(21,128,61,0.15);    --rw-issued-fg:   #86EFAC;
     --rw-rejected-bg:  rgba(190,18,60,0.15);    --rw-rejected-fg: #FDA4AF;
     --rw-revoked-bg:   rgba(109,40,217,0.15);   --rw-revoked-fg:  #C4B5FD;
+    --rw-neutral-bg:   rgba(148,163,184,0.15);  --rw-neutral-fg:  #CBD5E1;
 
     --rw-toolbar-bg:      #161B22;
     --rw-toolbar-border:  #30363D;

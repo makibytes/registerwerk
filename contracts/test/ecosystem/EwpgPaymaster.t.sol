@@ -8,11 +8,11 @@ import {
     IPaymaster
 } from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {EntryPoint} from "../aa-v08/core/EntryPoint.sol";
-import {IEntryPoint} from "../aa-v08/interfaces/IEntryPoint.sol";
-import {IStakeManager} from "../aa-v08/interfaces/IStakeManager.sol";
-import {PackedUserOperation} from "../aa-v08/interfaces/PackedUserOperation.sol";
-import {IAccount} from "../aa-v08/interfaces/IAccount.sol";
+import {EntryPoint} from "@account-abstraction/contracts/core/EntryPoint.sol";
+import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
+import {IStakeManager} from "@account-abstraction/contracts/interfaces/IStakeManager.sol";
+import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
+import {IAccount} from "@account-abstraction/contracts/interfaces/IAccount.sol";
 import {EcosystemTrustedIssuersRegistry} from "../../src/ecosystem/EcosystemTrustedIssuersRegistry.sol";
 import {EwpgPaymaster} from "../../src/ecosystem/EwpgPaymaster.sol";
 import {OrgRegistry} from "../../src/ecosystem/OrgRegistry.sol";
@@ -33,7 +33,7 @@ contract AcceptAllAccount is IAccount {
     receive() external payable {}
 }
 
-/// @notice {EwpgPaymaster} against the real EntryPoint v0.8.0 (vendored under `test/aa-v08/`):
+/// @notice {EwpgPaymaster} against the real EntryPoint v0.8.0 (the pinned `lib/account-abstraction` submodule):
 ///         every sponsored path goes through `handleOps`, so the gas accounting below is the
 ///         EntryPoint's own, not a mock's. Ports the phase-2 PoCs `PaymasterDrain.t.sol`
 ///         (T2-01) and adds the T2-01b / T2-02 regressions.

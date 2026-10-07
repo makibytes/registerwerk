@@ -1,5 +1,6 @@
 import { HttpErrorResponse, HttpInterceptorFn, HttpStatusCode } from '@angular/common/http';
 import { inject } from '@angular/core';
+import { Router } from '@angular/router';
 import { catchError, tap, throwError } from 'rxjs';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { AuthService } from '../auth/auth.service';
@@ -39,12 +40,14 @@ function isAuthProbe(url: string): boolean {
  * Global HTTP error handler:
  *  401 with a claims challenge → re-authenticates for the required auth context
  *  401 otherwise               → clears auth and redirects to /login
+ *  403 PASSWORD_CHANGE_REQUIRED → routes to /change-password (no toast)
  *  403 → shows "Access denied" toast
  *  5xx → shows generic error toast
  */
 export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   const snackBar = inject(MatSnackBar);
   const auth = inject(AuthService);
+  const router = inject(Router);
 
   return next(req).pipe(
     // Any successful response proves the session is good, so a later genuine expiry is not
@@ -83,6 +86,15 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
 
         case HttpStatusCode.Forbidden: {
           const code = (err.error as { code?: string } | null)?.code;
+          if (code === 'PASSWORD_CHANGE_REQUIRED') {
+            // Not a permission failure: the account must set a new password first. Route there once
+            // instead of toasting "access denied" for every request the page fires.
+            auth.markPasswordChangeRequired();
+            if (!router.url.startsWith('/change-password')) {
+              void router.navigate(['/change-password']);
+            }
+            break;
+          }
           if (code === 'IMPERSONATION_READ_ONLY' || code === 'IMPERSONATION_ACTION_DENIED') {
             snackBar.open(
               code === 'IMPERSONATION_READ_ONLY'

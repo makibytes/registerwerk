@@ -72,6 +72,7 @@ public class CompanyUserService {
     private final ApplicationEventPublisher eventPublisher;
     private final RegisterwerkAuthProperties authProperties;
     private final PrincipalResolver principalResolver;
+    private final de.makibytes.registerwerk.shared.SecureLinkPort secureLinks;
     private final String customerFrontendUrl;
     private final long userActionTokenTtlHours;
 
@@ -83,7 +84,8 @@ public class CompanyUserService {
             ApplicationEventPublisher eventPublisher,
             RegisterwerkAuthProperties authProperties,
             PrincipalResolver principalResolver,
-                        @Value("${registerwerk.onboarding.frontend-url:http://localhost:44201}") String customerFrontendUrl,
+            de.makibytes.registerwerk.shared.SecureLinkPort secureLinks,
+            @Value("${registerwerk.onboarding.frontend-url:http://localhost:44201}") String customerFrontendUrl,
             @Value("${registerwerk.onboarding.user-action-ttl-hours:48}") long userActionTokenTtlHours) {
         this.appUserRepository = appUserRepository;
         this.actionTokenRepository = actionTokenRepository;
@@ -92,6 +94,7 @@ public class CompanyUserService {
         this.eventPublisher = eventPublisher;
         this.authProperties = authProperties;
         this.principalResolver = principalResolver;
+        this.secureLinks = secureLinks;
         this.customerFrontendUrl = customerFrontendUrl;
         this.userActionTokenTtlHours = userActionTokenTtlHours;
     }
@@ -164,7 +167,8 @@ public class CompanyUserService {
 
         String registrationToken = createActionToken(saved, AppUserActionTokenType.REGISTRATION, actorId);
         eventPublisher.publishEvent(new CompanyUserInvitedEvent(entityId, saved.getId(), actorId, actorRole(authentication),
-            saved.getEmail(), saved.getFullName(), customerFrontendUrl + "/register/" + registrationToken));
+            saved.getEmail(), saved.getFullName(),
+            secureLinks.seal(customerFrontendUrl + "/register/" + registrationToken, saved.getId())));
 
         // CompanyUserInvitedEvent already published above with notification data
         return toResponse(saved);
@@ -222,7 +226,7 @@ public class CompanyUserService {
         LegalEntity entity = getEntity(entityId);
         String resetToken = createActionToken(user, AppUserActionTokenType.PASSWORD_RESET, actorId);
         eventPublisher.publishEvent(new CompanyUserPasswordResetRequestedEvent(entityId, user.getId(), actorId, null,
-            user.getEmail(), customerFrontendUrl + "/reset-password/" + resetToken));
+            user.getEmail(), secureLinks.seal(customerFrontendUrl + "/reset-password/" + resetToken, user.getId())));
 
         // CompanyUserPasswordResetRequestedEvent already published above with notification data
     }

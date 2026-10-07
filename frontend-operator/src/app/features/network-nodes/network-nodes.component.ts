@@ -15,7 +15,8 @@ import { environment } from '../../../environments/environment';
 import { EMPTY, Subject, Subscription, catchError, exhaustMap, finalize, merge, timer } from 'rxjs';
 import { AddNodeDialogComponent } from './add-node-dialog.component';
 import { ChainConfigDialogComponent } from './chain-config-dialog.component';
-import { StepUpDialogComponent, StepUpDialogResult } from '../../shared/components/step-up/step-up-dialog.component';
+import { StepUpDialogResult } from '../../shared/components/step-up/step-up-dialog.component';
+import { openStepUp } from '../../shared/components/step-up/open-step-up';
 import { DualControlTokens } from '../../core/api/dual-control-headers';
 
 @Component({
@@ -151,8 +152,8 @@ import { DualControlTokens } from '../../core/api/dual-control-headers';
       text-transform: uppercase;
     }
 
-    .badge-mainnet { background: rgba(22, 163, 74, 0.12); color: #16a34a; }
-    .badge-testnet { background: rgba(245, 158, 11, 0.12); color: #d97706; }
+    .badge-mainnet { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
+    .badge-testnet { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
     .badge-disabled { background: rgba(140, 152, 174, 0.15); color: var(--rw-text-muted); }
 
     .add-node-btn {
@@ -254,8 +255,8 @@ import { DualControlTokens } from '../../core/api/dual-control-headers';
 
     .exclusive-btn.active {
       background: rgba(245,158,11,0.12);
-      border-color: #f59e0b;
-      color: #d97706;
+      border-color: var(--rw-pending-fg);
+      color: var(--rw-pending-fg);
     }
 
     .exclusive-btn:hover:not(.active) {
@@ -268,7 +269,7 @@ import { DualControlTokens } from '../../core/api/dual-control-headers';
     }
 
     .delete-btn:hover {
-      color: #ef4444;
+      color: var(--rw-text-danger);
     }
 
     .no-nodes {
@@ -299,7 +300,7 @@ import { DualControlTokens } from '../../core/api/dual-control-headers';
 
     .failures-text {
       font-size: 11px;
-      color: #ef4444;
+      color: var(--rw-text-danger);
     }
 
     .stopped-row td {
@@ -731,19 +732,30 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** Step-up + second approver (4-eyes) for every RPC-node change (P4C-1). */
-  private withDualControl(reason: string, run: (tokens: DualControlTokens) => void, onCancel?: () => void): void {
-    this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: true, reason, action: RPC_NODE_CHANGE },
-      width: '500px',
-      disableClose: true,
-    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
-      if (result?.stepUpToken && result.dualControlToken) {
-        run({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
-      } else {
-        onCancel?.();
-      }
-    });
+  /**
+   * Step-up + second approver (4-eyes) for every RPC-node change (P4C-1). `target` and `targetBody` are exactly the
+   * request the service sends next (the approver token is bound to its method, path, query and canonical body):
+   * the enable/disable/exclusive/genesis-pin calls send `{}`, the delete sends no body.
+   */
+  private withDualControl(
+    reason: string,
+    target: string,
+    targetBody: unknown,
+    run: (tokens: DualControlTokens) => void,
+    onCancel?: () => void,
+  ): void {
+    openStepUp(this.dialog, { requireDualControl: true, reason, action: RPC_NODE_CHANGE, target, targetBody })
+      .subscribe((result: StepUpDialogResult | undefined) => {
+        if (result?.stepUpToken && result.dualControlToken) {
+          run({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
+        } else {
+          onCancel?.();
+        }
+      });
+  }
+
+  private nodesPath(chainId: string): string {
+    return `/api/v1/admin/chains/${chainId}/nodes`;
   }
 
   private errorMessage(e: { error?: { message?: string } }, fallback: string): string {
@@ -773,7 +785,8 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
   }
 
   toggleEnabled(chain: ChainHealth, node: RpcNode, enabled: boolean) {
-    this.withDualControl(`${enabled ? 'Start' : 'Stop'} RPC node ${node.url}`, tokens => {
+    const action = enabled ? 'enable' : 'disable';
+    this.withDualControl(`${enabled ? 'Start' : 'Stop'} RPC node ${node.url}`, `POST ${this.nodesPath(chain.id)}/${node.id}/${action}`, {}, tokens => {
       const call = enabled
         ? this.chainService.enableNode(chain.id, node.id, tokens)
         : this.chainService.disableNode(chain.id, node.id, tokens);
@@ -792,7 +805,8 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
 
   toggleExclusive(chain: ChainHealth, node: RpcNode) {
     const newValue = !node.exclusive;
-    this.withDualControl(`${newValue ? 'Pin all traffic to' : 'Unpin'} RPC node ${node.url}`, tokens =>
+    this.withDualControl(`${newValue ? 'Pin all traffic to' : 'Unpin'} RPC node ${node.url}`,
+      `POST ${this.nodesPath(chain.id)}/${node.id}/exclusive?value=${newValue}`, {}, tokens =>
       this.chainService.setExclusive(chain.id, node.id, newValue, tokens).subscribe({
         next: () => {
           this.updateNode(chain.id, node.id, { exclusive: newValue });
@@ -807,7 +821,7 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
   deleteNode(chain: ChainHealth, node: RpcNode) {
     if (!confirm(`Remove node "${node.url}"?\n\nThis cannot be undone.`)) return;
 
-    this.withDualControl(`Remove RPC node ${node.url}`, tokens =>
+    this.withDualControl(`Remove RPC node ${node.url}`, `DELETE ${this.nodesPath(chain.id)}/${node.id}`, undefined, tokens =>
       this.chainService.deleteNode(chain.id, node.id, tokens).subscribe({
         next: () => {
           this.chains.update((chains) => chains.map((current) => current.id === chain.id
@@ -821,7 +835,7 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
 
   resetGenesisPin(chain: ChainHealth) {
     if (!confirm(`Reset the pinned genesis hash of "${chain.displayName}"?\n\nOnly do this after a legitimate network reset (devnet). The next health round pins the genesis hash reported by a node whose chain id matches.`)) return;
-    this.withDualControl(`Reset genesis pin of ${chain.displayName}`, tokens =>
+    this.withDualControl(`Reset genesis pin of ${chain.displayName}`, `POST ${this.nodesPath(chain.id)}/genesis-pin/reset`, {}, tokens =>
       this.chainService.resetGenesisPin(chain.id, tokens).subscribe({
         next: () => {
           this.snackBar.open('Genesis pin cleared — it is re-captured on the next health round', 'OK', { duration: 4000 });
@@ -839,7 +853,7 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
 
     ref.afterClosed().subscribe((result: RpcNodeWriteRequest | undefined) => {
       if (!result) return;
-      this.withDualControl(`Add RPC node ${result.url} to ${chain.displayName}`, tokens =>
+      this.withDualControl(`Add RPC node ${result.url} to ${chain.displayName}`, `POST ${this.nodesPath(chain.id)}`, result, tokens =>
         this.chainService.addNode(chain.id, result, tokens).subscribe({
           next: node => {
             this.chains.update((chains) => chains.map((current) => current.id === chain.id
@@ -864,7 +878,7 @@ export class NetworkNodesComponent implements OnInit, OnDestroy {
 
     ref.afterClosed().subscribe((result: RpcNodeWriteRequest | undefined) => {
       if (!result) return;
-      this.withDualControl(`Change RPC node ${node.url}`, tokens =>
+      this.withDualControl(`Change RPC node ${node.url}`, `PUT ${this.nodesPath(chain.id)}/${node.id}`, result, tokens =>
         this.chainService.updateNode(chain.id, node.id, result, tokens).subscribe({
           next: updated => {
             this.updateNode(chain.id, node.id, updated);

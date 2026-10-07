@@ -82,6 +82,7 @@ html { @include mat.all-component-themes($light); }
   --rw-issued-bg:    #F0FDFA; --rw-issued-fg:   #0F766E;
   --rw-rejected-bg:  #FFF1F2; --rw-rejected-fg: #BE123C;
   --rw-revoked-bg:   #FAF5FF; --rw-revoked-fg:  #6D28D9;
+  --rw-neutral-bg:   #F1F5F9; --rw-neutral-fg:  #475569;
 
   // Chain chips
   --rw-chain-eth-bg:      #EEF2FF; --rw-chain-eth-fg:     #4338CA;
@@ -153,6 +154,7 @@ html { @include mat.all-component-themes($light); }
     --rw-issued-bg:    rgba(15,118,110,0.15);   --rw-issued-fg:   #5EEAD4;
     --rw-rejected-bg:  rgba(190,18,60,0.15);    --rw-rejected-fg: #FDA4AF;
     --rw-revoked-bg:   rgba(109,40,217,0.15);   --rw-revoked-fg:  #C4B5FD;
+    --rw-neutral-bg:   rgba(148,163,184,0.15);  --rw-neutral-fg:  #CBD5E1;
 
     --rw-chain-eth-bg:      rgba(67,56,202,0.15); --rw-chain-eth-fg:     #A5B4FC;
     --rw-chain-polygon-bg:  rgba(124,58,237,0.15); --rw-chain-polygon-fg: #C4B5FD;

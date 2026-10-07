@@ -1,8 +1,10 @@
 package de.makibytes.registerwerk.repo.internal;
 
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.asset.api.*;
 import de.makibytes.registerwerk.customer.api.*;
 import de.makibytes.registerwerk.repo.api.*;
+import de.makibytes.registerwerk.shared.Money;
 import de.makibytes.registerwerk.repo.api.RepoTypes.*;
 import jakarta.persistence.EntityNotFoundException;
 import de.makibytes.registerwerk.repo.events.RepoAuditEvent;
@@ -35,14 +37,17 @@ public class RepoDeskService {
     private final AssetBondTermsRepository bondTerms;
     private final AssetHolderRepository holders;
     private final ApplicationEventPublisher publisher;
+    private final RegisterClock registerClock;
 
     public RepoDeskService(RepoDeskProperties properties, RepoRfqRepository rfqs,
                            RepoQuoteRepository quotes, RepoTradeRepository trades,
                            RepoLifecycleEventRepository lifecycleEvents, LegalEntityRepository entities,
                            AssetRepository assets, RepoControls controls, RepoDeskParticipantRepository participants,
                            RepoCorporateActionListener corporateActions, AssetBondTermsRepository bondTerms,
-                           AssetHolderRepository holders, ApplicationEventPublisher publisher) {
+                           AssetHolderRepository holders, ApplicationEventPublisher publisher,
+                           RegisterClock registerClock) {
         this.controls = controls;
+        this.registerClock = registerClock;
         this.participants = participants;
         this.corporateActions = corporateActions;
         this.bondTerms = bondTerms;
@@ -84,7 +89,7 @@ public class RepoDeskService {
             throw new IllegalStateException("Only issued securities can be used in a repo RFQ");
         }
         String currency = command.cashCurrency().toUpperCase(Locale.ROOT);
-        CurrencyRules.currency(currency);
+        Money.minorUnits(currency); // validates the ISO 4217 code (fail closed)
         CurrencyRules.requireMinorUnitScale(currency, command.cashAmount(), "Cash amount");
         validateDates(command.startDate(), command.endDate());
         controls.requireTermWithinCollateralLife(asset.getId(), command.endDate());
@@ -252,7 +257,7 @@ public class RepoDeskService {
         controls.requireTermWithinCollateralLife(rfq.getCollateralAssetId(), rfq.getEndDate());
         // 9A-07: no new pledge on a register frozen for a §§21/22 handover (the RFQ may predate the freeze)
         RegisterFreezeGuard.requireOpen(assets, rfq.getCollateralAssetId(), "Repo trade");
-        if (rfq.getStartDate().isBefore(LocalDate.now(ZoneOffset.UTC))) {
+        if (rfq.getStartDate().isBefore(registerClock.today())) {
             throw new IllegalStateException("The repo start date has passed");
         }
 
@@ -478,7 +483,7 @@ public class RepoDeskService {
     }
 
     private void validateDates(LocalDate startDate, LocalDate endDate) {
-        if (startDate.isBefore(LocalDate.now(ZoneOffset.UTC))) {
+        if (startDate.isBefore(registerClock.today())) {
             throw new IllegalArgumentException("Repo start date cannot be in the past");
         }
         if (!endDate.isAfter(startDate)) {

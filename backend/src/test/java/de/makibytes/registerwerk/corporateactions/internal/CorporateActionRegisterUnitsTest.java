@@ -99,6 +99,7 @@ class CorporateActionRegisterUnitsTest {
         ca.setActionType(CorporateAction.ActionType.COUPON);
         ca.setStatus(CorporateAction.Status.ANNOUNCED);
         ca.setAmountPerUnit(new BigDecimal("0.05"));
+        ca.setCurrency("EUR");
         ca.setRecordDate(LocalDate.now().minusDays(1));
         ca.setPaymentDate(LocalDate.now().plusDays(5));
         when(repository.findById(ca.getId())).thenReturn(Optional.of(ca));

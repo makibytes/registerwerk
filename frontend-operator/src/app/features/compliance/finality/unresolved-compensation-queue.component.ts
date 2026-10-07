@@ -139,7 +139,7 @@ import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/compo
         letter-spacing: 0.4px;
         color: var(--rw-text-secondary);
       }
-      .last-error { color: #dc2626; }
+      .last-error { color: var(--rw-text-danger); }
     }
     .warn-box {
       font-size: 12px;

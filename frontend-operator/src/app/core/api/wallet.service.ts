@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
+import { parseJsonPreservingBigNumbers } from '@registerwerk/ui';
 import { environment } from '../../../environments/environment';
 import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 import { OperatorWallet, WalletBalance, WalletDefault } from '../models';
@@ -39,6 +40,11 @@ export class WalletService {
     return this.http.post<OperatorWallet>(`${this.base}/attach-hsm`, { name, keyAlias, address }, { headers: dualControlHeaders(tokens) });
   }
 
+  /** Attaches a cloud-KMS key version (`WALLET_ATTACH_KMS`); the address is derived from the key, `address` only cross-checks. */
+  attachKms(body: { name: string; keyVersion: string; address?: string }, tokens: DualControlTokens): Observable<OperatorWallet> {
+    return this.http.post<OperatorWallet>(`${this.base}/attach-kms`, body, { headers: dualControlHeaders(tokens) });
+  }
+
   exportKeystore(walletId: string, password: string): Observable<Blob> {
     return this.http.post(`${this.base}/${walletId}/export-keystore`, { password }, { responseType: 'blob' });
   }
@@ -66,7 +72,9 @@ export class WalletService {
   }
 
   getBalances(walletId: string): Observable<WalletBalance[]> {
-    return this.http.get<WalletBalance[]>(`${this.base}/${walletId}/balances`);
+    // Native balances are NUMERIC(96,18): 16+ significant digits stay exact (strings).
+    return this.http.get(`${this.base}/${walletId}/balances`, { responseType: 'text' })
+      .pipe(map((text) => parseJsonPreservingBigNumbers(text) as WalletBalance[]));
   }
 
   listDefaults(): Observable<WalletDefault[]> {

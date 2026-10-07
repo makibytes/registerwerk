@@ -118,8 +118,8 @@ import { AuthService } from '../../../core/auth/auth.service';
       font-size: .75rem;
       color: var(--rw-text-secondary);
       padding: .625rem .75rem;
-      background: rgba(239,68,68,.07);
-      border: 1px solid rgba(239,68,68,.18);
+      background: var(--rw-rejected-bg);
+      border: 1px solid color-mix(in srgb, var(--rw-rejected-fg) 30%, transparent);
       border-radius: 6px;
     }
     @media (max-width: 720px) {

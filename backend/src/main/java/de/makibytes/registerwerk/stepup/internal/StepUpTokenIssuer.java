@@ -12,7 +12,9 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 import javax.crypto.Mac;
@@ -68,11 +70,19 @@ public class StepUpTokenIssuer {
     private final DualControlProperties dualControl;
     private final ApplicationEventPublisher events;
     private final boolean allowUnenrolled;
+    /**
+     * The enrolment calls verify (BCrypt, TOTP, REQUIRES_NEW attempt counters) with NO connection held and
+     * only then open this short transaction for the write + audit event; a method-level {@code @Transactional}
+     * would pin one pooled connection through all of that and ask for a second (the login fix, C4).
+     */
+    private final TransactionTemplate tx;
 
     StepUpTokenIssuer(AppUserRepository userRepository, JwtMintingService jwtMintingService,
                       TotpSecretStore secrets, TotpStateRepository state, PasswordEncoder passwordEncoder,
                       DualControlProperties dualControl, ApplicationEventPublisher events,
-                      @Value("${registerwerk.auth.step-up.allow-unenrolled:false}") boolean allowUnenrolled) {
+                      @Value("${registerwerk.auth.step-up.allow-unenrolled:false}") boolean allowUnenrolled,
+                      PlatformTransactionManager txManager) {
+        this.tx = new TransactionTemplate(txManager);
         this.userRepository = userRepository;
         this.jwtMintingService = jwtMintingService;
         this.secrets = secrets;
@@ -221,7 +231,6 @@ public class StepUpTokenIssuer {
      * @throws AccessDeniedException if the password is wrong, the account is IdP-managed, or it is already
      *         enrolled (use {@link #disenroll} or an operator reset first)
      */
-    @Transactional
     public EnrollmentStart enroll(UUID userId, String currentPassword) {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
@@ -243,10 +252,20 @@ public class StepUpTokenIssuer {
                     "TOTP is already enrolled for this account. Disenrol before re-enrolling.");
         }
         String secret = generateBase32Secret();
-        user.setTotpSecret(secrets.encrypt(userId, secret));
-        user.setTotpSecretKid(secrets.kid());
-        userRepository.save(user);
-        events.publishEvent(new TotpLifecycleEvent("ENROLMENT_STARTED", userId, userId, null, null));
+        String encrypted = secrets.encrypt(userId, secret);
+        String kid = secrets.kid();
+        tx.executeWithoutResult(status -> {
+            AppUser fresh = userRepository.findById(userId)
+                    .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
+            if (fresh.isTotpEnabled()) {
+                throw new AccessDeniedException(
+                        "TOTP is already enrolled for this account. Disenrol before re-enrolling.");
+            }
+            fresh.setTotpSecret(encrypted);
+            fresh.setTotpSecretKid(kid);
+            userRepository.save(fresh);
+            events.publishEvent(new TotpLifecycleEvent("ENROLMENT_STARTED", userId, userId, null, null));
+        });
         String otpauthUri = "otpauth://totp/Registerwerk:" + urlEncode(user.getEmail())
                 + "?secret=" + secret + "&issuer=Registerwerk&algorithm=SHA1&digits=6&period=30";
         return new EnrollmentStart(secret, otpauthUri);
@@ -258,7 +277,6 @@ public class StepUpTokenIssuer {
      * in their authenticator app. The accepted step is recorded, so that same code cannot be replayed
      * as a step-up code.
      */
-    @Transactional
     public void confirmEnrollment(UUID userId, String code) {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
@@ -269,17 +287,20 @@ public class StepUpTokenIssuer {
             throw new AccessDeniedException("TOTP is already enrolled for this account.");
         }
         verifyAndAdvance(user, code);
-        user.setTotpEnabled(true);
-        user.setTotpEnrolledAt(Instant.now());
-        userRepository.save(user);
-        events.publishEvent(new TotpLifecycleEvent("ENROLLED", userId, userId, null, null));
+        tx.executeWithoutResult(status -> {
+            AppUser fresh = userRepository.findById(userId)
+                    .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
+            fresh.setTotpEnabled(true);
+            fresh.setTotpEnrolledAt(Instant.now());
+            userRepository.save(fresh);
+            events.publishEvent(new TotpLifecycleEvent("ENROLLED", userId, userId, null, null));
+        });
     }
 
     /**
      * Self-service disenrolment; requires a valid current TOTP code (replay-protected, lockout-counted).
      * Revokes the user's live sessions, since the account's assurance level just changed.
      */
-    @Transactional
     public void disenroll(UUID userId, String code) {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
@@ -287,8 +308,12 @@ public class StepUpTokenIssuer {
             throw new AccessDeniedException("No TOTP enrolment to remove for this account.");
         }
         verifyAndAdvance(user, code);
-        clearEnrolment(user);
-        events.publishEvent(new TotpLifecycleEvent("DISENROLLED", userId, userId, null, null));
+        tx.executeWithoutResult(status -> {
+            AppUser fresh = userRepository.findById(userId)
+                    .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
+            clearEnrolment(fresh);
+            events.publishEvent(new TotpLifecycleEvent("DISENROLLED", userId, userId, null, null));
+        });
     }
 
     /**

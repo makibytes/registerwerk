@@ -130,9 +130,14 @@ env:
   # Wallet keystores live in Postgres (wallet_keystore_blob, V3 migration) rather than on a
   # shared filesystem volume — see wallets.persistence below for why that matters here.
   REGISTERWERK_WALLET_STORAGE_BACKEND: "POSTGRES"
-  # Peers allowed to assert X-Forwarded-For (Kong + operator nginx pods). Explicit on purpose;
-  # replace with a regex matching YOUR pod CIDR (registerwerk.auth.trusted-proxies).
-  REGISTERWERK_AUTH_TRUSTED_PROXIES: '10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+|127\.\d+\.\d+\.\d+|0:0:0:0:0:0:0:1|::1'
+  # Peers allowed to assert X-Forwarded-For to the backend (registerwerk.auth.trusted-proxies, a
+  # Java regex matched against the TCP peer address): Kong and the operator frontend nginx pods.
+  # The login throttle and the audit trail key on the address this yields, so a regex that also
+  # matches ordinary client pods lets any of them choose its own throttle bucket by sending
+  # X-Forwarded-For. REQUIRED, no default (like ingress.trustedCidrs and kong.env.trusted_ips):
+  # the chart fails to render while it is empty. Match only the pods that front the backend, e.g.
+  # '10\.8\.\d+\.\d+' for a dedicated proxy subnet; never a whole private range (10/8, 172.16/12).
+  REGISTERWERK_AUTH_TRUSTED_PROXIES: ""
 
 # Generic, additive hooks for the backend Deployment (all empty by default). They let an operator
 # mount what this chart cannot know about: a PKCS#11 config + vendor HSM client library (volume +

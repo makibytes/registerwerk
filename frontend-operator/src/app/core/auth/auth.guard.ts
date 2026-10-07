@@ -15,6 +15,23 @@ export const authGuard: CanActivateFn = () => {
   const router = inject(Router);
 
   return authService.ensureInitialized().pipe(
+    map(authenticated => {
+      if (!authenticated) return router.createUrlTree(['/login']);
+      // A must_change_password session can reach nothing but the change-password screen.
+      return authService.isPasswordChangeRequired() ? router.createUrlTree(['/change-password']) : true;
+    })
+  );
+};
+
+/**
+ * Guard of the change-password screen itself: needs a session, and only makes sense while the
+ * account is flagged (an unflagged user may also open it, e.g. after being redirected by a 403 —
+ * the page just works either way).
+ */
+export const changePasswordGuard: CanActivateFn = () => {
+  const authService = inject(AuthService);
+  const router = inject(Router);
+  return authService.ensureInitialized().pipe(
     map(authenticated => authenticated ? true : router.createUrlTree(['/login']))
   );
 };

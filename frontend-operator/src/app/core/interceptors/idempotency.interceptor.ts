@@ -11,7 +11,7 @@ export const IDEMPOTENT_ENDPOINTS: readonly RegExp[] = [
   /\/deployments\/[^/]+\/(slots|tokens|holders)(\/|$)/,
   /\/deployments\/[^/]+\/(nav-strike|dealing-cutoff|vault-requests\/[^/]+\/(fulfill|force-cancel))$/,
   /\/payment-rails(\/|$)/,
-  /\/lending\/markets(\/reverify|\/[^/]+\/(reconcile-collateral|borrow-paused))?$/,
+  /\/lending\/markets(\/reverify|\/legacy-borrow-pause|\/[^/]+\/(reconcile-collateral|borrow-paused))?$/,
   /\/assets\/[^/]+\/erc3643\/[^/]+\/(forced-transfer|forced-approve|freeze|unfreeze|freeze-partial|unfreeze-partial|pause|unpause|force-burn|batch-forced-transfer|batch-mint|batch-burn)$/,
   /\/admin\/wallets\/import-(raw|keystore)$/,
   /\/register-transfers\/[^/]+\/(onchain-handover|complete)$/,

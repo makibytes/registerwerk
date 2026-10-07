@@ -168,7 +168,7 @@ restituisce l'indirizzo che ogni policy deve registrare come firmatario.
   (sponsor `OPERATOR`, per mostrare l'altro tipo) e un override a livello di deployment sul Green
   Bond di punta di Meridian (`OPERATOR`, che mostra la precedenza dell'override sul default).
 - Test: `contracts/test/ecosystem/EwpgPaymaster.t.sol` fa passare ogni percorso sponsorizzato per
-  `handleOps` del **vero EntryPoint v0.8.0** (incluso solo per i test in `contracts/test/aa-v08/`),
+  `handleOps` del **vero EntryPoint v0.8.0** (solo per i test, submodule git fissato `contracts/lib/account-abstraction` al tag v0.8.0; GPL-3.0, mai importato da `src/` o `script/`),
   con test di regressione per gli scenari di svuotamento citati nel rollout più sotto.
   `backend/.../asset/internal/GasSponsorshipVoucherServiceTest.java` e
   `unit/GasSponsorshipVoucherDigestTest.java` vincolano il digest Java a quello Solidity con un
