@@ -13,7 +13,7 @@ public class RepoSubstitutionRequest {
     @Version private long version;
     @Column(name = "repo_trade_id", nullable = false, updatable = false) private UUID repoTradeId;
     @Column(name = "asset_id", nullable = false, updatable = false) private UUID assetId;
-    @Column(nullable = false, updatable = false, precision = 38, scale = 18) private BigDecimal quantity;
+    @Column(nullable = false, updatable = false, precision = 96, scale = 18) private BigDecimal quantity;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20) private RepoTypes.SubstitutionStatus status = RepoTypes.SubstitutionStatus.PENDING;
     @Column(name = "requested_by", nullable = false, updatable = false) private UUID requestedBy;
     @Column(name = "requested_at", nullable = false, updatable = false) private Instant requestedAt = Instant.now();

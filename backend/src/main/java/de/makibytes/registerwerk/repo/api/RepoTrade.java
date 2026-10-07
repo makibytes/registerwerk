@@ -15,7 +15,7 @@ public class RepoTrade {
     @Column(name="cash_borrower_entity_id", nullable=false) private UUID cashBorrowerEntityId;
     @Column(name="cash_lender_entity_id", nullable=false) private UUID cashLenderEntityId;
     @Column(name="collateral_asset_id", nullable=false) private UUID collateralAssetId;
-    @Column(name="collateral_quantity", nullable=false, precision=38, scale=18) private BigDecimal collateralQuantity;
+    @Column(name="collateral_quantity", nullable=false, precision=96, scale=18) private BigDecimal collateralQuantity;
     @Column(name="cash_amount", nullable=false, updatable=false, precision=38, scale=18) private BigDecimal cashAmount;
     @Column(name="cash_currency", nullable=false, updatable=false, length=3) private String cashCurrency;
     @Column(name="repo_rate", nullable=false, updatable=false, precision=12, scale=8) private BigDecimal repoRate;

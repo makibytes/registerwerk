@@ -68,10 +68,10 @@ public class TradeListing {
     @Column(nullable = false, length = 20)
     private ListingStatus status = ListingStatus.OPEN;
 
-    @Column(name = "quantity_total", nullable = false, precision = 38, scale = 18)
+    @Column(name = "quantity_total", nullable = false, precision = 96, scale = 18)
     private BigDecimal quantityTotal;
 
-    @Column(name = "quantity_available", nullable = false, precision = 38, scale = 18)
+    @Column(name = "quantity_available", nullable = false, precision = 96, scale = 18)
     private BigDecimal quantityAvailable;
 
     @Column(name = "price_per_unit", nullable = false, precision = 38, scale = 18)

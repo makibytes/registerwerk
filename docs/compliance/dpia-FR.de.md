@@ -47,7 +47,7 @@ description: Entwurf einer Datenschutz-Folgenabschätzung für die Jurisdiktion 
 ## 3. Exigences spécifiques France / Frankreich-spezifische Anforderungen { #3-exigences-specifiques-france-frankreich-spezifische-anforderungen }
 
 - **Extrait Kbis ≤ 3 Monate:** Erfasst über den Dokumenttyp `COMMERCIAL_REGISTER_EXTRACT`; Alter wird in `DocumentRequirement.maxAge` geprüft.
-- **Meldung wirtschaftlich Berechtigter:** Modell `BeneficialOwner` (V12) gemäß Loi PACTE, Schwellenwert 25 %.
+- **Meldung wirtschaftlich Berechtigter:** Modell `BeneficialOwner` gemäß Loi PACTE, Schwellenwert 25 %.
 - **TRACFIN:** Verdachtsmeldung (SAR) über `POST /api/v1/admin/ict-incidents` (DORA) mit category=AML_SAR. Das Dokument wird manuell an das TRACFIN-Portal (ACPR) übermittelt.
 - **Aufbewahrung:** 5 Jahre (LCB-FT); 10 Jahre für das Register (Äquivalenz zum eWpG).
 - **Rechte der betroffenen Personen:** CNIL — Zugriff über `GET /api/v1/me/dsar/export`; Löschung über `POST /api/v1/me/dsar/erasure`.

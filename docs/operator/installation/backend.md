@@ -22,10 +22,10 @@ Migrations run automatically on startup. All migration files are in:
 backend/src/main/resources/db/migration/
 ```
 
-Current schema versions:
-| Version | Description |
-|---|---|
-| V1 | Consolidated initial schema covering legal entities, KYC, onboarding tokens, assets, deployments, holders, audit log, chain config, token transfers, indexer state cursors, ONCHAINID and claims, ERC-3643 T-REX suite tables, Fhenix and Inco chains, and related tables |
+The schema is one clean-install baseline, `V1__initial_schema.sql`, covering every table, index, trigger and function (including the audit log with its partitioning and the DML-only privileges of the `registerwerk_app` runtime login). Later changes are added as `V{n}__description.sql` and are never edited after release.
+
+!!! note
+    Databases created from development builds before the baseline was re-squashed carry an incompatible Flyway history and cannot be upgraded in place; recreate them.
 
 ## Health and monitoring
 

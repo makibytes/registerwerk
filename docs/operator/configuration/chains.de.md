@@ -94,7 +94,7 @@ Die resultierenden Entitäten bleiben vorläufige, aus Ereignissen abgeleitete P
 
 ## FHE-Chains (Fhenix / Inco)
 
-Fhenix- und Inco-Chains verwenden das Zama-fhEVM und unterstützen vertrauliche ERC-3643-Token. Sie sind in V15 vorbelegt. Stellen Sie den `ConfidentialERC3643`-Vertrag bereit mit:
+Fhenix- und Inco-Chains verwenden das Zama-fhEVM und unterstützen vertrauliche ERC-3643-Token. Sie sind in der Basis-Migration vorbelegt. Stellen Sie den `ConfidentialERC3643`-Vertrag bereit mit:
 
 ```bash
 forge script script/Deploy.s.sol --rpc-url $FHENIX_HELIUM_RPC --broadcast

@@ -94,7 +94,7 @@ The resulting entities remain provisional event-derived projections.
 
 ## FHE chains (Fhenix / Inco)
 
-Fhenix and Inco chains use the Zama fhEVM and support confidential ERC-3643 tokens. They are pre-seeded in V15. Deploy the `ConfidentialERC3643` contract using:
+Fhenix and Inco chains use the Zama fhEVM and support confidential ERC-3643 tokens. They are pre-seeded in the baseline migration. Deploy the `ConfidentialERC3643` contract using:
 
 ```bash
 forge script script/Deploy.s.sol --rpc-url $FHENIX_HELIUM_RPC --broadcast

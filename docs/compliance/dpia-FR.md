@@ -40,7 +40,7 @@
 ## 3. Exigences spécifiques France / France-Specific Requirements
 
 - **Extrait Kbis ≤ 3 mois:** Collecté via type de document `COMMERCIAL_REGISTER_EXTRACT`; âge vérifié dans `DocumentRequirement.maxAge`.
-- **Déclaration des bénéficiaires effectifs:** Modèle `BeneficialOwner` (V12) per Loi PACTE, seuil 25%.
+- **Déclaration des bénéficiaires effectifs:** Modèle `BeneficialOwner` per Loi PACTE, seuil 25%.
 - **TRACFIN:** Déclaration de soupçon (SAR) via `POST /api/v1/admin/ict-incidents` (DORA) avec category=AML_SAR. Le document est envoyé manuellement au portail TRACFIN (ACPR).
 - **Conservation:** 5 ans (LCB-FT); 10 ans pour le registre (équivalence avec eWpG).
 - **Droits des personnes:** CNIL — accès via `GET /api/v1/me/dsar/export`; effacement via `POST /api/v1/me/dsar/erasure`.

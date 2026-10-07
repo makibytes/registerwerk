@@ -1,10 +1,9 @@
 package de.makibytes.registerwerk.integration;
 
-import org.flywaydb.core.Flyway;
+import de.makibytes.registerwerk.MigratedDb;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -14,23 +13,23 @@ import java.math.BigInteger;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** P4B-6: V16 widens the amount columns on a database that already has the V13 history trigger and rows. */
+/**
+ * P4B-6: raw uint256 token amounts (indexed base units) must fit every column that carries or sums them. The
+ * baseline schema declares them NUMERIC(96,18); this guards the whole list, including the trading and repo
+ * quantities, and the trigger / generated column that depend on the register balance columns.
+ */
 @Testcontainers
-@DisplayName("V16 register amount widening migration")
-class RegisterAmountWideningMigrationIT {
+@DisplayName("Register and trading token-amount columns hold a full uint256")
+class RegisterAmountColumnsIT {
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
     @Test
-    @DisplayName("existing rows survive, uint256 fits afterwards, trigger and generated delta still work")
+    @DisplayName("uint256 fits, the position-history trigger still fires and the generated drift delta is exact")
     void widensWithTriggerAndGeneratedColumn() {
-        DriverManagerDataSource ds = new DriverManagerDataSource(
-                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
-        Flyway.configure().dataSource(ds).locations("classpath:db/migration").target("15").load().migrate();
-        JdbcTemplate jdbc = new JdbcTemplate(ds);
+        JdbcTemplate jdbc = MigratedDb.migrate(postgres).jdbc();
 
         UUID issuer = UUID.randomUUID(), investor = UUID.randomUUID(), asset = UUID.randomUUID(), chain = UUID.randomUUID();
         jdbc.update("INSERT INTO legal_entity (id, entity_number, type, current_name) VALUES (?, 'ISS-W', 'ISSUER', 'I')", issuer);
@@ -45,24 +44,27 @@ class RegisterAmountWideningMigrationIT {
                 asset, UUID.randomUUID());
 
         BigDecimal huge = new BigDecimal(BigInteger.TWO.pow(256).subtract(BigInteger.ONE));
-        assertThatThrownBy(() -> jdbc.update("UPDATE asset_holder SET nominal_amount = ?", huge))
-                .hasMessageContaining("numeric field overflow");
 
-        Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate();
-
-        assertThat(jdbc.queryForObject("SELECT nominal_amount FROM asset_holder", BigDecimal.class)).isEqualByComparingTo("12.5");
-        assertThat(jdbc.queryForObject("SELECT amount FROM token_transfer", BigDecimal.class)).isEqualByComparingTo("7.25");
         assertThat(jdbc.queryForObject("SELECT delta FROM chain_drift_event", BigDecimal.class)).isEqualByComparingTo("3");
         for (String col : new String[] {"asset_holder.nominal_amount", "token_transfer.amount", "chain_drift_event.delta",
-                "chain_drift_event.db_balance", "asset_holder_position_history.nominal_amount",
-                "corporate_action_entry.nominal_at_record", "register_statement.nominal_amount"}) {
+                "chain_drift_event.db_balance", "chain_drift_event.onchain_balance",
+                "asset_holder_position_history.nominal_amount",
+                "corporate_action_entry.nominal_at_record", "corporate_action_entry.entitlement_amount",
+                "corporate_action.total_amount", "corporate_action.rounding_residual", "register_statement.nominal_amount",
+                "asset_redemption_burn.amount",
+                // trading and repo quantities are token amounts too
+                "trade_listing.quantity_total", "trade_listing.quantity_available",
+                "trade_execution.requested_quantity", "trade_execution.executed_quantity",
+                "repo_rfq.collateral_quantity", "repo_trade.collateral_quantity",
+                "repo_trade.pending_substitution_quantity", "repo_substitution_request.quantity",
+                "repo_lifecycle_event.quantity"}) {
             String[] p = col.split("\\.");
             assertThat(jdbc.queryForObject("SELECT numeric_precision FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
                     Integer.class, p[0], p[1])).as(col).isEqualTo(96);
         }
 
         int before = jdbc.queryForObject("SELECT count(*) FROM asset_holder_position_history", Integer.class);
-        jdbc.update("UPDATE asset_holder SET nominal_amount = ?", huge); // V13 update trigger must still fire
+        jdbc.update("UPDATE asset_holder SET nominal_amount = ?", huge); // the history trigger must still fire
         assertThat(jdbc.queryForObject("SELECT count(*) FROM asset_holder_position_history", Integer.class)).isEqualTo(before + 1);
         jdbc.update("""
                 INSERT INTO token_transfer (asset_id, chain_config_id, contract_address, amount, event_type, tx_hash, occurred_at)

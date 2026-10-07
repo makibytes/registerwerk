@@ -47,8 +47,8 @@ description: Analyse d'impact relative à la protection des données (DPIA) en p
 
 - **TVTG §9 document d'information sur le jeton :** champ obligatoire dans le type de document KYC `TOKEN_WHITEPAPER` ; signé numériquement via PAdES.
 - **Audit du smart contract :** le TVTG exige un audit de sécurité indépendant. Le type de document `SMART_CONTRACT_AUDIT` est configuré comme champ obligatoire dans `JurisdictionRequirementConfig.buildLiTvtg()`.
-- **Obligation de déclaration à la FMA :** les prestataires de services TT (TT-Dienstleister) au sens du TVTG §12 doivent être déclarés à la FMA. Inscription dans le registre `third_party_provider` (V18).
-- **Obligations de diligence SPG :** déclaration des ayants droit économiques (bénéficiaires effectifs ≥ 25 %) via l'entité `BeneficialOwner` (V12) ; conforme au SPG.
+- **Obligation de déclaration à la FMA :** les prestataires de services TT (TT-Dienstleister) au sens du TVTG §12 doivent être déclarés à la FMA. Inscription dans le registre `third_party_provider`.
+- **Obligations de diligence SPG :** déclaration des ayants droit économiques (bénéficiaires effectifs ≥ 25 %) via l'entité `BeneficialOwner` ; conforme au SPG.
 - **Conservation :** 10 ans (TVTG §33) ; 5 ans pour les documents LCB-FT (SPG art. 7).
 - **Droits des personnes concernées :** le DSGVO s'applique directement au Liechtenstein (EEE). Accès : `GET /api/v1/me/dsar/export` ; effacement : `POST /api/v1/me/dsar/erasure`.
 

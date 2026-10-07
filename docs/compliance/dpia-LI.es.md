@@ -46,8 +46,8 @@ description: Borrador de evaluación de impacto relativa a la protección de dat
 
 - **TVTG §9 — Documento de información sobre el token:** Campo obligatorio en el tipo de documento KYC `TOKEN_WHITEPAPER`; firmado digitalmente mediante PAdES.
 - **Auditoría del smart contract:** La TVTG exige una auditoría de seguridad independiente. El tipo de documento `SMART_CONTRACT_AUDIT` está configurado como campo obligatorio en `JurisdictionRequirementConfig.buildLiTvtg()`.
-- **Obligación de notificación a la FMA:** Los prestadores de servicios TT (TT-Dienstleister) conforme al TVTG §12 deben notificarse a la FMA. Registro en la tabla `third_party_provider` (V18).
-- **Diligencia debida SPG:** Declaración de titular real (WB) (titulares reales ≥ 25 %) mediante la entidad `BeneficialOwner` (V12); conforme a la SPG.
+- **Obligación de notificación a la FMA:** Los prestadores de servicios TT (TT-Dienstleister) conforme al TVTG §12 deben notificarse a la FMA. Registro en la tabla `third_party_provider`.
+- **Diligencia debida SPG:** Declaración de titular real (WB) (titulares reales ≥ 25 %) mediante la entidad `BeneficialOwner`; conforme a la SPG.
 - **Conservación:** 10 años (TVTG §33); 5 años para los documentos de prevención del blanqueo (SPG Art. 7).
 - **Derechos de los interesados:** El DSGVO se aplica directamente en Liechtenstein (EEE). Acceso: `GET /api/v1/me/dsar/export`; supresión: `POST /api/v1/me/dsar/erasure`.
 

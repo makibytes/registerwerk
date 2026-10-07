@@ -4,13 +4,13 @@
 # Two logins, two jobs:
 #   * migrator / owner  = $POSTGRES_USER (DB_USER in compose). Owns the schema; used ONLY by Flyway
 #                         (spring.flyway.user / password in the backend).
-#   * runtime           = $DB_APP_USER (default registerwerk_app, the role name V1/V36 already
-#                         assume). DML only: no ownership, no DDL, and V36/V57 withhold
+#   * runtime           = $DB_APP_USER (default registerwerk_app, the role name the baseline
+#                         migration assumes). DML only: no ownership, no DDL, and the baseline migration (V1__initial_schema.sql) withholds
 #                         UPDATE/DELETE/TRUNCATE on audit_event and its partitions, so the
 #                         audit WORM defences actually bind the application.
 #
 # The role is created here (before Flyway ever runs) because a database cannot authenticate a
-# role it does not have. Grants live in migration V57 so every environment gets identical privileges.
+# role it does not have. Grants live in the baseline migration (V1__initial_schema.sql) so every environment gets identical privileges.
 # Safe to re-run on every `docker compose up` (it also rotates the password). Not mounted into
 # /docker-entrypoint-initdb.d: it is executed by the one-shot `db-roles` compose service so it also
 # works against an existing data volume.

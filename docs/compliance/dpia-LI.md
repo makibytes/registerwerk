@@ -40,8 +40,8 @@
 
 - **TVTG §9 Token-Informationsdokument:** Pflichtfeld im KYC-Dokumententyp `TOKEN_WHITEPAPER`; digital signiert via PAdES.
 - **Smart-Contract-Audit:** TVTG verlangt unabhängiges Sicherheitsaudit. Dokumenttyp `SMART_CONTRACT_AUDIT` ist als Pflichtfeld in `JurisdictionRequirementConfig.buildLiTvtg()` konfiguriert.
-- **FMA-Meldepflicht:** TT-Dienstleister nach TVTG §12 müssen der FMA gemeldet werden. Eintrag im `third_party_provider`-Register (V18).
-- **SPG Sorgfaltspflichten:** WB-Erklärung (wirtschaftlich Berechtigte ≥ 25%) per `BeneficialOwner`-Entität (V12); SPG-konform.
+- **FMA-Meldepflicht:** TT-Dienstleister nach TVTG §12 müssen der FMA gemeldet werden. Eintrag im `third_party_provider`-Register.
+- **SPG Sorgfaltspflichten:** WB-Erklärung (wirtschaftlich Berechtigte ≥ 25%) per `BeneficialOwner`-Entität; SPG-konform.
 - **Aufbewahrung:** 10 Jahre (TVTG §33); 5 Jahre AML-Dokumente (SPG Art. 7).
 - **Betroffenenrechte:** DSGVO gilt direkt in Liechtenstein (EWR). Zugang: `GET /api/v1/me/dsar/export`; Löschung: `POST /api/v1/me/dsar/erasure`.
 

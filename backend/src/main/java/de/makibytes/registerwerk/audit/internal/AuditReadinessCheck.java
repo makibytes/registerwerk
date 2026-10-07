@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <ul>
  *   <li>a signing key provider must be active;</li>
  *   <li>the runtime DB login must not own (or be a superuser over) {@code audit_event}: an owner
- *       can lift any privilege or trigger, so the V36/V57 REVOKEs and the WORM triggers do not bind it.
+ *       can lift any privilege or trigger, so the REVOKEs in V1__initial_schema.sql and the WORM triggers do not bind it.
  *       Compose and Helm split the logins (owner/migrator for Flyway only, {@code registerwerk_app}
  *       for the application); {@code registerwerk.audit.allow-owner-runtime-role=true} remains only as
  *       an explicit, logged acknowledgement for an environment that has not split them yet;</li>
@@ -96,7 +96,7 @@ class AuditReadinessCheck implements ApplicationRunner {
     private String ownerMessage() {
         return "the application's runtime database login '" + runtimeLogin() + "' owns audit_event (or is a "
                 + "superuser). Failure mode: an owner can ALTER TABLE ... DISABLE TRIGGER, GRANT itself "
-                + "UPDATE/DELETE/TRUNCATE or DROP the table, so neither the REVOKEs (V36/V57) nor the WORM triggers "
+                + "UPDATE/DELETE/TRUNCATE or DROP the table, so neither the REVOKEs (V1__initial_schema.sql) nor the WORM triggers "
                 + "protect the audit trail. Fix: run the application as the DML-only login (DB_APP_USER / "
                 + "DB_APP_PASSWORD, default registerwerk_app, created by postgres-init/roles/ensure-runtime-role.sh) "
                 + "and keep the schema-owner login for Flyway only (DB_USER / DB_PASSWORD -> spring.flyway.user / "
@@ -109,7 +109,7 @@ class AuditReadinessCheck implements ApplicationRunner {
                 + "UPDATE/DELETE/TRUNCATE on audit_event or one of its partitions, or CREATE on schema public. "
                 + "Failure mode: audit rows can be rewritten or removed, or the schema altered, by the application's "
                 + "own credentials. Fix: REVOKE UPDATE, DELETE, TRUNCATE ON audit_event (and its partitions) and "
-                + "REVOKE CREATE ON SCHEMA public from this login (migration V57 and "
+                + "REVOKE CREATE ON SCHEMA public from this login (the last section of V1__initial_schema.sql and "
                 + "audit_event_ensure_partitions() do this for registerwerk_app).";
     }
 

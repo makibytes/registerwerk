@@ -13,6 +13,11 @@ set -euo pipefail
 # re-flag history — and re-scanning it would make this check fail forever on migrations that
 # already shipped and were already reviewed.
 #
+# A re-squash of the baseline (V1__initial_schema.sql rewritten, V2..Vn deleted) is deliberately NOT scanned:
+# it is only done while the chain is unreleased, so V1 shows up as *modified* (the filter above is
+# --diff-filter=A, added files only), the deleted files no longer exist in the working tree, and the baseline
+# creates objects in an empty database - there is no data for it to destroy.
+#
 # Acknowledge a statement (or a consecutive block of them — the ack stays in effect until the
 # next line that isn't blank, a comment, or itself a flagged statement) with a comment line
 # directly above it:

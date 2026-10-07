@@ -94,7 +94,7 @@ Las entidades resultantes siguen siendo proyecciones provisionales derivadas de 
 
 ## Cadenas FHE (Fhenix / Inco) { #fhe-chains-fhenix-inco }
 
-Las cadenas Fhenix e Inco utilizan Zama fhEVM y admiten tokens ERC-3643 confidenciales. Están precargadas en V15. Implemente el contrato `ConfidentialERC3643` usando:
+Las cadenas Fhenix e Inco utilizan Zama fhEVM y admiten tokens ERC-3643 confidenciales. Están precargadas en la migración base. Implemente el contrato `ConfidentialERC3643` usando:
 
 ```bash
 forge script script/Deploy.s.sol --rpc-url $FHENIX_HELIUM_RPC --broadcast

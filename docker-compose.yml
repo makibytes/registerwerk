@@ -390,7 +390,7 @@ services:
   # (default registerwerk_app): DML only, no ownership, no DDL, and no UPDATE/DELETE/TRUNCATE on
   # audit_event, so the audit WORM defences actually bind the application. This one-shot creates/refreshes
   # that login on every `up` (works on a fresh AND an existing data volume; postgres-init/ only runs on a
-  # fresh one); migration V57 grants it its privileges. Re-running it also rotates the password.
+  # fresh one); the baseline migration (V1__initial_schema.sql) grants it its privileges. Re-running it also rotates the password.
   db-roles:
     image: postgres:18.6-alpine
     logging: *default-logging

@@ -71,10 +71,10 @@ public class TradeExecution {
     @Column(name = "order_type", nullable = false, length = 20)
     private OrderType orderType;
 
-    @Column(name = "requested_quantity", nullable = false, precision = 38, scale = 18)
+    @Column(name = "requested_quantity", nullable = false, precision = 96, scale = 18)
     private BigDecimal requestedQuantity;
 
-    @Column(name = "executed_quantity", nullable = false, precision = 38, scale = 18)
+    @Column(name = "executed_quantity", nullable = false, precision = 96, scale = 18)
     private BigDecimal executedQuantity;
 
     @Column(name = "unit_price", nullable = false, precision = 38, scale = 18)

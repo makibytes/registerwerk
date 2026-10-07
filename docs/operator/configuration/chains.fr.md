@@ -94,7 +94,7 @@ Les entités résultantes restent des projections provisoires dérivées d'évé
 
 ## Chaînes FHE (Fhenix / Inco)
 
-Les chaînes Fhenix et Inco utilisent Zama fhEVM et prennent en charge les jetons ERC-3643 confidentiels. Elles sont pré-ensemencées dans V15. Déployez le contrat `ConfidentialERC3643` en utilisant :
+Les chaînes Fhenix et Inco utilisent Zama fhEVM et prennent en charge les jetons ERC-3643 confidentiels. Elles sont pré-ensemencées dans la migration de base. Déployez le contrat `ConfidentialERC3643` en utilisant :
 
 ```bash
 forge script script/Deploy.s.sol --rpc-url $FHENIX_HELIUM_RPC --broadcast

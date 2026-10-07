@@ -46,7 +46,7 @@ description: Bozza di Valutazione d'impatto sulla protezione dei dati per la giu
 ## 3. Requisiti specifici per la Francia
 
 - **Extrait Kbis ≤ 3 mesi:** raccolto tramite il tipo di documento `COMMERCIAL_REGISTER_EXTRACT`; l'età viene verificata in `DocumentRequirement.maxAge`.
-- **Dichiarazione dei titolari effettivi:** modello `BeneficialOwner` (V12) ai sensi della Loi PACTE, soglia 25%.
+- **Dichiarazione dei titolari effettivi:** modello `BeneficialOwner` ai sensi della Loi PACTE, soglia 25%.
 - **TRACFIN:** la déclaration de soupçon (SAR) viene registrata tramite `POST /api/v1/admin/ict-incidents` (DORA) con category=AML_SAR. Il documento viene inviato manualmente al portale TRACFIN (ACPR).
 - **Conservazione:** 5 anni (LCB-FT); 10 anni per il registro (equivalenza con l'eWpG).
 - **Diritti degli interessati:** CNIL — accesso tramite `GET /api/v1/me/dsar/export`; cancellazione tramite `POST /api/v1/me/dsar/erasure`.

@@ -46,8 +46,8 @@ description: Bozza di Valutazione d'impatto sulla protezione dei dati per la giu
 
 - **TVTG §9 documento informativo sul token:** campo obbligatorio nel tipo di documento KYC `TOKEN_WHITEPAPER`; firmato digitalmente tramite PAdES.
 - **Audit dello smart contract:** il TVTG richiede un audit di sicurezza indipendente. Il tipo di documento `SMART_CONTRACT_AUDIT` è configurato come campo obbligatorio in `JurisdictionRequirementConfig.buildLiTvtg()`.
-- **Obbligo di segnalazione alla FMA:** i prestatori di servizi TT (TT-Dienstleister) ai sensi del TVTG §12 devono essere segnalati alla FMA. Registrazione nel registro `third_party_provider` (V18).
-- **Obblighi di diligenza SPG:** dichiarazione dei titolari effettivi (wirtschaftlich Berechtigte ≥ 25%) tramite l'entità `BeneficialOwner` (V12); conforme alla SPG.
+- **Obbligo di segnalazione alla FMA:** i prestatori di servizi TT (TT-Dienstleister) ai sensi del TVTG §12 devono essere segnalati alla FMA. Registrazione nel registro `third_party_provider`.
+- **Obblighi di diligenza SPG:** dichiarazione dei titolari effettivi (wirtschaftlich Berechtigte ≥ 25%) tramite l'entità `BeneficialOwner`; conforme alla SPG.
 - **Conservazione:** 10 anni (TVTG §33); 5 anni per i documenti antiriciclaggio (SPG art. 7).
 - **Diritti degli interessati:** la DSGVO si applica direttamente in Liechtenstein (SEE). Accesso: `GET /api/v1/me/dsar/export`; cancellazione: `POST /api/v1/me/dsar/erasure`.
 

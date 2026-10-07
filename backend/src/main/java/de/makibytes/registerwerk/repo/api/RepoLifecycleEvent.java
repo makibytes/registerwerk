@@ -15,7 +15,7 @@ public class RepoLifecycleEvent {
     @Column(name="actor_user_id") private UUID actorUserId;
     @Column(precision=38, scale=18) private BigDecimal amount;
     @Column(name="asset_id") private UUID assetId;
-    @Column(precision=38, scale=18) private BigDecimal quantity;
+    @Column(precision=96, scale=18) private BigDecimal quantity;
     @Column(length=200) private String reference;
     @Column(length=1000) private String note;
     @Column(name="created_at", nullable=false, updatable=false) private Instant createdAt=Instant.now();

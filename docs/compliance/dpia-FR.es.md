@@ -46,7 +46,7 @@ description: Borrador de evaluación de impacto relativa a la protección de dat
 ## 3. Requisitos específicos de Francia
 
 - **Extracto Kbis ≤ 3 meses:** Recogido mediante el tipo de documento `COMMERCIAL_REGISTER_EXTRACT`; la antigüedad se verifica en `DocumentRequirement.maxAge`.
-- **Declaración de titulares reales:** Modelo `BeneficialOwner` (V12) conforme a la Loi PACTE, umbral del 25 %.
+- **Declaración de titulares reales:** Modelo `BeneficialOwner` conforme a la Loi PACTE, umbral del 25 %.
 - **TRACFIN:** Declaración de sospecha (SAR) mediante `POST /api/v1/admin/ict-incidents` (DORA) con category=AML_SAR. El documento se envía manualmente al portal de TRACFIN (ACPR).
 - **Conservación:** 5 años (LCB-FT); 10 años para el registro (equivalencia con el eWpG).
 - **Derechos de las personas:** CNIL — acceso mediante `GET /api/v1/me/dsar/export`; supresión mediante `POST /api/v1/me/dsar/erasure`.

@@ -94,7 +94,7 @@ Le entità risultanti rimangono proiezioni provvisorie derivate da eventi.
 
 ## Le catene FHE (Fhenix / Inco) { #fhe-chains-fhenix-inco }
 
-Fhenix e le catene Inco utilizzano Zama fhEVM e supportano i token ERC-3643 confidenziali. Sono pre-seminati in V15. Distribuisci il contratto `ConfidentialERC3643` utilizzando:
+Fhenix e le catene Inco utilizzano Zama fhEVM e supportano i token ERC-3643 confidenziali. Sono pre-seminati nella migrazione di base. Distribuisci il contratto `ConfidentialERC3643` utilizzando:
 
 ```bash
 forge script script/Deploy.s.sol --rpc-url $FHENIX_HELIUM_RPC --broadcast

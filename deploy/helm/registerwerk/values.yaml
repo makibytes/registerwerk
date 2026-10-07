@@ -127,7 +127,7 @@ env:
   SWAGGER_ENABLED: "false"
   OTEL_SAMPLING_PROBABILITY: "0.10"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4318/v1/traces"
-  # Wallet keystores live in Postgres (wallet_keystore_blob, V3 migration) rather than on a
+  # Wallet keystores live in Postgres (wallet_keystore_blob) rather than on a
   # shared filesystem volume — see wallets.persistence below for why that matters here.
   REGISTERWERK_WALLET_STORAGE_BACKEND: "POSTGRES"
   # Peers allowed to assert X-Forwarded-For to the backend (registerwerk.auth.trusted-proxies, a

@@ -82,7 +82,7 @@ spec:
         {{- end }}
         {{- if .Values.postgresql.enabled }}
         {{/* T6-17: creates/refreshes the DML-only runtime login (postgresql.auth.runtimeUsername) with the
-             schema-owner login before the application starts; migration V57 grants it its privileges.
+             schema-owner login before the application starts; the baseline migration (V1__initial_schema.sql) grants it its privileges.
              With cloudSqlProxy the roles are provisioned out of band (Terraform/gcloud) instead — see
              the cloudSqlProxy.runtimeUsername comment in values.yaml. */}}
         - name: ensure-db-roles

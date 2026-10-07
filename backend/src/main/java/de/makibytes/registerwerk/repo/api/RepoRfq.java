@@ -26,7 +26,7 @@ public class RepoRfq {
     private RepoTypes.Visibility visibility;
     @Column(name = "collateral_asset_id", nullable = false)
     private UUID collateralAssetId;
-    @Column(name = "collateral_quantity", nullable = false, precision = 38, scale = 18)
+    @Column(name = "collateral_quantity", nullable = false, precision = 96, scale = 18)
     private BigDecimal collateralQuantity;
     @Column(name = "cash_amount", nullable = false, precision = 38, scale = 18)
     private BigDecimal cashAmount;
