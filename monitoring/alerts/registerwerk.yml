@@ -160,6 +160,65 @@ groups:
           summary: "KYC lapse not propagated on chain"
           description: "{{ $value }} KYC lapse(s) have a FAILED on-chain propagation (org suspension / KYC-AML claim revocation). The entity may still pass PermissionOracle / T-REX gates — check the kyc_chain_propagation rows and the chain signer, then let the retry job or an operator re-drive it."
 
+      # ── Sperrvermerk on-chain freeze reach (H5) ───────────────────────────
+      # Live counts of holder_block_freeze rows (SperrvermerkFreezeService). The register-level block applies
+      # whatever these say; they count the wallets whose legal block did NOT (yet) reach the chain, where repo
+      # repay/liquidate and direct transfers rely on the on-chain frozen flag.
+      - alert: SperrvermerkFreezeFailed
+        expr: |
+          registerwerk_sperrvermerk_freeze_failed{job="registerwerk-backend"} > 0
+        for: 15m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Sperrvermerk freeze failed on-chain"
+          description: "{{ $value }} Sperrvermerk freeze(s) could not be submitted or failed on-chain: the wallet may still move on-chain although the register blocks it. See the SPERRVERMERK_FREEZE_NOT_PROPAGATED operator tasks and the holder_block_freeze rows; the sweep and the nightly reconcile keep retrying."
+
+      - alert: SperrvermerkFreezeDrift
+        expr: |
+          increase(registerwerk_sperrvermerk_freeze_drift_total{job="registerwerk-backend"}[1d]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Sperrvermerk freeze lost on-chain"
+          description: "The nightly reconcile found a wallet NOT frozen although its Sperrvermerk freeze had been confirmed (someone unfroze it, or the token was replaced). It was re-frozen; find out who changed the freeze."
+
+      - alert: SperrvermerkFreezeUnsupported
+        expr: |
+          registerwerk_sperrvermerk_freeze_unsupported{job="registerwerk-backend"} > 0
+        for: 1h
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Sperrvermerk on a deployment without an automated freeze"
+          description: "{{ $value }} Sperrvermerk wallet(s) sit on deployments whose standard/chain has no automated, outcome-tracked freeze (SPL, Stellar, Starknet, Canton, confidential ERC-20). The register block applies; an operator must freeze the wallet through the chain's admin tooling (operator task SPERRVERMERK_FREEZE_NOT_PROPAGATED)."
+
+      - alert: SperrvermerkFreezePending
+        expr: |
+          registerwerk_sperrvermerk_freeze_pending{job="registerwerk-backend"} > 0
+        for: 6h
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Sperrvermerk freeze submitted but not final"
+          description: "{{ $value }} Sperrvermerk (un)freeze transaction(s) have been unconfirmed for over 6 hours (stuck in the outbox, or timed out un-mined). Check the transaction console and the EVM outbox alerts."
+
+      - alert: SperrvermerkReleaseFailed
+        expr: |
+          registerwerk_sperrvermerk_release_failed{job="registerwerk-backend"} > 0
+        for: 30m
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Unfreeze after a lifted Sperrvermerk failed"
+          description: "{{ $value }} wallet(s) stay frozen on-chain although their Sperrvermerk was lifted. The holder cannot move assets; retry or repair the unfreeze (the sweep retries a few times)."
+
       # ── Sanctions hits ────────────────────────────────────────────────────
       - alert: SanctionsHitOpenTooLong
         expr: |
@@ -226,7 +285,7 @@ groups:
           severity: critical
         annotations:
           summary: "Two RPC nodes of {{ $labels.chain }} disagree about a registry-mutating transaction"
-          description: "A transaction is held because another healthy node reports a different block hash, recipient or sender than the receipt. Treat as a possible hostile or forked node: check RPC node health (health_reason), quarantine the suspect node under step-up + second approver, see the ERROR log line 'Second-source MISMATCH'."
+          description: "A transaction is held because another healthy node reports a different block hash, recipient, sender or receipt (status, block, gas used, logs) than the one being completed. Treat as a possible hostile or forked node: check RPC node health (health_reason), quarantine the suspect node under step-up + second approver, see the ERROR log line 'Second-source MISMATCH'."
 
       - alert: RpcSecondSourceHoldOverdue
         expr: |
@@ -238,6 +297,16 @@ groups:
           summary: "A registry transaction on {{ $labels.chain }} waits for a second RPC node that never answers"
           description: "The transaction is mined and final but held (PENDING) because fewer than two healthy nodes confirm it. Repair or add an independent node; see the ERROR log 'Second-source confirmation ... still pending'."
 
+      - alert: RpcSingleSourceHeld
+        expr: |
+          increase(registerwerk_confirmation_single_source_held_total{job="registerwerk-backend"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A registry transaction on {{ $labels.chain }} is held: production mode needs a second healthy RPC node"
+          description: "A registry-mutating transaction (freeze, forced transfer, burn, mint, compliance change, ...) is mined and final but stays PENDING because fewer than two healthy nodes are available and production mode refuses single-source confirmation. Repair or add an independent node; the transaction completes by itself once a second node agrees. RpcSecondSourceHoldOverdue repeats the warning after 15 minutes."
+
       - alert: RpcSingleSourceConfirmation
         expr: |
           increase(registerwerk_confirmation_single_source_total{job="registerwerk-backend"}[1h]) > 0
@@ -246,7 +315,7 @@ groups:
           severity: warning
         annotations:
           summary: "Registry transactions on {{ $labels.chain }} were confirmed from a single RPC node"
-          description: "Fewer than two healthy nodes were available, so the second-source receipt cross-check was skipped. Add or repair a second independent node."
+          description: "Fewer than two healthy nodes were available, so the second-source receipt cross-check was skipped (outside production mode only: in production mode the transaction is held instead, see RpcSingleSourceHeld). Add or repair a second independent node."
 
       - alert: EvmChainIdUnpinned
         expr: registerwerk_evm_chains_unpinned{job="registerwerk-backend"} > 0
@@ -298,7 +367,7 @@ groups:
           severity: warning
         annotations:
           summary: "A stale nonce lease was capped back to the chain value (chain id {{ $labels.chain }})"
-          description: "A signer's nonce lease led the chain's pending count with no outbox row holding the gap: a transaction was dropped from the mempool. The lease was repaired; check the affected TIMEOUT transactions."
+          description: "A signer's nonce lease led the pending count reported by every node with neither an outbox row nor a live direct send holding the gap: a transaction was dropped from the mempool. The lease was repaired; check the affected TIMEOUT transactions. A repair that is refused (node unreachable, outbox row or live direct send in the gap) is counted in registerwerk_outbox_lease_repair_blocked_total{reason}."
 
       - alert: BlockchainTxLateMined
         expr: |

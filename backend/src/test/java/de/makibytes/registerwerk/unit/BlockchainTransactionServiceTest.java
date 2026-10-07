@@ -93,7 +93,7 @@ class BlockchainTransactionServiceTest {
         // AssetDeploymentCompletionWriterTest's pattern. complete()/markTimeout() used to be
         // self-invoked @Transactional methods on this service (a no-op due to Spring proxy
         // bypass); they now live on this separate bean so the transaction boundary is real.
-        BlockchainTransactionCompletionWriter completionWriter =
+        completionWriter =
                 new BlockchainTransactionCompletionWriter(repository, eventPublisher, new SimpleMeterRegistry(), chainEffectRecorder);
         // chainConfigRepository is left unstubbed in most tests: findByIdentifier() then returns
         // Optional.empty() (Mockito's built-in default for Optional-returning methods), and
@@ -102,11 +102,19 @@ class BlockchainTransactionServiceTest {
         // Optional.empty() also means BlockchainTransactionService.record() never resolves a
         // chainConfigId in these tests, so completionWriter.complete()'s chain-effect journalling
         // is a no-op (chainConfigId stays null) — chainEffectRecorder needs no stubbing either.
-        EvmFinalityResolver finalityResolver = new EvmFinalityResolver(chainConfigRepository, txProperties);
-        service = new BlockchainTransactionService(repository, clientRegistry, evmContractService,
+        finalityResolver = new EvmFinalityResolver(chainConfigRepository, txProperties);
+        service = serviceWith(new de.makibytes.registerwerk.blockchain.api.SecondSourceConfirmer(
+                clientRegistry, new SimpleMeterRegistry()));
+    }
+
+    private BlockchainTransactionCompletionWriter completionWriter;
+    private EvmFinalityResolver finalityResolver;
+
+    private BlockchainTransactionService serviceWith(
+            de.makibytes.registerwerk.blockchain.api.SecondSourceConfirmer confirmer) {
+        return new BlockchainTransactionService(repository, clientRegistry, evmContractService,
                 eventPublisher, txProperties, completionWriter, finalityResolver, chainConfigRepository,
-                new OutboxNonceResolver(outboxRepository),
-                new de.makibytes.registerwerk.blockchain.api.SecondSourceConfirmer(clientRegistry, new SimpleMeterRegistry()));
+                new OutboxNonceResolver(outboxRepository), confirmer);
     }
 
     @AfterEach
@@ -308,6 +316,37 @@ class BlockchainTransactionServiceTest {
         assertThat(tx.getGasUsed()).isEqualTo(21_000L);
         verify(repository).save(tx);
         verify(eventPublisher).publishEvent(any(BlockchainTxStatusEvent.class));
+    }
+
+    @Test
+    @DisplayName("H9(a): in production a final court-ordered freeze (setAddressFrozen) stays PENDING while only one "
+            + "node is healthy; outside production the same transaction completes")
+    void pollPendingTransactions_productionSingleSource_holdsRegistryMutatingTransaction() throws java.io.IOException {
+        BlockchainTransaction tx = pendingTx("0xabc", "ETHEREUM", "MAINNET", Instant.now());
+        tx.setMethodName("setAddressFrozen");
+        stubPending(tx);
+        when(clientRegistry.getEvmClientByIdentifier(any(String.class))).thenReturn(web3j);
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setBlockNumber("0x64");
+        receipt.setStatus("0x1");
+        receipt.setGasUsed("0x5208");
+        when(web3j.ethGetTransactionReceipt("0xabc").send().getTransactionReceipt()).thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(200));
+        when(clientRegistry.evmNodeClients("ETHEREUM_MAINNET")).thenReturn(List.of(
+                new BlockchainClientRegistry.EvmNodeClient(UUID.randomUUID(), web3j, true)));
+        BlockchainTransactionService production = serviceWith(
+                new de.makibytes.registerwerk.blockchain.api.SecondSourceConfirmer(clientRegistry,
+                        new SimpleMeterRegistry(), de.makibytes.registerwerk.shared.ProductionMode.of(true)));
+
+        production.pollPendingTransactions();
+
+        assertThat(tx.getStatus()).as("held, not completed from one node's word")
+                .isEqualTo(BlockchainTransaction.Status.PENDING);
+        verify(repository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any(BlockchainTxStatusEvent.class));
+
+        service.pollPendingTransactions();   // non-production confirmer from setUp
+        assertThat(tx.getStatus()).isEqualTo(BlockchainTransaction.Status.SUCCESS);
     }
 
     @Test

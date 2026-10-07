@@ -21,6 +21,8 @@ import java.util.Map;
 @ConfigurationProperties(prefix = "registerwerk.blockchain.tx")
 public class BlockchainTxProperties {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(BlockchainTxProperties.class);
+
     /** Applied to any chain without an explicit override. */
     private int defaultConfirmations = 12;
 
@@ -66,22 +68,28 @@ public class BlockchainTxProperties {
     private long replacedConfirmationSeconds = 600;
 
     /**
-     * Function-name fragments (case-insensitive "contains") of registry-mutating transactions that need a
-     * second-source receipt confirmation before completion (P4C-6). {@code *} requires it for every
-     * transaction. Finality depth itself always comes from {@code chain_config} / this class, never from
-     * a node's or chaincache's self-declared capabilities.
+     * Function names that need a second-source receipt confirmation before completion (P4C-6) <em>in addition
+     * to</em> the built-in explicit list ({@link RegistryMutatingMethods}), matched by exact name
+     * (case-insensitive) - not by substring (H9). {@code *} requires it for every transaction. Anything the
+     * built-in list does not classify is treated as registry-mutating (fail closed), so an extra entry is only
+     * ever needed to be stricter about a function the list deliberately exempts. Finality depth itself always
+     * comes from {@code chain_config} / this class, never from a node's or chaincache's self-declared
+     * capabilities.
      */
-    private java.util.List<String> secondSourceMethods = java.util.List.of(
-            "forced", "forceburn", "burn", "mint", "freeze", "pause", "recovery", "claim", "identity",
-            "whitelist", "trustedissuer", "ownership", "grantrole", "revokerole", "compliance", "anchor");
+    private java.util.List<String> secondSourceMethods = java.util.List.of();
+
+    private final java.util.Set<String> unclassifiedWarned = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public boolean requiresSecondSource(String methodName) {
-        if (methodName == null) return false;
-        String lower = methodName.toLowerCase(Locale.ROOT);
-        for (String fragment : secondSourceMethods) {
-            if (fragment.equals("*") || lower.contains(fragment.toLowerCase(Locale.ROOT))) return true;
+        String lower = methodName == null ? null : methodName.toLowerCase(Locale.ROOT);
+        for (String configured : secondSourceMethods) {
+            if (configured.equals("*") || configured.toLowerCase(Locale.ROOT).equals(lower)) return true;
         }
-        return false;
+        if (!RegistryMutatingMethods.isClassified(methodName) && unclassifiedWarned.add(String.valueOf(lower))) {
+            log.warn("Transaction method '{}' is not classified in RegistryMutatingMethods; treating it as "
+                    + "registry-mutating (second-source confirmation required)", methodName);
+        }
+        return RegistryMutatingMethods.requiresSecondSource(methodName);
     }
 
     public java.util.List<String> getSecondSourceMethods() { return secondSourceMethods; }

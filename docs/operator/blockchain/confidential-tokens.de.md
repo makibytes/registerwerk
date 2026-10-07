@@ -30,7 +30,7 @@ Das Backend leitet `CONF_ERC20`/`CONF_ERC3643` an `ConfidentialErc20Service`/`Co
 
 | Aktion | Endpunkt | Hinweise |
 |---|---|---|
-| Vertrauliches Minting (Emittenten-/Betreiberausgabe) | `POST /api/v1/assets/{id}/deployments/{depId}/issuer/mint-confidential` | Verschlüsselt den Betrag serverseitig über den `zama-relayer`-Sidecar — kein Browser/Wallet nötig |
+| Vertrauliches Minting (Emittenten-/Betreiberausgabe) | `POST /api/v1/assets/{id}/deployments/{depId}/issuer/mint-confidential` | Verschlüsselt den Betrag serverseitig über den `zama-relayer`-Sidecar — kein Browser/Wallet nötig. Erfordert Step-up (`ISSUER_MINT_CONFIDENTIAL`) und einen an den Request-Body gebundenen zweiten Freigeber; das Ziel muss ein geprüfter Registerinhaber sein, genau wie beim normalen Mint |
 | Vertrauliche Zwangsvernichtung (Forced Burn, §26 Einziehung) | `POST .../admin/force-burn-confidential` | Derselbe serverseitige Verschlüsselungspfad; bereits Agent-/Owner-gated — dieses Gating IST die Zwangsvernichtungsbefugnis |
 | Vertraulichen Viewer hinzufügen | `POST .../admin/confidential-add-viewer` | Gewährt ab sofort Entschlüsselungsrechte für den Saldo jedes Inhabers — z. B. einen Prüfer oder die eigene Wallet des Emittenten nach der Bereitstellung hinzufügen |
 | Vertraulichen Viewer entfernen | `POST .../admin/confidential-remove-viewer` | Stoppt künftige Gewährungen — widerruft NICHT rückwirkend bereits entschlüsselbare historische Handles (Zamas ACL hat keine Widerruf-Primitive) |

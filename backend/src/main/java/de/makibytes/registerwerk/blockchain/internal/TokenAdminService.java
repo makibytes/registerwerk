@@ -124,11 +124,24 @@ public class TokenAdminService implements TokenAdminPort {
 
     // ── Address freeze (AWG §17, GwG §40; MiCAR Art. 36) ─────────────────────
 
+    /**
+     * Freezes {@code walletAddress}. Covers ERC-20/721/1155 and, for the §16 eWpG Sperrvermerk sync (H5), the
+     * ERC-4626/7540 vault shares ({@code EwpgCompliance.freezeAddress}, the same control as on ERC-20) and the
+     * confidential ERC-3643 ({@code setAddressFrozen(address,bool)}). ERC-3525 has its own admin service and
+     * plain ERC-3643 goes through {@code Erc3643LifecycleService}.
+     */
     public UUID freezeAddress(UUID deploymentId, String walletAddress, String reason, String legalBasis,
                                UUID actorId, String actorRole) {
         log.info("ADMIN freezeAddress={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep, true);
+        if (asset.tokenStandard() == TokenStandard.CONF_ERC3643) {
+            Function confidential = new Function("setAddressFrozen",
+                    Arrays.asList(new Address(walletAddress), new Bool(true)), Collections.emptyList());
+            return submitAdmin(dep, asset, confidential, "confidentialSetAddressFrozen",
+                    Map.of("address", walletAddress, "frozen", true, "reason", reason, "legalBasis", legalBasis),
+                    actorId, actorRole);
+        }
         Function fn = new Function("freezeAddress",
                 Arrays.asList(new Address(walletAddress), new Utf8String(reason)),
                 Collections.emptyList());
@@ -155,7 +168,13 @@ public class TokenAdminService implements TokenAdminPort {
     private UUID doUnfreezeAddress(UUID deploymentId, String walletAddress, UUID actorId, String actorRole) {
         log.info("ADMIN unfreezeAddress={} on deployment={}", walletAddress, deploymentId);
         AssetDeployment dep = requireDeployment(deploymentId);
-        AssetLookupPort.AssetInfo asset = requireEvmToken(dep);
+        AssetLookupPort.AssetInfo asset = requireEvmToken(dep, true);
+        if (asset.tokenStandard() == TokenStandard.CONF_ERC3643) {
+            Function confidential = new Function("setAddressFrozen",
+                    Arrays.asList(new Address(walletAddress), new Bool(false)), Collections.emptyList());
+            return submitAdmin(dep, asset, confidential, "confidentialSetAddressFrozen",
+                    Map.of("address", walletAddress, "frozen", false), actorId, actorRole);
+        }
         Function fn = new Function("unfreezeAddress",
                 Collections.singletonList(new Address(walletAddress)),
                 Collections.emptyList());
@@ -631,9 +650,23 @@ public class TokenAdminService implements TokenAdminPort {
     }
 
     private AssetLookupPort.AssetInfo requireEvmToken(AssetDeployment dep) {
+        return requireEvmToken(dep, false);
+    }
+
+    /**
+     * @param addressFreezeOnly the caller only freezes/unfreezes one address, a control that the vault shares
+     *        (ERC-4626/7540, via {@code EwpgCompliance}) and the confidential ERC-3643 expose on this port even
+     *        though every other admin operation of those standards goes through their own services
+     */
+    private AssetLookupPort.AssetInfo requireEvmToken(AssetDeployment dep, boolean addressFreezeOnly) {
         AssetLookupPort.AssetInfo asset = assetLookupPort.findById(dep.getAssetId())
                 .orElseThrow(() -> new de.makibytes.registerwerk.shared.EntityNotFoundException("Asset", dep.getAssetId()));
         TokenStandard standard = asset.tokenStandard();
+        if (addressFreezeOnly && (standard == TokenStandard.ERC4626 || standard == TokenStandard.ERC7540
+                || standard == TokenStandard.CONF_ERC3643)) {
+            requireDeployedContract(dep);
+            return asset;
+        }
         if (standard == TokenStandard.ERC3643 || standard == TokenStandard.CONF_ERC3643) {
             throw new IllegalArgumentException(
                     "ERC-3643 admin operations go through Erc3643LifecycleService (/erc3643 endpoints).");
@@ -667,10 +700,14 @@ public class TokenAdminService implements TokenAdminPort {
                     "Registerwerk Daml bond lifecycle operations (coupon authorization, rate fixing, redemption, early call) " +
                     "go through CantonBondOperations (/api/v1/deployments/{id}/coupon-payment etc.).");
         }
+        requireDeployedContract(dep);
+        return asset;
+    }
+
+    private static void requireDeployedContract(AssetDeployment dep) {
         if (dep.getContractAddress() == null || dep.getContractAddress().startsWith("0x-PENDING")) {
             throw new IllegalStateException("Token contract is not yet deployed for deployment=" + dep.getId());
         }
-        return asset;
     }
 
     /**

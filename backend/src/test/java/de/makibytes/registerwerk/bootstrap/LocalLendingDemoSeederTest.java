@@ -53,7 +53,8 @@ class LocalLendingDemoSeederTest {
                 mock(OrgMemberWalletRepository.class), mock(LendingMarketRepository.class),
                 mock(LendingMarketRegistrar.class), mock(ContractAddressConfig.class), transfers,
                 mock(de.makibytes.registerwerk.payment.api.PaymentRailRepository.class),
-                mock(de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository.class));
+                mock(de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository.class),
+                mock(org.springframework.transaction.PlatformTransactionManager.class));
 
         Asset greenBond = new Asset();
         greenBond.setId(UUID.randomUUID());

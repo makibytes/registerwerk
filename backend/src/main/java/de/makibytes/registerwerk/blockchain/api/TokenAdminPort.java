@@ -44,11 +44,12 @@ public interface TokenAdminPort {
     UUID mint(UUID deploymentId, String toAddress, BigInteger amount, UUID actorId, String actorRole);
 
     /**
-     * Freezes {@code walletAddress} on the given (non-ERC-3643) token deployment — AWG §17,
-     * GwG §40; MiCAR Art. 36. Exposed here so {@code erc3643.internal.SperrvermerkOnchainSyncListener}
-     * can keep a §16 eWpG Sperrvermerk in sync with the on-chain frozen flag without importing
-     * {@code blockchain.internal} (would violate the Modulith boundary — same rationale as
-     * {@link #forceBurn} above).
+     * Freezes {@code walletAddress} on the given deployment - AWG §17, GwG §40; MiCAR Art. 36. Covers ERC-20/721/1155,
+     * the ERC-4626/7540 vault shares ({@code EwpgCompliance.freezeAddress}) and the confidential ERC-3643
+     * ({@code setAddressFrozen}); ERC-3525 has {@code Erc3525AdminPort}, plain ERC-3643 {@code Erc3643LifecycleService}.
+     * Exposed here so {@code erc3643.internal.SperrvermerkOnchainSyncListener} can keep a §16 eWpG Sperrvermerk in sync
+     * with the on-chain frozen flag without importing {@code blockchain.internal} (would violate the Modulith
+     * boundary - same rationale as {@link #forceBurn} above).
      */
     UUID freezeAddress(UUID deploymentId, String walletAddress, String reason, String legalBasis,
                         UUID actorId, String actorRole);

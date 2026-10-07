@@ -18,7 +18,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.function.Predicate;
 
 /**
  * Serializes EVM transaction submission per {@code (chainId, senderAddress)} across every
@@ -65,6 +70,17 @@ import java.util.Locale;
  * is <em>lease repair</em>: a lease that leads the chain's pending count while no outbox row holds a
  * nonce in the gap (the transaction was dropped) would otherwise stay ahead forever, because the lease
  * only ever grew; see {@code effectiveNonce}.
+ *
+ * <p><strong>Lease repair never reuses a nonce that has a known transaction (H10).</strong> Repair used to
+ * trust the one chain read the caller made - through the failover client, which may have landed on a lagging
+ * node - and to look only at outbox rows, so a still-pending transaction sent <em>directly</em> (immediate
+ * submit/send/deploy, no outbox row) could have its nonce handed out again after the grace period and be
+ * replaced. Now a repair needs a {@link ChainNonceSource} that reads the pending count from <em>every</em>
+ * routable node (the highest wins; any node that cannot answer blocks the repair), and is refused while an
+ * outbox row ({@code evm_signed_submission}) or a registered direct send ({@code evm_direct_submission},
+ * see {@link #registerDirectSubmission}) holds a nonce in the gap and any node still knows that transaction.
+ * A plain {@link ChainNonceSupplier} (no node information) never repairs: the lease stays, which is the safe
+ * direction - a gap is cleared by the outbox's explicit cancel / re-price, a reused nonce cannot be undone.
  */
 @Component
 public class NonceCoordinator {
@@ -76,15 +92,46 @@ public class NonceCoordinator {
         BigInteger fetch() throws Exception;
     }
 
+    /**
+     * A chain reading that can also answer what lease repair must know before it may reuse a nonce (H10).
+     * {@link #fetch()} is the ordinary (failover, possibly lagging) read used for {@code max(lease, chain)}.
+     */
+    public interface ChainNonceSource extends ChainNonceSupplier {
+        /**
+         * The highest {@code eth_getTransactionCount(PENDING)} reported by <em>every</em> routable node of the
+         * chain, or empty when that is not known: no node pool, or at least one node could not answer (a node
+         * that is down may be the one holding the transaction).
+         */
+        Optional<BigInteger> authoritativePendingNonce() throws Exception;
+
+        /** True when any node knows {@code txHash} (pending or mined). Must answer {@code true} when it cannot tell. */
+        boolean knowsTransaction(String txHash);
+
+        static ChainNonceSource of(ChainNonceSupplier lagging, Callable<Optional<BigInteger>> authoritative,
+                Predicate<String> knows) {
+            return new ChainNonceSource() {
+                @Override public BigInteger fetch() throws Exception { return lagging.fetch(); }
+                @Override public Optional<BigInteger> authoritativePendingNonce() throws Exception {
+                    return authoritative.call();
+                }
+                @Override public boolean knowsTransaction(String txHash) { return knows.test(txHash); }
+            };
+        }
+    }
+
     @FunctionalInterface
     public interface NonceCallback<T> {
         T withNonce(BigInteger nonce) throws Exception;
     }
 
+    /** The lock-holding connection while a {@link #withNonce} callback runs (direct sends register on it). */
+    private static final ThreadLocal<Connection> LOCK_CONNECTION = new ThreadLocal<>();
+
     private final DataSource dataSource;
     private final JdbcTemplate jdbcTemplate;
     private final MeterRegistry meters;
     private final java.time.Duration leaseRepairGrace;
+    private final java.time.Duration directLedgerRetention;
 
     @Autowired
     public NonceCoordinator(DataSource dataSource, MeterRegistry meters, OutboxProperties properties) {
@@ -92,6 +139,7 @@ public class NonceCoordinator {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
         this.meters = meters;
         this.leaseRepairGrace = properties.getLeaseRepairGrace();
+        this.directLedgerRetention = properties.getDirectLedgerRetention();
     }
 
     /** Without metrics wiring and with default lease-repair settings (unit tests, tooling). */
@@ -133,7 +181,7 @@ public class NonceCoordinator {
                 chainId, normalizedAddress);
         BigInteger chainNonce = chainNonceSupplier.fetch();
         BigInteger nonce = jdbcTemplate.execute((ConnectionCallback<BigInteger>) connection ->
-                effectiveNonce(connection, chainId, normalizedAddress, leased, chainNonce));
+                effectiveNonce(connection, chainId, normalizedAddress, leased, chainNonce, chainNonceSupplier));
 
         T result = callback.withNonce(nonce);
         jdbcTemplate.update("""
@@ -164,7 +212,8 @@ public class NonceCoordinator {
             try {
                 BigInteger leased = readLease(conn, chainId, normalizedAddress);
                 BigInteger chainNonce = chainNonceSupplier.fetch();
-                BigInteger nonce = effectiveNonce(conn, chainId, normalizedAddress, leased, chainNonce);
+                BigInteger nonce = effectiveNonce(conn, chainId, normalizedAddress, leased, chainNonce,
+                        chainNonceSupplier);
 
                 if (leased != null && chainNonce.compareTo(leased) > 0) {
                     log.info("NonceCoordinator: chain-reported PENDING nonce {} for {}/{} is ahead of the "
@@ -172,7 +221,13 @@ public class NonceCoordinator {
                             chainNonce, chainId, normalizedAddress, leased);
                 }
 
-                T result = callback.withNonce(nonce);
+                LOCK_CONNECTION.set(conn);
+                T result;
+                try {
+                    result = callback.withNonce(nonce);
+                } finally {
+                    LOCK_CONNECTION.remove();
+                }
 
                 // Only reached if the callback (sign + broadcast) succeeded — a failed attempt
                 // must not advance the lease, so the same nonce is correctly retried next time.
@@ -185,16 +240,70 @@ public class NonceCoordinator {
     }
 
     /**
+     * Registers a direct (non-outbox) send in the {@code evm_direct_submission} ledger so lease repair can never
+     * hand out its nonce again while the transaction is alive (H10). Must be called from inside the
+     * {@link NonceCallback} of {@link #withNonce}, <strong>after signing and before broadcasting</strong>: the
+     * row then exists even when the broadcast fails ambiguously (the node accepted it but the answer was lost).
+     * It reuses the connection that holds the nonce lock, so it costs no extra pooled connection, and it throws
+     * on failure - an unregistered direct send must not be broadcast.
+     */
+    public void registerDirectSubmission(long chainId, String senderAddress, BigInteger nonce, String txHash,
+            String kind) {
+        String address = senderAddress.toLowerCase(Locale.ROOT);
+        Connection held = LOCK_CONNECTION.get();
+        if (held != null) {
+            try {
+                insertDirectSubmission(held, chainId, address, nonce, txHash, kind);
+            } catch (SQLException e) {
+                throw new IllegalStateException("Could not register direct send " + txHash + ": " + e.getMessage(), e);
+            }
+            return;
+        }
+        jdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
+            insertDirectSubmission(connection, chainId, address, nonce, txHash, kind);
+            return null;
+        });
+    }
+
+    private void insertDirectSubmission(Connection conn, long chainId, String address, BigInteger nonce,
+            String txHash, String kind) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("""
+                INSERT INTO evm_direct_submission (chain_id, sender_address, nonce, tx_hash, kind, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (chain_id, sender_address, tx_hash) DO NOTHING
+                """)) {
+            ps.setLong(1, chainId);
+            ps.setString(2, address);
+            ps.setBigDecimal(3, new BigDecimal(nonce));
+            ps.setString(4, txHash.toLowerCase(Locale.ROOT));
+            ps.setString(5, kind);
+            ps.setTimestamp(6, Timestamp.from(Instant.now()));
+            ps.executeUpdate();
+        }
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM evm_direct_submission WHERE created_at < ?")) {
+            ps.setTimestamp(1, Timestamp.from(Instant.now().minus(directLedgerRetention)));
+            ps.executeUpdate();
+        }
+    }
+
+    /**
      * The nonce to use: normally {@code max(lease, chainPending)}. A lease that leads the chain
      * (P4B-4, scenario "dropped tx after TIMEOUT") would otherwise stay ahead forever - every later
-     * transaction sits behind a nonce gap no transaction will ever fill. It is capped back to the
-     * chain's pending count only when (a) it has not moved for {@code leaseRepairGrace} and (b) no local
-     * outbox row still holds a nonce in {@code [chainPending, lease)}; anything else in that range is
-     * either alive or a stuck row the outbox recovery handles explicitly. The caller's upsert then
-     * writes {@code nonce + 1}, which is the repair.
+     * transaction sits behind a nonce gap no transaction will ever fill. It is capped back only when
+     * <ol>
+     *   <li>the lease has not moved for {@code leaseRepairGrace};</li>
+     *   <li>the caller's reading is a {@link ChainNonceSource} and <em>every</em> routable node answered with a
+     *       pending count below the lease (the highest one is the floor - a single, possibly lagging, node
+     *       proves nothing);</li>
+     *   <li>no local outbox row still holds a nonce in {@code [floor, lease)}; anything else in that range is
+     *       either alive or a stuck row the outbox recovery handles explicitly; and</li>
+     *   <li>no registered direct send holds a nonce in that range whose transaction any node still knows (H10).</li>
+     * </ol>
+     * The caller's upsert then writes {@code nonce + 1}, which is the repair. If any condition fails the lease is
+     * kept (the safe direction: a gap is cleared by cancelling, a reused nonce replaces a live transaction).
      */
     private BigInteger effectiveNonce(Connection conn, long chainId, String address,
-            BigInteger leased, BigInteger chainNonce) throws SQLException {
+            BigInteger leased, BigInteger chainNonce, ChainNonceSupplier reading) throws SQLException {
         if (leased == null) {
             return chainNonce;
         }
@@ -213,6 +322,29 @@ public class NonceCoordinator {
         if (updatedAt == null || updatedAt.plus(leaseRepairGrace).isAfter(Instant.now())) {
             return leased;
         }
+
+        // The lease is a repair candidate. The caller's own read went through the failover client and may have
+        // landed on a lagging node, so it is not evidence: ask every node.
+        if (!(reading instanceof ChainNonceSource source)) {
+            return repairBlocked(chainId, address, leased, chainNonce, "NO_NODE_VIEW");
+        }
+        BigInteger floor;
+        try {
+            Optional<BigInteger> authoritative = source.authoritativePendingNonce();
+            if (authoritative.isEmpty()) {
+                return repairBlocked(chainId, address, leased, chainNonce, "NODE_UNAVAILABLE");
+            }
+            floor = authoritative.get().max(chainNonce);
+        } catch (Exception e) {
+            log.warn("NonceCoordinator: could not read the pending nonce from every node for {}/{}: {}",
+                    chainId, address, e.getMessage());
+            return repairBlocked(chainId, address, leased, chainNonce, "NODE_UNAVAILABLE");
+        }
+        if (floor.compareTo(leased) >= 0) {
+            // At least one node already counts the lease's range as sent: not stale at all.
+            return floor;
+        }
+
         long occupying;
         try (PreparedStatement ps = conn.prepareStatement("""
                 SELECT count(*) FROM evm_signed_submission
@@ -221,7 +353,7 @@ public class NonceCoordinator {
                 """)) {
             ps.setBigDecimal(1, new BigDecimal(BigInteger.valueOf(chainId)));
             ps.setString(2, address);
-            ps.setBigDecimal(3, new BigDecimal(chainNonce));
+            ps.setBigDecimal(3, new BigDecimal(floor));
             ps.setBigDecimal(4, new BigDecimal(leased));
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
@@ -229,15 +361,47 @@ public class NonceCoordinator {
             }
         }
         if (occupying > 0) {
-            return leased;
+            return repairBlocked(chainId, address, leased, floor, "OUTBOX_ROW");
         }
-        log.error("NonceCoordinator: nonce lease {} for {}/{} leads the chain's pending count {} but no outbox "
-                        + "row holds a nonce in [{}, {}) - the lease is stale (dropped transaction); capping it "
-                        + "back to the chain value.", leased, chainId, address, chainNonce, chainNonce, leased);
+
+        List<String> directHashes = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("""
+                SELECT tx_hash FROM evm_direct_submission
+                WHERE chain_id = ? AND sender_address = ? AND nonce >= ? AND nonce < ?
+                """)) {
+            ps.setLong(1, chainId);
+            ps.setString(2, address);
+            ps.setBigDecimal(3, new BigDecimal(floor));
+            ps.setBigDecimal(4, new BigDecimal(leased));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) directHashes.add(rs.getString(1));
+            }
+        }
+        for (String hash : directHashes) {
+            if (source.knowsTransaction(hash)) {
+                return repairBlocked(chainId, address, leased, floor, "DIRECT_SEND");
+            }
+        }
+
+        log.error("NonceCoordinator: nonce lease {} for {}/{} leads the pending count {} of every node but no outbox "
+                        + "row or live direct send holds a nonce in [{}, {}) - the lease is stale (dropped transaction); "
+                        + "capping it back to the chain value.", leased, chainId, address, floor, floor, leased);
         if (meters != null) {
             meters.counter("registerwerk.outbox.lease_repaired", "chain", String.valueOf(chainId)).increment();
         }
-        return chainNonce;
+        return floor;
+    }
+
+    private BigInteger repairBlocked(long chainId, String address, BigInteger leased, BigInteger chainNonce,
+            String reason) {
+        log.warn("NonceCoordinator: nonce lease {} for {}/{} leads the chain reading {} but is NOT repaired ({}): "
+                + "a nonce that may belong to a live transaction is never reused.", leased, chainId, address,
+                chainNonce, reason);
+        if (meters != null) {
+            meters.counter("registerwerk.outbox.lease_repair_blocked", "chain", String.valueOf(chainId),
+                    "reason", reason).increment();
+        }
+        return leased;
     }
 
     private void acquireAdvisoryLock(Connection conn, String lockKey) throws SQLException {

@@ -103,15 +103,23 @@ public class IssuerTokenController {
      * equivalent of {@link #mint}. Requires a configured Zama relayer sidecar
      * ({@code registerwerk.zama.relayer-url}) to encrypt {@code amount} server-side before
      * submission, since there is no browser/wallet in an issuer-initiated mint.
+     *
+     * <p>H13: same controls as the plain mint — step-up plus a second approver (an issuer cannot approve its
+     * own mint) and the screened-destination gate. The step-up reason is distinct ({@code ISSUER_MINT_CONFIDENTIAL}),
+     * so an approval minted for one cannot be used for the other; the approval is bound to this request body.
+     * The audit event ({@code TokenAdminActionEvent}) carries the approver.
      */
     @PostMapping("/mint-confidential")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ISSUER_MINT_CONFIDENTIAL")
     public ResponseEntity<TxSubmissionResponse> mintConfidential(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid MintRequest request, Authentication auth) {
         log.info("ISSUER confidentialMint to={} on deployment={} by actor={}",
                 request.toAddress(), depId, actorName(auth));
-        return accepted(adminService.confidentialMint(depId, request.toAddress(), request.amount(),
-                actorId(auth), SecurityUtils.primaryRole(auth, "ISSUER")));
+        var resolved = destinationGate.require(assetId, request.toAddress(), "confidentialMint");
+        UUID txId = adminService.confidentialMint(depId, request.toAddress(), request.amount(),
+                actorId(auth), SecurityUtils.primaryRole(auth, "ISSUER"));
+        return ResponseEntity.accepted().body(new TxSubmissionResponse(txId, resolved != null ? resolved.holderName() : null));
     }
 
     @PostMapping("/forced-transfer")

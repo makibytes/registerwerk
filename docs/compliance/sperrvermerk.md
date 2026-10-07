@@ -50,7 +50,7 @@ The `HolderBlock` entity in the `kyc` module stores all active and historical bl
 | `liftedBy` | UUID of the operator who lifted the block |
 | `twoManRuleApprover` | UUID of the second approver |
 | `twoManRuleApprovedAt` | When the second approver confirmed |
-| `onChainFreezeTxHash` | Hash of the corresponding on-chain freeze transaction |
+| `onChainFreezeTxHash` | Hash of the first confirmed on-chain freeze transaction of this block. A block can reach several deployments; the outcome per deployment and wallet is in `holder_block_freeze` (see [On-chain reach](#on-chain-reach)) |
 
 ---
 
@@ -71,12 +71,12 @@ stateDiagram-v2
 1. `REGISTRY_ADMIN` submits `POST /api/v1/holder-blocks` with block type, legal basis, and optional expiry
 2. `@RequiresStepUp` aspect enforces a fresh step-up token (TOTP or WebAuthn)
 3. `SperrvermerkService` checks that a second approver has confirmed (`dualControlPending` token)
-4. If the asset uses [ERC-3643](../token-standards/erc3643.md) identity-bound tokens, `freezeAddress()` is called on the compliance module contract
-5. The `onChainFreezeTxHash` is stored once the transaction is confirmed
+4. Once the block is committed, `SperrvermerkOnchainSyncListener` freezes the wallet on every live token deployment of the assets it holds (or of the `assetId` only, for an asset-scoped block), through the durable transaction outbox. The standards that can be frozen are listed [below](#on-chain-reach); a deployment that cannot be frozen is recorded and escalated, not skipped
+5. The outcome per block, deployment and wallet is recorded in `holder_block_freeze` and follows the transaction status: `SUBMITTED` becomes `CONFIRMED` (and `onChainFreezeTxHash` is stored) or `FAILED`
 6. An `AuditEvent` is emitted with the full block details
 
 **Lifting a block:**
-The same step-up + 4-eyes flow applies. Lifting calls the corresponding on-chain `unfreezeAddress()` and clears the `HolderBlock.liftedAt` field.
+The same step-up + 4-eyes flow applies. Lifting runs the reconciliation in reverse: for each wallet and deployment the on-chain unfreeze is submitted only if no remaining blocking block still covers it (`RELEASE_SUBMITTED`, then `RELEASED`). A failed unfreeze leaves the wallet frozen, is reported (`HOLDER_BLOCK_RELEASE_FAILED`, operator task) and retried. In the register the block is `LIFTED` either way; `liftedAt` and `liftedBy` are set.
 
 **Automatic expiry:**
 A `@Scheduled` job runs nightly and finds all ACTIVE blocks with `expiresAt < NOW()`. By default **no block type expires automatically**: the block moves to `EXPIRY_REVIEW`, keeps blocking (registry gates and on-chain freeze), and an operator task and a compliance e-mail are raised. It is lifted only through the normal lift (step-up + second approver). Types listed in `registerwerk.sperrvermerk.auto-expire-types` (default empty) are still auto-lifted to `EXPIRED`.
@@ -95,15 +95,46 @@ The `HolderBlock` is enforced at multiple layers:
 | `forceTransfer` | `TokenAdminController` — checked before any transfer call |
 | `forceApprove` | `TokenAdminController` — checked before approval |
 | `AssetHolder` creation (new investor) | `AssetService` — existing blocks can prevent new positions |
-| On-chain transfer (ERC-3643) | `ComplianceModuleContract` — identity registry rejects frozen addresses |
+| On-chain transfer | The token contract refuses movements from, to or by a frozen address (`freezeAddress` / `setAddressFrozen`), see [On-chain reach](#on-chain-reach) |
 
-The registry-layer block (DB) and the on-chain freeze (smart contract) are **both** required for ERC-3643 tokens. For other standards (ERC-20, ERC-3525), only the registry-layer block applies; the on-chain transfer is prevented by the operator refusing to sign the transaction.
+---
+
+## On-chain reach { #on-chain-reach }
+
+The registry-layer block (database) is authoritative and applies to every token standard. The on-chain freeze mirrors it where a contract can express it, so that paths the backend does not mediate (direct transfers, repo `repay`/`liquidate`, vault deposits and redemptions) are closed for the wallet too. It is a technical measure, not a legal effect (see the review warning at the top).
+
+| Standard / chain | Automated on-chain freeze | How |
+|---|---|---|
+| ERC-20, ERC-721, ERC-1155 | Yes | `freezeAddress(address,string)` (`EwpgCompliance`) through the token admin port |
+| ERC-3525 | Yes | `freezeAddress` through the ERC-3525 admin port; a manual unfreeze is refused while a block covers the wallet |
+| ERC-4626 / ERC-7540 vault shares | Yes | `freezeAddress` (`EwpgCompliance`); a frozen owner or payer is not paid out and the escrow stays in the vault (freeze-in-place) |
+| ERC-3643 (T-REX) | Yes | `setAddressFrozen(address,true)` on the token (`Erc3643LifecycleService`) |
+| Confidential ERC-3643 (Zama fhEVM) | Yes | `setAddressFrozen(address,bool)` |
+| Confidential ERC-20 | No | the contract has no freeze function |
+| Solana (SPL, Token-2022 and the extension presets) | No | `FreezeAccount` works per token account and is a manual operator action |
+| Starknet (ERC-20, ERC-3525) | No | the Cairo contracts have `freeze_address`, but it is only a manual operator call: Starknet invokes are not in the durable outbox and their receipts are not tracked, so no outcome could be confirmed |
+| Stellar | No | a freeze is a trustline authorization change, a manual operator action |
+| Canton / Daml | No | no holder-level freeze that the register can drive |
+
+Every freeze goes through the durable transaction outbox (signed in the database transaction, broadcast after commit) and its outcome is read from the transaction status. `holder_block_freeze` keeps one row per block, deployment and wallet:
+
+| Status | Meaning |
+|---|---|
+| `SUBMITTED` | the freeze transaction is in the outbox, its outcome is not final yet |
+| `CONFIRMED` | the transaction is final and successful; `onChainFreezeTxHash` is stored; audit event `HOLDER_BLOCK_FREEZE_CONFIRMED` |
+| `FAILED` | the freeze could not be submitted, reverted or was replaced: the wallet may still move on-chain |
+| `UNSUPPORTED_ON_CHAIN` | the standard or chain has no automated freeze (table above): manual action needed |
+| `RELEASE_SUBMITTED` / `RELEASED` / `RELEASE_FAILED` | the same for the unfreeze after a lifted block; `RELEASED` also covers "another block still covers the wallet, the freeze stays" |
+
+A `FAILED` or `UNSUPPORTED_ON_CHAIN` outcome is never silent: it raises the audit event `HOLDER_BLOCK_NOT_PROPAGATED` (`cause`: `SUBMISSION_FAILED`, `TX_FAILED`, `UNSUPPORTED_ON_CHAIN`, `NO_DEPLOYMENT_MATCHED` or `DRIFT`), an operator task `SPERRVERMERK_FREEZE_NOT_PROPAGATED` on the asset's issuer entity, the gauges `registerwerk_sperrvermerk_freeze_failed` / `registerwerk_sperrvermerk_freeze_unsupported` and the alerts `SperrvermerkFreezeFailed` / `SperrvermerkFreezeUnsupported`. **It never unblocks the register-level block.**
+
+Two jobs keep the chain aligned with the register (both ShedLock-guarded). A sweep every 5 minutes reads the outcome of submitted freezes and retries failed ones with a back-off (5 attempts; `registerwerk.sperrvermerk.freeze-sweep-ms`). A nightly reconcile (`registerwerk.sperrvermerk.freeze-reconcile-cron`, default 02:30) walks every block that still blocks, both `ACTIVE` and `EXPIRY_REVIEW`: it re-sends missing and failed freezes, reads `isFrozen` back for confirmed ones, and reports a wallet found **not** frozen as drift (`registerwerk_sperrvermerk_freeze_drift_total`, alert `SperrvermerkFreezeDrift`, then re-freezes it). A failed unfreeze leaves the wallet frozen (the safe direction) and is reported through `HOLDER_BLOCK_RELEASE_FAILED`.
 
 ---
 
 ## Audit trail
 
-Every block creation, modification, and lifting generates an `AuditEvent` of type `HOLDER_BLOCK_CREATED`, `HOLDER_BLOCK_LIFTED`, or `HOLDER_BLOCK_EXPIRED`. These events include:
+Every block creation, modification, and lifting generates an `AuditEvent` of type `HOLDER_BLOCK_CREATED`, `HOLDER_BLOCK_LIFTED`, or `HOLDER_BLOCK_EXPIRED`; the on-chain follow-up adds `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` and `HOLDER_BLOCK_RELEASE_FAILED`. These events include:
 
 - The initiating operator's identity
 - The second approver's identity (for create/lift)

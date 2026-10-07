@@ -27,6 +27,18 @@ public final class Erc3643AgentRequests {
             @NotNull Map<String, Object> parameters
     ) {}
 
+    /**
+     * Replaces the legacy open-setter {@code EwpgComplianceModule} bound to a suite. {@code parameters} may be
+     * omitted to carry over the configuration stored for the legacy module (the module itself exposes no
+     * getters for its limits).
+     */
+    public record ReplaceComplianceModule(
+            @NotBlank @Pattern(regexp = EVM_ADDRESS) String legacyModuleAddress,
+            @NotBlank @Pattern(regexp = EVM_ADDRESS) String newModuleAddress,
+            @Size(max = 100) String moduleType,
+            Map<String, Object> parameters
+    ) {}
+
     public record ForcedTransfer(
             @NotBlank @Pattern(regexp = EVM_ADDRESS) String from,
             @NotBlank @Pattern(regexp = EVM_ADDRESS) String to,

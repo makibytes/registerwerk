@@ -32,7 +32,8 @@ public class EntityTaskService implements EntityTaskPort {
 
     /** Kinds that are not termination follow-ups. */
     static final List<String> REVIEW_KINDS = List.of(
-            EntityTask.KYC_REVIEW_REQUIRED, EntityTask.CHAIN_REINSTATEMENT_REQUIRED, EntityTask.SPERRVERMERK_EXPIRY_REVIEW);
+            EntityTask.KYC_REVIEW_REQUIRED, EntityTask.CHAIN_REINSTATEMENT_REQUIRED, EntityTask.SPERRVERMERK_EXPIRY_REVIEW,
+            EntityTask.SPERRVERMERK_FREEZE_NOT_PROPAGATED);
 
     private final EntityTaskRepository repository;
     private final ApplicationEventPublisher events;

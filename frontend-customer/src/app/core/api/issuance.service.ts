@@ -194,8 +194,11 @@ export class IssuanceService {
    * mint), unlike an investor's own confidential transfer, which {@link FheClientService}
    * encrypts entirely client-side.
    */
-  mintConfidential(assetId: string, depId: string, body: { toAddress: string; amount: string; reason?: string }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/${assetId}/deployments/${depId}/issuer/mint-confidential`, body);
+  mintConfidential(assetId: string, depId: string, body: { toAddress: string; amount: string; reason?: string },
+                   approval: { approvalToken: string; stepUpToken?: string }): Observable<{ txId: string; destinationHolder?: string | null }> {
+    return this.http.post<{ txId: string; destinationHolder?: string | null }>(
+      `${this.base}/${assetId}/deployments/${depId}/issuer/mint-confidential`, body,
+      { headers: this.approvalHeaders(approval) });
   }
 
   /**

@@ -122,6 +122,29 @@ public class Erc3643Controller {
     }
 
     /**
+     * Replaces the legacy open-setter compliance module of a token (H4): the new module is bound, configured,
+     * read back and back-filled with the register holders before the legacy one is unbound, so the token is
+     * never without an enforcing module. Step-up and a second approver; the request body is bound to the
+     * approval.
+     */
+    @PostMapping("/{deploymentId}/compliance-modules/replace")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ERC3643_COMPLIANCE_MODULE_REPLACE")
+    public ResponseEntity<Void> replaceComplianceModule(
+            @PathVariable UUID assetId,
+            @PathVariable UUID deploymentId,
+            @RequestBody @Valid Erc3643AgentRequests.ReplaceComplianceModule body,
+            Authentication auth) {
+        log.info("POST compliance-module replace legacy={} new={} for deploymentId={}",
+                body.legacyModuleAddress(), body.newModuleAddress(), deploymentId);
+        UUID suiteId = resolveSuiteId(assetId, deploymentId);
+        lifecycleService.replaceLegacyComplianceModule(suiteId, body.legacyModuleAddress(), body.newModuleAddress(),
+                body.moduleType(), body.parameters(), actorId(auth),
+                SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * Removes a compliance module from the suite's ModularCompliance contract.
      */
     @DeleteMapping("/{deploymentId}/compliance-modules/{moduleId}")

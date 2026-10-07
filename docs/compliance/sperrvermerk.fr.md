@@ -50,7 +50,7 @@ L'entité `HolderBlock` dans le module `kyc` stocke tous les blocs actifs et his
 | `liftedBy` | UUID de l'opérateur qui a levé le bloc |
 | `twoManRuleApprover` | UUID du deuxième approbateur |
 | `twoManRuleApprovedAt` | Lorsque le deuxième approbateur a confirmé |
-| `onChainFreezeTxHash` | Hachage de la transaction de gel en chaîne correspondante |
+| `onChainFreezeTxHash` | Hachage de la première transaction de gel en chaîne confirmée de ce bloc. Un bloc peut toucher plusieurs déploiements ; le résultat par déploiement et par wallet figure dans `holder_block_freeze` (voir [Portée en chaîne](#on-chain-reach)) |
 
 ---
 
@@ -71,12 +71,12 @@ stateDiagram-v2
 1. `REGISTRY_ADMIN` soumet `POST /api/v1/holder-blocks` avec le type de bloc, la base juridique et l'expiration facultative
 2. L'aspect `@RequiresStepUp` impose un nouveau jeton d'authentification renforcée (step-up) (TOTP ou WebAuthn)
 3. `SperrvermerkService` vérifie qu'un deuxième approbateur a confirmé (jeton `dualControlPending`)
-4. Si l'actif utilise des jetons [ERC-3643](../token-standards/erc3643.md) liés à l'identité, `freezeAddress()` est appelé sur le contrat du module de conformité
-5. Le `onChainFreezeTxHash` est stocké une fois la transaction confirmée
+4. Une fois le bloc validé, `SperrvermerkOnchainSyncListener` gèle le wallet, via l'outbox durable des transactions, sur chaque déploiement de jeton actif des actifs détenus (ou du seul `assetId` pour un bloc limité à un actif). Les normes gelables sont listées [ci-dessous](#on-chain-reach) ; un déploiement qui ne peut pas être gelé est consigné et escaladé, pas ignoré
+5. Le résultat par bloc, déploiement et wallet est consigné dans `holder_block_freeze` et suit le statut de la transaction : `SUBMITTED` devient `CONFIRMED` (le `onChainFreezeTxHash` est alors stocké) ou `FAILED`
 6. Un `AuditEvent` est émis avec les détails complets du bloc
 
 **Levée d'un bloc :**
-Le même circuit d'authentification renforcée (step-up) + quatre yeux s'applique. La levée appelle le `unfreezeAddress()` en chaîne correspondant et efface le champ `HolderBlock.liftedAt`.
+Le même circuit d'authentification renforcée (step-up) + quatre yeux s'applique. La levée rapproche dans le sens inverse : pour chaque wallet et chaque déploiement, le dégel en chaîne n'est soumis que si aucun autre bloc bloquant ne couvre encore le wallet (`RELEASE_SUBMITTED`, puis `RELEASED`). Un dégel échoué laisse le wallet gelé, est signalé (`HOLDER_BLOCK_RELEASE_FAILED`, tâche opérateur) et réessayé. Dans le registre, le bloc est de toute façon `LIFTED` ; `liftedAt` et `liftedBy` sont renseignés.
 
 **Expiration automatique :**
 Un job `@Scheduled` s'exécute chaque nuit et trouve tous les blocs ACTIVE avec `expiresAt < NOW()`. Par défaut, **aucun type de blocage n'expire automatiquement** : le bloc passe à `EXPIRY_REVIEW`, continue de bloquer (contrôles du registre et gel en chaîne), et une tâche opérateur ainsi qu'un e-mail à la conformité sont déclenchés. Il n'est levé que par la levée normale (step-up + second approbateur). Les types listés dans `registerwerk.sperrvermerk.auto-expire-types` (vide par défaut) restent levés automatiquement vers `EXPIRED`.
@@ -95,15 +95,46 @@ Le `HolderBlock` est appliqué à plusieurs couches :
 | `forceTransfer` | `TokenAdminController` — vérifié avant tout appel de transfert |
 | `forceApprove` | `TokenAdminController` — vérifié avant approbation |
 | Création `AssetHolder` (nouvel investisseur) | `AssetService` — les blocs existants peuvent empêcher de nouvelles positions |
-| Transfert en chaîne (ERC-3643) | `ComplianceModuleContract` — le registre d'identité rejette les adresses gelées |
+| Transfert en chaîne | Le contrat du jeton refuse les mouvements depuis, vers ou par une adresse gelée (`freezeAddress` / `setAddressFrozen`), voir [Portée en chaîne](#on-chain-reach) |
 
-Le bloc de couche de registre (DB) et le gel en chaîne (contrat intelligent) sont **tous deux** requis pour les jetons ERC-3643. Pour les autres normes (ERC-20, ERC-3525), seul le bloc de la couche de registre s'applique ; le transfert en chaîne est empêché par le refus de l'opérateur de signer la transaction.
+---
+
+## Portée en chaîne {#on-chain-reach}
+
+Le bloc de la couche de registre (base de données) fait foi et s'applique à toutes les normes de jeton. Le gel en chaîne le reproduit là où un contrat peut l'exprimer, de sorte que les chemins que le backend ne médiatise pas (transferts directs, `repay`/`liquidate` du repo, dépôts et rachats de vault) soient aussi fermés pour le wallet. C'est une mesure technique, pas un effet juridique (voir l'avertissement de revue en haut de page).
+
+| Norme / chaîne | Gel en chaîne automatisé | Comment |
+|---|---|---|
+| ERC-20, ERC-721, ERC-1155 | Oui | `freezeAddress(address,string)` (`EwpgCompliance`) via le port d'administration des jetons |
+| ERC-3525 | Oui | `freezeAddress` via le port d'administration ERC-3525 ; un dégel manuel est refusé tant qu'un bloc couvre le wallet |
+| Parts de vault ERC-4626 / ERC-7540 | Oui | `freezeAddress` (`EwpgCompliance`) ; un propriétaire ou payeur gelé n'est pas payé et le séquestre reste dans le vault (gel sur place) |
+| ERC-3643 (T-REX) | Oui | `setAddressFrozen(address,true)` sur le jeton (`Erc3643LifecycleService`) |
+| ERC-3643 confidentiel (Zama fhEVM) | Oui | `setAddressFrozen(address,bool)` |
+| ERC-20 confidentiel | Non | le contrat n'a pas de fonction de gel |
+| Solana (SPL, Token-2022 et préréglages d'extensions) | Non | `FreezeAccount` agit par compte de jeton et reste une action manuelle de l'opérateur |
+| Starknet (ERC-20, ERC-3525) | Non | les contrats Cairo ont `freeze_address`, mais ce n'est qu'un appel manuel de l'opérateur : les invokes Starknet ne passent pas par l'outbox durable et leurs reçus ne sont pas suivis, aucun résultat ne pourrait donc être confirmé |
+| Stellar | Non | un gel est une modification de l'autorisation de trustline, une action manuelle de l'opérateur |
+| Canton / Daml | Non | pas de gel au niveau du titulaire que le registre puisse piloter |
+
+Chaque gel passe par l'outbox durable des transactions (signé dans la transaction de base de données, diffusé après validation) et son résultat est lu dans le statut de la transaction. `holder_block_freeze` conserve une ligne par bloc, déploiement et wallet :
+
+| Statut | Signification |
+|---|---|
+| `SUBMITTED` | la transaction de gel est dans l'outbox, son résultat n'est pas encore définitif |
+| `CONFIRMED` | la transaction est définitive et réussie ; `onChainFreezeTxHash` est stocké ; événement d'audit `HOLDER_BLOCK_FREEZE_CONFIRMED` |
+| `FAILED` | le gel n'a pas pu être soumis, a été annulé (revert) ou remplacé : le wallet peut encore bouger en chaîne |
+| `UNSUPPORTED_ON_CHAIN` | la norme ou la chaîne n'a pas de gel automatisé (tableau ci-dessus) : intervention manuelle nécessaire |
+| `RELEASE_SUBMITTED` / `RELEASED` / `RELEASE_FAILED` | la même chose pour le dégel après la levée d'un bloc ; `RELEASED` couvre aussi « un autre bloc couvre encore le wallet, le gel reste » |
+
+Un résultat `FAILED` ou `UNSUPPORTED_ON_CHAIN` n'est jamais silencieux : il déclenche l'événement d'audit `HOLDER_BLOCK_NOT_PROPAGATED` (`cause` : `SUBMISSION_FAILED`, `TX_FAILED`, `UNSUPPORTED_ON_CHAIN`, `NO_DEPLOYMENT_MATCHED` ou `DRIFT`), une tâche opérateur `SPERRVERMERK_FREEZE_NOT_PROPAGATED` sur l'entité émettrice de l'actif, les jauges `registerwerk_sperrvermerk_freeze_failed` / `registerwerk_sperrvermerk_freeze_unsupported` et les alertes `SperrvermerkFreezeFailed` / `SperrvermerkFreezeUnsupported`. **Il ne lève jamais le bloc de la couche de registre.**
+
+Deux jobs maintiennent la chaîne alignée sur le registre (tous deux protégés par ShedLock). Un balayage toutes les 5 minutes lit le résultat des gels soumis et réessaie les gels échoués avec un back-off (5 tentatives ; `registerwerk.sperrvermerk.freeze-sweep-ms`). Un rapprochement nocturne (`registerwerk.sperrvermerk.freeze-reconcile-cron`, 02:30 par défaut) parcourt chaque bloc qui bloque encore, `ACTIVE` comme `EXPIRY_REVIEW` : il renvoie les gels manquants et échoués, relit `isFrozen` pour les gels confirmés, et signale comme dérive (`registerwerk_sperrvermerk_freeze_drift_total`, alerte `SperrvermerkFreezeDrift`, puis nouveau gel) un wallet qui n'est **pas** gelé. Un dégel échoué laisse le wallet gelé (le sens sûr) et est signalé par `HOLDER_BLOCK_RELEASE_FAILED`.
 
 ---
 
 ## Piste d'audit {#audit-trail}
 
-Chaque création, modification et levée de bloc génère un `AuditEvent` de type `HOLDER_BLOCK_CREATED`, `HOLDER_BLOCK_LIFTED` ou `HOLDER_BLOCK_EXPIRED`. Ces événements incluent :
+Chaque création, modification et levée de bloc génère un `AuditEvent` de type `HOLDER_BLOCK_CREATED`, `HOLDER_BLOCK_LIFTED` ou `HOLDER_BLOCK_EXPIRED` ; le suivi en chaîne ajoute `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` et `HOLDER_BLOCK_RELEASE_FAILED`. Ces événements incluent :
 
 - l'identité de l'opérateur initiateur
 - l'identité du second approbateur (pour la création/la levée)

@@ -1,94 +1,49 @@
 package de.makibytes.registerwerk.erc3643.internal;
 
-import de.makibytes.registerwerk.blockchain.api.TokenAdminPort;
-import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.deployment.api.AssetDeployment;
-import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
-import de.makibytes.registerwerk.deployment.api.AssetHolder;
-import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
-import de.makibytes.registerwerk.erc3643.api.Erc3643Suite;
-import de.makibytes.registerwerk.erc3643.api.Erc3643SuiteRepository;
-import de.makibytes.registerwerk.erc3643.events.HolderBlockNotPropagatedEvent;
-import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
+import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.kyc.events.HolderBlockCreatedEvent;
 import de.makibytes.registerwerk.kyc.events.HolderBlockFreezeResyncRequestedEvent;
 import de.makibytes.registerwerk.kyc.events.HolderBlockLiftedEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.shared.AddressNormalizer;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
-import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * Keeps each token deployment's on-chain frozen flag in sync with the registry-layer §16 eWpG
- * Sperrvermerk. Previously {@code SperrvermerkService.create}/{@code lift}
- * only ever wrote {@code holder_block} rows and published audit events — nothing called the
- * token's own {@code freezeAddress}/{@code setAddressFrozen}, and {@code EwpgRepoMarket}'s
- * {@code repay}/{@code liquidate} are deliberately ungated by ecosystem permissions, relying
- * entirely on that on-chain frozen flag as the real compliance chokepoint (the backend never
- * mediates those calls directly). Without this sync, a legally blocked holder could still
- * repay/liquidate/withdraw pledged securities on-chain even though the register shows them
- * blocked.
+ * Event entry points of the §16 eWpG Sperrvermerk -> on-chain freeze sync. The work (which admin path freezes which
+ * standard, the per-deployment outcome table, alerts, retries) lives in {@link SperrvermerkFreezeService}; this class
+ * only translates events. Previously {@code SperrvermerkService.create}/{@code lift} only ever wrote
+ * {@code holder_block} rows and published audit events: nothing called the token's own {@code freezeAddress} /
+ * {@code setAddressFrozen}, and {@code EwpgRepoMarket}'s {@code repay}/{@code liquidate} are deliberately ungated by
+ * ecosystem permissions, relying entirely on that on-chain frozen flag as the real compliance chokepoint (the backend
+ * never mediates those calls directly). Without the sync a legally blocked holder could still repay/liquidate/withdraw
+ * pledged securities on-chain although the register shows them blocked.
  *
- * <p>Lives in {@code erc3643.internal} rather than {@code blockchain.internal} or
- * {@code kyc.internal} because it needs to call both {@link Erc3643LifecycleService} (same
- * module) and {@link TokenAdminPort} — {@code erc3643} already safely depends one-way on both
- * {@code blockchain.api} and {@code kyc.api}; placing this listener in either of those modules
- * would require a dependency back onto {@code erc3643}, creating a cycle.
+ * <p>Lives in {@code erc3643.internal} rather than {@code blockchain.internal} or {@code kyc.internal} because it needs
+ * both {@link Erc3643LifecycleService} (same module) and the {@code blockchain.api} admin ports; {@code erc3643} already
+ * depends one-way on {@code blockchain.api} and {@code kyc.api}, placing it in either of those would create a cycle.
  *
- * <p>On-chain freeze failures never roll back the Sperrvermerk itself (the DB record is the
- * legally authoritative one) — they are logged at ERROR so an operator can intervene manually,
- * since a failed freeze here is a real compliance gap, not a benign no-op.
+ * <p>On-chain trouble never rolls back or unblocks the Sperrvermerk (the register record is the legally authoritative
+ * one). Since H5 it is no longer swallowed either: every submission failure, failed transaction and standard/chain
+ * without a freeze is a recorded outcome with an audit event, an operator task and an alert, and the freeze is retried
+ * and reconciled nightly.
  *
- * <p>T3-15: the wallet is matched in canonical form ({@link AddressNormalizer}) — a checksum-cased
- * block used to match no {@code asset_holder} row, so nothing was frozen and nothing was logged.
- * An ACTIVE block that still resolves to no deployment while its asset has EVM deployments is
- * logged at ERROR and published as {@link HolderBlockNotPropagatedEvent}.
- *
- * <p>T3-16: the lift path uses the dedicated block-lift unfreeze variants; the manual unfreeze
- * endpoints refuse while any ACTIVE block covers the wallet.
+ * <p>T3-15: wallets are matched in canonical form ({@link AddressNormalizer}) - a checksum-cased block used to match no
+ * {@code asset_holder} row, so nothing was frozen and nothing was logged. T3-16: the lift path uses the dedicated
+ * block-lift unfreeze variants; the manual unfreeze endpoints refuse while any ACTIVE block covers the wallet.
  */
 @Component
 class SperrvermerkOnchainSyncListener {
 
-    private static final Logger log = LoggerFactory.getLogger(SperrvermerkOnchainSyncListener.class);
-    private static final UUID SYSTEM_ACTOR = new UUID(0L, 0L);
-    private static final Set<Chain> NON_EVM_CHAINS =
-            EnumSet.of(Chain.SOLANA, Chain.STARKNET, Chain.STELLAR, Chain.CANTON);
+    private final SperrvermerkFreezeService freezeService;
 
-    private final AssetHolderRepository holderRepository;
-    private final AssetDeploymentRepository deploymentRepository;
-    private final Erc3643SuiteRepository suiteRepository;
-    private final Erc3643LifecycleService erc3643LifecycleService;
-    private final TokenAdminPort tokenAdminPort;
-    private final HolderBlockGate holderBlockGate;
-    private final ApplicationEventPublisher eventPublisher;
-
-    SperrvermerkOnchainSyncListener(AssetHolderRepository holderRepository,
-                                     AssetDeploymentRepository deploymentRepository,
-                                     Erc3643SuiteRepository suiteRepository,
-                                     Erc3643LifecycleService erc3643LifecycleService,
-                                     TokenAdminPort tokenAdminPort,
-                                     HolderBlockGate holderBlockGate,
-                                     ApplicationEventPublisher eventPublisher) {
-        this.holderRepository = holderRepository;
-        this.deploymentRepository = deploymentRepository;
-        this.suiteRepository = suiteRepository;
-        this.erc3643LifecycleService = erc3643LifecycleService;
-        this.tokenAdminPort = tokenAdminPort;
-        this.holderBlockGate = holderBlockGate;
-        this.eventPublisher = eventPublisher;
+    SperrvermerkOnchainSyncListener(SperrvermerkFreezeService freezeService) {
+        this.freezeService = freezeService;
     }
 
     @ApplicationModuleListener
@@ -102,18 +57,26 @@ class SperrvermerkOnchainSyncListener {
         propagateFreeze(event.holderBlockId(), event.payload());
     }
 
-    private void propagateFreeze(UUID holderBlockId, Map<String, Object> payload) {
-        UUID assetId = uuidDetail(payload, "assetId");
-        String reason = "eWpG §16 Sperrvermerk: " + stringDetail(payload, "legalBasis");
-        for (String walletAddress : walletsOf(payload)) {
-            List<AssetDeployment> deployments = deploymentsFor(walletAddress, assetId);
-            if (deployments.isEmpty()) {
-                alertIfNotPropagated(holderBlockId, walletAddress, assetId);
-            }
-            for (AssetDeployment deployment : deployments) {
-                freeze(deployment, walletAddress, reason);
-            }
+    @ApplicationModuleListener
+    void onHolderBlockLifted(HolderBlockLiftedEvent event) {
+        freezeService.release(event.holderBlockId(), walletsOf(event.payload()));
+    }
+
+    /**
+     * H5: the outcome of a submitted freeze/unfreeze is read from its transaction status; a SUCCESS confirms it and a
+     * FAILED/REPLACED one is reported (TIMEOUT is not a verdict, the transaction may still be mined).
+     */
+    @ApplicationModuleListener
+    void onTransactionStatus(BlockchainTxStatusEvent event) {
+        Object hash = event.details() == null ? null : event.details().get("txHash");
+        if (hash != null) {
+            freezeService.onTransactionStatus(String.valueOf(hash));
         }
+    }
+
+    private void propagateFreeze(UUID holderBlockId, Map<String, Object> payload) {
+        freezeService.propagate(holderBlockId, uuidDetail(payload, "assetId"), walletsOf(payload),
+                SperrvermerkFreezeService.REASON_PREFIX + stringDetail(payload, "legalBasis"));
     }
 
     /** The block's wallet plus, for an entity-scoped block, the entity's other holder wallets (6-25). */
@@ -132,91 +95,6 @@ class SperrvermerkOnchainSyncListener {
             }
         }
         return wallets;
-    }
-
-    /**
-     * An asset-scoped block that matches no register row cannot be frozen on-chain. When the asset
-     * has EVM deployments, that is a compliance gap (the wallet may hold units the register does
-     * not attribute to it), not a no-op. A wallet-wide block with no holdings is a no-op.
-     */
-    private void alertIfNotPropagated(UUID holderBlockId, String walletAddress, UUID assetId) {
-        if (assetId == null) {
-            return;
-        }
-        List<UUID> evmDeployments = deploymentRepository.findByAssetId(assetId).stream()
-                .filter(d -> d.getChain() == null || !NON_EVM_CHAINS.contains(d.getChain()))
-                .map(AssetDeployment::getId)
-                .toList();
-        if (evmDeployments.isEmpty()) {
-            return;
-        }
-        log.error("SPERRVERMERK NOT PROPAGATED: ACTIVE block={} wallet={} asset={} matches no register "
-                        + "entry, so none of the asset's {} EVM deployment(s) was frozen on-chain — "
-                        + "operator must verify the wallet and apply the freeze manually.",
-                holderBlockId, walletAddress, assetId, evmDeployments.size());
-        Map<String, Object> details = new HashMap<>();
-        details.put("walletAddress", walletAddress);
-        details.put("assetId", assetId.toString());
-        details.put("evmDeploymentIds", evmDeployments.stream().map(UUID::toString).toList());
-        eventPublisher.publishEvent(new HolderBlockNotPropagatedEvent(holderBlockId, details));
-    }
-
-    @ApplicationModuleListener
-    void onHolderBlockLifted(HolderBlockLiftedEvent event) {
-        // Reconcile instead of "unfreeze the lifted block's asset": recompute, per wallet and per
-        // deployment of every asset the wallet holds, whether any remaining blocking block still
-        // covers it, and release exactly the rest. A freeze applied for asset A while another block
-        // covered asset B used to be stranded when the last block was lifted (6-25).
-        for (String walletAddress : walletsOf(event.payload())) {
-            for (AssetDeployment deployment : deploymentsFor(walletAddress, null)) {
-                if (holderBlockGate.isBlockedForAsset(walletAddress, deployment.getAssetId())) {
-                    log.info("Sperrvermerk lifted for wallet={} but a block still covers asset={} — not unfreezing deployment={}.",
-                            walletAddress, deployment.getAssetId(), deployment.getId());
-                    continue;
-                }
-                unfreeze(deployment, walletAddress);
-            }
-        }
-    }
-
-    private List<AssetDeployment> deploymentsFor(String walletAddress, UUID assetId) {
-        List<AssetHolder> holders = holderRepository.findByWalletAddressIn(List.of(walletAddress));
-        return holders.stream()
-                .map(AssetHolder::getAssetId)
-                .filter(id -> assetId == null || assetId.equals(id))
-                .distinct()
-                .flatMap(id -> deploymentRepository.findByAssetId(id).stream())
-                .toList();
-    }
-
-    private void freeze(AssetDeployment deployment, String walletAddress, String reason) {
-        try {
-            Optional<Erc3643Suite> suite = suiteRepository.findByAssetDeploymentId(deployment.getId());
-            if (suite.isPresent()) {
-                erc3643LifecycleService.freezeAddress(suite.get().getId(), walletAddress, SYSTEM_ACTOR, "SYSTEM");
-            } else {
-                tokenAdminPort.freezeAddress(deployment.getId(), walletAddress, reason, reason, SYSTEM_ACTOR, "SYSTEM");
-            }
-        } catch (Exception e) {
-            log.error("Failed to freeze wallet={} on deployment={} following a new Sperrvermerk — "
-                    + "operator must verify/apply the on-chain freeze manually: {}",
-                    walletAddress, deployment.getId(), e.getMessage());
-        }
-    }
-
-    private void unfreeze(AssetDeployment deployment, String walletAddress) {
-        try {
-            Optional<Erc3643Suite> suite = suiteRepository.findByAssetDeploymentId(deployment.getId());
-            if (suite.isPresent()) {
-                erc3643LifecycleService.unfreezeAddressForBlockLift(suite.get().getId(), walletAddress);
-            } else {
-                tokenAdminPort.unfreezeAfterBlockLift(deployment.getId(), walletAddress);
-            }
-        } catch (Exception e) {
-            log.error("Failed to unfreeze wallet={} on deployment={} following a lifted Sperrvermerk — "
-                    + "operator must verify/apply the on-chain unfreeze manually: {}",
-                    walletAddress, deployment.getId(), e.getMessage());
-        }
     }
 
     private static String stringDetail(Map<String, Object> payload, String key) {

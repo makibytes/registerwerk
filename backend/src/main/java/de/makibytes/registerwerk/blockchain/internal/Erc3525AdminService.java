@@ -63,6 +63,7 @@ import java.util.UUID;
 public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain.api.Erc3525AdminPort {
 
     private static final Logger log = LoggerFactory.getLogger(Erc3525AdminService.class);
+    private static final UUID SYSTEM_ACTOR = new UUID(0L, 0L);
 
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetSlotRepository slotRepository;
@@ -346,9 +347,28 @@ public class Erc3525AdminService implements de.makibytes.registerwerk.blockchain
                 "freezeAddress", params, actorId, actorRole);
     }
 
+    /**
+     * Manual unfreeze. Refused while an ACTIVE §16 eWpG Sperrvermerk covers the wallet (T3-16, extended to
+     * ERC-3525 by H5 now that the Sperrvermerk sync freezes ERC-3525 holders): a court-ordered freeze is lifted by
+     * lifting the block, which the sync propagates through {@link #unfreezeAfterBlockLift}.
+     */
     public UUID unfreezeAddress(UUID deploymentId, String address, UUID actorId, String actorRole) {
         AssetDeployment dep = requireDeployment(deploymentId);
         requireHolderAddress(dep, address);
+        requireNotBlocked(address);
+        return doUnfreezeAddress(dep, address, actorId, actorRole);
+    }
+
+    /** Always runs as the SYSTEM actor and skips the block check by design: the sync listener checks coverage. */
+    @Override
+    public UUID unfreezeAfterBlockLift(UUID deploymentId, String address) {
+        AssetDeployment dep = requireDeployment(deploymentId);
+        requireHolderAddress(dep, address);
+        return doUnfreezeAddress(dep, address, SYSTEM_ACTOR, "SYSTEM");
+    }
+
+    private UUID doUnfreezeAddress(AssetDeployment dep, String address, UUID actorId, String actorRole) {
+        UUID deploymentId = dep.getId();
         log.info("ERC-3525 unfreezeAddress={} on deployment={}", address, deploymentId);
         Map<String, Object> params = Map.of("address", address);
         if (isStarknet(dep)) {

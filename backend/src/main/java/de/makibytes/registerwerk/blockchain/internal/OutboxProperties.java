@@ -57,6 +57,12 @@ public class OutboxProperties {
      */
     private Duration leaseRepairGrace = Duration.ofMinutes(10);
 
+    /**
+     * How long a direct (non-outbox) send stays in the {@code evm_direct_submission} ledger that protects its
+     * nonce from lease repair (H10). A transaction nobody has mined or dropped after this long is long gone.
+     */
+    private Duration directLedgerRetention = Duration.ofDays(7);
+
     /** Prefixes of function names that are regulatory operations (never auto re-priced). */
     public static final List<String> REGULATORY_PREFIXES = List.of(
             "forced", "forceBurn", "burn", "batchBurn", "batchForced", "freeze", "unfreeze",
@@ -100,6 +106,8 @@ public class OutboxProperties {
     public void setStuckAfter(Duration stuckAfter) { this.stuckAfter = stuckAfter; }
     public int getReplacementBumpPercent() { return replacementBumpPercent; }
     public void setReplacementBumpPercent(int replacementBumpPercent) { this.replacementBumpPercent = replacementBumpPercent; }
+    public Duration getDirectLedgerRetention() { return directLedgerRetention; }
+    public void setDirectLedgerRetention(Duration directLedgerRetention) { this.directLedgerRetention = directLedgerRetention; }
     public Duration getLeaseRepairGrace() { return leaseRepairGrace; }
     public void setLeaseRepairGrace(Duration leaseRepairGrace) { this.leaseRepairGrace = leaseRepairGrace; }
 }

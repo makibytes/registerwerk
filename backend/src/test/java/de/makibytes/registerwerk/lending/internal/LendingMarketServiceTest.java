@@ -21,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigInteger;
+import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -281,6 +282,76 @@ class LendingMarketServiceTest {
     }
 
     @Test
+    @DisplayName("H11: a market row nobody has verified is not treated as verified (fail-closed default)")
+    void freshRowIsUnverifiedByDefault() {
+        assertThat(new LendingMarket().isBindingVerified()).isFalse();
+    }
+
+    private void stubReverifyRpcDown(LendingMarket market) {
+        market.setCollateralAssetId(UUID.randomUUID());
+        when(marketRepository.findAll()).thenReturn(List.of(market));
+        when(assetRepository.findById(market.getCollateralAssetId())).thenReturn(Optional.of(issuedAsset()));
+        when(onchainReader.isFactoryMarket(any(), any(), any())).thenThrow(new IllegalStateException("rpc down"));
+    }
+
+    @Test
+    @DisplayName("H11: an RPC error during re-verification leaves a verified row unchanged but reports it as NOT verified")
+    void rpcErrorDuringReverifyIsFlaggedNotReportedAsVerified() {
+        LendingMarket market = registeredMarket(7500);
+        market.setBindingVerified(true);
+        Instant verifiedAt = Instant.now().minusSeconds(3600);
+        market.setBindingVerifiedAt(verifiedAt);
+        stubReverifyRpcDown(market);
+
+        List<LendingMarketService.ReverifyResult> results = service.reverifyMarkets();
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).verified()).isFalse();
+        assertThat(results.get(0).failure()).contains("not checked");
+        assertThat(market.isBindingVerified()).isTrue();
+        assertThat(market.getBindingVerifiedAt()).isEqualTo(verifiedAt);
+    }
+
+    @Test
+    @DisplayName("H11: an RPC error never promotes a legacy row that has no recorded successful verification")
+    void rpcErrorKeepsLegacyRowUnverified() {
+        LendingMarket market = registeredMarket(7500);
+        market.setBindingVerified(true); // what V31 gave every pre-existing row
+        market.setBindingVerifiedAt(null);
+        stubReverifyRpcDown(market);
+
+        List<LendingMarketService.ReverifyResult> results = service.reverifyMarkets();
+
+        assertThat(results.get(0).verified()).isFalse();
+        assertThat(market.isBindingVerified()).isFalse();
+    }
+
+    @Test
+    @DisplayName("H11: unverified markets, and legacy ones whose reads succeed, need the on-chain borrow pause; read failures do not")
+    void onchainBorrowPauseIsRequiredForUnverifiedAndLegacyMarkets() {
+        LendingMarket unverified = registeredMarket(7500);
+        unverified.setBindingVerified(false);
+        assertThat(service.requiresOnchainBorrowPause(unverified)).isTrue();
+
+        LendingMarket sound = registeredMarket(7500);
+        sound.setBindingVerified(true);
+        when(onchainReader.oracleQuoteToken("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(LOAN_TOKEN);
+        when(onchainReader.oracleMaxDeviationBps("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(BigInteger.valueOf(2000));
+        when(onchainReader.operatorOrg("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(OPERATOR_ORG);
+        when(onchainReader.treasury("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(TREASURY);
+        assertThat(service.requiresOnchainBorrowPause(sound)).isFalse();
+
+        LendingMarket legacy = registeredMarket(8000); // lltv x (1 + bonus) exceeds the oracle haircut
+        legacy.setBindingVerified(true);
+        assertThat(service.requiresOnchainBorrowPause(legacy)).isTrue();
+
+        LendingMarket unreadable = registeredMarket(7500);
+        unreadable.setBindingVerified(true);
+        when(onchainReader.oracleQuoteToken("ETHEREUM_SEPOLIA", "0xoracle")).thenThrow(new IllegalStateException("rpc down"));
+        assertThat(service.requiresOnchainBorrowPause(unreadable)).isFalse();
+    }
+
+    @Test
     @DisplayName("registers a market, resolves jurisdiction from the linked asset, and emits an audit event")
     void registersMarketAndResolvesJurisdiction() {
         when(marketRepository.existsByChainConfigIdAndMarketAddressIgnoreCase(chainConfigId, marketAddress))
@@ -359,6 +430,7 @@ class LendingMarketServiceTest {
     @DisplayName("listMarkets filters by status when provided")
     void listMarketsFiltersByStatus() {
         LendingMarket market = new LendingMarket();
+        market.setBindingVerified(true); // H11: a row is unverified by default
         market.setId(UUID.randomUUID());
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);
@@ -380,6 +452,7 @@ class LendingMarketServiceTest {
     void quoteComputesMaxBorrowFromLivePriceAndMaxLtv() {
         UUID marketId = UUID.randomUUID();
         LendingMarket market = new LendingMarket();
+        market.setBindingVerified(true); // H11: a row is unverified by default
         market.setId(marketId);
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);
@@ -417,6 +490,7 @@ class LendingMarketServiceTest {
     void quoteIsCappedAtAvailableLiquidity() {
         UUID marketId = UUID.randomUUID();
         LendingMarket market = new LendingMarket();
+        market.setBindingVerified(true); // H11: a row is unverified by default
         market.setId(marketId);
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);
@@ -513,6 +587,7 @@ class LendingMarketServiceTest {
 
     private LendingMarket registeredMarket(int lltvBps) {
         LendingMarket market = new LendingMarket();
+        market.setBindingVerified(true); // H11: a row is unverified by default
         market.setId(UUID.randomUUID());
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);
@@ -594,6 +669,7 @@ class LendingMarketServiceTest {
     @DisplayName("an ACTIVE market reads as PAUSED when the on-chain borrowPaused flag is set")
     void activeMarketReflectsOnchainBorrowPaused() {
         LendingMarket market = new LendingMarket();
+        market.setBindingVerified(true); // H11: a row is unverified by default
         market.setId(UUID.randomUUID());
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);
@@ -615,6 +691,7 @@ class LendingMarketServiceTest {
     @DisplayName("an ACTIVE market with borrowPaused=false stays ACTIVE")
     void activeMarketStaysActiveWhenNotPaused() {
         LendingMarket market = new LendingMarket();
+        market.setBindingVerified(true); // H11: a row is unverified by default
         market.setId(UUID.randomUUID());
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);
@@ -635,6 +712,7 @@ class LendingMarketServiceTest {
     @DisplayName("a RETIRED market never triggers an on-chain read — its persisted status is authoritative")
     void retiredMarketSkipsOnchainCheck() {
         LendingMarket market = new LendingMarket();
+        market.setBindingVerified(true); // H11: a row is unverified by default
         market.setId(UUID.randomUUID());
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);
@@ -651,6 +729,7 @@ class LendingMarketServiceTest {
     @DisplayName("an ACTIVE discovery query hides a market when its on-chain pause status cannot be verified")
     void onchainReadFailureFailsClosedForActiveDiscovery() {
         LendingMarket market = new LendingMarket();
+        market.setBindingVerified(true); // H11: a row is unverified by default
         market.setId(UUID.randomUUID());
         market.setChainConfigId(chainConfigId);
         market.setMarketAddress(marketAddress);

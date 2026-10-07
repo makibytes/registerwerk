@@ -5,6 +5,8 @@ import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.dora.events.IctIncidentDeadlineBreachedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import de.makibytes.registerwerk.shared.ProductionMode;
+import org.springframework.core.env.Environment;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
@@ -18,10 +20,12 @@ class DoraDeadlineAlertListener {
 
     private final AppUserRepository users;
     private final EmailService emailService;
+    private final Environment environment;
 
-    DoraDeadlineAlertListener(AppUserRepository users, EmailService emailService) {
+    DoraDeadlineAlertListener(AppUserRepository users, EmailService emailService, Environment environment) {
         this.users = users;
         this.emailService = emailService;
+        this.environment = environment;
     }
 
     @ApplicationModuleListener
@@ -40,7 +44,23 @@ class DoraDeadlineAlertListener {
             }
         }
         if (failure != null) {
+            if (!ProductionMode.resolve(environment)) {
+                // Demo / local: SMTP is typically the placeholder host, so rethrowing would leave the
+                // publication incomplete and re-log an ERROR stack trace on every boot. The alert is
+                // already in the log above; one WARN line is enough outside production.
+                log.warn("DORA deadline alert for incident {} not emailed (non-production, SMTP delivery failed: {})",
+                        e.incidentId(), rootMessage(failure));
+                return;
+            }
             throw failure; // 7A-04: leave the publication incomplete so it is retried
         }
+    }
+
+    private static String rootMessage(Throwable t) {
+        Throwable root = t;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getMessage();
     }
 }

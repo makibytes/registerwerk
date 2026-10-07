@@ -9,7 +9,11 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.p2p.solanaj.rpc.RpcClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import de.makibytes.registerwerk.chain.events.RpcNodeChangedEvent;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.stereotype.Component;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
@@ -35,15 +39,23 @@ class RpcChainIdentityChecker implements RpcNodeChainVerifier {
     private final ChainConfigRepository chainConfigRepository;
     private final MeterRegistry meters;
     private final long timeoutSeconds;
+    private final LocalDevChainRepinPolicy repinPolicy;
+    private final ApplicationEventPublisher events;
+    private final TransactionTemplate tx;
 
     RpcChainIdentityChecker(Web3jClientFactory web3jClientFactory, SolanaClientFactory solanaClientFactory,
                             ChainConfigRepository chainConfigRepository, MeterRegistry meters,
-                            @Value("${registerwerk.rpc.health-check-timeout-seconds:5}") long timeoutSeconds) {
+                            @Value("${registerwerk.rpc.health-check-timeout-seconds:5}") long timeoutSeconds,
+                            LocalDevChainRepinPolicy repinPolicy, ApplicationEventPublisher events,
+                            PlatformTransactionManager transactionManager) {
         this.web3jClientFactory = web3jClientFactory;
         this.solanaClientFactory = solanaClientFactory;
         this.chainConfigRepository = chainConfigRepository;
         this.meters = meters;
         this.timeoutSeconds = timeoutSeconds;
+        this.repinPolicy = repinPolicy;
+        this.events = events;
+        this.tx = new TransactionTemplate(transactionManager);
     }
 
     @Override
@@ -112,6 +124,9 @@ class RpcChainIdentityChecker implements RpcNodeChainVerifier {
             if (pinned == null) return Verdict.unverifiable("genesis hash could not be pinned");
         }
         if (!pinned.equalsIgnoreCase(reported)) {
+            if (repinPolicy.allowsRepin(chain) && repin(chain, pinned, reported)) {
+                return new Verdict(Outcome.MATCH, "genesis hash re-pinned (local dev chain recreated)");
+            }
             return mismatch(chain, "genesis hash " + reported + " differs from the pinned " + pinned);
         }
         return new Verdict(Outcome.MATCH, "ok");
@@ -120,5 +135,27 @@ class RpcChainIdentityChecker implements RpcNodeChainVerifier {
     private Verdict mismatch(ChainConfig chain, String detail) {
         meters.counter("registerwerk.rpc.chain_mismatch", "chain", String.valueOf(chain.getIdentifier())).increment();
         return new Verdict(Outcome.MISMATCH, detail);
+    }
+
+    /**
+     * Compare-and-set re-pin plus its audit event in ONE transaction: the audit listener is a
+     * transactional event listener, so an event published outside a transaction (the health round has
+     * none) would be dropped silently.
+     */
+    private boolean repin(ChainConfig chain, String previous, String reported) {
+        boolean changed = Boolean.TRUE.equals(tx.execute(status -> {
+            if (chainConfigRepository.repinGenesisHash(chain.getId(), previous, reported) == 0) {
+                return false;
+            }
+            events.publishEvent(new RpcNodeChangedEvent(chain.getId(), null, "SYSTEM", "GENESIS_PIN_AUTO_REPIN",
+                    chain.getId(), reported, previous, null, null));
+            return true;
+        }));
+        if (changed) {
+            log.warn("Local dev chain {} was recreated: genesis hash re-pinned {} -> {} (demo seeding on, "
+                    + "non-production)", chain.getIdentifier(), previous, reported);
+            chain.setGenesisHash(reported);
+        }
+        return changed;
     }
 }

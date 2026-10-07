@@ -219,6 +219,54 @@ class Erc3525AdminServiceTest {
     }
 
     @Test
+    @DisplayName("H5 (T3-16 for ERC-3525): a manual unfreeze is refused while a Sperrvermerk covers the wallet")
+    void manualUnfreezeRefusedWhileBlocked() {
+        AssetDeployment dep = deployment(Chain.ETHEREUM);
+        when(deploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
+        when(holderBlockGate.isBlocked(null, EVM_HOLDER)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.unfreezeAddress(DEPLOYMENT_ID, EVM_HOLDER, ACTOR_ID, "REGISTRY_ADMIN"))
+                .isInstanceOf(ComplianceGateException.class)
+                .hasMessageContaining("Sperrvermerk");
+        verify(evmTransactions, never()).submit(any(), anyString(), any(Function.class), any());
+    }
+
+    @Test
+    @DisplayName("H5: unfreezeAfterBlockLift runs as SYSTEM, does not consult the block gate and submits unfreezeAddress")
+    void unfreezeAfterBlockLift_submitsAsSystem() {
+        AssetDeployment dep = deployment(Chain.ETHEREUM);
+        when(deploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
+        when(evmTransactions.submit(eq(dep.getChainConfigId()), eq("0xdeployed"), any(Function.class), any()))
+                .thenReturn("0xtx");
+        UUID tracked = UUID.randomUUID();
+        when(txService.record(eq("0xtx"), eq("unfreezeAddress"), eq(DEPLOYMENT_ID), eq(ASSET_ID),
+                anyString(), anyString(), eq("0xdeployed"), any())).thenReturn(tracked);
+
+        UUID txId = service.unfreezeAfterBlockLift(DEPLOYMENT_ID, EVM_HOLDER);
+
+        assertThat(txId).isEqualTo(tracked);
+        ArgumentCaptor<Function> fn = ArgumentCaptor.forClass(Function.class);
+        verify(evmTransactions).submit(any(), any(), fn.capture(), any());
+        assertThat(fn.getValue().getName()).isEqualTo("unfreezeAddress");
+        ArgumentCaptor<TokenAdminActionEvent> event = ArgumentCaptor.forClass(TokenAdminActionEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().actorId()).isEqualTo(new UUID(0L, 0L));
+        assertThat(event.getValue().actorRole()).isEqualTo("SYSTEM");
+        verify(holderBlockGate, never()).isBlocked(any(), any());
+    }
+
+    @Test
+    @DisplayName("H5: unfreezeAfterBlockLift still validates the holder address")
+    void unfreezeAfterBlockLift_rejectsAMalformedAddress() {
+        AssetDeployment dep = deployment(Chain.ETHEREUM);
+        when(deploymentRepository.findById(DEPLOYMENT_ID)).thenReturn(Optional.of(dep));
+
+        assertThatThrownBy(() -> service.unfreezeAfterBlockLift(DEPLOYMENT_ID, STARK_HOLDER))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(evmTransactions, never()).submit(any(), anyString(), any(Function.class), any());
+    }
+
+    @Test
     @DisplayName("whitelisting a Sperrvermerk'd wallet or a malformed address is refused before any chain call")
     void whitelist_refusesBlockedOrMalformedAddress() {
         AssetDeployment dep = deployment(Chain.STARKNET);

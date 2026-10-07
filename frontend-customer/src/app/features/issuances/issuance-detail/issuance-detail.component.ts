@@ -828,9 +828,24 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                     <mat-label>Amount</mat-label>
                     <input matInput type="number" [(ngModel)]="mintAmount" min="1" step="1" />
                   </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Authenticator code</mat-label>
+                    <input matInput [(ngModel)]="mintTotpCode" inputmode="numeric" maxlength="6"
+                           autocomplete="one-time-code" />
+                    <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Operator approval token (ISSUER_MINT_CONFIDENTIAL)</mat-label>
+                    <input matInput [(ngModel)]="mintApprovalToken" autocomplete="off" />
+                    <mat-hint>A confidential mint needs a second approver; the recipient must be a registered, KYC-approved holder.</mat-hint>
+                  </mat-form-field>
+                  <div class="approval-request-box">
+                    Give your approver exactly this request. Their approval token is bound to it and works once:
+                    <pre class="approval-request">{{ confidentialMintApprovalRequest() }}</pre>
+                  </div>
                   <button type="button" mat-flat-button color="primary"
                           (click)="submitConfidentialMint()"
-                          [disabled]="minting || !isValidWalletAddress(mintToAddress) || !isValidMintAmount()">
+                          [disabled]="minting || !isValidWalletAddress(mintToAddress) || !isValidMintAmount() || !mintApprovalToken.trim()">
                     <mat-icon>add_circle</mat-icon>
                     {{ minting ? 'Encrypting & submitting…' : 'Mint' }}
                   </button>
@@ -1002,6 +1017,10 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
      .confidential-mint-title { font-size: 14px; margin: 0 0 12px; color: var(--rw-text-primary); }
      .confidential-mint-form { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
      .confidential-mint-form mat-form-field { flex: 1; min-width: 220px; }
+     .approval-request-box { flex-basis: 100%; font-size: 13px; color: var(--rw-text-secondary); }
+     .approval-request { margin: 6px 0 0; padding: 8px 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+       font-family: var(--rw-font-mono, monospace); font-size: 12px; background: var(--rw-surface-alt, transparent);
+       border: 1px solid var(--rw-border); border-radius: 6px; color: var(--rw-text-primary); }
      .table-wrap { overflow-x: auto; }
      .live-holder-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
      .load-error { text-align: center; padding: 48px 16px; color: var(--rw-text-secondary); }
@@ -1044,6 +1063,9 @@ export class IssuanceDetailComponent implements OnInit {
   revealError: string | null = null;
   mintToAddress = '';
   mintAmount: number | null = null;
+  /** H13: the confidential mint needs step-up (TOTP under built-in sign-in) and a bound second-approver token. */
+  mintTotpCode = '';
+  mintApprovalToken = '';
   minting = false;
   identityRegistryState: AsyncSection<null> = createAsyncSection<null>(null);
   liveHoldersState: AsyncSection<null> = { data: null, status: 'ready', hasLoaded: true };
@@ -1744,25 +1766,47 @@ export class IssuanceDetailComponent implements OnInit {
     }
   }
 
+  /** The exact call the approver's token must be bound to: `METHOD /path` plus the JSON body. */
+  confidentialMintApprovalRequest(): string {
+    const dep = this.deployments[0];
+    return `POST /api/v1/assets/${this.asset?.id}/deployments/${dep?.id}/issuer/mint-confidential\n`
+      + JSON.stringify({ toAddress: this.mintToAddress.trim(), amount: this.mintAmount === null ? '' : this.mintAmount.toString() });
+  }
+
   submitConfidentialMint(): void {
     if (!this.asset?.id || this.deployments.length === 0 || this.minting
-        || !this.isValidWalletAddress(this.mintToAddress) || !this.isValidMintAmount()) return;
+        || !this.isValidWalletAddress(this.mintToAddress) || !this.isValidMintAmount()
+        || !this.mintApprovalToken.trim()) return;
     const amount = this.mintAmount!;
+    const assetId = this.asset.id;
+    const depId = this.deployments[0].id;
+    const body = { toAddress: this.mintToAddress.trim(), amount: amount.toString() };
+    const approvalToken = this.mintApprovalToken.trim();
     this.minting = true;
     this.cdr.markForCheck();
-    this.issuanceService.mintConfidential(this.asset.id, this.deployments[0].id, {
-      toAddress: this.mintToAddress.trim(),
-      amount: amount.toString(),
-    }).subscribe({
+    const stepUp$: Observable<string | undefined> = this.mintTotpCode.trim()
+      ? this.issuanceService.stepUp(this.mintTotpCode.trim(), 'ISSUER_MINT_CONFIDENTIAL').pipe(map(r => r.stepUpToken))
+      : of(undefined);
+    stepUp$.pipe(
+      switchMap(stepUpToken =>
+        this.issuanceService.mintConfidential(assetId, depId, body, { approvalToken, stepUpToken })),
+    ).subscribe({
       next: (r) => {
         this.txService.track(r.txId, 'Confidential mint');
+        if (r.destinationHolder) {
+          this.snackBar.open(`Confidential mint submitted to ${r.destinationHolder}`, 'Close', { duration: 5000 });
+        }
         this.mintToAddress = '';
         this.mintAmount = null;
+        this.mintTotpCode = '';
+        this.mintApprovalToken = '';
         this.minting = false;
         this.cdr.markForCheck();
       },
-      error: () => {
-        this.snackBar.open('Confidential mint failed.', 'Close', { duration: 5000 });
+      error: (err: HttpErrorResponse) => {
+        this.snackBar.open(err?.status === 403
+          ? (err.error?.message ?? 'Confidential mint refused: the recipient is not a registered, approved holder, or the second approval / authenticator code is missing or does not match this request.')
+          : 'Confidential mint failed.', 'Close', { duration: 8000 });
         this.minting = false;
         this.cdr.markForCheck();
       },

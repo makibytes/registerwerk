@@ -61,7 +61,9 @@ class HolderBlockFreezeResyncRunner {
         for (Object raw : claimed) {
             UUID blockId = raw instanceof UUID u ? u : UUID.fromString(raw.toString());
             HolderBlock block = repository.findById(blockId).orElse(null);
-            if (block == null || block.getStatus() != HolderBlock.Status.ACTIVE) {
+            // EXPIRY_REVIEW is still a legal block (H5): it keeps blocking until a human lifts it, so its
+            // wallet must be frozen on-chain like an ACTIVE one.
+            if (block == null || !HolderBlock.BLOCKING.contains(block.getStatus())) {
                 continue;
             }
             events.publishEvent(new HolderBlockFreezeResyncRequestedEvent(block.getId(), Map.of(

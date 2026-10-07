@@ -51,7 +51,7 @@ Die `HolderBlock`-Entität im `kyc`-Modul speichert alle aktiven und historische
 | `liftedBy` | UUID des Betreibers, der die Sperre aufgehoben hat |
 | `twoManRuleApprover` | UUID des zweiten Genehmigers |
 | `twoManRuleApprovedAt` | Wann der zweite Genehmiger bestätigt hat |
-| `onChainFreezeTxHash` | Hash der entsprechenden On-Chain-Freeze-Transaktion |
+| `onChainFreezeTxHash` | Hash der ersten bestätigten On-Chain-Freeze-Transaktion dieses Blocks. Ein Block kann mehrere Deployments betreffen; das Ergebnis je Deployment und Wallet steht in `holder_block_freeze` (siehe [On-Chain-Wirkung](#on-chain-reach)) |
 
 ---
 
@@ -72,12 +72,12 @@ stateDiagram-v2
 1. `REGISTRY_ADMIN` übermittelt `POST /api/v1/holder-blocks` mit Blocktyp, Rechtsgrundlage und optionalem Ablaufdatum
 2. Der Aspekt `@RequiresStepUp` erzwingt ein frisches Step-up-Token (TOTP oder WebAuthn)
 3. `SperrvermerkService` prüft, ob ein zweiter Genehmiger bestätigt hat (`dualControlPending`-Token)
-4. Verwendet das Asset [ERC-3643](../token-standards/erc3643.md)-identitätsgebundene Token, wird `freezeAddress()` auf dem Compliance-Modul-Vertrag aufgerufen
-5. Der `onChainFreezeTxHash` wird gespeichert, sobald die Transaktion bestätigt ist
+4. Sobald der Block committet ist, friert `SperrvermerkOnchainSyncListener` die Wallet über den dauerhaften Transaktions-Outbox auf jedem aktiven Token-Deployment der gehaltenen Assets ein (bei einem Asset-bezogenen Block nur auf dem des `assetId`). Welche Standards sich einfrieren lassen, steht [unten](#on-chain-reach); ein Deployment, das sich nicht einfrieren lässt, wird erfasst und eskaliert, nicht übersprungen
+5. Das Ergebnis je Block, Deployment und Wallet wird in `holder_block_freeze` festgehalten und folgt dem Transaktionsstatus: `SUBMITTED` wird zu `CONFIRMED` (dann wird `onChainFreezeTxHash` gespeichert) oder zu `FAILED`
 6. Ein `AuditEvent` mit den vollständigen Blockdetails wird ausgegeben
 
 **Aufheben eines Blocks:**
-Es gilt derselbe Step-up-+-Vier-Augen-Ablauf. Das Aufheben ruft das entsprechende On-Chain-`unfreezeAddress()` auf und leert das Feld `HolderBlock.liftedAt`.
+Es gilt derselbe Step-up-+-Vier-Augen-Ablauf. Das Aufheben gleicht in umgekehrter Richtung ab: Je Wallet und Deployment wird das On-Chain-Unfreeze nur eingereicht, wenn kein verbleibender sperrender Block die Wallet noch abdeckt (`RELEASE_SUBMITTED`, danach `RELEASED`). Ein fehlgeschlagenes Unfreeze lässt die Wallet eingefroren, wird gemeldet (`HOLDER_BLOCK_RELEASE_FAILED`, Operator-Aufgabe) und erneut versucht. Im Register ist der Block in jedem Fall `LIFTED`; `liftedAt` und `liftedBy` werden gesetzt.
 
 **Automatischer Ablauf:**
 Ein `@Scheduled`-Job läuft nächtlich und findet alle ACTIVE-Blöcke mit `expiresAt < NOW()`. Standardmäßig **läuft kein Block-Typ automatisch ab**: Der Block wechselt in `EXPIRY_REVIEW`, sperrt weiterhin (Register-Gates und On-Chain-Freeze), und es werden eine Operator-Aufgabe und eine Compliance-E-Mail ausgelöst. Aufgehoben wird er nur über die normale Aufhebung (Step-up + zweiter Genehmiger). Typen in `registerwerk.sperrvermerk.auto-expire-types` (Standard leer) werden weiterhin automatisch auf `EXPIRED` gesetzt.
@@ -96,15 +96,46 @@ Ein `@Scheduled`-Job läuft nächtlich und findet alle ACTIVE-Blöcke mit `expir
 | `forceTransfer` | `TokenAdminController` — wird vor jedem Übertragungsaufruf geprüft |
 | `forceApprove` | `TokenAdminController` — wird vor der Genehmigung geprüft |
 | `AssetHolder`-Erstellung (neuer Investor) | `AssetService` — bestehende Blöcke können neue Positionen verhindern |
-| On-Chain-Übertragung (ERC-3643) | `ComplianceModuleContract` — das Identitätsregister lehnt eingefrorene Adressen ab |
+| On-Chain-Übertragung | Der Token-Vertrag verweigert Bewegungen von, an oder durch eine eingefrorene Adresse (`freezeAddress` / `setAddressFrozen`), siehe [On-Chain-Wirkung](#on-chain-reach) |
 
-Der Registry-Layer-Block (DB) und das On-Chain-Freeze (Smart Contract) sind **beide** für ERC-3643-Token erforderlich. Für andere Standards (ERC-20, ERC-3525) gilt nur der Registry-Layer-Block; die On-Chain-Übertragung wird dadurch verhindert, dass der Betreiber sich weigert, die Transaktion zu signieren.
+---
+
+## On-Chain-Wirkung { #on-chain-reach }
+
+Der Block auf Registerebene (Datenbank) ist maßgeblich und gilt für jeden Token-Standard. Der On-Chain-Freeze bildet ihn dort nach, wo ein Vertrag das ausdrücken kann, sodass auch Wege geschlossen sind, die das Backend nicht vermittelt (direkte Übertragungen, `repay`/`liquidate` im Repo, Vault-Einzahlungen und -Rücknahmen). Er ist eine technische Maßnahme, keine Rechtswirkung (siehe die Prüfwarnung am Seitenanfang).
+
+| Standard / Chain | Automatischer On-Chain-Freeze | Wie |
+|---|---|---|
+| ERC-20, ERC-721, ERC-1155 | Ja | `freezeAddress(address,string)` (`EwpgCompliance`) über den Token-Admin-Port |
+| ERC-3525 | Ja | `freezeAddress` über den ERC-3525-Admin-Port; ein manuelles Unfreeze wird abgelehnt, solange ein Block die Wallet abdeckt |
+| ERC-4626 / ERC-7540 Vault-Anteile | Ja | `freezeAddress` (`EwpgCompliance`); an einen eingefrorenen Eigentümer oder Zahler wird nicht ausgezahlt, das Escrow bleibt im Vault (Freeze-in-place) |
+| ERC-3643 (T-REX) | Ja | `setAddressFrozen(address,true)` auf dem Token (`Erc3643LifecycleService`) |
+| Vertrauliches ERC-3643 (Zama fhEVM) | Ja | `setAddressFrozen(address,bool)` |
+| Vertrauliches ERC-20 | Nein | der Vertrag hat keine Freeze-Funktion |
+| Solana (SPL, Token-2022 und die Erweiterungs-Presets) | Nein | `FreezeAccount` wirkt je Token-Konto und ist eine manuelle Betreiberaktion |
+| Starknet (ERC-20, ERC-3525) | Nein | die Cairo-Verträge haben `freeze_address`, das aber nur ein manueller Betreiberaufruf ist: Starknet-Invokes laufen nicht über den dauerhaften Outbox und ihre Receipts werden nicht verfolgt, ein Ergebnis ließe sich also nicht bestätigen |
+| Stellar | Nein | ein Freeze ist eine Änderung der Trustline-Autorisierung, eine manuelle Betreiberaktion |
+| Canton / Daml | Nein | kein Freeze auf Halterebene, den das Register steuern kann |
+
+Jeder Freeze läuft über den dauerhaften Transaktions-Outbox (in der Datenbanktransaktion signiert, nach dem Commit gesendet), und sein Ergebnis wird aus dem Transaktionsstatus gelesen. `holder_block_freeze` führt eine Zeile je Block, Deployment und Wallet:
+
+| Status | Bedeutung |
+|---|---|
+| `SUBMITTED` | die Freeze-Transaktion liegt im Outbox, ihr Ergebnis ist noch nicht final |
+| `CONFIRMED` | die Transaktion ist final und erfolgreich; `onChainFreezeTxHash` ist gespeichert; Audit-Ereignis `HOLDER_BLOCK_FREEZE_CONFIRMED` |
+| `FAILED` | der Freeze konnte nicht eingereicht werden, wurde zurückgesetzt (Revert) oder ersetzt: die Wallet kann on-chain noch Bewegungen ausführen |
+| `UNSUPPORTED_ON_CHAIN` | der Standard bzw. die Chain hat keinen automatischen Freeze (Tabelle oben): manuelles Eingreifen nötig |
+| `RELEASE_SUBMITTED` / `RELEASED` / `RELEASE_FAILED` | dasselbe für das Unfreeze nach einem aufgehobenen Block; `RELEASED` umfasst auch „ein anderer Block deckt die Wallet noch ab, der Freeze bleibt“ |
+
+Ein Ergebnis `FAILED` oder `UNSUPPORTED_ON_CHAIN` bleibt nie unbemerkt: Es löst das Audit-Ereignis `HOLDER_BLOCK_NOT_PROPAGATED` aus (`cause`: `SUBMISSION_FAILED`, `TX_FAILED`, `UNSUPPORTED_ON_CHAIN`, `NO_DEPLOYMENT_MATCHED` oder `DRIFT`), eine Operator-Aufgabe `SPERRVERMERK_FREEZE_NOT_PROPAGATED` auf der Emittenten-Entität des Assets, die Gauges `registerwerk_sperrvermerk_freeze_failed` / `registerwerk_sperrvermerk_freeze_unsupported` und die Alarme `SperrvermerkFreezeFailed` / `SperrvermerkFreezeUnsupported`. **Der Block auf Registerebene wird dadurch nie aufgehoben.**
+
+Zwei Jobs halten die Chain mit dem Register im Einklang (beide durch ShedLock abgesichert). Ein Sweep alle 5 Minuten liest das Ergebnis eingereichter Freezes und wiederholt fehlgeschlagene mit Back-off (5 Versuche; `registerwerk.sperrvermerk.freeze-sweep-ms`). Ein nächtlicher Abgleich (`registerwerk.sperrvermerk.freeze-reconcile-cron`, Standard 02:30) geht jeden Block durch, der noch sperrt, also `ACTIVE` und `EXPIRY_REVIEW`: Er sendet fehlende und fehlgeschlagene Freezes erneut, liest bei bestätigten `isFrozen` zurück und meldet eine Wallet, die **nicht** eingefroren ist, als Drift (`registerwerk_sperrvermerk_freeze_drift_total`, Alarm `SperrvermerkFreezeDrift`, danach wird sie erneut eingefroren). Ein fehlgeschlagenes Unfreeze lässt die Wallet eingefroren (die sichere Richtung) und wird über `HOLDER_BLOCK_RELEASE_FAILED` gemeldet.
 
 ---
 
 ## Audit-Trail { #audit-trail }
 
-Jede Erstellung, Änderung und Aufhebung eines Blocks erzeugt ein `AuditEvent` vom Typ `HOLDER_BLOCK_CREATED`, `HOLDER_BLOCK_LIFTED` oder `HOLDER_BLOCK_EXPIRED`. Diese Ereignisse enthalten:
+Jede Erstellung, Änderung und Aufhebung eines Blocks erzeugt ein `AuditEvent` vom Typ `HOLDER_BLOCK_CREATED`, `HOLDER_BLOCK_LIFTED` oder `HOLDER_BLOCK_EXPIRED`; die On-Chain-Folgeschritte fügen `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` und `HOLDER_BLOCK_RELEASE_FAILED` hinzu. Diese Ereignisse enthalten:
 
 - Die Identität des initiierenden Betreibers
 - Die Identität des zweiten Genehmigers (bei Erstellung/Aufhebung)

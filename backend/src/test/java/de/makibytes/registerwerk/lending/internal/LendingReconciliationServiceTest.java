@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.lending.internal;
 import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.lending.api.LendingMarket;
 import de.makibytes.registerwerk.lending.api.LendingMarketRepository;
+import de.makibytes.registerwerk.lending.api.LendingMarketStatus;
 import de.makibytes.registerwerk.lending.api.LendingReconciliationTask;
 import de.makibytes.registerwerk.lending.api.LendingReconciliationTaskRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -17,6 +18,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.web3j.abi.datatypes.Function;
 
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -146,6 +148,45 @@ class LendingReconciliationServiceTest {
         ArgumentCaptor<Function> fn = ArgumentCaptor.forClass(Function.class);
         verify(gateway).submit(eq(chainConfigId), eq(MARKET), fn.capture(), any(Map.class));
         assertThat(fn.getValue().getName()).isEqualTo("setBorrowPaused");
+    }
+
+    @Test
+    @DisplayName("H11: legacy / unverified markets get setBorrowPaused(true) through the outbox, others and unreadable ones do not")
+    void enforcesOnchainPauseOnlyWhereNeededAndReadable() {
+        UUID actor = UUID.randomUUID();
+        market.setStatus(LendingMarketStatus.ACTIVE);
+        LendingMarket alreadyPaused = marketAt("0x" + "a1".repeat(20));
+        LendingMarket sound = marketAt("0x" + "a2".repeat(20));
+        LendingMarket unreadable = marketAt("0x" + "a3".repeat(20));
+        when(marketRepository.findByStatus(LendingMarketStatus.ACTIVE))
+                .thenReturn(List.of(market, alreadyPaused, sound, unreadable));
+        when(marketService.requiresOnchainBorrowPause(market)).thenReturn(true);
+        when(marketService.requiresOnchainBorrowPause(alreadyPaused)).thenReturn(true);
+        when(marketService.requiresOnchainBorrowPause(sound)).thenReturn(false);
+        when(marketService.requiresOnchainBorrowPause(unreadable)).thenReturn(true);
+        when(onchainReader.borrowPaused("ETHEREUM_SEPOLIA", MARKET)).thenReturn(false);
+        when(onchainReader.borrowPaused("ETHEREUM_SEPOLIA", alreadyPaused.getMarketAddress())).thenReturn(true);
+        when(onchainReader.borrowPaused("ETHEREUM_SEPOLIA", unreadable.getMarketAddress()))
+                .thenThrow(new IllegalStateException("rpc down"));
+        when(gateway.submit(eq(chainConfigId), eq(MARKET), any(Function.class), anyMap())).thenReturn("0xpause");
+
+        var results = service.enforceLegacyBorrowPause(actor);
+
+        assertThat(results).extracting(LendingReconciliationService.PauseEnforcement::outcome)
+                .containsExactly("SUBMITTED", "ALREADY_PAUSED", "NOT_CHECKED");
+        ArgumentCaptor<Function> fn = ArgumentCaptor.forClass(Function.class);
+        verify(gateway, org.mockito.Mockito.times(1)).submit(any(), any(), fn.capture(), anyMap());
+        assertThat(fn.getValue().getName()).isEqualTo("setBorrowPaused");
+        assertThat(fn.getValue().getInputParameters().get(0).getValue()).isEqualTo(true);
+    }
+
+    private LendingMarket marketAt(String address) {
+        LendingMarket m = new LendingMarket();
+        m.setId(UUID.randomUUID());
+        m.setChainConfigId(chainConfigId);
+        m.setMarketAddress(address);
+        m.setStatus(LendingMarketStatus.ACTIVE);
+        return m;
     }
 
     private static final class NoopTransactionManager implements org.springframework.transaction.PlatformTransactionManager {

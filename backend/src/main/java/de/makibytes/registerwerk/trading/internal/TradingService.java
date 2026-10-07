@@ -248,6 +248,8 @@ public class TradingService {
             throw new de.makibytes.registerwerk.shared.ComplianceGateException(
                     "Entity " + entityId + "'s holding in this asset is under a lockup — cannot list for sale.");
         }
+        // H11: same (entity, asset) lock as the repo desk's pledge check; availability is read after it
+        tradeExecutionRepository.lockHolding(holder.getInvestorId(), asset.getId());
         BigDecimal available = computeAvailableQuantity(holder, asset.getId());
         BigDecimal quantity = positive(request.quantity(), "Quantity must be greater than zero");
         if (quantity.compareTo(available) > 0) {
@@ -1118,6 +1120,8 @@ public class TradingService {
         AssetHolder sellerHolder = assetHolderRepository.findActiveByIdForUpdate(execution.getSellerHolderId())
                 .orElseThrow(() -> new InvalidStateTransitionException("The seller's register entry "
                         + execution.getSellerHolderId() + " was removed - the trade cannot proceed."));
+        // H11: a repo pledge of the same (entity, asset) takes this lock too; the encumbrance below is read after it
+        tradeExecutionRepository.lockHolding(execution.getSellerEntityId(), execution.getAssetId());
         requirePartyEligible(execution, execution.getBuyerEntityId(), execution.getWalletAddress(), actingEntityId);
         requirePartyEligible(execution, execution.getSellerEntityId(), sellerHolder.getWalletAddress(), actingEntityId);
         requireBuyerWithinTargetMarket(execution, asset);

@@ -874,6 +874,47 @@ class TradingServiceTest {
                 .hasMessageContaining("no longer holds enough unencumbered units");
     }
 
+    @Test
+    void buy_takesTheSharedHoldingLockBeforeCountingTheSellersFreeUnits() {
+        // H11: a repo pledge of the same (entity, asset) takes the same advisory lock and re-reads after it.
+        UUID listingId = UUID.randomUUID();
+        TradeListing listing = openListing(BigDecimal.TEN, BigDecimal.ONE, Set.of(PaymentOption.STABLECOIN));
+        when(tradeListingRepository.findByIdForUpdate(listingId)).thenReturn(Optional.of(listing));
+        AssetHolder seller = sellerHolder(BigDecimal.valueOf(2));
+        seller.setId(HOLDER_ID);
+        when(assetHolderRepository.findActiveByIdForUpdate(HOLDER_ID)).thenReturn(Optional.of(seller));
+        when(tradeListingRepository.sumQuantityAvailableBySellerHolderIdAndStatusIn(any(), any())).thenReturn(BigDecimal.TEN);
+        BuyTradingOfferRequest req = new BuyTradingOfferRequest(
+                BigDecimal.valueOf(5), OrderType.MARKET, null, PaymentOption.STABLECOIN,
+                WalletPreferenceMode.CUSTOM_ADDRESS, null, "0x" + "11".repeat(20));
+
+        assertThatThrownBy(() -> service.buy(BUYER, UUID.randomUUID(), listingId, req))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        var order = inOrder(assetHolderRepository, tradeExecutionRepository);
+        order.verify(assetHolderRepository).findActiveByIdForUpdate(HOLDER_ID);
+        order.verify(tradeExecutionRepository).lockHolding(SELLER, ASSET_ID);
+    }
+
+    @Test
+    void createListing_takesTheSharedHoldingLockBeforeComputingAvailability() {
+        AssetHolder holder = sellerHolder(BigDecimal.TEN);
+        when(assetHolderRepository.findActiveByIdForUpdate(HOLDER_ID)).thenReturn(Optional.of(holder));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        when(tradeListingRepository.sumQuantityAvailableBySellerHolderIdAndStatusIn(any(), any()))
+                .thenReturn(BigDecimal.ZERO);
+        when(tradeExecutionRepository.sumExecutedQuantityBySellerHolderIdAndSettlementStatusIn(any(), any()))
+                .thenReturn(BigDecimal.ZERO);
+        CreateTradeListingRequest req = new CreateTradeListingRequest(HOLDER_ID, BigDecimal.valueOf(1000), BigDecimal.TEN, true, null);
+
+        assertThatThrownBy(() -> service.createListing(SELLER, UUID.randomUUID(), req))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        var order = inOrder(assetHolderRepository, tradeExecutionRepository);
+        order.verify(assetHolderRepository).findActiveByIdForUpdate(HOLDER_ID);
+        order.verify(tradeExecutionRepository).lockHolding(SELLER, ASSET_ID);
+    }
+
     // ── buy — non-SIMULATED venue dispatch ────────────────────────────────────
 
     @Test

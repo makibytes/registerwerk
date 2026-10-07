@@ -43,7 +43,7 @@ Le backend achemine `CONF_ERC20`/`CONF_ERC3643` vers `ConfidentialErc20Service`/
 
 | Actions | Point de terminaison | Remarques |
 |---|---|---|
-| Émission confidentielle (mint) (émission par l'émetteur/l'opérateur) | `POST /api/v1/assets/{id}/deployments/{depId}/issuer/mint-confidential` | Chiffre le montant côté serveur via le side-car `zama-relayer` — aucun navigateur/portefeuille requis |
+| Émission confidentielle (mint) (émission par l'émetteur/l'opérateur) | `POST /api/v1/assets/{id}/deployments/{depId}/issuer/mint-confidential` | Chiffre le montant côté serveur via le side-car `zama-relayer` — aucun navigateur/portefeuille requis. Exige un step-up (`ISSUER_MINT_CONFIDENTIAL`) et un second approbateur lié au corps de la requête ; la destination doit être un détenteur du registre filtré, comme pour le mint ordinaire |
 | Destruction forcée confidentielle (burning) (§26 Einziehung) | `POST .../admin/force-burn-confidential` | Même chemin de chiffrement côté serveur ; déjà soumis à un contrôle agent/propriétaire — ce contrôle EST l'autorité de destruction forcée |
 | Ajouter un viewer confidentiel | `POST .../admin/confidential-add-viewer` | Accorde des droits de déchiffrement sur le solde de chaque titulaire à l'avenir — par ex. ajout d'un auditeur ou du propre portefeuille de l'émetteur après le déploiement |
 | Supprimer un viewer confidentiel | `POST .../admin/confidential-remove-viewer` | Arrête les octrois futurs — ne révoque pas rétroactivement les handles historiques déjà déchiffrables (l'ACL de Zama n'a pas de primitive de révocation) |

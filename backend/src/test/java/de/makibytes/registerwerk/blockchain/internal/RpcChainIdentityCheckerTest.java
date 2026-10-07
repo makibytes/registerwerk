@@ -36,7 +36,10 @@ class RpcChainIdentityCheckerTest {
     void setUp() {
         repo = mock(ChainConfigRepository.class);
         meters = new SimpleMeterRegistry();
-        checker = new RpcChainIdentityChecker(null, null, repo, meters, 5);
+        checker = new RpcChainIdentityChecker(null, null, repo, meters, 5,
+                new LocalDevChainRepinPolicy(false, false, "http://anvil:8545"),
+                mock(org.springframework.context.ApplicationEventPublisher.class),
+                mock(org.springframework.transaction.PlatformTransactionManager.class));
         chain = new ChainConfig();
         chain.setId(UUID.randomUUID());
         chain.setIdentifier("ETHEREUM_MAINNET");

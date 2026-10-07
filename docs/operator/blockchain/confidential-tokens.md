@@ -45,7 +45,7 @@ viewer addresses as `initialViewers`.
 
 | Action | Endpoint | Notes |
 |---|---|---|
-| Confidential mint (issuer/operator issuance) | `POST /api/v1/assets/{id}/deployments/{depId}/issuer/mint-confidential` | Encrypts the amount server-side via the `zama-relayer` sidecar — no browser/wallet needed |
+| Confidential mint (issuer/operator issuance) | `POST /api/v1/assets/{id}/deployments/{depId}/issuer/mint-confidential` | Encrypts the amount server-side via the `zama-relayer` sidecar — no browser/wallet needed. Needs step-up (`ISSUER_MINT_CONFIDENTIAL`) and a second approver bound to the request body, and the destination must be a screened register holder, exactly like the plain mint |
 | Confidential forced burn (§26 Einziehung) | `POST .../admin/force-burn-confidential` | Same server-side encrypt path; already agent/owner-gated — that gating IS the forced-burn authority |
 | Add a confidential viewer | `POST .../admin/confidential-add-viewer` | Grants decrypt rights on every holder's balance going forward — e.g. adding an auditor or the issuer's own wallet after deployment |
 | Remove a confidential viewer | `POST .../admin/confidential-remove-viewer` | Stops future grants — does NOT retroactively revoke already-decryptable historical handles (Zama's ACL has no revoke primitive) |

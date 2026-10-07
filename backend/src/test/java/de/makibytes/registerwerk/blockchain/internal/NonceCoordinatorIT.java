@@ -54,6 +54,9 @@ class NonceCoordinatorIT {
     @Autowired
     private TransactionTemplate transactions;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
     private static final long CHAIN_ID = 11155111L; // Sepolia
 
     @Test
@@ -73,6 +76,147 @@ class NonceCoordinatorIT {
         BigInteger second = coordinator.withNonce(CHAIN_ID, address, () -> BigInteger.valueOf(5),
                 nonce -> nonce);
         assertThat(second).isEqualTo(BigInteger.valueOf(6));
+    }
+
+    @Test
+    @DisplayName("H10: a direct send's nonce is not handed out again once the lease has aged and the chain read lags")
+    void directSendNonceIsNotReusedAfterLeaseAgesWhileTheReadLags() throws Exception {
+        String address = "0x" + "a1".repeat(20);
+
+        // a direct (non-outbox) send takes nonce 5; the lease moves to 6
+        BigInteger sent = coordinator.withNonce(CHAIN_ID, address, () -> BigInteger.valueOf(5), nonce -> nonce);
+        assertThat(sent).isEqualTo(BigInteger.valueOf(5));
+
+        // more than the repair grace passes without another send, and the node the failover read picked
+        // is lagging: it has not seen transaction 5 yet, so it still reports 5
+        jdbc.update("UPDATE wallet_nonce_lease SET updated_at = ? WHERE chain_id = ? AND sender_address = ?",
+                java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(3_600)), CHAIN_ID, address);
+
+        BigInteger next = coordinator.withNonce(CHAIN_ID, address, () -> BigInteger.valueOf(5), nonce -> nonce);
+
+        // before the fix the lease was "repaired" back to 5 - the pending transaction would be replaced
+        assertThat(next).as("nonce 5 already belongs to the direct send").isEqualTo(BigInteger.valueOf(6));
+    }
+
+    // ── H10: lease repair needs every node's reading and never reuses a nonce with a known transaction ──
+
+    private static final String TX_5 = "0x" + "5".repeat(64);
+    private static final String TX_3 = "0x" + "3".repeat(64);
+
+    private void ageLease(long chainId, String address) {
+        jdbc.update("UPDATE wallet_nonce_lease SET updated_at = ? WHERE chain_id = ? AND sender_address = ?",
+                java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(3_600)), chainId, address);
+    }
+
+    /** A direct send exactly as EvmContractService does it: register inside the lock, then "broadcast". */
+    private BigInteger directSend(long chainId, String address, long laggingRead, String txHash) throws Exception {
+        return coordinator.withNonce(chainId, address, () -> BigInteger.valueOf(laggingRead), nonce -> {
+            coordinator.registerDirectSubmission(chainId, address, nonce, txHash, "SEND");
+            return nonce;
+        });
+    }
+
+    private static NonceCoordinator.ChainNonceSource nodes(long laggingRead, java.util.Optional<BigInteger> everyNode,
+            java.util.function.Predicate<String> knows) {
+        return NonceCoordinator.ChainNonceSource.of(() -> BigInteger.valueOf(laggingRead), () -> everyNode, knows);
+    }
+
+    @Test
+    @DisplayName("H10: a registered direct send blocks the repair while any node still knows its transaction")
+    void liveDirectSendBlocksLeaseRepair() throws Exception {
+        String address = "0x" + "a2".repeat(20);
+        long chain = CHAIN_ID + 2;
+        assertThat(directSend(chain, address, 5, TX_5)).isEqualTo(BigInteger.valueOf(5));
+        ageLease(chain, address);
+
+        // the failover read lags (5); every node reports pending 5 as well (the tx sits in a mempool that
+        // does not count it yet) but one node KNOWS the transaction
+        BigInteger next = coordinator.withNonce(chain, address,
+                nodes(5, java.util.Optional.of(BigInteger.valueOf(5)), TX_5::equals), nonce -> nonce);
+
+        assertThat(next).as("nonce 5 belongs to a live direct send").isEqualTo(BigInteger.valueOf(6));
+    }
+
+    @Test
+    @DisplayName("H10: a direct send whose transaction no node knows any more is a dropped one - the lease is repaired")
+    void droppedDirectSendDoesNotBlockLeaseRepair() throws Exception {
+        String address = "0x" + "a3".repeat(20);
+        long chain = CHAIN_ID + 3;
+        assertThat(directSend(chain, address, 5, TX_5)).isEqualTo(BigInteger.valueOf(5));
+        ageLease(chain, address);
+
+        BigInteger next = coordinator.withNonce(chain, address,
+                nodes(5, java.util.Optional.of(BigInteger.valueOf(5)), hash -> false), nonce -> nonce);
+
+        assertThat(next).as("nobody holds nonce 5 any more").isEqualTo(BigInteger.valueOf(5));
+    }
+
+    @Test
+    @DisplayName("H10: a ledger entry below the nodes' pending count is consumed and never blocks")
+    void consumedDirectSendDoesNotBlockRepair() throws Exception {
+        String address = "0x" + "a4".repeat(20);
+        long chain = CHAIN_ID + 4;
+        // direct send at nonce 3 (mined long ago: the nodes' pending count is 5), then two sends that were dropped
+        assertThat(directSend(chain, address, 3, TX_3)).isEqualTo(BigInteger.valueOf(3));
+        jdbc.update("UPDATE wallet_nonce_lease SET next_nonce = 7 WHERE chain_id = ? AND sender_address = ?", chain, address);
+        ageLease(chain, address);
+
+        BigInteger next = coordinator.withNonce(chain, address,
+                nodes(5, java.util.Optional.of(BigInteger.valueOf(5)), TX_3::equals), nonce -> nonce);
+
+        assertThat(next).isEqualTo(BigInteger.valueOf(5));
+    }
+
+    @Test
+    @DisplayName("H10: when any node cannot answer, the lease is not repaired (the missing node may hold the tx)")
+    void unreadableNodeBlocksLeaseRepair() throws Exception {
+        String address = "0x" + "a5".repeat(20);
+        long chain = CHAIN_ID + 5;
+        jdbc.update("INSERT INTO wallet_nonce_lease (chain_id, sender_address, next_nonce, updated_at) VALUES (?, ?, 10, ?)",
+                chain, address, java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(3_600)));
+
+        BigInteger unknown = coordinator.withNonce(chain, address,
+                nodes(5, java.util.Optional.empty(), hash -> false), nonce -> nonce);
+        assertThat(unknown).isEqualTo(BigInteger.TEN);
+
+        ageLease(chain, address);
+        BigInteger failing = coordinator.withNonce(chain, address,
+                NonceCoordinator.ChainNonceSource.of(() -> BigInteger.valueOf(5),
+                        () -> { throw new java.io.IOException("node down"); }, hash -> false),
+                nonce -> nonce);
+        assertThat(failing).isEqualTo(BigInteger.valueOf(11));
+    }
+
+    @Test
+    @DisplayName("H10: a node that is already at or ahead of the lease wins over the lagging read")
+    void aNodeAheadOfTheLeaseWins() throws Exception {
+        String address = "0x" + "a6".repeat(20);
+        long chain = CHAIN_ID + 6;
+        jdbc.update("INSERT INTO wallet_nonce_lease (chain_id, sender_address, next_nonce, updated_at) VALUES (?, ?, 10, ?)",
+                chain, address, java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(3_600)));
+
+        BigInteger next = coordinator.withNonce(chain, address,
+                nodes(5, java.util.Optional.of(BigInteger.valueOf(12)), hash -> false), nonce -> nonce);
+
+        assertThat(next).isEqualTo(BigInteger.valueOf(12));
+    }
+
+    @Test
+    @DisplayName("H10: registering a direct send is idempotent per hash, works outside a lock, and prunes by retention")
+    void directLedgerRegistrationAndRetention() throws Exception {
+        String address = "0x" + "a7".repeat(20);
+        long chain = CHAIN_ID + 7;
+        String old = "0x" + "7".repeat(64);
+        jdbc.update("INSERT INTO evm_direct_submission (chain_id, sender_address, nonce, tx_hash, kind, created_at) "
+                + "VALUES (?, ?, 1, ?, 'SEND', ?)", chain, address, old,
+                java.sql.Timestamp.from(java.time.Instant.now().minus(java.time.Duration.ofDays(30))));
+
+        coordinator.registerDirectSubmission(chain, address.toUpperCase().replace("0X", "0x"),
+                BigInteger.valueOf(2), TX_5, "DEPLOY");
+        coordinator.registerDirectSubmission(chain, address, BigInteger.valueOf(2), TX_5, "DEPLOY");   // same hash again
+
+        assertThat(jdbc.queryForList("SELECT tx_hash FROM evm_direct_submission WHERE chain_id = ? AND sender_address = ?",
+                String.class, chain, address)).containsExactly(TX_5);
     }
 
     @Test

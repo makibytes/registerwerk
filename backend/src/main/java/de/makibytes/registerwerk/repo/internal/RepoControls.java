@@ -148,7 +148,13 @@ class RepoControls {
                 .add(substitutions.sumApprovedReplacement(entityId, assetId));
     }
 
+    /**
+     * H11: takes the {@code (entity, asset)} advisory lock the trading module also takes (listing, reservation,
+     * settlement) before reading the committed quantities, so two RFQs of one borrower, or a pledge racing a
+     * trade confirmation, cannot both pass. The lock is transaction-scoped and held until the caller commits.
+     */
     void requireHolding(UUID borrowerEntityId, UUID assetId, BigDecimal quantity) {
+        executions.lockHolding(borrowerEntityId, assetId);
         if (availableHolding(borrowerEntityId, assetId).compareTo(quantity) < 0) {
             throw new ComplianceGateException("The cash borrower does not hold " + quantity.stripTrailingZeros().toPlainString()
                     + " unencumbered units of the collateral on the register");

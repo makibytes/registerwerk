@@ -244,6 +244,7 @@ public class EcosystemDemoDataSeeder implements ApplicationRunner, Ordered, de.m
         PermissionDefinition platformPermission = platformPermission();
         orgGrant(platformPermission, meridianOrg, false);
         orgGrant(platformPermission, auroraOrg, false);
+        seedPaymasterPermissions(meridianOrg);
 
         // Both reference dApps are published by Meridian and operated with the same
         // treasury wallet that signed their manifests.
@@ -256,9 +257,9 @@ public class EcosystemDemoDataSeeder implements ApplicationRunner, Ordered, de.m
 
         log.info("Ecosystem demo data seeded: 7 orgs, 8 member wallets, 1 trusted issuer, "
                 + "{} permission definitions, {} grants, 4 published dApps, 2 ASSET_TOKEN_ADMIN grants",
-                1 + boardroom.definitionsCreated() + bondDesk.definitionsCreated() + repoFacility.definitionsCreated()
+                3 + boardroom.definitionsCreated() + bondDesk.definitionsCreated() + repoFacility.definitionsCreated()
                         + repoMarkets.definitionsCreated(),
-                2 + boardroom.grantsCreated() + bondDesk.grantsCreated() + repoFacility.grantsCreated()
+                3 + boardroom.grantsCreated() + bondDesk.grantsCreated() + repoFacility.grantsCreated()
                         + repoMarkets.grantsCreated());
     }
 
@@ -566,6 +567,41 @@ public class EcosystemDemoDataSeeder implements ApplicationRunner, Ordered, de.m
         issuer.setStatus(TrustedIssuerStatus.ACTIVE);
         issuer.setAddedTx(keccak256Hex("demo-kyc-issuer-add-tx"));
         trustedIssuers.save(issuer);
+    }
+
+    /**
+     * The two permissions {@code EwpgPaymaster} gates on. {@code paymaster.register-policy} lets an
+     * org register a sponsorship policy (a funder cannot squat a published policy id without it);
+     * {@code paymaster.configure} is the operator safety valve (budget caps, policy deactivation,
+     * EntryPoint stake) and the paymaster binds it to its {@code operatorOrg}. The demo has no
+     * paymaster deployed, so these rows only make the permissions grantable from the operator
+     * console. {@code register-policy} goes to Meridian, the demo's issuer-sponsor (its default gas
+     * policy is ISSUER-sponsored); Aurora and the green-bond deployment are operator-sponsored, but
+     * the demo data has no operator org, so no one is granted {@code configure} here (a real
+     * deployment grants it to the operator org only, and {@code register-policy} to the operator
+     * org plus each issuer that sponsors gas).
+     */
+    void seedPaymasterPermissions(OrgRegistration issuerSponsorOrg) {
+        PermissionDefinition registerPolicy = paymasterPermission("paymaster.register-policy",
+                "Register an EwpgPaymaster sponsorship policy",
+                "Allows an org to register a gas sponsorship policy on EwpgPaymaster; without it a wallet "
+                        + "cannot claim a published policy id.");
+        paymasterPermission("paymaster.configure",
+                "Administer EwpgPaymaster (operator org only)",
+                "Operator safety valve on EwpgPaymaster: org budget caps, policy deactivation and "
+                        + "withdrawal triggers, EntryPoint stake. Bound on chain to the paymaster's operator org.");
+        orgGrant(registerPolicy, issuerSponsorOrg, false);
+    }
+
+    private PermissionDefinition paymasterPermission(String code, String name, String description) {
+        PermissionDefinition definition = new PermissionDefinition();
+        definition.setCode(code);
+        definition.setPermissionHash(keccak256Hex(code));
+        definition.setName(name);
+        definition.setDescription(description);
+        definition.setStatus(PermissionDefinitionStatus.ACTIVE);
+        definition.setDefinedTx(keccak256Hex(code + "-define-tx"));
+        return permissionDefinitions.save(definition);
     }
 
     private PermissionDefinition platformPermission() {

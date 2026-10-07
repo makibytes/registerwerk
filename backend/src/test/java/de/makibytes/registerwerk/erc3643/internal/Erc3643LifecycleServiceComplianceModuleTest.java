@@ -77,11 +77,13 @@ class Erc3643LifecycleServiceComplianceModuleTest {
     @Mock private BlockchainClientRegistry blockchainClientRegistry;
     @Mock private BlockchainTransactionService txService;
     @Mock private HolderBlockGate holderBlockGate;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetHolderRepository holderRepository;
 
     private Erc3643LifecycleService service;
     private final UUID suiteId = UUID.randomUUID();
     private final UUID deploymentId = UUID.randomUUID();
     private final UUID chainConfigId = UUID.randomUUID();
+    private final UUID assetId = UUID.randomUUID();
     private final Web3j web3j = mock(Web3j.class);
 
     /** Values the mocked module returns from getConfig — (maxInvestors, maxBalance, cooldown, count, investors). */
@@ -96,7 +98,8 @@ class Erc3643LifecycleServiceComplianceModuleTest {
                 blockchainClientRegistry, txService, holderBlockGate,
                 org.mockito.Mockito.mock(de.makibytes.registerwerk.deployment.api.AssetLookupPort.class),
                 org.mockito.Mockito.mock(de.makibytes.registerwerk.kyc.api.OutboundDestinationGate.class),
-                org.mockito.Mockito.mock(de.makibytes.registerwerk.travelrule.api.TravelRuleGate.class));
+                org.mockito.Mockito.mock(de.makibytes.registerwerk.travelrule.api.TravelRuleGate.class),
+                holderRepository);
 
         Erc3643Suite suite = new Erc3643Suite();
         suite.setId(suiteId);
@@ -109,7 +112,10 @@ class Erc3643LifecycleServiceComplianceModuleTest {
         dep.setChainConfigId(chainConfigId);
         dep.setChain(Chain.ETHEREUM);
         dep.setNetwork(Network.MAINNET);
+        dep.setAssetId(assetId);
         when(deploymentRepository.findById(deploymentId)).thenReturn(Optional.of(dep));
+        when(holderRepository.findActiveByAssetId(eq(assetId), any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(org.springframework.data.domain.Page.empty());
         when(blockchainClientRegistry.getEvmClient(any(ChainDescriptor.class))).thenReturn(web3j);
         EvmSigner signer = mock(EvmSigner.class);
         when(signer.address()).thenReturn(SIGNER);
@@ -207,5 +213,109 @@ class Erc3643LifecycleServiceComplianceModuleTest {
                 .containsExactly("addModule", "setMaxInvestors", "removeModule");
         verify(complianceModuleRepository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    // ── H4: holders that exist before the module is bound ─────────────────────
+
+    private void holders(int count) {
+        List<de.makibytes.registerwerk.deployment.api.AssetHolder> all = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            de.makibytes.registerwerk.deployment.api.AssetHolder h = new de.makibytes.registerwerk.deployment.api.AssetHolder();
+            h.setAssetId(assetId);
+            h.setWalletAddress(String.format("0x%040x", i + 1));
+            all.add(h);
+        }
+        when(holderRepository.findActiveByAssetId(eq(assetId), any(org.springframework.data.domain.Pageable.class)))
+                .thenAnswer(inv -> {
+                    org.springframework.data.domain.Pageable p = inv.getArgument(1);
+                    int from = (int) Math.min(p.getOffset(), all.size());
+                    int to = Math.min(from + p.getPageSize(), all.size());
+                    return new org.springframework.data.domain.PageImpl<>(all.subList(from, to), p, all.size());
+                });
+    }
+
+    @Test
+    @DisplayName("H4: a module bound to a token that already has holders is back-filled with syncHolders, in pages, after it is configured")
+    void addComplianceModule_syncsExistingHoldersInPagesAfterConfiguring() {
+        onChainConfig = new long[] {150, 0, 0, 0, 0};
+        holders(250);
+
+        service.addComplianceModule(suiteId, MODULE, "EWPG", Map.of("maxInvestors", 150),
+                UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        List<String> targets = new java.util.ArrayList<>();
+        List<Function> sent = sentFunctions(targets);
+        assertThat(sent).extracting(Function::getName)
+                .containsExactly("addModule", "setMaxInvestors", "syncHolders", "syncHolders", "syncHolders");
+        assertThat(targets).containsExactly(COMPLIANCE, MODULE, MODULE, MODULE, MODULE);
+        List<Integer> pageSizes = sent.stream().filter(f -> f.getName().equals("syncHolders"))
+                .map(f -> ((org.web3j.abi.datatypes.DynamicArray<?>) f.getInputParameters().get(1)).getValue().size())
+                .toList();
+        assertThat(pageSizes).containsExactly(100, 100, 50);
+        assertThat(sent.stream().filter(f -> f.getName().equals("syncHolders")).toList()).allSatisfy(f ->
+                assertThat(((Address) f.getInputParameters().get(0)).getValue()).isEqualTo(COMPLIANCE));
+        verify(complianceModuleRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("H4: a token without holders needs no syncHolders transaction")
+    void addComplianceModule_noHolders_noSync() {
+        onChainConfig = new long[] {150, 0, 0, 0, 0};
+
+        service.addComplianceModule(suiteId, MODULE, "EWPG", Map.of("maxInvestors", 150),
+                UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        assertThat(sentFunctions(new java.util.ArrayList<>())).extracting(Function::getName)
+                .containsExactly("addModule", "setMaxInvestors");
+    }
+
+    @Test
+    @DisplayName("H4: a wallet is synced once and a non-EVM register wallet is skipped, not sent")
+    void addComplianceModule_syncDeduplicatesAndSkipsInvalidWallets() {
+        onChainConfig = new long[] {150, 0, 0, 0, 0};
+        de.makibytes.registerwerk.deployment.api.AssetHolder a = new de.makibytes.registerwerk.deployment.api.AssetHolder();
+        a.setAssetId(assetId);
+        a.setWalletAddress("0x" + "ab".repeat(20));
+        de.makibytes.registerwerk.deployment.api.AssetHolder dup = new de.makibytes.registerwerk.deployment.api.AssetHolder();
+        dup.setAssetId(assetId);
+        dup.setWalletAddress("0x" + "AB".repeat(20));
+        de.makibytes.registerwerk.deployment.api.AssetHolder starknet = new de.makibytes.registerwerk.deployment.api.AssetHolder();
+        starknet.setAssetId(assetId);
+        starknet.setWalletAddress("0x" + "1".repeat(63));
+        when(holderRepository.findActiveByAssetId(eq(assetId), any(org.springframework.data.domain.Pageable.class)))
+                .thenAnswer(inv -> new org.springframework.data.domain.PageImpl<>(
+                        List.of(a, dup, starknet), inv.getArgument(1), 3));
+
+        service.addComplianceModule(suiteId, MODULE, "EWPG", Map.of("maxInvestors", 150),
+                UUID.randomUUID(), "REGISTRY_ADMIN");
+
+        List<Function> sync = sentFunctions(new java.util.ArrayList<>()).stream()
+                .filter(f -> f.getName().equals("syncHolders")).toList();
+        assertThat(sync).hasSize(1);
+        assertThat(((org.web3j.abi.datatypes.DynamicArray<?>) sync.get(0).getInputParameters().get(1)).getValue())
+                .hasSize(1);
+    }
+
+    @Test
+    @DisplayName("H4: a failing syncHolders unbinds the module again, surfaces the error and persists nothing")
+    void addComplianceModule_syncFailure_unbindsAndThrows() {
+        onChainConfig = new long[] {150, 0, 0, 0, 0};
+        holders(3);
+        org.mockito.Mockito.doAnswer(inv -> {
+            Function fn = inv.getArgument(4);
+            if (fn.getName().equals("syncHolders")) {
+                throw new IllegalStateException("out of gas");
+            }
+            return null;
+        }).when(evmContractService).send(eq(chainConfigId), eq(web3j), any(EvmSigner.class), anyString(), any(Function.class));
+
+        assertThatThrownBy(() -> service.addComplianceModule(suiteId, MODULE, "EWPG",
+                Map.of("maxInvestors", 150), UUID.randomUUID(), "REGISTRY_ADMIN"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("out of gas");
+
+        assertThat(sentFunctions(new java.util.ArrayList<>())).extracting(Function::getName)
+                .containsExactly("addModule", "setMaxInvestors", "syncHolders", "removeModule");
+        verify(complianceModuleRepository, never()).save(any());
     }
 }

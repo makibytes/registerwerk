@@ -71,6 +71,14 @@ public class LendingReconciliationController {
         return ResponseEntity.accepted().body(Map.of("txHash", txHash));
     }
 
+    /** H11: submits setBorrowPaused(true) for every unverified / legacy market that is not yet paused on-chain. */
+    @PostMapping("/markets/legacy-borrow-pause")
+    @RequiresStepUp(reason = "Lending legacy market borrow pause", requireSecondApprover = true)
+    public ResponseEntity<List<LendingReconciliationService.PauseEnforcement>> enforceLegacyBorrowPause(
+            Authentication authentication) {
+        return ResponseEntity.accepted().body(reconciliationService.enforceLegacyBorrowPause(actorId(authentication)));
+    }
+
     private static UUID actorId(Authentication authentication) {
         try {
             return authentication == null ? null : UUID.fromString(authentication.getName());

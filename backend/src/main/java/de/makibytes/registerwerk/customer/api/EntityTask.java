@@ -18,6 +18,8 @@ public class EntityTask {
     public static final String KYC_REVIEW_REQUIRED = "KYC_REVIEW_REQUIRED";
     public static final String CHAIN_REINSTATEMENT_REQUIRED = "CHAIN_REINSTATEMENT_REQUIRED";
     public static final String SPERRVERMERK_EXPIRY_REVIEW = "SPERRVERMERK_EXPIRY_REVIEW";
+    /** A legal block (Sperrvermerk) is in the register but not (yet) enforced on-chain for a wallet (H5). */
+    public static final String SPERRVERMERK_FREEZE_NOT_PROPAGATED = "SPERRVERMERK_FREEZE_NOT_PROPAGATED";
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

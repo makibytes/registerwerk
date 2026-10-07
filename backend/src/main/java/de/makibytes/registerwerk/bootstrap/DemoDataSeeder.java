@@ -683,10 +683,12 @@ public class DemoDataSeeder implements ApplicationRunner, Ordered, de.makibytes.
         // ── Sperrvermerk (§16 eWpG holder block) ─────────────────────────────
         // A pledge notation on Rheinische Kapital's Green Bond position — demonstrates the
         // HolderBlock lifecycle (docs/compliance/sperrvermerk.md) with real data instead of an
-        // empty table. Written directly in its terminal ACTIVE state (no on-chain freeze tx —
-        // ERC-20 Green Bond has no identity-registry freeze primitive, matching
-        // sperrvermerk.md's documented "registry-layer block only" behaviour for non-ERC-3643
-        // standards); createdBy/dualControlApproverId both point at the demo dual-control
+        // empty table. Written directly in its terminal ACTIVE state, so the seeder submits no
+        // on-chain freeze itself: the nightly Sperrvermerk reconcile (SperrvermerkFreezeService)
+        // freezes the wallet on the Green Bond token like for any other block and records the
+        // outcome in holder_block_freeze (a demo chain that is unreachable shows up there as a
+        // FAILED freeze, which is the intended signal, not a seeding error);
+        // createdBy/dualControlApproverId both point at the demo dual-control
         // admin since the seeder has only one extra distinct operator identity readily at hand
         // — this is a fixture, not a simulation of the live 4-eyes approval flow itself.
         holderBlock(rheinische.getId(), greenBond.getId(), gbRheinische.getWalletAddress(),

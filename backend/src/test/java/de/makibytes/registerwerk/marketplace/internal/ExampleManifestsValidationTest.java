@@ -111,6 +111,63 @@ class ExampleManifestsValidationTest {
                         "bond-desk.pause", "bond-desk.legal-order");
     }
 
+    /**
+     * Wave 1 (H15-4): EwpgBondDesk pro-rates the first (stub) coupon period and withholds only the
+     * frozen units' share, escrowing it in the desk where it stays claimable after an unfreeze. The
+     * marketplace listing is what an integrator reads, so the manifest must not keep describing the
+     * old stub-pays-a-full-coupon / whole-coupon-withheld-in-the-treasury behaviour.
+     */
+    @org.junit.jupiter.api.Test
+    @DisplayName("bond-desk description states the pro-rated first period and the frozen-share-only withholding")
+    void bondDeskDescriptionMatchesTheContractBehaviour() throws IOException {
+        var result = service.validate(readManifest("bond-desk"), "bond-desk", chainConfigId);
+
+        assertThat(result.valid()).isTrue();
+        String description = result.manifest().description();
+        assertThat(description)
+                .contains("pro-rated")
+                .contains("only the frozen")
+                .contains("claimWithheldCoupon")
+                .contains("releaseWithheld")
+                .contains("forceRedeem")
+                .doesNotContain("cash stays in the treasury")
+                .doesNotContain("coupons are recorded as withheld");
+    }
+
+    @org.junit.jupiter.api.Test
+    @DisplayName("bond-desk manifest pins the sha256 of the current EwpgBondDesk ABI (forge inspect EwpgBondDesk abi --json)")
+    void bondDeskAbiHashIsNotTheStalePreReworkValue() throws IOException {
+        var manifest = new com.fasterxml.jackson.databind.ObjectMapper().readTree(readManifest("bond-desk"));
+        String hash = manifest.path("contracts").path(0).path("abiSha256").asText();
+
+        assertThat(hash).matches("[0-9a-f]{64}")
+                // sha256 of the ABI before claimWithheldCoupon/couponStart/firstPeriodSecs existed
+                .isNotEqualTo("80fb9250be05ff1bda25ee52923aa7d698c023390cd7f8ee99c50abd283e4935");
+    }
+
+    /**
+     * {@code EcosystemDemoDataSeeder} computes each seeded listing's hash and EIP-191 signature at
+     * seed time from the manifest bytes on the classpath (no signed fixture is checked in), so an
+     * edited manifest must still hash and verify exactly as {@code ManifestSigningService} does.
+     */
+    @ParameterizedTest(name = "{0}: seed-time hash + signature verify like the marketplace does")
+    @ValueSource(strings = {"boardroom", "bond-desk", "repo-facility", "repo-markets"})
+    void seededHashAndSignatureVerifyForEveryDemoManifest(String slug) throws Exception {
+        String raw = readManifest(slug);
+        var signing = new ManifestSigningService(
+                org.mockito.Mockito.mock(de.makibytes.registerwerk.orgidentity.api.PermissionGate.class),
+                org.mockito.Mockito.mock(de.makibytes.registerwerk.orgidentity.api.WalletSignatureVerifier.class));
+        String seederHash = org.web3j.utils.Numeric.toHexString(
+                org.web3j.crypto.Hash.sha3(raw.getBytes(StandardCharsets.UTF_8)));
+        assertThat(signing.manifestHash(raw)).isEqualTo(seederHash);
+
+        org.web3j.crypto.ECKeyPair key = org.web3j.crypto.Keys.createEcKeyPair();
+        var signature = org.web3j.crypto.Sign.signPrefixedMessage(seederHash.getBytes(StandardCharsets.UTF_8), key);
+        java.math.BigInteger recovered = org.web3j.crypto.Sign.signedPrefixedMessageToKey(
+                seederHash.getBytes(StandardCharsets.UTF_8), signature);
+        assertThat(recovered).isEqualTo(key.getPublicKey());
+    }
+
     @org.junit.jupiter.api.Test
     @DisplayName("boardroom declares no payment methods (pure governance, no cash leg)")
     void boardroomDeclaresNoPaymentMethods() throws IOException {

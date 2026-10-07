@@ -204,6 +204,11 @@ registerwerk:
     # automatically after expires_at. Default empty = none: every expired block moves to EXPIRY_REVIEW,
     # keeps blocking, and needs a step-up + second-approver lift.
     auto-expire-types: ${SPERRVERMERK_AUTO_EXPIRE_TYPES:}
+    # H5: on-chain freeze of a Sperrvermerk. The sweep reads the outcome of submitted freezes and retries failed
+    # ones (backoff, 5 attempts); the nightly reconcile (ShedLock) re-sends missing freezes and compares every
+    # still-blocking block with the tokens' isFrozen flags. The register-level block applies regardless.
+    freeze-sweep-ms: ${SPERRVERMERK_FREEZE_SWEEP_MS:300000}
+    freeze-reconcile-cron: ${SPERRVERMERK_FREEZE_RECONCILE_CRON:0 30 2 * * *}
   chain:
     # P4C-2: whitelist / mint / forced transfer / forced approve destinations must be an ACTIVE,
     # KYC-approved, screened holder of the asset. Disable ONLY in a demo profile that mints to
@@ -492,8 +497,11 @@ registerwerk:
       optimism-mainnet:  ${ECOSYSTEM_TIR_OPTIMISM_MAINNET:}
       optimism-testnet:  ${ECOSYSTEM_TIR_OPTIMISM_TESTNET:}
     # ONCHAINID ClaimIssuer contract per chain: _issuer of backend-signed KYC/AML claims and the
-    # trusted issuer of new T-REX suites. MANAGEMENT key = the chain's registry signer
-    # (`forge script script/DeployClaimIssuer.s.sol`). Must be a contract, never an EOA.
+    # trusted issuer of new T-REX suites. Decision: its MANAGEMENT key is the chain's registry signer
+    # (`forge script script/DeployClaimIssuer.s.sol` default), because the backend revokes claims with
+    # revokeClaimBySignature, which is onlyManager. That hot key is therefore a manager too; in
+    # production mode ClaimIssuerManagerReadinessCheck reports it (error log + gauge
+    # registerwerk_claim_issuer_hot_manager, never a boot failure). Must be a contract, never an EOA.
     claim-issuer:
       ethereum-mainnet:  ${CLAIM_ISSUER_ETH_MAINNET:}
       ethereum-testnet:  ${CLAIM_ISSUER_ETH_TESTNET:}
@@ -620,6 +628,9 @@ registerwerk:
     stuck-after: PT10M
     replacement-bump-percent: 15
     lease-repair-grace: PT10M
+    # How long a direct (non-outbox) send stays in the evm_direct_submission ledger that protects its nonce
+    # from lease repair (H10).
+    direct-ledger-retention: P7D
     # Function names that may be re-priced without an operator once they keep failing for fee reasons.
     # Regulatory operations (forced transfer, burn, freeze, recovery, pause) are NEVER auto-replaced,
     # whatever is listed here; those wait for the operator's cancel / re-price (step-up + 4-eyes).

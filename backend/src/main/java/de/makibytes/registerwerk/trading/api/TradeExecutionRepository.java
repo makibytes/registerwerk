@@ -100,6 +100,21 @@ public interface TradeExecutionRepository extends JpaRepository<TradeExecution, 
     long lockBuyerReservations(@Param("key") String key);
 
     /**
+     * H11: serialises every commitment of one {@code (entity, asset)} holding - a trade reservation or
+     * settlement, a new listing, and the repo desk's collateral check - on one transaction-scoped
+     * advisory lock, so a repo pledge and a sale of the same units cannot both pass their
+     * availability check. Callers re-read the committed/pledged quantities AFTER taking it.
+     * Lock order in the trading module: holder row first, then this lock; the repo module only takes this one.
+     */
+    @Query(value = "SELECT count(*) FROM (SELECT pg_advisory_xact_lock(hashtextextended(cast(:key AS text), 0))) t",
+            nativeQuery = true)
+    long lockHoldingKey(@Param("key") String key);
+
+    default void lockHolding(UUID entityId, UUID assetId) {
+        lockHoldingKey("holding:" + entityId + ":" + assetId);
+    }
+
+    /**
      * Most recent settled trade price for an asset — the reference price surfaced alongside
      * marketplace listings/offers. Previously a trader had nothing to
      * benchmark a quoted listing price against beyond eyeballing it.

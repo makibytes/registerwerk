@@ -209,6 +209,74 @@ class EvmContractServiceTest {
         assertThat(built.getGasPrice()).isEqualTo(BigInteger.valueOf(12_000_000_000L));
     }
 
+    private void stubLegacyFees() throws Exception {
+        doReturn(requestThrowing(new RuntimeException("fee history unavailable")))
+                .when(web3j).ethFeeHistory(eq(1), any(), any());
+        doReturn(requestThrowing(new RuntimeException("estimate unavailable")))
+                .when(web3j).ethEstimateGas(any());
+        EthGasPrice gasPriceResponse = new EthGasPrice();
+        gasPriceResponse.setResult(toHex(10_000_000_000L));
+        doReturn(requestReturning(gasPriceResponse)).when(web3j).ethGasPrice();
+    }
+
+    @Test
+    @DisplayName("H10: a direct send registers its nonce and hash with the coordinator BEFORE it is broadcast")
+    void directSendIsRegisteredBeforeBroadcast() throws Exception {
+        stubCommon();
+        stubLegacyFees();
+        service = newService(EvmSubmissionSettings.defaults());
+
+        service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT, new Function("setMaxBalance", List.of(), List.of()));
+
+        String expectedHash = Numeric.toHexString(Hash.sha3(new byte[]{1, 2, 3}));
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(nonceCoordinator, web3j);
+        order.verify(nonceCoordinator).registerDirectSubmission(
+                PINNED_CHAIN_ID, FROM, BigInteger.valueOf(7), expectedHash, "SUBMIT");
+        order.verify(web3j).ethSendRawTransaction(Numeric.toHexString(new byte[]{1, 2, 3}));
+    }
+
+    @Test
+    @DisplayName("H10: a direct send whose nonce cannot be registered is not broadcast (fail closed)")
+    void unregisteredDirectSendIsNotBroadcast() throws Exception {
+        when(signer.address()).thenReturn(FROM);
+        doReturn(requestReturning(chainIdResponse(11155111L))).when(web3j).ethChainId();
+        when(nonceCoordinator.withNonce(anyLong(), any(), any(), any())).thenAnswer(inv ->
+                ((NonceCoordinator.NonceCallback<?>) inv.getArgument(3)).withNonce(BigInteger.valueOf(7)));
+        when(signer.signTransaction(any(RawTransaction.class), anyLong())).thenReturn(new byte[]{1, 2, 3});
+        stubLegacyFees();
+        org.mockito.Mockito.doThrow(new IllegalStateException("ledger unavailable"))
+                .when(nonceCoordinator).registerDirectSubmission(anyLong(), any(), any(), any(), any());
+        service = newService(EvmSubmissionSettings.defaults());
+
+        assertThatThrownBy(() -> service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT,
+                new Function("setMaxBalance", List.of(), List.of())))
+                .hasMessageContaining("ledger unavailable");
+
+        verify(web3j, org.mockito.Mockito.never()).ethSendRawTransaction(any());
+    }
+
+    @Test
+    @DisplayName("H10: the durable (outbox) path is not registered in the direct ledger - its row is the ledger")
+    void outboxPreparationIsNotRegisteredAsDirect() throws Exception {
+        when(signer.address()).thenReturn(FROM);
+        doReturn(requestReturning(chainIdResponse(11155111L))).when(web3j).ethChainId();
+        when(nonceCoordinator.withReservedNonce(anyLong(), any(), any(), any())).thenAnswer(inv ->
+                ((NonceCoordinator.NonceCallback<?>) inv.getArgument(3)).withNonce(BigInteger.valueOf(9)));
+        when(signer.signTransaction(any(RawTransaction.class), anyLong())).thenReturn(new byte[]{1, 2, 3});
+        stubLegacyFees();
+        service = newService(EvmSubmissionSettings.defaults());
+
+        service.prepareDurable(CHAIN_CONFIG_ID, web3j, signer, CONTRACT, new Function("mint", List.of(), List.of()));
+
+        verify(nonceCoordinator, org.mockito.Mockito.never())
+                .registerDirectSubmission(anyLong(), any(), any(), any(), any());
+        // ... and the reading handed over for repair is a ChainNonceSource (every-node view), not a bare lambda
+        ArgumentCaptor<NonceCoordinator.ChainNonceSupplier> reading =
+                ArgumentCaptor.forClass(NonceCoordinator.ChainNonceSupplier.class);
+        verify(nonceCoordinator).withReservedNonce(anyLong(), any(), reading.capture(), any());
+        assertThat(reading.getValue()).isInstanceOf(NonceCoordinator.ChainNonceSource.class);
+    }
+
     @Test
     @DisplayName("durable preparation reserves/signs exact bytes without broadcasting them")
     void prepareDurableReturnsDeterministicHashWithoutRpcBroadcast() throws Exception {

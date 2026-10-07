@@ -72,8 +72,16 @@ public class ContractAddressConfig {
 
     /** ONCHAINID {@code ClaimIssuer} contract per chain identifier — the {@code _issuer} of every
      *  backend-issued KYC/AML claim and the trusted issuer of new T-REX suites. Its MANAGEMENT key
-     *  must be the chain's registry signer (deploy via {@code script/DeployClaimIssuer.s.sol}).
-     *  An EOA cannot be used: {@code Identity.addClaim} calls {@code isClaimValid} on the issuer. */
+     *  is, by decision, the chain's registry signer (the default of
+     *  {@code script/DeployClaimIssuer.s.sol}): the backend revokes claims with
+     *  {@code revokeClaimBySignature}, which ONCHAINID gates with {@code onlyManager}, so a
+     *  signer that is only a CLAIM key could sign claims but every automatic revocation would
+     *  revert. That makes the hot registry signer a manager too; production mode therefore reports
+     *  it ({@code ClaimIssuerManagerReadinessCheck}: error log + gauge
+     *  {@code registerwerk_claim_issuer_hot_manager}, never a boot failure). Splitting the roles
+     *  (cold {@code CLAIM_ISSUER_MANAGEMENT_KEY}) means giving up backend-side revocation until it is
+     *  routed through that key. An EOA cannot be used as issuer: {@code Identity.addClaim} calls
+     *  {@code isClaimValid} on it. */
     private Map<String, String> claimIssuer = new HashMap<>();
 
     /** EwpgRepoMarketFactory address per chain identifier — the provenance anchor of lending markets. */

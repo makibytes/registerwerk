@@ -100,7 +100,8 @@ public class LendingMarket {
     /** 5B-09: false once a re-verification found the on-chain binding (factory, collateral or loan
      *  token) no longer matches; such a market is hidden from the customer catalogue. */
     @Column(name = "binding_verified", nullable = false)
-    private boolean bindingVerified = true;
+    // H11: fail closed - a row is only verified once a successful on-chain verification was recorded
+    private boolean bindingVerified = false;
 
     @Column(name = "binding_verified_at")
     private Instant bindingVerifiedAt;

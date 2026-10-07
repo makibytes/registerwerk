@@ -89,6 +89,7 @@ class Erc3643SuiteOwnershipTest {
     @Mock private BlockchainClientRegistry blockchainClientRegistry;
     @Mock private BlockchainTransactionService txService;
     @Mock private HolderBlockGate holderBlockGate;
+    @Mock private de.makibytes.registerwerk.deployment.api.AssetHolderRepository holderRepository;
 
     private Erc3643LifecycleService lifecycle;
     private Erc3643Suite suite;
@@ -109,7 +110,8 @@ class Erc3643SuiteOwnershipTest {
                 blockchainClientRegistry, txService, holderBlockGate,
                 org.mockito.Mockito.mock(de.makibytes.registerwerk.deployment.api.AssetLookupPort.class),
                 org.mockito.Mockito.mock(de.makibytes.registerwerk.kyc.api.OutboundDestinationGate.class),
-                org.mockito.Mockito.mock(de.makibytes.registerwerk.travelrule.api.TravelRuleGate.class));
+                org.mockito.Mockito.mock(de.makibytes.registerwerk.travelrule.api.TravelRuleGate.class),
+                holderRepository);
 
         suite = new Erc3643Suite();
         suite.setId(suiteId);

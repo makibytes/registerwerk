@@ -461,12 +461,14 @@ public class BlockchainTransactionService {
                 nonceResolver.abandonNonce(tx, minedHash, reason, "system", null);
                 return;
             }
-            // P4C-6: a registry-mutating transaction is completed only when a second node agrees.
+            // P4C-6 / H9: a registry-mutating transaction is completed only when a second node agrees (full
+            // receipt, not only the transaction); in production mode a single healthy node is a hold, not a pass.
             if (txProperties.requiresSecondSource(tx.getMethodName())) {
                 SecondSourceConfirmer.Verdict verdict = secondSource.confirm(identifier,
                         minedHash != null ? minedHash : tx.getTxHash(), tx.getContractAddress(), r);
                 if (verdict == SecondSourceConfirmer.Verdict.HOLD_PENDING
-                        || verdict == SecondSourceConfirmer.Verdict.HOLD_MISMATCH) {
+                        || verdict == SecondSourceConfirmer.Verdict.HOLD_MISMATCH
+                        || verdict == SecondSourceConfirmer.Verdict.HOLD_SINGLE_SOURCE) {
                     log.warn("tx={} held: second-source confirmation {}", tx.getTxHash(), verdict);
                     return;
                 }

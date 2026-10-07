@@ -92,3 +92,80 @@ tests:
       - eval_time: 4m
         alertname: AssetRedemptionBurnFailed
         exp_alerts: []
+
+  # H5: a Sperrvermerk that did not reach the chain. Failed freezes are critical after 15 minutes; drift on the
+  # first increase; unsupported / pending / failed releases are warnings with their own delay.
+  - interval: 1m
+    input_series:
+      - series: 'registerwerk_sperrvermerk_freeze_failed{job="registerwerk-backend"}'
+        values: "0 0 1x30"
+      - series: 'registerwerk_sperrvermerk_freeze_drift_total{job="registerwerk-backend"}'
+        values: "0 0 0 1 1 1"
+      - series: 'registerwerk_sperrvermerk_freeze_unsupported{job="registerwerk-backend"}'
+        values: "2x80"
+      - series: 'registerwerk_sperrvermerk_freeze_pending{job="registerwerk-backend"}'
+        values: "1x500"
+      - series: 'registerwerk_sperrvermerk_release_failed{job="registerwerk-backend"}'
+        values: "0 1x40"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SperrvermerkFreezeFailed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: SperrvermerkFreezeFailed
+        exp_alerts:
+          - exp_labels: {severity: critical, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Sperrvermerk freeze failed on-chain"
+              description: "1 Sperrvermerk freeze(s) could not be submitted or failed on-chain: the wallet may still move on-chain although the register blocks it. See the SPERRVERMERK_FREEZE_NOT_PROPAGATED operator tasks and the holder_block_freeze rows; the sweep and the nightly reconcile keep retrying."
+      - eval_time: 4m
+        alertname: SperrvermerkFreezeDrift
+        exp_alerts:
+          - exp_labels: {severity: critical, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Sperrvermerk freeze lost on-chain"
+              description: "The nightly reconcile found a wallet NOT frozen although its Sperrvermerk freeze had been confirmed (someone unfroze it, or the token was replaced). It was re-frozen; find out who changed the freeze."
+      - eval_time: 30m
+        alertname: SperrvermerkFreezeUnsupported
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: SperrvermerkFreezeUnsupported
+        exp_alerts:
+          - exp_labels: {severity: warning, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Sperrvermerk on a deployment without an automated freeze"
+              description: "2 Sperrvermerk wallet(s) sit on deployments whose standard/chain has no automated, outcome-tracked freeze (SPL, Stellar, Starknet, Canton, confidential ERC-20). The register block applies; an operator must freeze the wallet through the chain's admin tooling (operator task SPERRVERMERK_FREEZE_NOT_PROPAGATED)."
+      - eval_time: 5h
+        alertname: SperrvermerkFreezePending
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: SperrvermerkFreezePending
+        exp_alerts:
+          - exp_labels: {severity: warning, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Sperrvermerk freeze submitted but not final"
+              description: "1 Sperrvermerk (un)freeze transaction(s) have been unconfirmed for over 6 hours (stuck in the outbox, or timed out un-mined). Check the transaction console and the EVM outbox alerts."
+      - eval_time: 40m
+        alertname: SperrvermerkReleaseFailed
+        exp_alerts:
+          - exp_labels: {severity: warning, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Unfreeze after a lifted Sperrvermerk failed"
+              description: "1 wallet(s) stay frozen on-chain although their Sperrvermerk was lifted. The holder cannot move assets; retry or repair the unfreeze (the sweep retries a few times)."
+
+  # H9: production mode holds a registry-mutating transaction instead of confirming it from one node.
+  - interval: 1m
+    input_series:
+      - series: 'registerwerk_confirmation_single_source_held_total{job="registerwerk-backend", chain="ETH_MAINNET"}'
+        values: "0 0 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: RpcSingleSourceHeld
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: RpcSingleSourceHeld
+        exp_alerts:
+          - exp_labels: {severity: critical, job: registerwerk-backend, chain: ETH_MAINNET}
+            exp_annotations:
+              summary: "A registry transaction on ETH_MAINNET is held: production mode needs a second healthy RPC node"
+              description: "A registry-mutating transaction (freeze, forced transfer, burn, mint, compliance change, ...) is mined and final but stays PENDING because fewer than two healthy nodes are available and production mode refuses single-source confirmation. Repair or add an independent node; the transaction completes by itself once a second node agrees. RpcSecondSourceHoldOverdue repeats the warning after 15 minutes."

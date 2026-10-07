@@ -52,6 +52,13 @@ public interface ChainConfigRepository extends JpaRepository<ChainConfig, UUID> 
     @Query("UPDATE ChainConfig c SET c.genesisHash = :hash WHERE c.id = :id AND c.genesisHash IS NULL")
     int pinGenesisHashIfAbsent(@Param("id") UUID id, @Param("hash") String hash);
 
+    /** Compare-and-set re-pin of the genesis hash, used only for local dev chains whose ledger was
+     *  recreated (demo seeding on, never production). Returns the rows changed (0 = the pin moved). */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE ChainConfig c SET c.genesisHash = :newHash WHERE c.id = :id AND c.genesisHash = :oldHash")
+    int repinGenesisHash(@Param("id") UUID id, @Param("oldHash") String oldHash, @Param("newHash") String newHash);
+
     /** Clears the genesis pin (operator action with step-up + second approver). */
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)

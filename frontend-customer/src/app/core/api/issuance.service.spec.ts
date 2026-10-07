@@ -52,6 +52,27 @@ describe('IssuanceService', () => {
         req.flush({ txId: 'tx-1' });
     });
 
+    it('mintConfidential() sends the approver token and step-up bearer (H13)', () => {
+        service.mintConfidential('asset-1', 'dep-1', { toAddress: '0xabc', amount: '5' },
+            { approvalToken: 'approver-jwt', stepUpToken: 'stepup-jwt' }).subscribe();
+
+        const req = httpMock.expectOne(`${base}/asset-1/deployments/dep-1/issuer/mint-confidential`);
+        expect(req.request.method).toBe('POST');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('approver-jwt');
+        expect(req.request.headers.get('Authorization')).toBe('Bearer stepup-jwt');
+        req.flush({ txId: 'tx-1' });
+    });
+
+    it('mintConfidential() without a step-up token leaves Authorization to the interceptor (Entra claims challenge)', () => {
+        service.mintConfidential('asset-1', 'dep-1', { toAddress: '0xabc', amount: '5' },
+            { approvalToken: 'approver-jwt' }).subscribe();
+
+        const req = httpMock.expectOne(`${base}/asset-1/deployments/dep-1/issuer/mint-confidential`);
+        expect(req.request.headers.has('Authorization')).toBe(false);
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('approver-jwt');
+        req.flush({ txId: 'tx-1' });
+    });
+
     it('stepUp() sends only code+method (no action: an action without target is refused)', () => {
         service.stepUp('123456', 'ISSUER_BURN_EWG26').subscribe();
 

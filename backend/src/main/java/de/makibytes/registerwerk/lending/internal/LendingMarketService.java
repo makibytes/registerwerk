@@ -128,7 +128,7 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
             Long chainId, String chainName) {}
 
     /** On-chain facts about a market's risk construction and operating binding — see {@link MarketView}. */
-    private record OnchainBinding(boolean riskParametersLegacy, String operatorOrg, String treasury) {}
+    private record OnchainBinding(boolean riskParametersLegacy, String operatorOrg, String treasury, boolean readFailed) {}
 
     /**
      * Mirrors {@code EwpgRepoMarket}'s construction check: {@code lltv × (1 + bonus)} must stay
@@ -294,7 +294,8 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
     /**
      * 5B-09: re-checks every non-retired market against the chain. Mismatches are flagged
      * ({@code binding_verified=false}) and hide the market from customers, never deleted; a market
-     * that verifies again is restored. An unreadable chain leaves the row unchanged.
+     * that verifies again is restored. An unreadable chain leaves the row unchanged (except that a row without a recorded
+     * successful verification is set to unverified) and is reported as not verified.
      */
     public List<ReverifyResult> reverifyMarkets() {
         List<ReverifyResult> results = new java.util.ArrayList<>();
@@ -330,11 +331,29 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
                 results.add(new ReverifyResult(market.getId(), market.getMarketAddress(), failure == null, failure));
             } catch (RuntimeException e) {
                 log.warn("Re-verification of market {} skipped: {}", market.getMarketAddress(), e.getMessage());
-                results.add(new ReverifyResult(market.getId(), market.getMarketAddress(), market.isBindingVerified(),
+                // H11: unreadable chain = unchanged state, but never reported as verified; a row without a
+                // recorded successful verification (legacy default) must not stay "verified" by omission.
+                if (market.getBindingVerifiedAt() == null && market.isBindingVerified()) {
+                    market.setBindingVerified(false);
+                    marketRepository.save(market);
+                }
+                results.add(new ReverifyResult(market.getId(), market.getMarketAddress(), false,
                         "not checked: " + e.getMessage()));
             }
         }
         return results;
+    }
+
+    /**
+     * H11: whether the market must be paused for new borrowing ON-CHAIN, not only in this service's view:
+     * an ACTIVE market whose binding is not verified, or which is legacy by a SUCCESSFUL on-chain read
+     * (a read failure is flagged elsewhere and never triggers a transaction).
+     */
+    public boolean requiresOnchainBorrowPause(LendingMarket market) {
+        if (market.getStatus() != LendingMarketStatus.ACTIVE) return false;
+        if (!market.isBindingVerified()) return true;
+        OnchainBinding binding = resolveOnchainBinding(market);
+        return !binding.readFailed() && binding.riskParametersLegacy();
     }
 
     /** T5-13 interim: only PROFESSIONAL / ELIGIBLE_COUNTERPARTY entities may borrow against securities. */
@@ -505,11 +524,12 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
      */
     private OnchainBinding resolveOnchainBinding(LendingMarket market) {
         if (market.getStatus() == LendingMarketStatus.RETIRED) {
-            return new OnchainBinding(false, null, null);
+            return new OnchainBinding(false, null, null, false);
         }
         String operatorOrg = null;
         String treasury = null;
         boolean legacy = true;
+        boolean readFailed = false;
         try {
             String chainIdentifier = resolveChainIdentifier(market.getChainConfigId());
             String quoteToken = onchainReader.oracleQuoteToken(chainIdentifier, market.getPriceOracleAddress());
@@ -522,10 +542,11 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
                     || !quoteToken.equalsIgnoreCase(market.getLoanTokenAddress())
                     || !riskParametersSound(market.getLltvBps(), market.getLiquidationBonusBps(), maxDeviationBps);
         } catch (RuntimeException e) {
+            readFailed = true;
             log.warn("Risk-parameter read failed for market {}; treating it as legacy: {}",
                     market.getMarketAddress(), e.getMessage());
         }
-        return new OnchainBinding(legacy, operatorOrg, treasury);
+        return new OnchainBinding(legacy, operatorOrg, treasury, readFailed);
     }
 
     private String pauseReason(LendingMarket market, LendingMarketStatus effective) {

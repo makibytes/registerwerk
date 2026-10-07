@@ -31,12 +31,16 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
@@ -96,6 +100,7 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered, de.ma
     private final TokenTransferRepository tokenTransfers;
     private final PaymentRailRepository paymentRails;
     private final PaymentRailChainAddressRepository paymentRailAddresses;
+    private final TransactionTemplate stepTx;
 
     public LocalLendingDemoSeeder(
             AssetRepository assets,
@@ -112,7 +117,12 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered, de.ma
             ContractAddressConfig contractAddresses,
             TokenTransferRepository tokenTransfers,
             PaymentRailRepository paymentRails,
-            PaymentRailChainAddressRepository paymentRailAddresses) {
+            PaymentRailChainAddressRepository paymentRailAddresses,
+            PlatformTransactionManager transactionManager) {
+        // One fresh transaction per seeding step: a step that fails rolls back alone, never poisoning
+        // a shared transaction (a joined REQUIRED callee marks it rollback-only even when we catch).
+        this.stepTx = new TransactionTemplate(transactionManager);
+        this.stepTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.paymentRails = paymentRails;
         this.paymentRailAddresses = paymentRailAddresses;
         this.assets = assets;
@@ -137,32 +147,83 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered, de.ma
 
     /**
      * Never lets a stale/partial on-chain demo deployment (e.g. an interrupted
-     * {@code demo-onchain-deploy} retry writing an address for a contract that never actually
-     * landed) fail the whole application's startup — this is optional local-demo enrichment
-     * behind {@code registerwerk.seed-demo-data}, not core functionality. A verification failure
-     * here means some demo data doesn't get linked; it must never mean the backend won't boot.
-     * Caught (not propagated) inside this same {@code @Transactional} method — letting the
-     * exception escape the proxy boundary would still commit whatever ran before the failure,
-     * which is the desired partial-success outcome, but self-invoking a separate method from here
-     * would bypass Spring's transactional proxy entirely.
+     * {@code demo-onchain-deploy} retry, or an anvil that was recreated while the chain identity pin
+     * is stale and every RPC node is quarantined) fail the whole application's startup — this is
+     * optional local-demo enrichment behind {@code registerwerk.seed-demo-data}, not core
+     * functionality. There is deliberately NO outer transaction: each step runs in its own
+     * {@code REQUIRES_NEW} transaction with the catch outside it. A joined (REQUIRED) callee such as
+     * {@code LendingMarketService.registerVerifiedMarket} marks the shared transaction rollback-only
+     * when it throws, so catching inside one outer transaction still ended in
+     * {@code UnexpectedRollbackException} at commit and a crash loop. A failed step is logged as one
+     * WARN line and skipped; the steps that succeeded stay committed.
      */
     @Override
-    @Transactional
     public void run(ApplicationArguments args) {
         if (addressesFile == null || addressesFile.isBlank()) {
             log.info("Local on-chain lending demo is not configured — skipped");
             return;
         }
+        Properties addresses;
         try {
-            seed();
+            addresses = loadAddresses();
         } catch (Exception e) {
-            log.error("Local on-chain lending demo seeding failed — some demo data may be "
-                    + "unlinked (safe to ignore outside local/demo use; rerun after confirming "
-                    + "demo-onchain-deploy completed cleanly to retry)", e);
+            log.warn("Local on-chain lending demo skipped — {}", e.getMessage());
+            return;
+        }
+        List<String> failed = new ArrayList<>();
+        step("RPC node + infrastructure addresses", failed, () -> {
+            ChainConfig chain = requireChain();
+            configureLocalRpc(chain);
+            reconcileInfrastructure(addresses);
+        });
+        step("asset deployments", failed, () -> {
+            updateDeployment(requireAsset("DEMO-BOND-MC-001"), requireAddress(addresses, "GREEN_BOND_TOKEN"));
+            updateDeployment(requireAsset("DEMO-NOTE-AF-001"), requireAddress(addresses, "INFRA_NOTE_TOKEN"));
+            updateDeployment(requireAsset("DEMO-EQ-MC-001"), requireAddress(addresses, "DEMO_ERC3643_TOKEN"));
+            updateDeployment(requireAsset("DEMO-NFT-MC-001"), requireAddress(addresses, "DEMO_ERC721_TOKEN"));
+            updateDeployment(requireAsset("DEMO-COMM-AF-001"), requireAddress(addresses, "DEMO_ERC1155_TOKEN"));
+            updateDeployment(requireAsset("DEMO-SFT-MC-001"), requireAddress(addresses, "DEMO_ERC3525_TOKEN"));
+            updateDeployment(requireAsset("DEMO-VAULT-AF-001"), requireAddress(addresses, "DEMO_ERC4626_VAULT"));
+            updateDeployment(requireAsset("DEMO-VAULT-AF-002"), requireAddress(addresses, "DEMO_ERC7540_VAULT"));
+        });
+        step("company wallets and holdings", failed, () -> {
+            Asset greenBond = requireAsset("DEMO-BOND-MC-001");
+            Asset infraNote = requireAsset("DEMO-NOTE-AF-001");
+            updateCompanyWallets(requireChain());
+            updateHoldingWallet(greenBond, "DEMO-NI-001");
+            updateHoldingWallet(greenBond, "DEMO-RK-001");
+            updateHoldingWallet(greenBond, "DEMO-AF-001");
+            remapSeededTransferWallets(greenBond);
+            updateHoldingWallet(infraNote, "DEMO-RK-001");
+            updateHoldingWallet(infraNote, "DEMO-FD-001");
+            updateHoldingWallet(infraNote, "DEMO-WI-001");
+        });
+        step("loan payment rail", failed, () -> bindLoanRail(requireChain(), requireAddress(addresses, "LOAN_TOKEN")));
+        step("Green Bond lending market", failed, () -> registerFreshMarket(requireChain(),
+                requireAsset("DEMO-BOND-MC-001"), requireAddress(addresses, "GREEN_BOND_MARKET")));
+        step("Infra Note lending market", failed, () -> registerFreshMarket(requireChain(),
+                requireAsset("DEMO-NOTE-AF-001"), requireAddress(addresses, "INFRA_NOTE_MARKET")));
+        if (failed.isEmpty()) {
+            log.info("Local on-chain demo linked: all 7 EVM standards, 2 lending markets, 5 funded companies");
+        } else {
+            log.warn("Local on-chain lending demo only partially linked — skipped: {}. Optional demo "
+                    + "enrichment; recreating the local anvil needs its chain identity re-pinned, then "
+                    + "rerun after confirming demo-onchain-deploy completed cleanly", failed);
         }
     }
 
-    private void seed() throws IOException {
+    /** Runs one seeding step in its own transaction; a failure is one WARN line (no stack) and a skip. */
+    private void step(String name, List<String> failed, Runnable work) {
+        try {
+            stepTx.executeWithoutResult(status -> work.run());
+        } catch (Exception e) {
+            failed.add(name);
+            log.warn("Local on-chain lending demo step '{}' skipped: {}", name, e.getMessage());
+            log.debug("Local on-chain lending demo step '{}' failure detail", name, e);
+        }
+    }
+
+    private Properties loadAddresses() throws IOException {
         Path file = Path.of(addressesFile);
         if (!Files.isRegularFile(file)) {
             throw new IllegalStateException("Local lending demo address file does not exist: " + file);
@@ -171,37 +232,12 @@ public class LocalLendingDemoSeeder implements ApplicationRunner, Ordered, de.ma
         try (InputStream input = Files.newInputStream(file)) {
             addresses.load(input);
         }
+        return addresses;
+    }
 
-        ChainConfig chain = chains.findByIdentifier(DEMO_CHAIN)
+    private ChainConfig requireChain() {
+        return chains.findByIdentifier(DEMO_CHAIN)
                 .orElseThrow(() -> new IllegalStateException("Demo chain is missing: " + DEMO_CHAIN));
-        configureLocalRpc(chain);
-        reconcileInfrastructure(addresses);
-        Asset greenBond = requireAsset("DEMO-BOND-MC-001");
-        Asset infraNote = requireAsset("DEMO-NOTE-AF-001");
-        String greenToken = requireAddress(addresses, "GREEN_BOND_TOKEN");
-        String infraToken = requireAddress(addresses, "INFRA_NOTE_TOKEN");
-        updateDeployment(greenBond, greenToken);
-        updateDeployment(infraNote, infraToken);
-        updateDeployment(requireAsset("DEMO-EQ-MC-001"), requireAddress(addresses, "DEMO_ERC3643_TOKEN"));
-        updateDeployment(requireAsset("DEMO-NFT-MC-001"), requireAddress(addresses, "DEMO_ERC721_TOKEN"));
-        updateDeployment(requireAsset("DEMO-COMM-AF-001"), requireAddress(addresses, "DEMO_ERC1155_TOKEN"));
-        updateDeployment(requireAsset("DEMO-SFT-MC-001"), requireAddress(addresses, "DEMO_ERC3525_TOKEN"));
-        updateDeployment(requireAsset("DEMO-VAULT-AF-001"), requireAddress(addresses, "DEMO_ERC4626_VAULT"));
-        updateDeployment(requireAsset("DEMO-VAULT-AF-002"), requireAddress(addresses, "DEMO_ERC7540_VAULT"));
-
-        updateCompanyWallets(chain);
-        updateHoldingWallet(greenBond, "DEMO-NI-001");
-        updateHoldingWallet(greenBond, "DEMO-RK-001");
-        updateHoldingWallet(greenBond, "DEMO-AF-001");
-        remapSeededTransferWallets(greenBond);
-        updateHoldingWallet(infraNote, "DEMO-RK-001");
-        updateHoldingWallet(infraNote, "DEMO-FD-001");
-        updateHoldingWallet(infraNote, "DEMO-WI-001");
-
-        bindLoanRail(chain, requireAddress(addresses, "LOAN_TOKEN"));
-        registerFreshMarket(chain, greenBond, requireAddress(addresses, "GREEN_BOND_MARKET"));
-        registerFreshMarket(chain, infraNote, requireAddress(addresses, "INFRA_NOTE_MARKET"));
-        log.info("Local on-chain demo linked: all 7 EVM standards, 2 lending markets, 5 funded companies");
     }
 
     private void reconcileInfrastructure(Properties addresses) {

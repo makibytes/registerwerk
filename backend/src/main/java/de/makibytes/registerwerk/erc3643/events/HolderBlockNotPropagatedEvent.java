@@ -5,10 +5,20 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * An ACTIVE §16 eWpG Sperrvermerk resolved to no deployment to freeze although its asset has EVM
- * deployments (T3-15): the block is in the register but not on-chain, so on-chain paths that rely
- * on the frozen flag (repo repay/liquidate, direct transfers) stay open. Operators must apply the
- * freeze manually. Published by {@code SperrvermerkOnchainSyncListener}.
+ * A §16 eWpG Sperrvermerk is in the register but NOT (yet) enforced on-chain, so on-chain paths that rely on
+ * the frozen flag (repo repay/liquidate, direct transfers) stay open for that wallet. The register-level block
+ * stays authoritative; this event is the audit record, and an operator task plus an alert accompany it.
+ * Published by the Sperrvermerk on-chain sync ({@code SperrvermerkFreezeService}); {@code details.cause} says why:
+ * <ul>
+ *   <li>{@code NO_DEPLOYMENT_MATCHED} (T3-15) - an asset-scoped block matches no register row although the asset has
+ *       EVM deployments;</li>
+ *   <li>{@code SUBMISSION_FAILED} - the freeze could not be submitted (signer, RPC, bad state);</li>
+ *   <li>{@code TX_FAILED} - the freeze was submitted but reverted, was replaced or never mined (H5: the outcome
+ *       is now read from the transaction status);</li>
+ *   <li>{@code UNSUPPORTED_ON_CHAIN} - the deployment's standard/chain has no automated, outcome-tracked
+ *       freeze (SPL, Stellar, Starknet, Canton, confidential ERC-20);</li>
+ *   <li>{@code DRIFT} - the nightly read-back found the wallet not frozen although the freeze was confirmed.</li>
+ * </ul>
  */
 public record HolderBlockNotPropagatedEvent(UUID holderBlockId, Map<String, Object> details)
         implements AuditableEvent {

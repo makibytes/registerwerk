@@ -157,6 +157,8 @@ actually ran on the leader replica — never lock-skipped ticks on the other rep
 | Metric | Description | Alert threshold |
 |--------|-------------|----------------|
 | `registerwerk_blockchain_tx_confirmation_latency_seconds{chain,outcome}` (histogram) | Time from a `blockchain_transaction` row's submission (`created_at`) to its terminal status (`SUCCESS`/`FAILED`/`TIMEOUT`) | p95 > 5 min for 10m = WARN (`BlockchainTxConfirmationLatencyHigh`) |
+| `registerwerk_confirmation_single_source_held_total{chain}` | A registry-mutating transaction was held because production mode refuses single-source confirmation (fewer than two healthy nodes) | any = CRITICAL (`RpcSingleSourceHeld`) |
+| `registerwerk_confirmation_second_source_held` | Registry-mutating transactions currently waiting for a second source (this instance) | informational |
 
 ### Durable EVM outbox and TIMEOUT semantics (`blockchain` module)
 
@@ -167,7 +169,8 @@ A signed transaction that no node ever accepts, or one dropped from the mempool,
 | `registerwerk_outbox_oldest_prepared_age_seconds{chain_id,signer}` | Age of the oldest signed payload not yet accepted by a node | > 10 min = CRITICAL (`EvmOutboxPreparedStuck`) |
 | `registerwerk_outbox_prepared_count{chain_id,signer}` | Signed payloads waiting to be broadcast | informational |
 | `registerwerk_outbox_stuck_count{chain_id,signer}` | Payloads without a receipt for 10+ minutes | > 0 for 5m = WARN (`EvmOutboxBroadcastStuck`) |
-| `registerwerk_outbox_lease_repaired_total{chain}` | A stale nonce lease was capped back to the chain value (dropped transaction) | any = WARN (`EvmNonceLeaseRepaired`) |
+| `registerwerk_outbox_lease_repaired_total{chain}` | A stale nonce lease was capped back to the chain value (dropped transaction): every node reported a lower pending count and no outbox row or live direct send held the gap | any = WARN (`EvmNonceLeaseRepaired`) |
+| `registerwerk_outbox_lease_repair_blocked_total{chain,reason}` | A nonce lease repair was refused (`reason`: `NODE_UNAVAILABLE` a node could not answer, `OUTBOX_ROW`, `DIRECT_SEND` a registered direct transaction is still known to a node, `NO_NODE_VIEW`): a nonce that may belong to a live transaction is never reused | informational |
 | `registerwerk_blockchain_tx_late_mined_total{outcome}` | A transaction marked `TIMEOUT` was mined after all | any = INFO (`BlockchainTxLateMined`) |
 
 - **`TIMEOUT` is not a failure.** It means "not mined within the timeout"; the transaction may still execute. The poller keeps reading `TIMEOUT` rows for `registerwerk.blockchain.tx.late-mined-window-seconds` (7 days) and completes them as `SUCCESS`/`FAILED` when a receipt arrives. Only `FAILED` (reverted) and `REPLACED` (the nonce was consumed by another transaction) count as confirmed failures; business state is never cleared, and nothing is resubmitted, on `TIMEOUT` alone.

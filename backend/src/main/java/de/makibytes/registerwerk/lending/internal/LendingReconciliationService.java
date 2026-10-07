@@ -251,6 +251,41 @@ public class LendingReconciliationService {
         return txHash;
     }
 
+    public record PauseEnforcement(UUID marketId, String marketAddress, String outcome, String txHash) {}
+
+    /**
+     * H11: makes the "withdraw-only" state of unverified / legacy markets real on-chain. For every ACTIVE
+     * market that {@link LendingMarketService#requiresOnchainBorrowPause} flags and whose
+     * {@code borrowPaused} flag reads false, submits {@code setBorrowPaused(true)} through the durable outbox
+     * ({@code SUBMITTED}). An unreadable chain is reported ({@code NOT_CHECKED}), never guessed. Only a pause is
+     * ever submitted here; lifting it stays the 4-eyes {@code borrow-paused} action.
+     */
+    public List<PauseEnforcement> enforceLegacyBorrowPause(UUID actorId) {
+        releaseGate.requireReleased();
+        List<PauseEnforcement> results = new java.util.ArrayList<>();
+        for (LendingMarket market : marketRepository.findByStatus(LendingMarketStatus.ACTIVE)) {
+            if (!marketService.requiresOnchainBorrowPause(market)) continue;
+            boolean paused;
+            try {
+                paused = onchainReader.borrowPaused(
+                        marketService.resolveChainIdentifier(market.getChainConfigId()), market.getMarketAddress());
+            } catch (RuntimeException e) {
+                log.warn("Legacy-pause enforcement could not read borrowPaused of market {}: {}",
+                        market.getMarketAddress(), e.getMessage());
+                results.add(new PauseEnforcement(market.getId(), market.getMarketAddress(), "NOT_CHECKED", null));
+                continue;
+            }
+            if (paused) {
+                results.add(new PauseEnforcement(market.getId(), market.getMarketAddress(), "ALREADY_PAUSED", null));
+                continue;
+            }
+            String txHash = setBorrowPaused(market.getId(), true,
+                    "Legacy or unverified market: new borrowing disabled on-chain (withdraw/repay only)", actorId);
+            results.add(new PauseEnforcement(market.getId(), market.getMarketAddress(), "SUBMITTED", txHash));
+        }
+        return results;
+    }
+
     static byte[] hexToBytes32(String hex) {
         byte[] out = new byte[32];
         for (int i = 0; i < 32; i++) {

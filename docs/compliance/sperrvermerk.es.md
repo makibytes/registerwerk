@@ -50,7 +50,7 @@ La entidad `HolderBlock` en el módulo `kyc` almacena todos los bloques activos 
 | `liftedBy` | UUID del operador que levantó el bloque |
 | `twoManRuleApprover` | UUID del segundo aprobador |
 | `twoManRuleApprovedAt` | Cuando el segundo aprobador confirmó |
-| `onChainFreezeTxHash` | Hash de la transacción de congelación en cadena correspondiente |
+| `onChainFreezeTxHash` | Hash de la primera transacción de congelación en cadena confirmada de este bloqueo. Un bloqueo puede alcanzar varios despliegues; el resultado por despliegue y wallet está en `holder_block_freeze` (véase [Alcance en cadena](#on-chain-reach)) |
 
 ---
 
@@ -71,12 +71,12 @@ stateDiagram-v2
 1. `REGISTRY_ADMIN` envía `POST /api/v1/holder-blocks` con tipo de bloque, base legal y vencimiento opcional
 2. El aspecto `@RequiresStepUp` exige un token de autenticación reforzada (step-up) recién emitido (TOTP o WebAuthn)
 3. `SperrvermerkService` comprueba que un segundo aprobador haya confirmado (token `dualControlPending`)
-4. Si el activo utiliza [ERC-3643](../token-standards/erc3643.md) tokens vinculados a identidad, se llama a `freezeAddress()` en el contrato del módulo de cumplimiento
-5. El `onChainFreezeTxHash` se almacena una vez confirmada la transacción
+4. Una vez confirmado el bloqueo en la base de datos, `SperrvermerkOnchainSyncListener` congela la wallet mediante el outbox duradero de transacciones en cada despliegue de token activo de los activos que mantiene (o solo en el del `assetId`, si el bloqueo se limita a un activo). Los estándares que se pueden congelar figuran [más abajo](#on-chain-reach); un despliegue que no se puede congelar se registra y se escala, no se omite
+5. El resultado por bloqueo, despliegue y wallet se registra en `holder_block_freeze` y sigue el estado de la transacción: `SUBMITTED` pasa a `CONFIRMED` (entonces se almacena `onChainFreezeTxHash`) o a `FAILED`
 6. Se emite un `AuditEvent` con los detalles completos del bloque
 
 **Levantando un bloque:**
-Se aplica el mismo flujo de autenticación reforzada (step-up) + doble control (4-eyes). Levantar el bloque llama al `unfreezeAddress()` correspondiente on-chain y borra el campo `HolderBlock.liftedAt`.
+Se aplica el mismo flujo de autenticación reforzada (step-up) + doble control (4-eyes). El levantamiento concilia en sentido inverso: por cada wallet y despliegue, la descongelación en cadena solo se envía si ningún otro bloqueo vigente sigue cubriendo la wallet (`RELEASE_SUBMITTED`, luego `RELEASED`). Una descongelación fallida deja la wallet congelada, se notifica (`HOLDER_BLOCK_RELEASE_FAILED`, tarea de operador) y se reintenta. En el registro el bloqueo queda `LIFTED` en cualquier caso; se rellenan `liftedAt` y `liftedBy`.
 
 **Vencimiento automático:**
 Un trabajo `@Scheduled` se ejecuta todas las noches y encuentra todos los bloqueos ACTIVE con `expiresAt < NOW()`. Por defecto **ningún tipo de bloqueo vence automáticamente**: el bloqueo pasa a `EXPIRY_REVIEW`, sigue bloqueando (controles del registro y congelación on-chain) y se genera una tarea de operador y un correo a cumplimiento. Solo se levanta mediante el levantamiento normal (step-up + segundo aprobador). Los tipos listados en `registerwerk.sperrvermerk.auto-expire-types` (vacío por defecto) se siguen levantando automáticamente a `EXPIRED`.
@@ -95,15 +95,46 @@ El `HolderBlock` se aplica en múltiples capas:
 | `forceTransfer` | `TokenAdminController` — verificado antes de cualquier llamada de transferencia |
 | `forceApprove` | `TokenAdminController` — comprobado antes de la aprobación |
 | Creación de `AssetHolder` (nuevo inversor) | `AssetService` — los bloques existentes pueden impedir nuevas posiciones |
-| Transferencia en cadena (ERC-3643) | `ComplianceModuleContract`: el registro de identidad rechaza direcciones congeladas |
+| Transferencia en cadena | El contrato del token rechaza movimientos desde, hacia o por una dirección congelada (`freezeAddress` / `setAddressFrozen`), véase [Alcance en cadena](#on-chain-reach) |
 
-El bloque de capa de registro (DB) y la congelación en cadena (contrato inteligente) son **ambos** necesarios para los tokens ERC-3643. Para otros estándares (ERC-20, ERC-3525), solo se aplica el bloque de la capa de registro; la transferencia en cadena se evita porque el operador se niega a firmar la transacción.
+---
+
+## Alcance en cadena { #on-chain-reach }
+
+El bloqueo de la capa de registro (base de datos) es el que prevalece y se aplica a todos los estándares de token. La congelación en cadena lo refleja allí donde un contrato puede expresarlo, de modo que también se cierren para la wallet las vías que el backend no media (transferencias directas, `repay`/`liquidate` del repo, depósitos y reembolsos de vaults). Es una medida técnica, no un efecto jurídico (véase la advertencia de revisión al principio de la página).
+
+| Estándar / cadena | Congelación en cadena automatizada | Cómo |
+|---|---|---|
+| ERC-20, ERC-721, ERC-1155 | Sí | `freezeAddress(address,string)` (`EwpgCompliance`) mediante el puerto de administración de tokens |
+| ERC-3525 | Sí | `freezeAddress` mediante el puerto de administración ERC-3525; se rechaza una descongelación manual mientras un bloqueo cubra la wallet |
+| Participaciones de vault ERC-4626 / ERC-7540 | Sí | `freezeAddress` (`EwpgCompliance`); a un propietario o pagador congelado no se le paga y el depósito en garantía permanece en el vault (congelación in situ) |
+| ERC-3643 (T-REX) | Sí | `setAddressFrozen(address,true)` en el token (`Erc3643LifecycleService`) |
+| ERC-3643 confidencial (Zama fhEVM) | Sí | `setAddressFrozen(address,bool)` |
+| ERC-20 confidencial | No | el contrato no tiene función de congelación |
+| Solana (SPL, Token-2022 y los preajustes de extensiones) | No | `FreezeAccount` actúa por cuenta de token y es una acción manual del operador |
+| Starknet (ERC-20, ERC-3525) | No | los contratos Cairo tienen `freeze_address`, pero es solo una llamada manual del operador: los invokes de Starknet no pasan por el outbox duradero y sus recibos no se siguen, por lo que no podría confirmarse ningún resultado |
+| Stellar | No | una congelación es un cambio de autorización de la trustline, una acción manual del operador |
+| Canton / Daml | No | no hay congelación a nivel de titular que el registro pueda gobernar |
+
+Cada congelación pasa por el outbox duradero de transacciones (firmada en la transacción de base de datos, difundida tras el commit) y su resultado se lee del estado de la transacción. `holder_block_freeze` guarda una fila por bloqueo, despliegue y wallet:
+
+| Estado | Significado |
+|---|---|
+| `SUBMITTED` | la transacción de congelación está en el outbox, su resultado aún no es definitivo |
+| `CONFIRMED` | la transacción es definitiva y exitosa; `onChainFreezeTxHash` queda almacenado; evento de auditoría `HOLDER_BLOCK_FREEZE_CONFIRMED` |
+| `FAILED` | la congelación no pudo enviarse, se revirtió o fue reemplazada: la wallet aún puede moverse en cadena |
+| `UNSUPPORTED_ON_CHAIN` | el estándar o la cadena no tiene congelación automatizada (tabla anterior): se necesita intervención manual |
+| `RELEASE_SUBMITTED` / `RELEASED` / `RELEASE_FAILED` | lo mismo para la descongelación tras levantar un bloqueo; `RELEASED` cubre también «otro bloqueo aún cubre la wallet, la congelación se mantiene» |
+
+Un resultado `FAILED` o `UNSUPPORTED_ON_CHAIN` nunca pasa inadvertido: genera el evento de auditoría `HOLDER_BLOCK_NOT_PROPAGATED` (`cause`: `SUBMISSION_FAILED`, `TX_FAILED`, `UNSUPPORTED_ON_CHAIN`, `NO_DEPLOYMENT_MATCHED` o `DRIFT`), una tarea de operador `SPERRVERMERK_FREEZE_NOT_PROPAGATED` sobre la entidad emisora del activo, los indicadores `registerwerk_sperrvermerk_freeze_failed` / `registerwerk_sperrvermerk_freeze_unsupported` y las alertas `SperrvermerkFreezeFailed` / `SperrvermerkFreezeUnsupported`. **Nunca levanta el bloqueo de la capa de registro.**
+
+Dos trabajos mantienen la cadena alineada con el registro (ambos protegidos con ShedLock). Un barrido cada 5 minutos lee el resultado de las congelaciones enviadas y reintenta las fallidas con back-off (5 intentos; `registerwerk.sperrvermerk.freeze-sweep-ms`). Una conciliación nocturna (`registerwerk.sperrvermerk.freeze-reconcile-cron`, por defecto 02:30) recorre cada bloqueo que aún bloquea, tanto `ACTIVE` como `EXPIRY_REVIEW`: reenvía las congelaciones ausentes y fallidas, relee `isFrozen` de las confirmadas y notifica como deriva (`registerwerk_sperrvermerk_freeze_drift_total`, alerta `SperrvermerkFreezeDrift`, y la vuelve a congelar) una wallet que **no** está congelada. Una descongelación fallida deja la wallet congelada (el sentido seguro) y se notifica mediante `HOLDER_BLOCK_RELEASE_FAILED`.
 
 ---
 
 ## Registro de auditoría { #audit-trail }
 
-Cada creación, modificación y levantamiento de bloques genera un `AuditEvent` de tipo `HOLDER_BLOCK_CREATED`, `HOLDER_BLOCK_LIFTED` o `HOLDER_BLOCK_EXPIRED`. Estos eventos incluyen:
+Cada creación, modificación y levantamiento de bloques genera un `AuditEvent` de tipo `HOLDER_BLOCK_CREATED`, `HOLDER_BLOCK_LIFTED` o `HOLDER_BLOCK_EXPIRED`; el seguimiento en cadena añade `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` y `HOLDER_BLOCK_RELEASE_FAILED`. Estos eventos incluyen:
 
 - la identidad del operador que inicia la acción
 - la identidad del segundo aprobador (para crear/levantar)

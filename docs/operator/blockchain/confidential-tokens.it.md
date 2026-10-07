@@ -45,7 +45,7 @@ viewer come `initialViewers`.
 
 | Azione | Punto finale | Note |
 |---|---|---|
-| Conio confidenziale (emissione di emittente/operatore) | `POST /api/v1/assets/{id}/deployments/{depId}/issuer/mint-confidential` | Crittografa l'importo lato server tramite il sidecar `zama-relayer`: non è necessario alcun browser/portafoglio |
+| Conio confidenziale (emissione di emittente/operatore) | `POST /api/v1/assets/{id}/deployments/{depId}/issuer/mint-confidential` | Crittografa l'importo lato server tramite il sidecar `zama-relayer`: non è necessario alcun browser/portafoglio. Richiede step-up (`ISSUER_MINT_CONFIDENTIAL`) e un secondo approvatore legato al corpo della richiesta; la destinazione deve essere un titolare di registro sottoposto a screening, come per il mint normale |
 | Distruzione forzata confidenziale (§26 Einziehung) | `POST .../admin/force-burn-confidential` | Stesso percorso di crittografia lato server; già soggetto al controllo agente/proprietario: tale controllo È l'autorità per la distruzione forzata |
 | Aggiungi un visualizzatore confidenziale | `POST .../admin/confidential-add-viewer` | Concede i diritti di decrittografia sul saldo di ogni detentore in futuro, ad es. aggiunta di un revisore o del portafoglio dell'emittente dopo l'implementazione |
 | Rimuovere un visualizzatore confidenziale | `POST .../admin/confidential-remove-viewer` | Interrompe le concessioni future: NON revoca retroattivamente gli handle storici già decifrabili (ACL di Zama non ha una primitiva di revoca) |

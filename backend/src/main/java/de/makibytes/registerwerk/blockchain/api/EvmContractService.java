@@ -253,11 +253,12 @@ public class EvmContractService {
             // whether on this instance or another replica — would otherwise read the same
             // pending nonce and one transaction would silently replace the other.
             EthSendTransaction sent = nonceCoordinator.withNonce(chainId, signer.address(),
-                    () -> nonce(web3j, signer.address()),
+                    nonceSource(web3j, ctx.identifier(), signer.address()),
                     nonce -> {
                         RawTransaction tx = buildTransaction(
                                 chainId, nonce, effectiveGasLimit, contractAddress, encodedData, fees);
                         byte[] signed = signer.signTransaction(tx, chainId);
+                        registerDirect(chainId, signer.address(), nonce, signed, "SUBMIT");
                         EthSendTransaction result = web3j
                                 .ethSendRawTransaction(Numeric.toHexString(signed))
                                 .send();
@@ -299,7 +300,7 @@ public class EvmContractService {
                     estimateGasLimit(web3j, signer.address(), contractAddress, encodedData, CALL_GAS_LIMIT));
             Fees fees = resolveFees(web3j, ctx);
             return nonceCoordinator.withReservedNonce(chainId, signer.address(),
-                    () -> nonce(web3j, signer.address()), nonce -> {
+                    nonceSource(web3j, ctx.identifier(), signer.address()), nonce -> {
                         RawTransaction tx = buildTransaction(
                                 chainId, nonce, effectiveGasLimit, contractAddress, encodedData, fees);
                         byte[] signed = signer.signTransaction(tx, chainId);
@@ -475,11 +476,12 @@ public class EvmContractService {
                     estimateGasLimit(web3j, signer.address(), contractAddress, encodedData, gasLimit));
             Fees fees = resolveFees(web3j, ctx);
             EthSendTransaction sent = nonceCoordinator.withNonce(chainId, signer.address(),
-                    () -> nonce(web3j, signer.address()),
+                    nonceSource(web3j, ctx.identifier(), signer.address()),
                     nonce -> {
                         RawTransaction tx = buildTransaction(
                                 chainId, nonce, effectiveGasLimit, contractAddress, encodedData, fees);
                         byte[] signed = signer.signTransaction(tx, chainId);
+                        registerDirect(chainId, signer.address(), nonce, signed, "SEND");
                         EthSendTransaction result = web3j
                                 .ethSendRawTransaction(Numeric.toHexString(signed))
                                 .send();
@@ -536,13 +538,14 @@ public class EvmContractService {
                     estimateDeployGasLimit(web3j, signer.address(), data, DEPLOY_GAS_LIMIT));
             Fees fees = resolveFees(web3j, ctx);
             EthSendTransaction sent = nonceCoordinator.withNonce(chainId, signer.address(),
-                    () -> nonce(web3j, signer.address()),
+                    nonceSource(web3j, ctx.identifier(), signer.address()),
                     nonce -> {
                         // "" (empty, not null) signals contract creation to RawTransaction's RLP
                         // encoding — the same convention RawTransaction.createContractTransaction
                         // uses internally for the legacy path.
                         RawTransaction tx = buildTransaction(chainId, nonce, effectiveGasLimit, "", data, fees);
                         byte[] signed = signer.signTransaction(tx, chainId);
+                        registerDirect(chainId, signer.address(), nonce, signed, "DEPLOY");
                         EthSendTransaction result = web3j
                                 .ethSendRawTransaction(Numeric.toHexString(signed))
                                 .send();
@@ -1010,6 +1013,65 @@ public class EvmContractService {
         } finally {
             immediateSlots.release();
         }
+    }
+
+    /**
+     * Registers a direct send's nonce and hash with the coordinator before it is broadcast (H10), so that lease
+     * repair can never hand the nonce out again while the transaction is alive.
+     */
+    private void registerDirect(long chainId, String sender, BigInteger nonce, byte[] signed, String kind) {
+        nonceCoordinator.registerDirectSubmission(chainId, sender, nonce, Numeric.toHexString(Hash.sha3(signed)), kind);
+    }
+
+    /**
+     * The chain reading handed to the {@link NonceCoordinator}: the ordinary failover read for
+     * {@code max(lease, chain)}, plus what lease repair needs before it may reuse a nonce (H10) - the pending
+     * count of <em>every</em> routable node and whether any node still knows a given transaction.
+     */
+    NonceCoordinator.ChainNonceSource nonceSource(Web3j web3j, String identifier, String address) {
+        return NonceCoordinator.ChainNonceSource.of(
+                () -> nonce(web3j, address),
+                () -> authoritativePendingNonce(identifier, address),
+                hash -> anyNodeKnows(identifier, hash));
+    }
+
+    /**
+     * Highest {@code eth_getTransactionCount(PENDING)} over all routable nodes of the chain (healthy or not: a node
+     * that is down may be the one that holds the transaction). Empty when the chain has no node pool or any node
+     * fails to answer - the caller then refuses to repair.
+     */
+    Optional<BigInteger> authoritativePendingNonce(String identifier, String address) {
+        List<BlockchainClientRegistry.EvmNodeClient> nodes = clientRegistry.evmNodeClients(identifier);
+        if (nodes.isEmpty()) return Optional.empty();
+        BigInteger highest = null;
+        for (BlockchainClientRegistry.EvmNodeClient node : nodes) {
+            try {
+                EthGetTransactionCount cnt = node.client().ethGetTransactionCount(
+                        address, DefaultBlockParameterName.PENDING).send();
+                if (cnt.hasError() || cnt.getTransactionCount() == null) return Optional.empty();
+                highest = highest == null ? cnt.getTransactionCount() : highest.max(cnt.getTransactionCount());
+            } catch (Exception e) {
+                log.debug("Pending-nonce read from node {} of {} failed: {}", node.nodeId(), identifier, e.getMessage());
+                return Optional.empty();
+            }
+        }
+        return Optional.ofNullable(highest);
+    }
+
+    /** True when any routable node knows {@code txHash} (pending or mined); true as well when it cannot tell. */
+    boolean anyNodeKnows(String identifier, String txHash) {
+        List<BlockchainClientRegistry.EvmNodeClient> nodes = clientRegistry.evmNodeClients(identifier);
+        if (nodes.isEmpty()) return true;
+        for (BlockchainClientRegistry.EvmNodeClient node : nodes) {
+            try {
+                var answer = node.client().ethGetTransactionByHash(txHash).send();
+                if (answer.hasError() || answer.getTransaction().isPresent()) return true;
+            } catch (Exception e) {
+                log.debug("Transaction lookup of {} on node {} failed: {}", txHash, node.nodeId(), e.getMessage());
+                return true;
+            }
+        }
+        return false;
     }
 
     private BigInteger nonce(Web3j web3j, String address) throws Exception {

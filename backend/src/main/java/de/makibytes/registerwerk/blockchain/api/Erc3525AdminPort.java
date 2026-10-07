@@ -31,6 +31,12 @@ public interface Erc3525AdminPort {
     UUID unwhitelistAddress(UUID deploymentId, String address, UUID actorId, String actorRole);
     UUID freezeAddress(UUID deploymentId, String address, String reason, UUID actorId, String actorRole);
     UUID unfreezeAddress(UUID deploymentId, String address, UUID actorId, String actorRole);
+    /**
+     * Lifts the freeze of a wallet after its §16 eWpG Sperrvermerk was lifted. For the Sperrvermerk sync listener
+     * only: SYSTEM actor, and no block check (the manual {@link #unfreezeAddress} refuses under an ACTIVE block);
+     * the listener has already verified that no other blocking block covers the wallet.
+     */
+    UUID unfreezeAfterBlockLift(UUID deploymentId, String address);
     UUID forceBurnValue(UUID deploymentId, BigInteger tokenId, BigInteger value, String legalBasis,
                         UUID actorId, String actorRole);
     void recordCouponPayment(UUID assetId, BigInteger slotId, int periodNo,

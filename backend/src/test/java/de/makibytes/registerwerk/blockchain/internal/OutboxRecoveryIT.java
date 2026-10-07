@@ -150,7 +150,8 @@ class OutboxRecoveryIT {
 
         BigInteger used = transactions.execute(status -> {
             try {
-                return coordinator.withReservedNonce(chainId, address, () -> BigInteger.valueOf(5), n -> n);
+                // every node reports 5 (H10: repair needs a reading of ALL nodes, not one failover read)
+                return coordinator.withReservedNonce(chainId, address, allNodesSay(5), n -> n);
             } catch (Exception e) {
                 throw new IllegalStateException(e);
             }
@@ -159,6 +160,12 @@ class OutboxRecoveryIT {
         assertThat(used).isEqualTo(BigInteger.valueOf(5));
         assertThat(jdbc.queryForObject("SELECT next_nonce FROM wallet_nonce_lease WHERE chain_id = ? AND sender_address = ?",
                 BigInteger.class, chainId, address)).isEqualTo(BigInteger.valueOf(6));
+    }
+
+    /** A reading in which the failover read and every routable node report {@code pending}; no tx is known. */
+    private static NonceCoordinator.ChainNonceSource allNodesSay(long pending) {
+        return NonceCoordinator.ChainNonceSource.of(() -> BigInteger.valueOf(pending),
+                () -> java.util.Optional.of(BigInteger.valueOf(pending)), hash -> false);
     }
 
     @Test
@@ -173,7 +180,7 @@ class OutboxRecoveryIT {
 
         BigInteger used = transactions.execute(status -> {
             try {
-                return coordinator.withReservedNonce(chainId, address, () -> BigInteger.valueOf(5), n -> n);
+                return coordinator.withReservedNonce(chainId, address, allNodesSay(5), n -> n);
             } catch (Exception e) {
                 throw new IllegalStateException(e);
             }

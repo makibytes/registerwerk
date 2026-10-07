@@ -10,6 +10,9 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.TypeReference;
@@ -18,12 +21,14 @@ import org.web3j.abi.datatypes.Bool;
 import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
+import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Uint16;
 import org.web3j.abi.datatypes.generated.Uint256;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.protocol.Web3j;
 
 import de.makibytes.registerwerk.erc3643.events.ComplianceModuleAddedEvent;
+import de.makibytes.registerwerk.erc3643.events.ComplianceModuleReplacedEvent;
 import de.makibytes.registerwerk.erc3643.events.ComplianceModuleRemovedEvent;
 import de.makibytes.registerwerk.erc3643.events.TrustedIssuerAddedEvent;
 import de.makibytes.registerwerk.erc3643.events.TrustedIssuerRemovedEvent;
@@ -38,6 +43,9 @@ import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.AssetHolder;
+import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
+import de.makibytes.registerwerk.deployment.api.HolderKind;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ClaimTopic;
 import de.makibytes.registerwerk.erc3643.api.Erc3643ComplianceModule;
 import de.makibytes.registerwerk.erc3643.api.Erc3643Suite;
@@ -84,6 +92,10 @@ public class Erc3643LifecycleService {
     private final AssetLookupPort assetLookupPort;
     private final de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate;
     private final de.makibytes.registerwerk.travelrule.api.TravelRuleGate travelRuleGate;
+    private final AssetHolderRepository holderRepository;
+
+    /** Wallets per {@code EwpgComplianceModule.syncHolders} transaction (gas-bounded; the call is idempotent). */
+    static final int SYNC_HOLDERS_BATCH = 100;
 
     public Erc3643LifecycleService(
             Erc3643SuiteRepository suiteRepository,
@@ -100,7 +112,9 @@ public class Erc3643LifecycleService {
             HolderBlockGate holderBlockGate,
             AssetLookupPort assetLookupPort,
             de.makibytes.registerwerk.kyc.api.OutboundDestinationGate destinationGate,
-            de.makibytes.registerwerk.travelrule.api.TravelRuleGate travelRuleGate) {
+            de.makibytes.registerwerk.travelrule.api.TravelRuleGate travelRuleGate,
+            AssetHolderRepository holderRepository) {
+        this.holderRepository = holderRepository;
         this.destinationGate = destinationGate;
         this.travelRuleGate = travelRuleGate;
         this.assetLookupPort = assetLookupPort;
@@ -265,43 +279,279 @@ public class Erc3643LifecycleService {
         Erc3643Suite suite = requireSuite(suiteId);
         boolean ownershipAccepted = ensureComplianceOwnership(suite);
 
-        // IModularCompliance.addModule(address moduleToAdd). EwpgComplianceModule's setters
-        // require the compliance to be bound, so bind first, then configure — and unbind again
-        // if configuring fails, so an operator-visible error never leaves a module enforcing
-        // no limits on-chain while the DB has no record of it.
-        Function fn = new Function(
-                "addModule",
-                List.of(new Address(moduleAddress)),
-                List.of()
-        );
-        sendToSuite(suite, suite.getComplianceAddress(), fn);
+        int syncedWallets = bindConfigureAndSync(suite, moduleAddress, params, null);
+
+        Erc3643ComplianceModule module = newModuleRow(suiteId, moduleAddress, moduleType, params);
+
+        Erc3643ComplianceModule saved = complianceModuleRepository.save(module);
+
+        eventPublisher.publishEvent(new ComplianceModuleAddedEvent(suiteId, actorId, actorRole,
+                Map.of("moduleAddress", moduleAddress, "moduleType", moduleType,
+                        "complianceOwnershipAccepted", ownershipAccepted, "holdersSynced", syncedWallets)));
+    }
+
+    /**
+     * Binds {@code moduleAddress} to the suite's compliance, configures it, reads the config back and
+     * re-syncs the holders that already exist, unbinding it again if any step fails so an operator-visible
+     * error never leaves a module enforcing wrong limits while the DB has no record of it.
+     *
+     * <p>{@code EwpgComplianceModule}'s setters require the compliance to be bound, so the order is bind,
+     * configure, verify, sync. The sync is the part the hooks cannot do: the module only sees balances
+     * that change <em>after</em> it is bound, so on a token that already has holders its per-identity
+     * balances and its investor count start at zero and {@code maxBalance}/{@code maxInvestors} would
+     * not bind until every holder had transacted once (H4). {@code syncHolders} reads the real balance
+     * and identity of each wallet from the token, is idempotent and is paged.
+     *
+     * @return the number of register wallets synced
+     */
+    private int bindConfigureAndSync(Erc3643Suite suite, String moduleAddress, Map<String, Object> params,
+                                     String carryNomineePoolsFrom) {
+        // IModularCompliance.addModule(address moduleToAdd).
+        sendToSuite(suite, suite.getComplianceAddress(), new Function(
+                "addModule", List.of(new Address(moduleAddress)), List.of()));
         try {
             configureComplianceModule(suite, moduleAddress, params);
             verifyComplianceModuleConfig(suite, moduleAddress, params);
+            if (carryNomineePoolsFrom != null) {
+                carryNomineePools(suite, carryNomineePoolsFrom, moduleAddress);
+            }
+            return syncHolders(suite, moduleAddress);
         } catch (RuntimeException configureFailure) {
-            log.error("Configuring compliance module={} on suite={} failed — unbinding it again",
-                    moduleAddress, suiteId, configureFailure);
+            log.error("Configuring compliance module={} on suite={} failed - unbinding it again",
+                    moduleAddress, suite.getId(), configureFailure);
             try {
                 sendToSuite(suite, suite.getComplianceAddress(), new Function(
                         "removeModule", List.of(new Address(moduleAddress)), List.of()));
             } catch (RuntimeException rollbackFailure) {
                 configureFailure.addSuppressed(rollbackFailure);
-                log.error("Unbinding compliance module={} from suite={} failed too — it is bound on-chain "
-                        + "without its configured limits; remove it manually", moduleAddress, suiteId,
-                        rollbackFailure);
+                log.error("Unbinding compliance module={} from suite={} failed too - it is bound on-chain "
+                        + "without its configured limits or holder balances; remove it manually", moduleAddress,
+                        suite.getId(), rollbackFailure);
             }
             throw new IllegalStateException("Compliance module configuration failed and the module was "
                     + "unbound again: " + configureFailure.getMessage(), configureFailure);
         }
+    }
 
+    /**
+     * Back-fills the module's per-identity balances for every active register wallet of the suite's asset,
+     * {@value #SYNC_HOLDERS_BATCH} wallets per transaction. Idempotent on chain, so it may be re-run.
+     *
+     * @return the number of wallets submitted
+     */
+    int syncHolders(Erc3643Suite suite, String moduleAddress) {
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+        forEachActiveHolderPage(assetIdOf(suite), holders -> {
+            List<Address> batch = new java.util.ArrayList<>();
+            for (AssetHolder holder : holders) {
+                String wallet = holder.getWalletAddress();
+                if (!isEvmAddress(wallet)) {
+                    log.warn("syncHolders: skipping register entry {} with a non-EVM wallet '{}'", holder.getId(), wallet);
+                    continue;
+                }
+                if (seen.add(wallet.toLowerCase())) {
+                    batch.add(new Address(wallet));
+                }
+            }
+            if (!batch.isEmpty()) {
+                sendToSuite(suite, moduleAddress, new Function("syncHolders",
+                        List.of(new Address(suite.getComplianceAddress()), new DynamicArray<>(Address.class, batch)),
+                        List.of()));
+            }
+        });
+        log.info("Synced {} register wallet(s) into compliance module={} of suite={}", seen.size(), moduleAddress,
+                suite.getId());
+        return seen.size();
+    }
+
+    private void forEachActiveHolderPage(UUID assetId, java.util.function.Consumer<List<AssetHolder>> consumer) {
+        int page = 0;
+        Page<AssetHolder> holders;
+        do {
+            holders = holderRepository.findActiveByAssetId(assetId,
+                    PageRequest.of(page, SYNC_HOLDERS_BATCH, Sort.by("id")));
+            consumer.accept(holders.getContent());
+            page++;
+        } while (holders.hasNext());
+    }
+
+    private static boolean isEvmAddress(String wallet) {
+        return wallet != null && wallet.matches("^0x[0-9a-fA-F]{40}$");
+    }
+
+    /**
+     * The nominee/omnibus-pool exemption (max balance, max investors) is per module and per compliance, so a
+     * module swap has to re-apply it: every register pool the old module exempts is flagged on the new one.
+     * Without it the pool would suddenly be subject to the per-investor cap and every transfer into it
+     * would be refused.
+     */
+    private void carryNomineePools(Erc3643Suite suite, String fromModule, String toModule) {
+        Address compliance = new Address(suite.getComplianceAddress());
+        forEachActiveHolderPage(assetIdOf(suite), holders -> {
+            for (AssetHolder holder : holders) {
+                if (holder.getHolderKind() != HolderKind.NOMINEE_POOL || !isEvmAddress(holder.getWalletAddress())) {
+                    continue;
+                }
+                List<Type> flagged = callSuite(suite, fromModule, new Function("isNomineePool",
+                        List.of(compliance, new Address(holder.getWalletAddress())),
+                        List.of(new TypeReference<Bool>() {})));
+                if (!flagged.isEmpty() && Boolean.TRUE.equals(flagged.get(0).getValue())) {
+                    sendToSuite(suite, toModule, new Function("setNomineePool",
+                            List.of(compliance, new Address(holder.getWalletAddress()), new Bool(true)), List.of()));
+                }
+            }
+        });
+    }
+
+    // ── Legacy open-setter module: detection and replacement (H4) ─────────────
+
+    /** The {@code name()} both the legacy and the current {@code EwpgComplianceModule} return. */
+    static final String EWPG_MODULE_NAME = "EwpgComplianceModule";
+
+    /** How a bound module classifies. {@code UNKNOWN}: it could not be read (node down), never treated as legacy. */
+    public enum ModuleGeneration { CURRENT, LEGACY, NOT_EWPG, UNKNOWN }
+
+    public record BoundModule(String address, String name, ModuleGeneration generation) {}
+
+    /**
+     * Reads the modules actually bound to the suite's ModularCompliance (so modules bound by a deployment
+     * script, with no DB row, are covered too) and classifies each. The legacy
+     * {@code EwpgComplianceModule} is recognised by ABI: it answers {@code name()} like the current one but
+     * has no {@code getConfig(address)} (that getter, {@code syncHolders} and the {@code onlyComplianceAdmin}
+     * setter guard shipped together). A revert or an empty answer to {@code getConfig} means legacy; any other
+     * failure (RPC, timeout) is {@code UNKNOWN} so an outage cannot raise a false alarm.
+     */
+    @Transactional(readOnly = true)
+    public List<BoundModule> inspectBoundModules(UUID suiteId) {
+        Erc3643Suite suite = requireSuite(suiteId);
+        List<Type> out = callSuite(suite, suite.getComplianceAddress(), new Function("getModules", List.of(),
+                List.of(new TypeReference<DynamicArray<Address>>() {})));
+        List<BoundModule> result = new java.util.ArrayList<>();
+        if (out.isEmpty()) {
+            return result;
+        }
+        @SuppressWarnings("unchecked")
+        List<Address> bound = ((DynamicArray<Address>) out.get(0)).getValue();
+        for (Address module : bound) {
+            result.add(classifyModule(suite, module.getValue()));
+        }
+        return result;
+    }
+
+    private BoundModule classifyModule(Erc3643Suite suite, String moduleAddress) {
+        String name;
+        try {
+            List<Type> n = callSuite(suite, moduleAddress, new Function("name", List.of(),
+                    List.of(new TypeReference<Utf8String>() {})));
+            name = n.isEmpty() ? "" : String.valueOf(n.get(0).getValue());
+        } catch (RuntimeException e) {
+            log.warn("Could not read name() of compliance module {} on suite {}: {}", moduleAddress, suite.getId(),
+                    e.getMessage());
+            return new BoundModule(moduleAddress, null, ModuleGeneration.UNKNOWN);
+        }
+        if (!EWPG_MODULE_NAME.equals(name)) {
+            return new BoundModule(moduleAddress, name, ModuleGeneration.NOT_EWPG);
+        }
+        try {
+            List<Type> cfg = callSuite(suite, moduleAddress, new Function("getConfig",
+                    List.of(new Address(suite.getComplianceAddress())),
+                    List.of(new TypeReference<Uint256>() {}, new TypeReference<Uint256>() {},
+                            new TypeReference<Uint256>() {}, new TypeReference<Uint256>() {},
+                            new TypeReference<Uint256>() {})));
+            return new BoundModule(moduleAddress, name,
+                    cfg.size() == 5 ? ModuleGeneration.CURRENT : ModuleGeneration.LEGACY);
+        } catch (RuntimeException e) {
+            boolean reverted = e.getMessage() != null && e.getMessage().toLowerCase().contains("revert");
+            if (!reverted) {
+                log.warn("Could not probe getConfig on compliance module {} of suite {}: {}", moduleAddress,
+                        suite.getId(), e.getMessage());
+            }
+            return new BoundModule(moduleAddress, name, reverted ? ModuleGeneration.LEGACY : ModuleGeneration.UNKNOWN);
+        }
+    }
+
+    /**
+     * Replaces a bound legacy open-setter {@code EwpgComplianceModule} by a current one without ever leaving
+     * the token unprotected: the new module is bound next to the old one, configured, read back, given the
+     * register's nominee-pool exemptions and back-filled with every holder ({@code syncHolders}); only then is
+     * the legacy module unbound. A failure before that point unbinds the new module again and leaves the old
+     * one enforcing. The legacy module's limits cannot be read back from it (it has no getters for them), so
+     * {@code params} must be supplied unless the DB row of the legacy module stores them.
+     *
+     * @param params the new module's configuration; {@code null} to carry over the legacy DB row's parameters
+     */
+    public void replaceLegacyComplianceModule(UUID suiteId, String legacyModuleAddress, String newModuleAddress,
+                                              String moduleType, Map<String, Object> params,
+                                              UUID actorId, String actorRole) {
+        if (legacyModuleAddress == null || !legacyModuleAddress.matches("^0x[0-9a-fA-F]{40}$")
+                || legacyModuleAddress.equalsIgnoreCase(newModuleAddress)) {
+            throw new IllegalArgumentException("legacyModuleAddress must be a valid EVM address different from newModuleAddress");
+        }
+        Erc3643Suite suite = requireSuite(suiteId);
+        Erc3643ComplianceModule legacyRow = complianceModuleRepository.findBySuiteIdAndRemovedAtIsNull(suiteId).stream()
+                .filter(m -> m.getModuleAddress().equalsIgnoreCase(legacyModuleAddress)).findFirst().orElse(null);
+        Map<String, Object> effectiveParams = params != null ? params
+                : legacyRow != null && legacyRow.getParameters() != null ? legacyRow.getParameters() : null;
+        if (effectiveParams == null) {
+            throw new IllegalArgumentException("parameters are required: the legacy module exposes no getters for "
+                    + "its limits and no stored configuration exists for it");
+        }
+        String type = moduleType != null && !moduleType.isBlank() ? moduleType
+                : legacyRow != null ? legacyRow.getModuleType() : "EWPG";
+        validateComplianceModule(newModuleAddress, type, effectiveParams);
+
+        ensureComplianceOwnership(suite);
+        BoundModule legacy = inspectBoundModules(suiteId).stream()
+                .filter(m -> m.address().equalsIgnoreCase(legacyModuleAddress)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Module " + legacyModuleAddress + " is not bound to the suite's compliance"));
+        if (legacy.generation() != ModuleGeneration.LEGACY) {
+            throw new IllegalArgumentException("Module " + legacyModuleAddress + " is not a legacy open-setter "
+                    + "EwpgComplianceModule (detected: " + legacy.generation() + "); refusing to unbind it");
+        }
+        log.info("Replacing legacy compliance module={} by {} on suite={}", legacyModuleAddress, newModuleAddress, suiteId);
+
+        boolean alreadyBound = isModuleBound(suite, newModuleAddress);
+        int synced = 0;
+        if (!alreadyBound) {
+            synced = bindConfigureAndSync(suite, newModuleAddress, effectiveParams, legacyModuleAddress);
+        }
+
+        Erc3643ComplianceModule replacement = newModuleRow(suiteId, newModuleAddress, type, effectiveParams);
+        complianceModuleRepository.save(replacement);
+
+        try {
+            sendToSuite(suite, suite.getComplianceAddress(), new Function(
+                    "removeModule", List.of(new Address(legacyModuleAddress)), List.of()));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("The new compliance module " + newModuleAddress + " is bound, verified "
+                    + "and synced, but unbinding the legacy module " + legacyModuleAddress + " failed (it still "
+                    + "enforces next to the new one). Repeat the replace request to retry the unbinding: "
+                    + e.getMessage(), e);
+        }
+        if (legacyRow != null) {
+            legacyRow.setRemovedAt(Instant.now());
+            complianceModuleRepository.save(legacyRow);
+        }
+        eventPublisher.publishEvent(new ComplianceModuleReplacedEvent(suiteId, actorId, actorRole, Map.of(
+                "legacyModuleAddress", legacyModuleAddress, "newModuleAddress", newModuleAddress,
+                "moduleType", type, "holdersSynced", synced, "resumedAfterPartialRun", alreadyBound)));
+    }
+
+    private boolean isModuleBound(Erc3643Suite suite, String moduleAddress) {
+        List<Type> out = callSuite(suite, suite.getComplianceAddress(), new Function("isModuleBound",
+                List.of(new Address(moduleAddress)), List.of(new TypeReference<Bool>() {})));
+        return !out.isEmpty() && Boolean.TRUE.equals(out.get(0).getValue());
+    }
+
+    private static Erc3643ComplianceModule newModuleRow(UUID suiteId, String moduleAddress, String moduleType,
+                                                        Map<String, Object> params) {
         Erc3643ComplianceModule module = new Erc3643ComplianceModule();
         module.setSuiteId(suiteId);
         module.setModuleAddress(moduleAddress);
         module.setModuleType(moduleType);
         module.setParameters(params);
         module.setAddedAt(Instant.now());
-
-        // Extract structured config from params map (mirrors EwpgModularCompliance.TokenConfig fields)
         if (params.containsKey("maxInvestors")) {
             module.setMaxInvestors(((Number) params.get("maxInvestors")).intValue());
         }
@@ -312,16 +562,9 @@ public class Erc3643LifecycleService {
             module.setTransferCooldown(((Number) params.get("transferCooldown")).intValue());
         }
         if (params.containsKey("blockedCountries") && params.get("blockedCountries") instanceof List<?> rawList) {
-            module.setBlockedCountries(rawList.stream()
-                    .map(v -> ((Number) v).shortValue())
-                    .toList());
+            module.setBlockedCountries(rawList.stream().map(v -> ((Number) v).shortValue()).toList());
         }
-
-        Erc3643ComplianceModule saved = complianceModuleRepository.save(module);
-
-        eventPublisher.publishEvent(new ComplianceModuleAddedEvent(suiteId, actorId, actorRole,
-                Map.of("moduleAddress", moduleAddress, "moduleType", moduleType,
-                        "complianceOwnershipAccepted", ownershipAccepted)));
+        return module;
     }
 
     private static void validateComplianceModule(

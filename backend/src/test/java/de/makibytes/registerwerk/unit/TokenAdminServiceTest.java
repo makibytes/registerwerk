@@ -596,6 +596,80 @@ class TokenAdminServiceTest {
         verify(holderBlockGate, never()).isBlocked(any(), any());
     }
 
+    // ── H5: the Sperrvermerk freeze reaches every EVM standard whose contract exposes one ─────────
+
+    private Function submittedFunction() {
+        org.mockito.ArgumentCaptor<Function> captor = org.mockito.ArgumentCaptor.forClass(Function.class);
+        verify(durableTransactions).submit(any(UUID.class), any(), captor.capture(), any());
+        return captor.getValue();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "freezeAddress reaches the {0} vault (EwpgCompliance.freezeAddress)")
+    @org.junit.jupiter.params.provider.EnumSource(value = TokenStandard.class, names = {"ERC4626", "ERC7540"})
+    void freezeAddress_reachesVaultTokens(TokenStandard standard) {
+        AssetDeployment dep = deploymentFor(UUID.randomUUID(), standard);
+        String wallet = "0x" + "7".repeat(40);
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any())).thenReturn("0xhash");
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        UUID txId = tokenAdminService.freezeAddress(dep.getId(), wallet, "eWpG §16 Sperrvermerk: order",
+                "eWpG §16 Sperrvermerk: order", UUID.randomUUID(), "SYSTEM");
+
+        assertThat(txId).isNotNull();
+        Function fn = submittedFunction();
+        assertThat(fn.getName()).isEqualTo("freezeAddress");
+        assertThat(fn.getInputParameters()).hasSize(2);
+        assertThat(fn.getInputParameters().get(0).getValue().toString()).isEqualTo(wallet);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "unfreezeAfterBlockLift reaches the {0} vault")
+    @org.junit.jupiter.params.provider.EnumSource(value = TokenStandard.class, names = {"ERC4626", "ERC7540"})
+    void unfreezeAfterBlockLift_reachesVaultTokens(TokenStandard standard) {
+        AssetDeployment dep = deploymentFor(UUID.randomUUID(), standard);
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any())).thenReturn("0xhash");
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        tokenAdminService.unfreezeAfterBlockLift(dep.getId(), "0x" + "7".repeat(40));
+
+        assertThat(submittedFunction().getName()).isEqualTo("unfreezeAddress");
+    }
+
+    @Test
+    @DisplayName("freezeAddress / unfreezeAfterBlockLift reach a confidential ERC-3643 through setAddressFrozen(address,bool)")
+    void freezeAddress_reachesConfidentialErc3643() {
+        AssetDeployment dep = deploymentFor(UUID.randomUUID(), TokenStandard.CONF_ERC3643);
+        String wallet = "0x" + "8".repeat(40);
+        when(durableTransactions.submit(any(UUID.class), any(), any(Function.class), any())).thenReturn("0xhash");
+        when(txService.record(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(UUID.randomUUID());
+
+        tokenAdminService.freezeAddress(dep.getId(), wallet, "reason", "basis", UUID.randomUUID(), "SYSTEM");
+        tokenAdminService.unfreezeAfterBlockLift(dep.getId(), wallet);
+
+        org.mockito.ArgumentCaptor<Function> captor = org.mockito.ArgumentCaptor.forClass(Function.class);
+        verify(durableTransactions, org.mockito.Mockito.times(2))
+                .submit(any(UUID.class), any(), captor.capture(), any());
+        assertThat(captor.getAllValues()).extracting(Function::getName).containsOnly("setAddressFrozen");
+        assertThat(captor.getAllValues().get(0).getInputParameters().get(1).getValue()).isEqualTo(true);
+        assertThat(captor.getAllValues().get(1).getInputParameters().get(1).getValue()).isEqualTo(false);
+    }
+
+    @Test
+    @DisplayName("standards without a freeze on this port are still refused with a pointer to their admin service")
+    void freezeAddress_stillRefusesStandardsThatHaveTheirOwnAdminPath() {
+        AssetDeployment sft = deploymentFor(UUID.randomUUID(), TokenStandard.ERC3525);
+        AssetDeployment spl = deploymentFor(UUID.randomUUID(), TokenStandard.SPL);
+        AssetDeployment confidentialErc20 = deploymentFor(UUID.randomUUID(), TokenStandard.CONF_ERC20);
+        UUID actor = UUID.randomUUID();
+
+        assertThatThrownBy(() -> tokenAdminService.freezeAddress(sft.getId(), "0x" + "9".repeat(40), "r", "b", actor, "SYSTEM"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Erc3525AdminService");
+        assertThatThrownBy(() -> tokenAdminService.freezeAddress(spl.getId(), "0x" + "9".repeat(40), "r", "b", actor, "SYSTEM"))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> tokenAdminService.freezeAddress(confidentialErc20.getId(), "0x" + "9".repeat(40), "r", "b", actor, "SYSTEM"))
+                .isInstanceOf(UnsupportedOperationException.class);
+        verify(durableTransactions, never()).submit(any(), any(), any(), any());
+    }
+
     @Test
     @DisplayName("T3-07: mint / burn / forced operations refused while the register is frozen (TRANSFER_PENDING) or transferred out")
     void mintAndForcedOperationsRefusedWhileRegisterFrozen() {
