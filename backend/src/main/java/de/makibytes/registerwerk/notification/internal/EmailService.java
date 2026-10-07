@@ -3,7 +3,6 @@ package de.makibytes.registerwerk.notification.internal;
 import de.makibytes.registerwerk.notification.internal.SmtpEmailAdapter;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import jakarta.mail.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;

@@ -17,7 +17,7 @@ contract DeployClaimIssuerTest is Test {
     uint256 constant REGISTRY_PK = 0xA11CE;
 
     /// @dev The backend's claim signature: EIP-191 over keccak256(abi.encode(identity, topic, data)).
-    function _sign(address identity, bytes memory data) internal returns (bytes memory) {
+    function _sign(address identity, bytes memory data) internal pure returns (bytes memory) {
         bytes32 dataHash = keccak256(abi.encode(identity, TOPIC_KYC, data));
         (uint8 v, bytes32 r, bytes32 s) =
             vm.sign(REGISTRY_PK, keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", dataHash)));

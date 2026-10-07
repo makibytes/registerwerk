@@ -24,3 +24,8 @@ b55bd725aec4502d5d729d6d10fed52883100ddc:docs/operator/api-reference.it.md:curl-
 # itself carries no secret, gitleaks' entropy heuristic just triggered on the adjacent region.
 439fd773f72012e025106446ce755198d5c52c09:.env.example:generic-api-key:33
 802f0d2150f6966f234b7d1e2282c2ea81b0d9f2:.env.example.test:generic-api-key:47
+
+# Anvil/Foundry's publicly documented account #0 development key (0xac0974be...ff80), shipped as a
+# PEM only so the disposable demo SoftHSM token can import it (deploy/softhsm/init-token.sh says so
+# explicitly). Intentionally public, never a real credential, demo profile only.
+77b5c474bb14bbf9c25d920341c22fe736d79be2:deploy/softhsm/demo-operator-key.pem:private-key:1

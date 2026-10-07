@@ -1,8 +1,6 @@
 package de.makibytes.registerwerk.repo.internal;
 
 import de.makibytes.registerwerk.asset.api.HolderEncumbranceSource;
-import de.makibytes.registerwerk.repo.api.RepoTradeRepository;
-import de.makibytes.registerwerk.repo.api.RepoTypes;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 

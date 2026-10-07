@@ -93,6 +93,7 @@ contract DeployEwpgTrexBond is Script {
 
     function _tokenDetails(address deployer, EwpgComplianceModule complianceModule)
         internal
+        view
         returns (ITREXFactory.TokenDetails memory details)
     {
         address[] memory irAgents = new address[](1);

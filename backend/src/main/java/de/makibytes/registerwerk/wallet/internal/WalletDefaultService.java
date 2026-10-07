@@ -16,8 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -51,11 +49,6 @@ public class WalletDefaultService {
     @Transactional(readOnly = true)
     public List<WalletChainDefault> listAll() {
         return defaultRepository.findAllWithAssociations();
-    }
-
-    @Transactional(readOnly = true)
-    public Optional<WalletChainDefault> findForChain(UUID chainConfigId) {
-        return defaultRepository.findByChainConfigId(chainConfigId);
     }
 
     /**

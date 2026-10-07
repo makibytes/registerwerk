@@ -197,7 +197,7 @@ class SperrvermerkFreezeServiceTest {
     }
 
     @Test
-    @DisplayName("a republished event or the V10 resync does not submit a second freeze")
+    @DisplayName("a republished event does not submit a second freeze")
     void propagate_isIdempotentForSubmittedAndConfirmedRows() {
         AssetDeployment dep = registerHolding(WALLET);
         UUID blockId = UUID.randomUUID();

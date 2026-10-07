@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.auth.internal;
 
-import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

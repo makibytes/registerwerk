@@ -440,11 +440,6 @@ public class AuditChainVerificationService implements HealthIndicator {
         return null;
     }
 
-    /** Returns the current hash-chain tip (for anchoring / external attestation). */
-    public byte[] currentChainTip() {
-        return jdbc.queryForObject("SELECT entry_hash FROM audit_chain_tip WHERE id = TRUE", byte[].class);
-    }
-
     static byte[] sha256(byte[] prevHash, String canonicalPayload, long sequenceNo) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

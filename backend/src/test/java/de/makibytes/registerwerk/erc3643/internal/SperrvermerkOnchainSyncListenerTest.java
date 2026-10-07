@@ -2,7 +2,6 @@ package de.makibytes.registerwerk.erc3643.internal;
 
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.kyc.events.HolderBlockCreatedEvent;
-import de.makibytes.registerwerk.kyc.events.HolderBlockFreezeResyncRequestedEvent;
 import de.makibytes.registerwerk.kyc.events.HolderBlockLiftedEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -93,17 +92,6 @@ class SperrvermerkOnchainSyncListenerTest {
                 "walletAddresses", List.of(WALLET, second, "  "), "legalBasis", "Court order", "assetId", "")));
 
         assertThat(propagatedWallets(blockId, null)).containsExactly(WALLET, second);
-    }
-
-    @Test
-    @DisplayName("the V10 resync request re-applies the freeze like a newly created block")
-    void resyncRequest_propagates() {
-        UUID blockId = UUID.randomUUID();
-
-        listener.onHolderBlockFreezeResyncRequested(new HolderBlockFreezeResyncRequestedEvent(blockId,
-                Map.of("walletAddress", WALLET, "legalBasis", "Court order", "assetId", "")));
-
-        assertThat(propagatedWallets(blockId, null)).containsExactly(WALLET);
     }
 
     @Test

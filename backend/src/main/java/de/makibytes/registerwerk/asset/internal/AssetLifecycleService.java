@@ -13,7 +13,6 @@ import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
-import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.api.RedemptionReadinessPort;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;

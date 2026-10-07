@@ -13,7 +13,6 @@ import de.makibytes.registerwerk.dora.api.IctIncidentRepository;
 import de.makibytes.registerwerk.dora.api.ResilienceTest;
 import de.makibytes.registerwerk.dora.api.ResilienceTestRepository;
 import de.makibytes.registerwerk.dora.api.ThirdPartyProviderRepository;
-import de.makibytes.registerwerk.dora.events.IctIncidentReportedEvent;
 import de.makibytes.registerwerk.dora.events.IctIncidentStatusChangedEvent;
 import de.makibytes.registerwerk.dora.internal.DoraService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;

@@ -15,7 +15,7 @@ docker build -t registerwerk-backend:latest .
 - **Builder**: `eclipse-temurin:25-jdk-alpine` – kompiliert mit Maven
 - **Laufzeit**: `eclipse-temurin:25-jre-alpine` – minimales Image, Nicht-Root-Benutzer `ewpg`
 
-## Docker Compose für Demo und Einzelhost
+## Docker Compose für Demo und Einzelhost { #demo-single-host-docker-compose }
 
 !!! warning "Keine Produktionstopologie"
     Der Root-Stack enthält entsperrte Anvil-Demokonten, SoftHSM, Demo-Deployment-Jobs,

@@ -5,7 +5,6 @@ import de.makibytes.registerwerk.trading.api.PaymentOption;
 import de.makibytes.registerwerk.trading.api.TradingAssetType;
 import de.makibytes.registerwerk.trading.api.TradingVenueCode;
 import de.makibytes.registerwerk.trading.web.dto.*;
-import de.makibytes.registerwerk.shared.api.PageResponse;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.trading.internal.TradeQueueService;
 import de.makibytes.registerwerk.trading.internal.TradingService;

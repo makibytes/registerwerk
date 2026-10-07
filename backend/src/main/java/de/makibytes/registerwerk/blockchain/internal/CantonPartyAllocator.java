@@ -5,7 +5,6 @@ import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.CantonLedgerClient;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.wallet.api.WalletStorage;
-import de.makibytes.registerwerk.wallet.api.WalletStorage.CantonContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -62,14 +61,6 @@ public class CantonPartyAllocator {
 
         String keystorePath = walletStorage.storeCanton(walletId, partyId, jwt);
         return new AllocationResult(partyId, keystorePath);
-    }
-
-    /**
-     * Stores an externally supplied party ID + JWT without allocating via the participant.
-     * Used by the import-raw wallet endpoint for CANTON wallets.
-     */
-    public String importParty(UUID walletId, String partyId, String jwt) {
-        return walletStorage.storeCanton(walletId, partyId, jwt);
     }
 
     /**

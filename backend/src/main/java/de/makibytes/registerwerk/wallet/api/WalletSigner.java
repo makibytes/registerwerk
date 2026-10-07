@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.wallet.api;
 
-import de.makibytes.registerwerk.chain.api.ChainDescriptor;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.wallet.api.OperatorWallet;
@@ -82,21 +81,6 @@ public class WalletSigner {
     }
 
     /**
-     * Returns the signing credentials for the default EVM wallet of the given chain descriptor.
-     * Looks up the chain config by identifier ({@code CHAIN_NETWORK} format).
-     *
-     * @throws IllegalStateException if no default wallet is set
-     */
-    public EvmSigner evmSignerForDescriptor(ChainDescriptor descriptor) {
-        String identifier = descriptor.chain().name() + "_" + descriptor.network().name();
-        WalletChainDefault match = defaultRepository.findByChainIdentifier(identifier)
-                .orElseThrow(() -> new IllegalStateException(
-                        "No default wallet for chain '" + identifier + "'. " +
-                        "Please configure a wallet default via the Operator Portal → Wallets."));
-        return evmSignerForChain(match.getChainConfigId());
-    }
-
-    /**
      * Returns signing credentials from any configured EVM default wallet.
      * Used for chain-agnostic operations (e.g. ERC-3643 claim signing).
      *
@@ -139,19 +123,6 @@ public class WalletSigner {
             log.debug("Loading Canton context for wallet '{}' ({})", wallet.getName(), id);
             return walletStorage.loadCanton(wallet.getKeystorePath());
         });
-    }
-
-    /**
-     * Returns the Canton context for the chain identified by the given descriptor
-     * ({@code CHAIN_NETWORK} format lookup).
-     */
-    public CantonContext cantonContextForDescriptor(ChainDescriptor descriptor) {
-        String identifier = descriptor.chain().name() + "_" + descriptor.network().name();
-        WalletChainDefault match = defaultRepository.findByChainIdentifier(identifier)
-                .orElseThrow(() -> new IllegalStateException(
-                        "No default wallet for chain '" + identifier + "'. " +
-                        "Please configure a Canton wallet default via the Operator Portal → Wallets."));
-        return cantonContextForChain(match.getChainConfigId());
     }
 
     // ── Starknet / Stellar (raw-bytes, same AES-GCM envelope as Solana) ──────

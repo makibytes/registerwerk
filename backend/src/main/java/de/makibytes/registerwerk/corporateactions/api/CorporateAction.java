@@ -17,7 +17,7 @@ public class CorporateAction {
 
     /** {@code PLEDGE} was retired (never read or written by any code path since this module's
      *  inception — the real pledge/collateral mechanism lives in the {@code lending} module) —
-     *  see {@code V14__corporate_action_issuer_workflow.sql}'s {@code ck_ca_action_type}. */
+     *  see {@code ck_ca_action_type} in {@code V1__initial_schema.sql}. */
     public enum ActionType {
         COUPON, DIVIDEND, SPLIT, REVERSE_SPLIT, CONVERSION,
         REDEMPTION, PARTIAL_REDEMPTION, CALL,

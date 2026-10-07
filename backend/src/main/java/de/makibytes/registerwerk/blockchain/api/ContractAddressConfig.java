@@ -198,15 +198,6 @@ public class ContractAddressConfig {
     }
 
     /**
-     * Returns the PermissionOracle address for the given chain identifier.
-     *
-     * @throws IllegalStateException if no address is configured for the identifier
-     */
-    public String requirePermissionOracle(String chainIdentifier) {
-        return require(permissionOracle, chainIdentifier, "PermissionOracle");
-    }
-
-    /**
      * Returns the EcosystemTrustedIssuersRegistry address for the given chain identifier.
      *
      * @throws IllegalStateException if no address is configured for the identifier

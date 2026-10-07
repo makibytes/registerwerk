@@ -125,16 +125,6 @@ public class CorrectionCapabilityService {
             "Compulsory cancellation via the Token-2022 Permanent Delegate extension. Irreversible "
                     + "on-chain — correcting a wrongful force-burn requires a fresh mint of equal amount.");
 
-    // ── Canton (TokenAdminController Canton-only endpoints) ─────────────────
-    private static final CorrectionCapability FREEZE_HOLDING = new CorrectionCapability(
-            "freeze-holding", "Freeze / unfreeze a holding", true, "Reversible in place, per-holding freeze.");
-    private static final CorrectionCapability FORCE_TRANSFER_CANTON = new CorrectionCapability(
-            "force-transfer-canton", "Forced transfer (issuer authority)", false,
-            "Moves a holding under issuer authority — book an opposite forced-transfer to correct.");
-    private static final CorrectionCapability BURN_HOLDING = new CorrectionCapability(
-            "burn-holding", "Burn a holding", false,
-            "Irreversible — correcting a wrongful burn requires a fresh issuance of equal amount.");
-
     private final AssetDeploymentRepository deploymentRepository;
     private final AssetLookupPort assetLookupPort;
 

@@ -46,7 +46,6 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
-import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.TreeSet;
@@ -504,10 +503,6 @@ public class CompanyUserService {
 
     private static String displayName(AppUser user) {
         return user.getFullName() == null || user.getFullName().isBlank() ? user.getEmail() : user.getFullName();
-    }
-
-    private static List<String> roleNames(Set<AppUserRole> roles) {
-        return roles.stream().map(Enum::name).toList();
     }
 
     /**

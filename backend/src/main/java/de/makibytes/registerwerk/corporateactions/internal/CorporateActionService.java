@@ -81,10 +81,6 @@ public class CorporateActionService {
 
     private static final Logger log = LoggerFactory.getLogger(CorporateActionService.class);
 
-    /** Nil UUID used as the actor ID for system-initiated actions — mirrors
-     *  {@code CouponPaymentJob}/{@code BondMaturityJob}'s own constant. */
-    private static final UUID SYSTEM_ACTOR = new UUID(0L, 0L);
-
     /** What a holder (investor) may see — an issuer's unreviewed or rejected proposal is a draft,
      *  not a register fact, so it's excluded from {@link #findByAssetForHolder}. */
     private static final Set<CorporateAction.Status> HOLDER_VISIBLE_STATUSES =

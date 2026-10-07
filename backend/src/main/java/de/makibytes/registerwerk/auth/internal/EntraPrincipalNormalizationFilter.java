@@ -2,7 +2,6 @@ package de.makibytes.registerwerk.auth.internal;
 
 import java.io.IOException;
 import java.util.Collection;
-import java.util.List;
 
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.JwtMintingService;
@@ -133,8 +132,4 @@ class EntraPrincipalNormalizationFilter extends OncePerRequestFilter {
                 + "as an optional access-token claim on the API app registration. ({}=true)", AUTH_TIME_WARNED);
     }
 
-    /** Exposed for tests; the production wiring is in {@code SecurityConfig}. */
-    static List<String> normalizedClaimNames() {
-        return List.of("sub", "entra_oid", "entra_tid", "roles", "email", "name", "entityId", "entity_id");
-    }
 }

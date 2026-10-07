@@ -23,14 +23,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import de.makibytes.registerwerk.wallet.api.EvmSigner;
 import org.web3j.crypto.ECKeyPair;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.Keys;
 
-import java.security.SecureRandom;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -44,7 +41,6 @@ import java.util.UUID;
 public class WalletService implements WalletManagement {
 
     private static final Logger log = LoggerFactory.getLogger(WalletService.class);
-    private static final SecureRandom RNG = new SecureRandom();
 
     private final OperatorWalletRepository walletRepository;
     private final WalletStorage            walletStorage;

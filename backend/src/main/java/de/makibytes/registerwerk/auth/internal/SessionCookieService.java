@@ -3,7 +3,6 @@ package de.makibytes.registerwerk.auth.internal;
 import de.makibytes.registerwerk.auth.api.RegisterwerkAuthProperties;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 

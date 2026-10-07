@@ -1,10 +1,8 @@
 package de.makibytes.registerwerk.erc3643.web;
 
 import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.Logger;

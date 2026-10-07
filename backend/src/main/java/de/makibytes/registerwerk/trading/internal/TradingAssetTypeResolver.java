@@ -5,7 +5,6 @@ import de.makibytes.registerwerk.trading.api.TradingAssetType;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
-import java.util.Map;
 
 @Component
 public class TradingAssetTypeResolver {

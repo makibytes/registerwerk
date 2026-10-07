@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.screening.internal;
 
-import de.makibytes.registerwerk.audit.api.AuditableEvent;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.screening.api.SanctionsScreeningPort;

@@ -5,8 +5,6 @@ import de.makibytes.registerwerk.blockchain.api.CantonBondOperations.BondCreatio
 import de.makibytes.registerwerk.chain.api.Network;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
-import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Instant;

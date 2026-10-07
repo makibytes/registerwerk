@@ -2048,15 +2048,6 @@ CREATE INDEX idx_holder_block_entity_review ON holder_block (entity_id)      WHE
 -- The application now normalises on write (shared.AddressNormalizer: trim, lowercase 0x only —
 -- base58/base32 addresses are case-sensitive and stay as they are).
 
--- ACTIVE blocks whose wallet changes were never propagated on-chain. Remember them so
--- kyc.internal.HolderBlockFreezeResyncRunner re-emits the freeze once after deploy.
-CREATE TABLE holder_block_freeze_resync (
-    holder_block_id          UUID PRIMARY KEY REFERENCES holder_block (id),
-    original_wallet_address  TEXT        NOT NULL,
-    created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
-    processed_at             TIMESTAMPTZ
-);
-
 -- H5 (Sperrvermerk on-chain freeze reach): one row per (block, deployment, wallet) that records whether the
 -- legal block actually reached the chain.
 --

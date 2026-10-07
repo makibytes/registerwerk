@@ -15,7 +15,7 @@ docker build -t registerwerk-backend:latest .
 - **Builder**: `eclipse-temurin:25-jdk-alpine` — compila con Maven
 - **Runtime**: `eclipse-temurin:25-jre-alpine` — immagine minima, utente non root `ewpg`
 
-## Docker Compose demo / host singolo { #production-docker-compose }
+## Docker Compose demo / host singolo { #demo-single-host-docker-compose }
 
 !!! warning "Non è una topologia di produzione"
     Lo stack radice include account Anvil sbloccati, SoftHSM, job di deployment demo, segreti di

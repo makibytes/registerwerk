@@ -4,7 +4,6 @@ import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.asset.api.RegisterFreezeGuard;
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;

@@ -6,7 +6,6 @@ import de.makibytes.registerwerk.blockchain.api.BlockchainClientRegistry;
 import de.makibytes.registerwerk.blockchain.internal.SolanaTokenAdminService;
 import de.makibytes.registerwerk.blockchain.internal.deploy.SplExtensionSet;
 import de.makibytes.registerwerk.chain.api.Chain;
-import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
 import de.makibytes.registerwerk.chain.api.Network;
 import de.makibytes.registerwerk.wallet.api.WalletSigner;
@@ -22,7 +21,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)

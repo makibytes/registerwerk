@@ -36,7 +36,6 @@ import de.makibytes.registerwerk.orgidentity.api.OrgMemberWallet;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
 import de.makibytes.registerwerk.shared.RegisterClock;
-import org.mockito.ArgumentCaptor;
 import java.math.BigInteger;
 import java.time.Clock;
 import java.time.Instant;

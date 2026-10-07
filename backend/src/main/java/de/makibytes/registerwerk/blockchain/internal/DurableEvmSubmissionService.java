@@ -176,11 +176,6 @@ public class DurableEvmSubmissionService implements DurableEvmSubmissionPort {
         row.setNextAttemptAt(now.plus(properties.backoff(row.getAttemptCount())));
     }
 
-    @Transactional(readOnly = true)
-    public Optional<UUID> findPreparedId(String txHash) {
-        return repository.findByTxHash(txHash).map(EvmSignedSubmission::getId);
-    }
-
     /**
      * Fair dispatch page (P4B-4): per signer the lowest eligible nonces (a row in back-off is
      * skipped, not waited for), interleaved round-robin across signers and capped per signer, so a

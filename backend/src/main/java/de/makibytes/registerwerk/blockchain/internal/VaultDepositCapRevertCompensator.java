@@ -12,7 +12,6 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 
 /** Restores the previous vault deposit cap when its exact confirming block is retracted. */

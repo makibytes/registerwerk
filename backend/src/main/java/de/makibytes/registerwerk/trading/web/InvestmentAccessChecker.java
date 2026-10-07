@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.trading.web;
 
-import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import org.springframework.security.core.Authentication;

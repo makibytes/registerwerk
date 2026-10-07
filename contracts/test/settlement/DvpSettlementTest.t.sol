@@ -445,7 +445,6 @@ contract DvpSettlementTest is Test {
 
     function test_forceCancel_revertsForADestinationOutsideTheTrade() public {
         _lockPayment();
-        address custodian = address(0x44);
         vm.prank(operator);
         vm.expectRevert(abi.encodeWithSelector(DvpSettlement.DestinationNotTradeParty.selector, TRADE, custodian));
         dvp.forceCancel(TRADE, custodian, "BaFin Az. 2026-001");

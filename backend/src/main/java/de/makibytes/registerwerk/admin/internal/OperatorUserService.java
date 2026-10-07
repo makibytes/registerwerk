@@ -488,10 +488,6 @@ public class OperatorUserService {
         return user.getFullName() == null || user.getFullName().isBlank() ? user.getEmail() : user.getFullName();
     }
 
-    private static List<String> roleNames(Set<AppUserRole> roles) {
-        return roles.stream().map(Enum::name).toList();
-    }
-
     private String createActionToken(AppUser user, AppUserActionTokenType tokenType, UUID actorId) {
         actionTokenRepository.findByAppUserIdAndTokenTypeAndConsumedAtIsNull(user.getId(), tokenType)
             .forEach(existing -> {

@@ -5,7 +5,6 @@ import de.makibytes.registerwerk.marketplace.api.DappListingRepository;
 import de.makibytes.registerwerk.marketplace.api.DappListingStatus;
 import de.makibytes.registerwerk.marketplace.api.DappRequiredPermission;
 import de.makibytes.registerwerk.marketplace.api.DappRequiredPermissionRepository;
-import de.makibytes.registerwerk.marketplace.api.DappVersion;
 import de.makibytes.registerwerk.marketplace.api.DappVersionRepository;
 import de.makibytes.registerwerk.marketplace.api.DappVersionStatus;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistration;

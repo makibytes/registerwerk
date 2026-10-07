@@ -143,7 +143,7 @@ Dos trabajos mantienen la cadena alineada con el registro (ambos protegidos con 
 
 ## Registro de auditoría { #audit-trail }
 
-Cada creación, modificación y levantamiento de un bloqueo genera un `AuditEvent` de tipo `HOLDER_BLOCK_CREATED` o `HOLDER_BLOCK_LIFTED` (un levantamiento automático lleva el motivo `AUTO_EXPIRED`); alcanzar la fecha de vencimiento genera `HOLDER_BLOCK_EXPIRY_REVIEW`. El seguimiento en cadena añade `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_FREEZE_RESYNC_REQUESTED`, `HOLDER_BLOCK_NOT_PROPAGATED` y `HOLDER_BLOCK_RELEASE_FAILED`. Estos eventos incluyen:
+Cada creación, modificación y levantamiento de un bloqueo genera un `AuditEvent` de tipo `HOLDER_BLOCK_CREATED` o `HOLDER_BLOCK_LIFTED` (un levantamiento automático lleva el motivo `AUTO_EXPIRED`); alcanzar la fecha de vencimiento genera `HOLDER_BLOCK_EXPIRY_REVIEW`. El seguimiento en cadena añade `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` y `HOLDER_BLOCK_RELEASE_FAILED`. Estos eventos incluyen:
 
 - la identidad del operador que inicia la acción
 - la identidad del segundo aprobador (para crear/levantar)

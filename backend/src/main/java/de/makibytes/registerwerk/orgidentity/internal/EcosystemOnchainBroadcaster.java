@@ -1,10 +1,8 @@
 package de.makibytes.registerwerk.orgidentity.internal;
 
-import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuer;
 import de.makibytes.registerwerk.orgidentity.api.EcosystemTrustedIssuerRepository;
 import de.makibytes.registerwerk.orgidentity.api.MemberWalletStatus;
 import de.makibytes.registerwerk.orgidentity.api.TrustedIssuerStatus;
-import de.makibytes.registerwerk.orgidentity.api.OrgMemberWallet;
 import de.makibytes.registerwerk.orgidentity.api.OrgMemberWalletRepository;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistration;
 import de.makibytes.registerwerk.orgidentity.api.OrgRegistrationRepository;

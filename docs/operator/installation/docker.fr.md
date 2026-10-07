@@ -15,7 +15,7 @@ Le `Dockerfile` utilise une construction en deux étapes :
 - **Builder** : `eclipse-temurin:25-jdk-alpine` — compile avec Maven
 - **Runtime** : `eclipse-temurin:25-jre-alpine` — image minimale, utilisateur non root `ewpg`
 
-## Docker Compose de démonstration / hôte unique
+## Docker Compose de démonstration / hôte unique { #demo-single-host-docker-compose }
 
 !!! warning "Ce n'est pas une topologie de production"
     La pile racine inclut les comptes Anvil déverrouillés, SoftHSM, les tâches de déploiement de

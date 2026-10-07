@@ -36,7 +36,6 @@ class ProductionReadinessCheck {
 
     static final String DEFAULT_DEV_SECRET = "registerwerk-dev-jwt-secret-change-in-production!!";
     private static final int MIN_DUAL_CONTROL_APPROVERS = 2;
-    private static final java.time.Duration SEED_GRACE = java.time.Duration.ofHours(24);
 
     private final RegisterwerkAuthProperties authProps;
     private final String issuerUri;

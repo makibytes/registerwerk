@@ -218,11 +218,6 @@ public class CaspRegistryService {
         return repository.findAll();
     }
 
-    @Transactional(readOnly = true)
-    public Optional<CaspAuthorization> findByVaspDid(String vaspDid) {
-        return repository.findByVaspDidIgnoreCase(vaspDid);
-    }
-
     /** Existing row for an incoming entry: by DID, then by LEI. */
     Optional<CaspAuthorization> findExisting(CaspAuthorization incoming) {
         Optional<CaspAuthorization> byDid = repository.findByVaspDidIgnoreCase(incoming.getVaspDid());

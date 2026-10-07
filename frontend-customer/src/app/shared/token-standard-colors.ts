@@ -15,7 +15,3 @@ export const TOKEN_STANDARD_COLORS: Record<string, string> = {
   STELLAR_ASSET:  '#06B6D4',
   CANTON_TOKEN:   '#8B5CF6',
 };
-
-export function tokenStandardColor(standard: string): string {
-  return TOKEN_STANDARD_COLORS[standard] ?? '#94A3B8';
-}

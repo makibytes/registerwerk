@@ -151,18 +151,6 @@ public final class EvmUtils {
     }
 
     /**
-     * @deprecated superseded by {@link #finalityOf}, which distinguishes SAFE from FINALIZED
-     * instead of collapsing both into a boolean. Kept only for any caller not yet migrated;
-     * behaviourally identical to {@code finalityOf(...) == FinalityLevel.FINALIZED}.
-     */
-    @Deprecated(forRemoval = true)
-    public static boolean isFinal(ChainConfig.FinalityModel model, long blockNumber,
-            Long headBlockNumber, Long finalizedBlockNumber, int requiredConfirmations) {
-        return finalityOf(model, blockNumber, headBlockNumber, null, finalizedBlockNumber,
-                requiredConfirmations, requiredConfirmations) == FinalityLevel.FINALIZED;
-    }
-
-    /**
      * Derives the on-chain token symbol for an asset deployment, so every EVM deploy service
      * ({@code Erc20DeploymentService}, {@code Erc721DeploymentService},
      * {@code Erc1155DeploymentService}, {@code Erc3525DeploymentService},

@@ -5,7 +5,6 @@ import de.makibytes.registerwerk.blockchain.web.dto.AddressResolveResponse;
 import de.makibytes.registerwerk.endpoint.internal.EndpointService;
 import de.makibytes.registerwerk.endpoint.api.AddressEndpoint;
 import de.makibytes.registerwerk.endpoint.web.dto.*;
-import de.makibytes.registerwerk.shared.api.PageResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

@@ -144,7 +144,7 @@ Zwei Jobs halten die Chain mit dem Register im Einklang (beide durch ShedLock ab
 
 ## Audit-Trail { #audit-trail }
 
-Jede Anlage, Änderung und Aufhebung eines Blocks erzeugt ein `AuditEvent` vom Typ `HOLDER_BLOCK_CREATED` oder `HOLDER_BLOCK_LIFTED` (eine automatische Aufhebung trägt den Grund `AUTO_EXPIRED`); das Erreichen des Ablaufdatums löst `HOLDER_BLOCK_EXPIRY_REVIEW` aus. Die On-Chain-Folgeschritte fügen `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_FREEZE_RESYNC_REQUESTED`, `HOLDER_BLOCK_NOT_PROPAGATED` und `HOLDER_BLOCK_RELEASE_FAILED` hinzu. Diese Ereignisse enthalten:
+Jede Anlage, Änderung und Aufhebung eines Blocks erzeugt ein `AuditEvent` vom Typ `HOLDER_BLOCK_CREATED` oder `HOLDER_BLOCK_LIFTED` (eine automatische Aufhebung trägt den Grund `AUTO_EXPIRED`); das Erreichen des Ablaufdatums löst `HOLDER_BLOCK_EXPIRY_REVIEW` aus. Die On-Chain-Folgeschritte fügen `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` und `HOLDER_BLOCK_RELEASE_FAILED` hinzu. Diese Ereignisse enthalten:
 
 - Die Identität des initiierenden Betreibers
 - Die Identität des zweiten Genehmigers (bei Erstellung/Aufhebung)

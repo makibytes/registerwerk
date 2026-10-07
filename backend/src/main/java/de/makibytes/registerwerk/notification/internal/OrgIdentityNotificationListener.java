@@ -1,6 +1,5 @@
 package de.makibytes.registerwerk.notification.internal;
 
-import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.auth.api.AppUserRole;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;

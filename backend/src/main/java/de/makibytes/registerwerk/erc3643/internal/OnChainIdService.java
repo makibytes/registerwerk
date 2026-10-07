@@ -4,7 +4,6 @@ import de.makibytes.registerwerk.erc3643.events.OnchainIdentityDeployedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.DurableEvmTransactionGateway;
-import de.makibytes.registerwerk.erc3643.internal.Erc3643DeploymentService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
@@ -21,10 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
-import org.web3j.abi.datatypes.Type;
 import de.makibytes.registerwerk.wallet.api.EvmSigner;
-import org.web3j.protocol.core.methods.response.Log;
-import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import java.time.Instant;
 import java.util.List;
@@ -240,35 +236,4 @@ public class OnChainIdService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /**
-     * Extracts the deployed ONCHAINID contract address from the {@code IdFactory}
-     * transaction receipt.
-     *
-     * <p>IdFactory emits {@code WalletLinked(address indexed wallet)} after deploying a new
-     * identity proxy. The wallet address in the event is the management key passed to
-     * {@code deployIdentityProxy}. The identity contract address is the {@code contractAddress}
-     * field of the receipt (since {@code deployIdentityProxy} deploys a new contract via CREATE).
-     */
-    private String extractIdentityAddress(TransactionReceipt receipt, String managementKey) {
-        // The identity proxy is a new contract; its address is in receipt.contractAddress
-        if (receipt.getContractAddress() != null && !receipt.getContractAddress().isBlank()) {
-            return receipt.getContractAddress();
-        }
-
-        // Fallback: look for WalletLinked event — the new identity address is in the log data
-        for (Log logEntry : receipt.getLogs()) {
-            if (logEntry.getTopics() != null && !logEntry.getTopics().isEmpty()
-                    && IDENTITY_CREATED_TOPIC.equalsIgnoreCase(logEntry.getTopics().get(0))) {
-                // data = abi.encode(identityAddress) — 32-byte padded address
-                String data = logEntry.getData();
-                if (data != null && data.length() >= 66) {
-                    return "0x" + data.substring(data.length() - 40);
-                }
-            }
-        }
-
-        // Last resort: there's no address in the receipt (should not happen with a well-formed factory)
-        throw new RuntimeException(
-                "Could not extract identity address from IdFactory receipt: " + receipt.getTransactionHash());
-    }
 }

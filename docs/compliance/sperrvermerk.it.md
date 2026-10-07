@@ -142,7 +142,7 @@ Due job mantengono la chain allineata al registro (entrambi protetti da ShedLock
 
 ## Audit trail { #audit-trail }
 
-Ogni creazione, modifica e rimozione di un blocco genera un `AuditEvent` di tipo `HOLDER_BLOCK_CREATED` o `HOLDER_BLOCK_LIFTED` (una rimozione automatica porta il motivo `AUTO_EXPIRED`); il raggiungimento della data di scadenza genera `HOLDER_BLOCK_EXPIRY_REVIEW`. Il seguito on-chain aggiunge `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_FREEZE_RESYNC_REQUESTED`, `HOLDER_BLOCK_NOT_PROPAGATED` e `HOLDER_BLOCK_RELEASE_FAILED`. Questi eventi includono:
+Ogni creazione, modifica e rimozione di un blocco genera un `AuditEvent` di tipo `HOLDER_BLOCK_CREATED` o `HOLDER_BLOCK_LIFTED` (una rimozione automatica porta il motivo `AUTO_EXPIRED`); il raggiungimento della data di scadenza genera `HOLDER_BLOCK_EXPIRY_REVIEW`. Il seguito on-chain aggiunge `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` e `HOLDER_BLOCK_RELEASE_FAILED`. Questi eventi includono:
 
 - l'identità dell'operatore che ha avviato l'operazione
 - l'identità del secondo approvatore (per creazione/revoca)

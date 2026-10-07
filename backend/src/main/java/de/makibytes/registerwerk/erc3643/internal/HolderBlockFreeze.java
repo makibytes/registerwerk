@@ -7,8 +7,8 @@ import java.util.UUID;
 /**
  * Whether one §16 eWpG Sperrvermerk actually reached one token deployment for one wallet (H5). One row per
  * (block, deployment, wallet); the register-level block is authoritative whatever this row says, the row only
- * records how far the chain follows it and what is still outstanding. See {@code V51__holder_block_freeze_outcome.sql}
- * for the meaning of each status.
+ * records how far the chain follows it and what is still outstanding. See the {@code holder_block_freeze} table in
+ * {@code V1__initial_schema.sql} for the meaning of each status.
  */
 @Entity
 @Table(name = "holder_block_freeze")

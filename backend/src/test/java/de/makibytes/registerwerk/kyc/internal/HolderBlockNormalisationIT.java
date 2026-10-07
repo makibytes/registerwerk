@@ -15,7 +15,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -31,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Review phase 3, K1 against a real database: T3-15 Sperrvermerk wallet normalisation (write path,
- * gate, one-shot freeze resync) and T3-21 entity-wide ASSET_TOKEN_ADMIN grant scope.
+ * gate) and T3-21 entity-wide ASSET_TOKEN_ADMIN grant scope.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers
@@ -55,8 +54,6 @@ class HolderBlockNormalisationIT {
 
     @Autowired SperrvermerkService service;
     @Autowired HolderBlockGate gate;
-    @Autowired HolderBlockFreezeResyncRunner resyncRunner;
-    @Autowired JdbcTemplate jdbc;
     @Autowired LegalEntityRepository legalEntityRepository;
     @Autowired AssetRepository assetRepository;
     @Autowired AssetTokenAdminGrantRepository grantRepository;
@@ -77,21 +74,6 @@ class HolderBlockNormalisationIT {
         assertThat(gate.isBlocked(null, checksum)).isTrue();
         assertThat(gate.isBlocked(null, checksum.toLowerCase())).isTrue();
         assertThat(service.findActiveByWallet(checksum)).hasSize(1);
-    }
-
-    @Test
-    @DisplayName("resync runner re-emits each queued ACTIVE block exactly once")
-    void resyncRunnerClaimsQueuedBlocksOnce() {
-        HolderBlock block = new HolderBlock();
-        block.setWalletAddress("0x" + UUID.randomUUID().toString().replace("-", "").substring(0, 32) + "00000000");
-        block.setBlockType(HolderBlock.BlockType.PFANDRECHT);
-        block.setLegalBasis("pledge");
-        HolderBlock saved = service.create(block, UUID.randomUUID(), "REGISTRY_ADMIN", UUID.randomUUID());
-        jdbc.update("INSERT INTO holder_block_freeze_resync (holder_block_id, original_wallet_address) VALUES (?, ?)",
-                saved.getId(), "0xOLD");
-
-        assertThat(resyncRunner.resyncPending()).isEqualTo(1);
-        assertThat(resyncRunner.resyncPending()).isZero();
     }
 
     @Test

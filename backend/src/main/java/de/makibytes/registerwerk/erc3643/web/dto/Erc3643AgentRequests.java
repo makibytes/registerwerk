@@ -2,7 +2,6 @@ package de.makibytes.registerwerk.erc3643.web.dto;
 
 import de.makibytes.registerwerk.shared.api.StrictAmount;
 import tools.jackson.databind.annotation.JsonDeserialize;
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;

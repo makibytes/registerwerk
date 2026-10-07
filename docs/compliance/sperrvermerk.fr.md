@@ -143,7 +143,7 @@ Deux jobs maintiennent la chaîne alignée sur le registre (tous deux protégés
 
 ## Piste d'audit {#audit-trail}
 
-Chaque création, modification et levée de blocage génère un `AuditEvent` de type `HOLDER_BLOCK_CREATED` ou `HOLDER_BLOCK_LIFTED` (une levée automatique porte le motif `AUTO_EXPIRED`) ; l'atteinte de la date d'expiration déclenche `HOLDER_BLOCK_EXPIRY_REVIEW`. Le suivi en chaîne ajoute `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_FREEZE_RESYNC_REQUESTED`, `HOLDER_BLOCK_NOT_PROPAGATED` et `HOLDER_BLOCK_RELEASE_FAILED`. Ces événements comprennent :
+Chaque création, modification et levée de blocage génère un `AuditEvent` de type `HOLDER_BLOCK_CREATED` ou `HOLDER_BLOCK_LIFTED` (une levée automatique porte le motif `AUTO_EXPIRED`) ; l'atteinte de la date d'expiration déclenche `HOLDER_BLOCK_EXPIRY_REVIEW`. Le suivi en chaîne ajoute `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` et `HOLDER_BLOCK_RELEASE_FAILED`. Ces événements comprennent :
 
 - l'identité de l'opérateur initiateur
 - l'identité du second approbateur (pour la création/la levée)

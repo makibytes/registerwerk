@@ -1,7 +1,6 @@
 package de.makibytes.registerwerk.webhook.internal;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.net.Inet4Address;

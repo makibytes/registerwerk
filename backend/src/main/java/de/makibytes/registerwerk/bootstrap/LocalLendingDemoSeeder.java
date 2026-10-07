@@ -44,7 +44,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
-import java.util.UUID;
 
 /**
  * Connects the ordinary relational demo fixtures to the disposable Anvil contracts deployed by

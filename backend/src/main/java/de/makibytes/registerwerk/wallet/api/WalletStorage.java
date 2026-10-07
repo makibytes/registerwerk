@@ -51,7 +51,6 @@ public class WalletStorage {
 
     private static final int  GCM_IV_LENGTH   = 12;  // bytes
     private static final int  GCM_TAG_LENGTH  = 128; // bits
-    private static final int  SALT_LENGTH     = 16;  // bytes
     private static final int  PBKDF2_ITER     = 600_000; // OWASP 2023 baseline for PBKDF2-HMAC-SHA256
     private static final int  AES_KEY_BITS    = 256;
     private static final int  DEK_BYTES       = 32;  // 256-bit DEK
@@ -244,17 +243,6 @@ public class WalletStorage {
         } catch (Exception e) {
             throw new WalletStorageException("Failed to load Solana keystore at " + relativePath, e);
         }
-    }
-
-    /**
-     * Imports a raw Solana private key (hex-encoded 64-byte keypair or 32-byte seed).
-     *
-     * @return relative path of the stored file
-     */
-    public String importSolanaRaw(UUID walletId, String privateKeyHex) {
-        String hex = privateKeyHex.startsWith("0x") ? privateKeyHex.substring(2) : privateKeyHex;
-        byte[] keyBytes = HexFormat.of().parseHex(hex);
-        return storeSolana(walletId, keyBytes);
     }
 
     // ── Canton (AES-256-GCM envelope, same scheme as Solana) ─────────────────

@@ -2,13 +2,11 @@ package de.makibytes.registerwerk.trading.internal;
 
 import de.makibytes.registerwerk.trading.api.ListingStatus;
 import de.makibytes.registerwerk.trading.api.OrderType;
-import de.makibytes.registerwerk.trading.api.PaymentOption;
 import de.makibytes.registerwerk.trading.api.TradeListing;
 import de.makibytes.registerwerk.trading.api.TradeListingRepository;
 import de.makibytes.registerwerk.trading.api.TradingVenueCode;
 import org.springframework.stereotype.Component;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 

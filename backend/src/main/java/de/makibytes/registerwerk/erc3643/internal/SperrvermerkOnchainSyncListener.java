@@ -2,7 +2,6 @@ package de.makibytes.registerwerk.erc3643.internal;
 
 import de.makibytes.registerwerk.blockchain.events.BlockchainTxStatusEvent;
 import de.makibytes.registerwerk.kyc.events.HolderBlockCreatedEvent;
-import de.makibytes.registerwerk.kyc.events.HolderBlockFreezeResyncRequestedEvent;
 import de.makibytes.registerwerk.kyc.events.HolderBlockLiftedEvent;
 import de.makibytes.registerwerk.shared.AddressNormalizer;
 import org.springframework.modulith.events.ApplicationModuleListener;
@@ -48,12 +47,6 @@ class SperrvermerkOnchainSyncListener {
 
     @ApplicationModuleListener
     void onHolderBlockCreated(HolderBlockCreatedEvent event) {
-        propagateFreeze(event.holderBlockId(), event.payload());
-    }
-
-    /** One-shot re-propagation for blocks whose wallet V10 normalised (T3-15). */
-    @ApplicationModuleListener
-    void onHolderBlockFreezeResyncRequested(HolderBlockFreezeResyncRequestedEvent event) {
         propagateFreeze(event.holderBlockId(), event.payload());
     }
 

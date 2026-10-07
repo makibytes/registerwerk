@@ -143,7 +143,7 @@ Two jobs keep the chain aligned with the register (both ShedLock-guarded). A swe
 
 ## Audit trail
 
-Every block creation, modification, and lifting generates an `AuditEvent` of type `HOLDER_BLOCK_CREATED` or `HOLDER_BLOCK_LIFTED` (an automatic lift carries the reason `AUTO_EXPIRED`); reaching the expiry date raises `HOLDER_BLOCK_EXPIRY_REVIEW`. The on-chain follow-up adds `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_FREEZE_RESYNC_REQUESTED`, `HOLDER_BLOCK_NOT_PROPAGATED` and `HOLDER_BLOCK_RELEASE_FAILED`. These events include:
+Every block creation, modification, and lifting generates an `AuditEvent` of type `HOLDER_BLOCK_CREATED` or `HOLDER_BLOCK_LIFTED` (an automatic lift carries the reason `AUTO_EXPIRED`); reaching the expiry date raises `HOLDER_BLOCK_EXPIRY_REVIEW`. The on-chain follow-up adds `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` and `HOLDER_BLOCK_RELEASE_FAILED`. These events include:
 
 - The initiating operator's identity
 - The second approver's identity (for create/lift)

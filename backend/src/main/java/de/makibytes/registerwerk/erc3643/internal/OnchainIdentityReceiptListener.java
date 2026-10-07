@@ -13,7 +13,6 @@ import de.makibytes.registerwerk.shared.IsolatedTransactionExecutor;
 import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.jpa.repository.Query;
 import org.springframework.scheduling.annotation.Scheduled;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;

@@ -1,12 +1,11 @@
 package de.makibytes.registerwerk.chain.api;
 
-import de.makibytes.registerwerk.chain.api.ChainConfig;
 import org.springframework.stereotype.Component;
 
 /**
- * Builds block-explorer URLs for transactions, addresses, and blocks on any supported chain.
- * All methods handle a null or blank {@code blockExplorerUrl} gracefully by returning the
- * raw identifier (hash / address / block number) when no base URL is available.
+ * Builds block-explorer URLs for transactions on any supported chain.
+ * Handles a null or blank {@code blockExplorerUrl} gracefully by returning the
+ * raw transaction hash when no base URL is available.
  */
 @Component
 public class ExplorerUrlBuilder {
@@ -26,49 +25,6 @@ public class ExplorerUrlBuilder {
         }
 
         String url = base + "/tx/" + txHash;
-
-        if (chain.getChainType() == ChainConfig.ChainType.SOLANA
-                && chain.getNetworkType() != ChainConfig.NetworkType.MAINNET) {
-            url = url + "?cluster=devnet";
-        }
-
-        return url;
-    }
-
-    /**
-     * Returns the explorer URL for a given address.
-     * <ul>
-     *   <li>EVM: {@code <baseUrl>/address/<address>}</li>
-     *   <li>Solana: {@code <baseUrl>/address/<address>} (with cluster query param for devnet)</li>
-     * </ul>
-     */
-    public String buildAddressUrl(ChainConfig chain, String address) {
-        String base = resolveBase(chain);
-        if (base == null) {
-            return address;
-        }
-
-        String url = base + "/address/" + address;
-
-        if (chain.getChainType() == ChainConfig.ChainType.SOLANA
-                && chain.getNetworkType() != ChainConfig.NetworkType.MAINNET) {
-            url = url + "?cluster=devnet";
-        }
-
-        return url;
-    }
-
-    /**
-     * Returns the explorer URL for a given block number (EVM) or slot (Solana).
-     */
-    public String buildBlockUrl(ChainConfig chain, long blockNumber) {
-        String base = resolveBase(chain);
-        if (base == null) {
-            return String.valueOf(blockNumber);
-        }
-
-        String segment = chain.getChainType() == ChainConfig.ChainType.SOLANA ? "block" : "block";
-        String url = base + "/" + segment + "/" + blockNumber;
 
         if (chain.getChainType() == ChainConfig.ChainType.SOLANA
                 && chain.getNetworkType() != ChainConfig.NetworkType.MAINNET) {

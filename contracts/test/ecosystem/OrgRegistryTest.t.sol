@@ -281,7 +281,7 @@ contract OrgRegistryTest is Test {
         assertEq(registry.orgOf(alice), address(0));
     }
 
-    function test_isOrgAdmin_falseForEoaOrg() public {
+    function test_isOrgAdmin_falseForEoaOrg() public view {
         // org address without code must not qualify anyone as admin
         assertFalse(registry.isOrgAdmin(address(0xdead), orgAdmin));
     }

@@ -67,8 +67,8 @@ export interface CouponScheduleEntry {
 
 // ── Corporate actions ──────────────────────────────────────────────────────────
 // Only DIVIDEND/SPLIT/CALL are issuer-proposable today; the rest are system-raised
-// (COUPON/REDEMPTION) or not yet buildable. PLEDGE was retired — see backend
-// V14__corporate_action_issuer_workflow.sql.
+// (COUPON/REDEMPTION) or not yet buildable. PLEDGE was retired — see the backend's
+// ck_ca_action_type constraint in V1__initial_schema.sql.
 export type CorporateActionType =
   | 'COUPON' | 'DIVIDEND' | 'SPLIT' | 'REVERSE_SPLIT' | 'CONVERSION'
   | 'REDEMPTION' | 'PARTIAL_REDEMPTION' | 'CALL'

@@ -16,7 +16,6 @@ import org.web3j.protocol.Web3j;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * Central registry mapping blockchain identifiers to their RPC clients.

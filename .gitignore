@@ -49,6 +49,9 @@ docs/chaincache/
 .env.local
 .env.*.local
 
+# Generic build output (IntelliJ/Gradle/etc.)
+out/
+
 # Foundry
 contracts/out/
 contracts/cache/

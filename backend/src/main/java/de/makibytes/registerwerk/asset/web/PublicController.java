@@ -7,7 +7,6 @@ import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
 import de.makibytes.registerwerk.asset.api.AssetDocument;
-import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
@@ -19,7 +18,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 

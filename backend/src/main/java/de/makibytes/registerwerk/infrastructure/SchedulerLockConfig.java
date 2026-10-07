@@ -7,7 +7,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
-import java.time.Duration;
 
 /**
  * Enables ShedLock so every {@code @Scheduled} job in the application is serialized

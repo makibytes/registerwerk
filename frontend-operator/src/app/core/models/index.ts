@@ -6,11 +6,6 @@ export type TokenStandard =
   | 'DAML_BOND_FIXED' | 'DAML_BOND_FLOATING' | 'DAML_BOND_ZERO'
   | 'SPL_2022_BOND' | 'SPL_2022_CONFIDENTIAL';
 
-export const BOND_STANDARDS: TokenStandard[] = [
-  'ERC3525', 'DAML_BOND_FIXED', 'DAML_BOND_FLOATING', 'DAML_BOND_ZERO',
-  'SPL_2022_BOND', 'STARKNET_ERC3525',
-];
-
 export const VAULT_STANDARDS: TokenStandard[] = ['ERC4626', 'ERC7540'];
 
 // ── Bond terms ────────────────────────────────────────────────────────────────
@@ -177,7 +172,7 @@ export interface AssetSlot {
 
 // ── Corporate actions ──────────────────────────────────────────────────────────
 // PLEDGE was retired — never read/written by any code path (the real pledge/collateral
-// mechanism lives in the lending module); see backend V14__corporate_action_issuer_workflow.sql.
+// mechanism lives in the lending module); see the ck_ca_action_type constraint in backend V1__initial_schema.sql.
 export type CorporateActionType =
   | 'COUPON' | 'DIVIDEND' | 'SPLIT' | 'REVERSE_SPLIT' | 'CONVERSION'
   | 'REDEMPTION' | 'PARTIAL_REDEMPTION' | 'CALL'

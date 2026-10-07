@@ -138,7 +138,7 @@ class SperrvermerkFreezeService {
     /**
      * Freezes {@code wallets} on every live deployment of the assets they hold (or of {@code assetId} only when the
      * block is asset-scoped). Idempotent: a (block, deployment, wallet) whose freeze is already SUBMITTED or
-     * CONFIRMED is left alone, so a republished event or the V10 resync cannot double-submit.
+     * CONFIRMED is left alone, so a republished event cannot double-submit.
      */
     void propagate(UUID blockId, UUID assetId, Collection<String> wallets, String reason) {
         for (String wallet : wallets) {

@@ -1,7 +1,6 @@
 package de.makibytes.registerwerk.blockchain.internal;
 
 import de.makibytes.registerwerk.chain.api.ChainConfigRepository;
-import de.makibytes.registerwerk.chain.api.ChaincacheCredentials;
 import de.makibytes.registerwerk.chain.api.ChainConfig;
 import de.makibytes.registerwerk.chain.api.RpcNode;
 import de.makibytes.registerwerk.chain.api.RpcNodeRepository;
