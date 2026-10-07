@@ -3,7 +3,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { RegisterInspectionsComponent } from './register-inspections.component';
 import { RegisterInspectionService } from '../../../../core/api/register-inspection.service';
 import { AuthService } from '../../../../core/auth/auth.service';
@@ -66,5 +66,15 @@ describe('RegisterInspectionsComponent fulfil (8B-06)', () => {
     create(true).confirmFulfil(request);
     expect(snackBar.open.mock.calls[0][0]).not.toContain('Download started');
     expect(snackBar.open.mock.calls[0][1]).toBe('Download again');
+  });
+  it('9A-05: a 409 from the one-shot fulfil shows the server message (blob error body), not a generic text', async () => {
+    vi.useRealTimers();
+    const message = 'Register inspection refused: the register of asset a1 is being reconciled with the chain';
+    service.fulfil.mockReturnValue(throwError(() => ({
+      status: 409,
+      error: new Blob([JSON.stringify({ status: 409, message })], { type: 'application/json' }),
+    })));
+    create(true).confirmFulfil(request);
+    await vi.waitFor(() => expect(snackBar.open).toHaveBeenCalledWith(message, 'Dismiss', { duration: 6000 }));
   });
 });

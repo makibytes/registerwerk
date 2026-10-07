@@ -37,6 +37,7 @@ Die Annotation `@RequiresStepUp` wird auf den folgenden Endpunkten und Dienstmet
 | `forceBurn` | ✅ | ✅ | Dauerhafte Vernichtung von Token |
 | `forceApprove` | ✅ | ✅ | Compliance-Override |
 | `setSupplyCap` | ✅ | ✅ | Änderung eines wirtschaftlichen Parameters |
+| ERC-3525 Slot-Anlage, Slot-Mint, Forced Value Transfer | ✅ | ✅ | Legt Slot-Obergrenze an / erzeugt Anleihewert in einem Slot |
 | KYC-Override (Genehmigung trotz Flag) | ✅ | ✅ | Umgehung des AML-Gates |
 | Sperrvermerk erstellen | ✅ | ✅ | Gesetzliche Beschränkung des Inhabers |
 | Sperrvermerk aufheben | ✅ | ✅ | Aufhebung der gesetzlichen Beschränkung |

@@ -14,13 +14,15 @@ export class SlotService {
     return this.http.get<AssetSlot[]>(`${this.base}/deployments/${deploymentId}/slots`);
   }
 
+  /** Step-up + second approver (`ERC3525_SLOT_CREATE`): the slot carries its supply cap. */
   createSlot(deploymentId: string, body: {
     slotId: string;
     name?: string;
     metadata?: Record<string, unknown>;
     supplyCap?: string;
-  }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/deployments/${deploymentId}/slots`, body);
+  }, tokens: DualControlTokens): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/deployments/${deploymentId}/slots`, body,
+      { headers: dualControlHeaders(tokens) });
   }
 
   pauseSlot(deploymentId: string, slotId: string): Observable<{ txId: string }> {
@@ -31,8 +33,11 @@ export class SlotService {
     return this.http.post<{ txId: string }>(`${this.base}/deployments/${deploymentId}/slots/${slotId}/unpause`, {});
   }
 
-  mintIntoSlot(deploymentId: string, slotId: string, body: { toAddress: string; value: string }): Observable<{ txId: string }> {
-    return this.http.post<{ txId: string }>(`${this.base}/deployments/${deploymentId}/slots/${slotId}/mint`, body);
+  /** Step-up + second approver (`ERC3525_SLOT_MINT`). */
+  mintIntoSlot(deploymentId: string, slotId: string, body: { toAddress: string; value: string },
+               tokens: DualControlTokens): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(`${this.base}/deployments/${deploymentId}/slots/${slotId}/mint`, body,
+      { headers: dualControlHeaders(tokens) });
   }
 
   freezeToken(deploymentId: string, tokenId: string, reason: string): Observable<{ txId: string }> {

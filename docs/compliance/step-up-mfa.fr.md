@@ -41,6 +41,7 @@ opérations marquées **4 yeux** nécessitent en outre un deuxième approbateur.
 | `forceBurn` | ✅ | ✅ | Destruction permanente de jetons |
 | `forceApprove` | ✅ | ✅ | Dérogation de conformité |
 | `setSupplyCap` | ✅ | ✅ | Modification d'un paramètre économique |
+| Création de slot ERC-3525, mint dans un slot, forced value transfer | ✅ | ✅ | Fixe le plafond du slot / émet de la valeur obligataire dans un slot |
 | Dérogation KYC (approuver malgré l'indicateur) | ✅ | ✅ | Contournement de la porte AML |
 | Création d'un Sperrvermerk | ✅ | ✅ | Restriction légale sur un titulaire |
 | Levée d'un Sperrvermerk | ✅ | ✅ | Suppression d'une restriction légale |

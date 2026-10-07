@@ -1048,7 +1048,7 @@ export interface LendingMarket {
   /**
    * Why `status` reads PAUSED although the market is registered ACTIVE. Hide borrowing when set.
    */
-  pauseReason?: 'COLLATERAL_SHORTFALL' | 'BINDING_UNVERIFIED' | 'BORROW_PAUSED_ONCHAIN' | 'CHAIN_READ_FAILED' | string | null;
+  pauseReason?: 'COLLATERAL_SHORTFALL' | 'BINDING_UNVERIFIED' | 'BORROW_PAUSED_ONCHAIN' | 'CHAIN_READ_FAILED' | `COLLATERAL_ASSET_${string}` | `COLLATERAL_BOND_${string}` | string | null;
   /** False when re-verification found the factory / collateral / loan-token binding broken. */
   bindingVerified?: boolean;
   bindingFailure?: string | null;

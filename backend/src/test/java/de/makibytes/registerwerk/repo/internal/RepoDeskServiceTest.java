@@ -71,6 +71,28 @@ class RepoDeskServiceTest {
         assertThat(trade.getAcceptedQuoteVersion()).isEqualTo(1);
     }
 
+    @Test void openRefusedOnFrozenRegister() {
+        // 9A-07: an RFQ raised before the handover must not turn into a pledge once the register is frozen.
+        UUID requesterId=UUID.randomUUID(), dealerId=UUID.randomUUID(), rfqId=UUID.randomUUID(), quoteId=UUID.randomUUID();
+        RepoRfq rfq=rfq(rfqId,requesterId); rfq.setSide(Side.BORROW_CASH);
+        RepoQuote quote=new RepoQuote(); quote.setId(quoteId); quote.setRfqId(rfqId); quote.setQuotingEntityId(dealerId);
+        quote.setCashAmount(new BigDecimal("100000")); quote.setRepoRate(new BigDecimal("5.00"));
+        quote.setHaircutBps(200); quote.setValidUntil(Instant.now().plusSeconds(3600));
+        quote.setStatus(QuoteStatus.ACTIVE);
+        when(rfqs.findByIdForUpdate(rfqId)).thenReturn(Optional.of(rfq));
+        when(quotes.findById(quoteId)).thenReturn(Optional.of(quote));
+        Asset frozen=asset(rfq.getCollateralAssetId()); frozen.setStatus(AssetStatus.TRANSFER_PENDING);
+        when(assets.findById(rfq.getCollateralAssetId())).thenReturn(Optional.of(frozen));
+        when(entities.findById(requesterId)).thenReturn(Optional.of(entity(requesterId,"Requester")));
+        when(entities.findById(dealerId)).thenReturn(Optional.of(entity(dealerId,"Dealer")));
+
+        assertThatThrownBy(() -> service.acceptQuote(rfqId,quoteId,requesterId,RepoTerms.hash(rfq,quote)))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class)
+                .hasMessageContaining("Repo trade");
+        assertThat(rfq.getStatus()).isEqualTo(RfqStatus.OPEN);
+        verify(trades, never()).save(any());
+    }
+
     @Test void targetedRfqRejectsUninvitedDealer() {
         UUID requesterId=UUID.randomUUID(), invitedId=UUID.randomUUID(), outsiderId=UUID.randomUUID();
         RepoRfq rfq=rfq(UUID.randomUUID(),requesterId); rfq.setVisibility(Visibility.TARGETED);

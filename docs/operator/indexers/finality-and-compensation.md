@@ -178,3 +178,11 @@ using `finalityLabel`.
 
 All three are real, evaluated rules in `monitoring/alerts/registerwerk.yml`, not illustrative
 examples.
+
+## Register disclosures while the holder sync is BLOCKED
+
+A holder-sync run that meets a wallet holding finalized units but mapped to no holder row marks the asset `BLOCKED` and writes nothing, so every nominal on its register may be stale. While an asset is `BLOCKED`:
+
+- **§19 statements and holding confirmations** (event-driven, annual and the customer self-service download) and the **§10 register extract** are refused with HTTP 409 naming the last successful sync and the unmapped wallets. An inspection request stays `APPROVED` and can be fulfilled once the register is reconciled; the daily annual job issues the statement then (`registerwerk_register_statements_refused_total{reason="unreconciled"}` counts refusals). Event-driven change statements refused in the meantime are not re-issued automatically; issue them from the register-statement endpoint after reconciliation.
+- The multi-asset **Depotauszug** is still issued, but the nominal of a `BLOCKED` asset is shown as *unconfirmed*; positions of a register already handed to a successor registrar are listed separately as "no longer administered here". Every disclosure carries a "Register status" line (last reconciliation, or that none is recorded).
+- Entity-level Sperrvermerke are included in the §19 statement of every holding of that entity (not only blocks on the holder wallet). The §10 extract still does not disclose blocks to third parties.

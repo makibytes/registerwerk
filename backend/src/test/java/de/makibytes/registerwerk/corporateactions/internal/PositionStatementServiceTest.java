@@ -79,4 +79,60 @@ class PositionStatementServiceTest {
             assertThat(text).contains("DE000PAGE000");
         }
     }
+
+    // ── 9A-05: Depotauszug of an unreconciled register / handed-over positions ──
+
+    private static Asset asset(String name, String isin, de.makibytes.registerwerk.asset.api.AssetStatus status) {
+        Asset a = new Asset();
+        a.setId(UUID.randomUUID());
+        a.setName(name);
+        a.setIsin(isin);
+        a.setStatus(status);
+        return a;
+    }
+
+    private static AssetHolder holding(Asset asset, String nominal, int walletSeed) {
+        AssetHolder h = new AssetHolder();
+        h.setAssetId(asset.getId());
+        h.setWalletAddress("0x" + "%040x".formatted(walletSeed));
+        h.setNominalAmount(new BigDecimal(nominal));
+        return h;
+    }
+
+    @Test
+    @DisplayName("a BLOCKED asset's nominal is shown as unconfirmed; transferred-out positions are not listed as current")
+    void blockedAssetRowIsUnconfirmedAndTransferredOutIsNotCurrent() throws Exception {
+        UUID entityId = UUID.randomUUID();
+        LegalEntity entity = new LegalEntity();
+        entity.setId(entityId);
+        entity.setEntityNumber("DEMO-9A05");
+        entity.setRegistrationCountry("DE");
+
+        Asset ok = asset("Reconciled Bond", "DE000OKBOND01", de.makibytes.registerwerk.asset.api.AssetStatus.ISSUED);
+        ok.setLastSuccessfulHolderSyncAt(java.time.Instant.parse("2026-09-01T10:15:00Z"));
+        Asset blocked = asset("Blocked Bond", "DE000BLKBND02", de.makibytes.registerwerk.asset.api.AssetStatus.ISSUED);
+        blocked.setHolderSyncStatus(de.makibytes.registerwerk.asset.api.HolderSyncStatus.BLOCKED);
+        blocked.setLastSuccessfulHolderSyncAt(java.time.Instant.parse("2026-08-01T08:00:00Z"));
+        Asset out = asset("Handed Over Bond", "DE000OUTBND03", de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFERRED_OUT);
+        Asset redeeming = asset("Redeeming Bond", "DE000REDBND04", de.makibytes.registerwerk.asset.api.AssetStatus.REDEMPTION_PENDING);
+
+        when(entityRepository.findById(entityId)).thenReturn(Optional.of(entity));
+        when(holderRepository.findActiveByInvestorId(entityId)).thenReturn(List.of(
+                holding(ok, "1111", 1), holding(blocked, "7777", 2), holding(out, "5555", 3), holding(redeeming, "3333", 4)));
+        when(assetRepository.findAllById(anyIterable())).thenReturn(List.of(ok, blocked, out, redeeming));
+
+        byte[] pdf = service.generateForEntity(entityId);
+
+        try (PDDocument doc = Loader.loadPDF(pdf)) {
+            String text = new PDFTextStripper().getText(doc);
+            assertThat(text).contains("1111");                        // reconciled row keeps its nominal
+            assertThat(text).doesNotContain("7777");                  // BLOCKED: never print a possibly stale nominal
+            assertThat(text).contains("unconfirmed");
+            assertThat(text).doesNotContain("5555");                  // handed over: not a current position
+            assertThat(text).contains("DE000OUTBND03").contains("No longer administered here");
+            assertThat(text).contains("REDEMPTION_PENDING");
+            assertThat(text).contains("3333");
+            assertThat(text).contains("oldest on-chain reconciliation 2026-08-01 08:00 UTC");
+        }
+    }
 }

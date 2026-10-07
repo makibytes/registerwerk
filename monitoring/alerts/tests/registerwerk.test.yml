@@ -93,6 +93,43 @@ tests:
         alertname: AssetRedemptionBurnFailed
         exp_alerts: []
 
+  # 9A-04R: operator-side lag past a payment date is a warning after 6h, and clears when the action is confirmed.
+  - interval: 1m
+    input_series:
+      - series: 'registerwerk_corporate_action_operator_side_overdue{job="registerwerk-backend"}'
+        values: "1x479 0x120"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: CorporateActionOperatorSideOverdue
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: CorporateActionOperatorSideOverdue
+        exp_alerts:
+          - exp_labels: {severity: warning, dora_category: DATA_INTEGRITY, job: registerwerk-backend}
+            exp_annotations:
+              summary: "Corporate action past its payment date, waiting for the operator"
+              description: "1 coupon/redemption action(s) are past their payment date and wait for the operator's confirmation or settlement dispatch. They are not counted as issuer non-payment; confirm or settle them (entity tasks BOND_REDEMPTION_OPERATOR_PENDING / COUPON_OPERATOR_PENDING)."
+      - eval_time: 9h
+        alertname: CorporateActionOperatorSideOverdue
+        exp_alerts: []
+
+  # 9A-06: an automatic pause is visible as soon as the counter moves, and clears once it is quiet.
+  - interval: 1m
+    input_series:
+      - series: 'registerwerk_lending_market_auto_paused_total{job="registerwerk-backend", cause="COLLATERAL_ASSET_SUSPENDED"}'
+        values: "0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: LendingMarketAutoPaused
+        exp_alerts:
+          - exp_labels: {severity: warning, dora_category: DATA_INTEGRITY, cause: COLLATERAL_ASSET_SUSPENDED}
+            exp_annotations:
+              summary: "A lending market was paused automatically"
+              description: "A lending market was paused on-chain by the system (cause COLLATERAL_ASSET_SUSPENDED). New borrowing is stopped; repay, liquidate and withdraw are unaffected. Review the collateral; lifting the pause is the 4-eyes borrow-paused action."
+      - eval_time: 24m
+        alertname: LendingMarketAutoPaused
+        exp_alerts: []
+
   # H5: a Sperrvermerk that did not reach the chain. Failed freezes are critical after 15 minutes; drift on the
   # first increase; unsupported / pending / failed releases are warnings with their own delay.
   - interval: 1m

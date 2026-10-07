@@ -5,6 +5,7 @@ import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
 import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import de.makibytes.registerwerk.asset.api.AssetStatus;
+import de.makibytes.registerwerk.asset.api.HandoverBlocker;
 import de.makibytes.registerwerk.asset.api.OpenSubscriptionOrdersPort;
 import de.makibytes.registerwerk.asset.api.RedemptionReadinessPort;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
@@ -44,6 +45,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
+import org.springframework.beans.factory.ObjectProvider;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
@@ -100,6 +103,7 @@ public class RegisterTransferService {
     private final OnchainHandoverVerifier handoverVerifier;
     private final RegisterClock registerClock;
     private final CacheManager cacheManager;
+    private final ObjectProvider<HandoverBlocker> handoverBlockers;
 
     public RegisterTransferService(
             RegisterTransferRepository transferRepository,
@@ -119,7 +123,9 @@ public class RegisterTransferService {
             OpenSubscriptionOrdersPort subscriptionOrdersPort,
             OnchainHandoverVerifier handoverVerifier,
             RegisterClock registerClock,
-            CacheManager cacheManager) {
+            CacheManager cacheManager,
+            ObjectProvider<HandoverBlocker> handoverBlockers) {
+        this.handoverBlockers = handoverBlockers;
         this.blockRepository = blockRepository;
         this.entityRepository = entityRepository;
         this.bondTermsRepository = bondTermsRepository;
@@ -232,6 +238,15 @@ public class RegisterTransferService {
                 + blocking.stream().map(a -> a.actionType() + " " + a.id() + " (payment "
                         + (a.paymentDate() != null ? a.paymentDate() : "n/a") + ")").toList()
                 + " are still open - settle or cancel them before the handover");
+
+        // 9A-07 (interim T9-03): pledges, lending collateral and in-flight trades are not part of the §20 package, so the
+        // handover is refused while any exists. Re-checked on every (re-)export: a pledge opened after the first
+        // export would otherwise slip into the frozen register.
+        List<String> encumbrances = new ArrayList<>();
+        handoverBlockers.orderedStream()
+                .forEach(blocker -> blocker.blocksHandover(transfer.getAssetId()).ifPresent(encumbrances::add));
+        require(encumbrances.isEmpty(), "Register handover refused: asset " + transfer.getAssetId()
+                + " is encumbered - " + String.join("; ", encumbrances));
 
         RegisterContent content = computeContent(asset);
 

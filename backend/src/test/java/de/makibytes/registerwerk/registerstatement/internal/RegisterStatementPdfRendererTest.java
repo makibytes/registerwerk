@@ -226,4 +226,18 @@ class RegisterStatementPdfRendererTest {
         }
         assertThat(textOf(pdf)).contains("Order #59");
     }
+
+    @Test
+    @DisplayName("the header always states how far the register was reconciled with the chain (9A-05)")
+    void headerCarriesTheReconciliationStamp() throws IOException {
+        Asset asset = asset(de.makibytes.registerwerk.customer.api.Jurisdiction.DE_EWPG, OnchainLevel.CONTROL);
+        asset.setLastSuccessfulHolderSyncAt(Instant.parse("2026-09-01T10:15:00Z"));
+        RegisterDocumentProfile profile = jurisdictionConfig.resolveRegisterDocumentProfile(asset.getJurisdiction(), true);
+
+        byte[] pdf = RegisterStatementPdfRenderer.render(asset, holder(EntryType.INDIVIDUAL), entity("INV-1", "Investor GmbH"),
+                null, List.of(), null, null, StatementTrigger.ANNUAL, profile, "Registerwerk eWpG-Registry", "DE",
+                LocalDate.of(2026, 9, 2));
+
+        assertThat(textOf(pdf)).contains("Register reconciled with the chain as of 2026-09-01 10:15 UTC");
+    }
 }

@@ -1,5 +1,8 @@
 package de.makibytes.registerwerk.integration;
 
+import de.makibytes.registerwerk.TestJwt;
+import de.makibytes.registerwerk.auth.api.AppUser;
+import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.auth.web.dto.LoginRequest;
 import de.makibytes.registerwerk.auth.web.dto.LoginResponse;
 import de.makibytes.registerwerk.deployment.api.DeploymentAccessChecker;
@@ -50,6 +53,7 @@ class TokenAdminControllerIT {
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(de.makibytes.registerwerk.TestPostgres.IMAGE);
 
+    static final String SECRET = "integration-test-jwt-secret-32-bytes!!";
     static final String ADMIN_EMAIL = "admin@test.local";
     static final String ADMIN_PASSWORD = "Sup3rSecret!";
 
@@ -58,6 +62,9 @@ class TokenAdminControllerIT {
 
     @Autowired
     TestRestTemplate rest;
+
+    @Autowired
+    AppUserRepository appUserRepository;
 
     /**
      * This test targets the step-up aspect, not nested deployment ownership.  Permit the
@@ -76,6 +83,7 @@ class TokenAdminControllerIT {
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> "");
+        registry.add("registerwerk.auth.dev-secret", () -> SECRET);
         registry.add("registerwerk.auth.entra-enabled", () -> "false");
         registry.add("registerwerk.auth.default-admin.email", () -> ADMIN_EMAIL);
         registry.add("registerwerk.auth.default-admin.password", () -> ADMIN_PASSWORD);
@@ -125,19 +133,33 @@ class TokenAdminControllerIT {
     }
 
     @Test
-    @DisplayName("supply-cap change with step-up token passes auth gate")
-    void setSupplyCap_withStepUpToken_passesAuthGate() {
-        HttpHeaders h = new HttpHeaders();
-        h.setBearerAuth(stepUpToken); // token with acr=stepup
-        h.setContentType(MediaType.APPLICATION_JSON);
-        h.set("Idempotency-Key", java.util.UUID.randomUUID().toString()); // P4B-7: mandatory on these endpoints
-
-        var response = rest.postForEntity(
+    @DisplayName("B-12: supply-cap change with a single step-up token but no second approver -> 403")
+    void setSupplyCap_withStepUpOnly_returns403() {
+        assertThat(postWithStepUpOnly(
                 "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/admin/set-supply-cap",
-                new HttpEntity<>(Map.of("newCap", 1_000), h),
-                Map.class);
+                Map.of("newCap", 1_000))).isEqualTo(403);
+    }
 
-        // Auth gate passed — 404 because no such deployment exists, not 403
+    @Test
+    @DisplayName("B-12: supply-cap change with step-up AND a bound approver token passes the auth gate")
+    void setSupplyCap_withSecondApprover_passesAuthGate() throws Exception {
+        String path = "/api/v1/assets/00000000-0000-0000-0000-000000000001/deployments/00000000-0000-0000-0000-000000000002/admin/set-supply-cap";
+        Map<String, Object> body = Map.of("newCap", 1_000);
+        AppUser approver = new AppUser();
+        approver.setEmail("approver-" + java.util.UUID.randomUUID() + "@test.local");
+        java.util.UUID approverId = appUserRepository.save(approver).getId();
+
+        HttpHeaders h = new HttpHeaders();
+        h.setBearerAuth(stepUpToken);
+        h.setContentType(MediaType.APPLICATION_JSON);
+        h.set("Idempotency-Key", java.util.UUID.randomUUID().toString());
+        h.set("X-Dual-Control-Token", TestJwt.dualControlWithBody(SECRET, approverId, "SUPPLY_CAP_CHANGE_MICAR46",
+                "POST", path, tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(body),
+                "REGISTRY_ADMIN"));
+
+        var response = rest.postForEntity(path, new HttpEntity<>(body, h), Map.class);
+
+        // Auth gate passed - 404/400/500 because no such deployment exists, not 403
         assertThat(response.getStatusCode().value()).isIn(404, 400, 500);
         assertThat(response.getStatusCode().value()).isNotEqualTo(403);
     }

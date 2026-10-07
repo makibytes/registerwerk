@@ -64,6 +64,8 @@ class LendingMarketServiceTest {
     private de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository railAddressRepository;
     @Mock
     private de.makibytes.registerwerk.customer.api.LegalEntityRepository legalEntityRepository;
+    @Mock
+    private de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository bondTermsRepository;
     private final LendingProperties properties = new LendingProperties();
 
     private static final String FACTORY = "0x9999999999999999999999999999999999999999";
@@ -80,7 +82,7 @@ class LendingMarketServiceTest {
         service = new LendingMarketService(
                 marketRepository, assetRepository, chainConfigRepository, onchainReader, eventPublisher,
                 jurisdictionConfig, releaseGate, properties, contractAddresses, deploymentRepository,
-                railRepository, railAddressRepository, legalEntityRepository);
+                railRepository, railAddressRepository, legalEntityRepository, bondTermsRepository);
         stubValidBinding();
         lenient().when(marketRepository.save(any(LendingMarket.class))).thenAnswer(invocation -> {
             LendingMarket market = invocation.getArgument(0);
@@ -238,6 +240,92 @@ class LendingMarketServiceTest {
         assertThat(view.effectiveStatus()).isEqualTo(LendingMarketStatus.PAUSED);
         assertThat(view.pauseReason()).isEqualTo("COLLATERAL_SHORTFALL");
         assertThatThrownBy(() -> service.requireOperational(market)).isInstanceOf(IllegalStateException.class);
+    }
+
+    // ── 9A-06: live collateral check ─────────────────────────────────────────────
+
+    private LendingMarket lenientMarket() {
+        LendingMarket market = new LendingMarket();
+        market.setBindingVerified(true);
+        market.setId(UUID.randomUUID());
+        market.setChainConfigId(chainConfigId);
+        market.setMarketAddress(marketAddress);
+        market.setLoanTokenAddress(LOAN_TOKEN);
+        market.setPriceOracleAddress("0xoracle");
+        market.setLltvBps(7500);
+        market.setLiquidationBonusBps(500);
+        market.setStatus(LendingMarketStatus.ACTIVE);
+        ChainConfig chainConfig = new ChainConfig();
+        chainConfig.setIdentifier("ETHEREUM_SEPOLIA");
+        lenient().when(chainConfigRepository.findById(chainConfigId)).thenReturn(Optional.of(chainConfig));
+        return market;
+    }
+
+    private LendingMarket marketWithCollateral(de.makibytes.registerwerk.asset.api.AssetStatus status) {
+        LendingMarket market = lenientMarket();
+        UUID assetId = UUID.randomUUID();
+        market.setCollateralAssetId(assetId);
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setStatus(status);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        when(marketRepository.findById(market.getId())).thenReturn(Optional.of(market));
+        lenient().when(onchainReader.oracleQuoteToken("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(LOAN_TOKEN);
+        lenient().when(onchainReader.oracleMaxDeviationBps("ETHEREUM_SEPOLIA", "0xoracle")).thenReturn(BigInteger.valueOf(2000));
+        lenient().when(onchainReader.operatorOrg("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(OPERATOR_ORG);
+        lenient().when(onchainReader.treasury("ETHEREUM_SEPOLIA", marketAddress)).thenReturn(TREASURY);
+        return market;
+    }
+
+    @Test
+    @DisplayName("9A-06: a market whose collateral asset is SUSPENDED reads as PAUSED immediately (no job, no RPC)")
+    void suspendedCollateralMakesMarketPausedImmediately() {
+        LendingMarket market = marketWithCollateral(de.makibytes.registerwerk.asset.api.AssetStatus.SUSPENDED);
+
+        var view = service.getMarket(market.getId());
+
+        assertThat(view.effectiveStatus()).isEqualTo(LendingMarketStatus.PAUSED);
+        assertThat(view.pauseReason()).isEqualTo("COLLATERAL_ASSET_SUSPENDED");
+        verify(onchainReader, never()).borrowPaused(any(), any());
+    }
+
+    @Test
+    @DisplayName("9A-06: a bond that is OVERDUE or DEFAULTED pauses the market (COLLATERAL_BOND_<STATUS>); an ACTIVE bond does not")
+    void overdueBondPausesMarketImmediately() {
+        LendingMarket market = marketWithCollateral(de.makibytes.registerwerk.asset.api.AssetStatus.ISSUED);
+        var terms = new de.makibytes.registerwerk.deployment.api.AssetBondTerms();
+        terms.setBondStatus(de.makibytes.registerwerk.deployment.api.BondStatus.OVERDUE);
+        when(bondTermsRepository.findById(market.getCollateralAssetId())).thenReturn(Optional.of(terms));
+
+        var view = service.getMarket(market.getId());
+
+        assertThat(view.effectiveStatus()).isEqualTo(LendingMarketStatus.PAUSED);
+        assertThat(view.pauseReason()).isEqualTo("COLLATERAL_BOND_OVERDUE");
+
+        terms.setBondStatus(de.makibytes.registerwerk.deployment.api.BondStatus.ACTIVE);
+        assertThat(service.collateralUnavailableReason(market)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("9A-06: reverifyMarket checks a single market and reports retired markets without touching the chain")
+    void reverifyMarketHandlesOneMarket() {
+        LendingMarket retired = lenientMarket();
+        retired.setStatus(LendingMarketStatus.RETIRED);
+        when(marketRepository.findById(retired.getId())).thenReturn(Optional.of(retired));
+
+        var result = service.reverifyMarket(retired.getId());
+
+        assertThat(result.verified()).isFalse();
+        verifyNoInteractions(onchainReader);
+    }
+
+    @Test
+    @DisplayName("9A-06: quoting a market whose collateral asset is not ISSUED is refused")
+    void quoteRefusedForSuspendedCollateral() {
+        LendingMarket market = marketWithCollateral(de.makibytes.registerwerk.asset.api.AssetStatus.TRANSFER_PENDING);
+
+        assertThatThrownBy(() -> service.quote(market.getId(), BigInteger.TEN))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("not operational");
     }
 
     @Test

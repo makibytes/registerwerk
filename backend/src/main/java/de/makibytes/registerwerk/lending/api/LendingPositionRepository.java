@@ -15,4 +15,6 @@ public interface LendingPositionRepository extends JpaRepository<LendingPosition
     List<LendingPosition> findByWalletAddressIgnoreCase(String walletAddress);
 
     List<LendingPosition> findByMarketId(UUID marketId);
+
+    boolean existsByMarketIdAndStatus(UUID marketId, LendingPositionStatus status);
 }

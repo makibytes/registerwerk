@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.registertransfer.internal;
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.api.RegisterFreezeGuard;
+import de.makibytes.registerwerk.asset.api.RegisterReconciliationGuard;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.finality.api.FinalityGate;
@@ -156,6 +157,9 @@ public class RegisterInspectionService {
         // Hard floor: a §10 disclosure, once handed to the requester, cannot be un-disclosed —
         // same reasoning as RegisterTransferService.export()'s REGISTER_EXTRACT_EXPORT gate.
         RegisterFreezeGuard.requireAdministeredHere(asset, "Register inspection");
+        // 9A-05 (interim T9-01): refused BEFORE the FULFILLED flip and the one-shot download, so the request stays
+        // APPROVED and can be fulfilled once the holder sync is reconciled again.
+        RegisterReconciliationGuard.requireReconciled(asset, "Register inspection");
         finalityGate.require(GatedOperation.REGISTER_INSPECTION_FULFIL, request.getAssetId(),
                 asset.getTokenStandard(), FinalityLevel.FINALIZED);
 

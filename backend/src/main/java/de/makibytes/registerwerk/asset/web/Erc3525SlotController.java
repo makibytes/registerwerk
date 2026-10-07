@@ -30,7 +30,12 @@ import java.util.UUID;
  *
  * <p>Every state-mutating endpoint threads {@code actorId}/{@code actorRole} through to the
  * service, so these admin actions are audited.
- * {@code forcedValueTransfer} additionally requires step-up dual-control —
+ * {@code createSlot} (it carries the slot's supply cap), {@code mintIntoSlot} and
+ * {@code forcedValueTransfer} additionally require step-up + a second approver (review 9X-1):
+ * minting bond value into a slot is the SFT counterpart of {@code IssuerTokenController.mint},
+ * which already needs 4-eyes, and must not be reachable by one session. Pause/unpause stay
+ * single-actor (same class as the ERC-20 {@code /pause}).
+ * {@code forcedValueTransfer} was the first one to require step-up dual-control —
  * the direct EVM/Canton equivalent of an eWpG §24 forced correction requires it everywhere else
  * in this codebase, but this one lacked it. Freeze/unfreeze deliberately do NOT gain step-up here:
  * neither the EVM nor Canton equivalents of freeze/unfreeze require it either (freeze is
@@ -56,6 +61,7 @@ public class Erc3525SlotController {
     }
 
     @PostMapping("/slots")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ERC3525_SLOT_CREATE")
     public ResponseEntity<TxSubmissionResponse> createSlot(
             @PathVariable UUID depId,
             @Valid @RequestBody CreateSlotRequest request,
@@ -90,6 +96,7 @@ public class Erc3525SlotController {
     }
 
     @PostMapping("/slots/{slotId}/mint")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ERC3525_SLOT_MINT")
     public ResponseEntity<TxSubmissionResponse> mintIntoSlot(
             @PathVariable UUID depId, @PathVariable BigInteger slotId,
             @Valid @RequestBody MintIntoSlotRequest request, Authentication auth) {

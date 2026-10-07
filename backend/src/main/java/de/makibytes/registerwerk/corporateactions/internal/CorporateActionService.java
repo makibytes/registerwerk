@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.corporateactions.internal;
 
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionAnnouncedEvent;
+import de.makibytes.registerwerk.deployment.api.CouponLifecycleTransitionEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionCancelledEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntry;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionEntryRepository;
@@ -648,7 +649,9 @@ public class CorporateActionService {
      * it was MISSED the morning after the payment date — publicly, and for every coupon.
      *
      * <p>H6: a coupon whose action the SYSTEM is holding back (snapshot blocked, register frozen, settlement held)
-     * is neither OVERDUE nor MISSED: that would present a registry-side delay as the issuer's non-payment.
+     * is neither OVERDUE nor MISSED: that would present a registry-side delay as the issuer's non-payment. 9A-04R: the
+     * same holds for an action that waits for the OPERATOR (confirmation missing, settlement not dispatched); and
+     * every real OVERDUE / MISSED change publishes one audited {@link CouponLifecycleTransitionEvent}.
      */
     private void flagOverdueCoupon(UUID corporateActionId, LocalDate today) {
         CorporateAction overdue = repository.findById(corporateActionId).orElse(null);
@@ -659,11 +662,19 @@ public class CorporateActionService {
                 || !overdue.getPaymentDate().isBefore(today)) {
             return;
         }
-        Optional<String> systemBlock = CorporateActionBlocks.systemBlockCause(overdue,
+        CorporateActionBlocks.Responsibility who = CorporateActionBlocks.responsibleSide(overdue,
                 registerFreshnessGate.isRegisterFrozen(overdue.getAssetId()));
-        if (systemBlock.isPresent()) {
-            log.warn("Coupon of corporate action {} is past its payment date but NOT flagged overdue/missed: {}",
-                    overdue.getId(), systemBlock.get());
+        if (!who.countsAsIssuerNonPayment()) {
+            log.warn("Coupon of corporate action {} is past its payment date but NOT flagged overdue/missed: it waits "
+                    + "for the {} side - {}", overdue.getId(), who.side(), who.cause());
+            if (who.side() == CorporateActionBlocks.Side.OPERATOR) {
+                // 9A-04R: operator slowness is surfaced to the operator, never as the issuer's missed coupon.
+                openIssuerTask(overdue.getAssetId(), CorporateActionBlocks.TASK_COUPON_OPERATOR_PENDING,
+                        overdue.getId().toString(), "The coupon payment " + overdue.getCouponPaymentId()
+                                + " (corporate action " + overdue.getId() + ", payment date " + overdue.getPaymentDate()
+                                + ") is waiting for the operator - " + who.cause()
+                                + ". It is NOT flagged overdue or missed.");
+            }
             return;
         }
         couponPaymentRepository.findById(overdue.getCouponPaymentId()).ifPresent(payment -> {
@@ -673,18 +684,39 @@ public class CorporateActionService {
             int grace = bondTermsRepository.findById(payment.getAssetId())
                     .map(AssetBondTerms::getInterestGraceDays).orElse(0);
             if (today.isAfter(overdue.getPaymentDate().plusDays(grace))) {
-                payment.setCouponStatus(CouponStatus.MISSED);
-                couponPaymentRepository.save(payment);
+                couponTransition(payment, overdue, CouponStatus.MISSED, grace,
+                        "unsettled after payment date " + overdue.getPaymentDate() + " + interest grace of " + grace
+                                + " day(s)", CorporateActionBlocks.TASK_COUPON_MISSED);
                 log.warn("Coupon missed: paymentId={} assetId={} paymentDate={} — unsettled after the {}-day grace period",
                         payment.getId(), payment.getAssetId(), overdue.getPaymentDate(), grace);
             } else if (payment.getCouponStatus() == CouponStatus.SCHEDULED) {
-                payment.setCouponStatus(CouponStatus.OVERDUE);
-                couponPaymentRepository.save(payment);
+                couponTransition(payment, overdue, CouponStatus.OVERDUE, grace,
+                        "unsettled after payment date " + overdue.getPaymentDate() + " (grace until "
+                                + overdue.getPaymentDate().plusDays(grace) + ")", CorporateActionBlocks.TASK_COUPON_OVERDUE);
                 log.warn("Coupon overdue: paymentId={} assetId={} paymentDate={} (grace until {})",
                         payment.getId(), payment.getAssetId(), overdue.getPaymentDate(),
                         overdue.getPaymentDate().plusDays(grace));
             }
         });
+    }
+
+    /** 9A-04R: the status change is audited (and the operator told) only when it really changes. */
+    private void couponTransition(de.makibytes.registerwerk.deployment.api.AssetCouponPayment payment,
+                                  CorporateAction action, CouponStatus to, int grace, String cause, String taskKind) {
+        CouponStatus from = payment.getCouponStatus();
+        if (from == to) {
+            return;
+        }
+        payment.setCouponStatus(to);
+        couponPaymentRepository.save(payment);
+        events.publishEvent(new CouponLifecycleTransitionEvent(payment.getId(), payment.getAssetId(), from, to, cause,
+                action.getId(), grace));
+        openIssuerTask(payment.getAssetId(), taskKind, payment.getId().toString(),
+                "Coupon " + payment.getId() + " moved " + from + " -> " + to + ": " + cause + ".");
+    }
+
+    private void openIssuerTask(UUID assetId, String kind, String refId, String detail) {
+        registerFreshnessGate.issuerOf(assetId).ifPresent(issuerId -> entityTasks.open(issuerId, kind, refId, detail, null));
     }
 
     /**

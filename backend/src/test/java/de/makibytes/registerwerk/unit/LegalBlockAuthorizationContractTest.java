@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.unit;
 
 import de.makibytes.registerwerk.asset.web.AssetController;
+import de.makibytes.registerwerk.asset.web.Erc3525SlotController;
 import de.makibytes.registerwerk.blockchain.web.IssuerTokenController;
 import de.makibytes.registerwerk.blockchain.web.TokenAdminController;
 import de.makibytes.registerwerk.erc3643.web.Erc3643Controller;
@@ -82,5 +83,27 @@ class LegalBlockAuthorizationContractTest {
         RequiresStepUp stepUp = burn.getAnnotation(RequiresStepUp.class);
         assertThat(stepUp.requireSecondApprover()).isTrue();
         assertThat(stepUp.reason()).isEqualTo("ISSUER_BURN_EWG26");
+    }
+
+    @Test
+    @DisplayName("setSupplyCapRequiresSecondApprover: the on-chain ceiling is no weaker than the 4-eyes issueSize amendment (B-12)")
+    void setSupplyCapRequiresSecondApprover() {
+        RequiresStepUp stepUp = post(TokenAdminController.class, "/set-supply-cap").getAnnotation(RequiresStepUp.class);
+        assertThat(stepUp).isNotNull();
+        assertThat(stepUp.requireSecondApprover()).isTrue();
+        assertThat(stepUp.reason()).isEqualTo("SUPPLY_CAP_CHANGE_MICAR46");
+    }
+
+    @ParameterizedTest(name = "Erc3525SlotController POST {0}")
+    @org.junit.jupiter.params.provider.CsvSource({
+            "/slots,ERC3525_SLOT_CREATE",
+            "/slots/{slotId}/mint,ERC3525_SLOT_MINT",
+            "/tokens/{tokenId}/forced-value-transfer,ERC3525_FORCED_VALUE_TRANSFER_EWG24"})
+    @DisplayName("ERC-3525 slot creation, slot mint and forced value transfer need step-up + a second approver (9X-1)")
+    void slotValueCreationNeedsSecondApprover(String path, String reason) {
+        RequiresStepUp stepUp = post(Erc3525SlotController.class, path).getAnnotation(RequiresStepUp.class);
+        assertThat(stepUp).as("@RequiresStepUp on " + path).isNotNull();
+        assertThat(stepUp.requireSecondApprover()).isTrue();
+        assertThat(stepUp.reason()).isEqualTo(reason);
     }
 }

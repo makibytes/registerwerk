@@ -233,15 +233,34 @@ export class SlotAdminComponent implements OnInit {
     });
   }
 
-  createSlot(): void {
-    this.run(this.slotService.createSlot(this.deploymentId, {
-      slotId: String(this.createForm.slotId),
-      name: this.createForm.name || undefined,
-      supplyCap: this.createForm.supplyCap ? String(this.createForm.supplyCap) : undefined,
-    }), 'Slot creation submitted.', () => {
-      this.createForm = { slotId: '', name: '', supplyCap: '' };
-      this.load();
+  /** Step-up + second approver; the approver's token is bound to this exact request (target + body). */
+  private withDualControl(action: string, reason: string, target: string, targetBody: Record<string, unknown>,
+                          submit: (tokens: { stepUpToken: string; dualControlToken: string }) => Observable<unknown>,
+                          successMsg: string, onSuccess?: () => void): void {
+    this.dialog.open(StepUpDialogComponent, {
+      data: { requireDualControl: true, reason, action, target, targetBody },
+      width: '500px',
+      disableClose: true,
+    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
+      if (!result?.stepUpToken || !result.dualControlToken) return;
+      this.run(submit({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken }), successMsg, onSuccess);
     });
+  }
+
+  createSlot(): void {
+    const body = {
+      slotId: String(this.createForm.slotId),
+      ...(this.createForm.name ? { name: this.createForm.name } : {}),
+      ...(this.createForm.supplyCap ? { supplyCap: String(this.createForm.supplyCap) } : {}),
+    };
+    // ERC-3525 slot creation (carries the supply cap): step-up + second approver.
+    this.withDualControl('ERC3525_SLOT_CREATE', `Create ERC-3525 slot #${body.slotId}`,
+      `POST /api/v1/deployments/${this.deploymentId}/slots`, body,
+      (tokens) => this.slotService.createSlot(this.deploymentId, body, tokens),
+      'Slot creation submitted.', () => {
+        this.createForm = { slotId: '', name: '', supplyCap: '' };
+        this.load();
+      });
   }
 
   pause(slot: AssetSlot): void {
@@ -253,13 +272,15 @@ export class SlotAdminComponent implements OnInit {
   }
 
   mint(slot: AssetSlot): void {
-    this.run(this.slotService.mintIntoSlot(this.deploymentId, slot.slotId, {
-      toAddress: this.mintForm.toAddress.trim(),
-      value: String(this.mintForm.value),
-    }), `Mint into slot #${slot.slotId} submitted.`, () => {
-      this.mintForm = { toAddress: '', value: '' };
-      this.mintTarget = null;
-    });
+    const body = { toAddress: this.mintForm.toAddress.trim(), value: String(this.mintForm.value) };
+    // Minting value into a slot is the SFT counterpart of the issuer mint: step-up + second approver.
+    this.withDualControl('ERC3525_SLOT_MINT', `Mint ${body.value} into slot #${slot.slotId} for ${body.toAddress}`,
+      `POST /api/v1/deployments/${this.deploymentId}/slots/${slot.slotId}/mint`, body,
+      (tokens) => this.slotService.mintIntoSlot(this.deploymentId, slot.slotId, body, tokens),
+      `Mint into slot #${slot.slotId} submitted.`, () => {
+        this.mintForm = { toAddress: '', value: '' };
+        this.mintTarget = null;
+      });
   }
 
   freeze(): void {

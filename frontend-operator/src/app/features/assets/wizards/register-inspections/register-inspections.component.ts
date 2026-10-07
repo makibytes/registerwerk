@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, TemplateRef, ViewChild, inject
 } from '@angular/core';
 import { downloadBlob } from '../../../../core/utils/download.util';
+import { blobErrorMessage } from '../../../../core/utils/blob-error.util';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -280,7 +281,9 @@ export class RegisterInspectionsComponent implements OnInit {
       error: (err) => {
         this.fulfilling.delete(request.id);
         this.cdr.markForCheck();
-        this.snackBar.open(err?.error?.message ?? 'Failed to fulfil request.', 'Dismiss', { duration: 6000 });
+        // The error body of a blob request is a Blob (e.g. 409 "register is being reconciled"): read the server message.
+        void blobErrorMessage(err, 'Failed to fulfil request.')
+          .then((message) => this.snackBar.open(message, 'Dismiss', { duration: 6000 }));
       },
     });
   }

@@ -15,6 +15,7 @@ import { StatementService } from '../../core/api/statement.service';
 import { TaxService } from '../../core/api/tax.service';
 import { RegisterDocumentService } from '../../core/api/register-document.service';
 import { downloadBlob } from '../../core/utils/download.util';
+import { blobErrorMessage } from '../../core/utils/blob-error.util';
 import { FormsModule } from '@angular/forms';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
@@ -382,10 +383,12 @@ export class PositionsComponent implements OnInit {
         this.downloadingRegisterDocFor.delete(row.assetId);
         this.cdr.markForCheck();
       },
-      error: () => {
+      error: (err) => {
         this.downloadingRegisterDocFor.delete(row.assetId);
         this.cdr.markForCheck();
-        this.snackBar.open('Register document could not be downloaded.', 'Dismiss', { duration: 5000 });
+        // 9A-05: a 409 says the register is being reconciled with the chain - show that, not a generic text.
+        void blobErrorMessage(err, 'Register document could not be downloaded.')
+          .then((message) => this.snackBar.open(message, 'Dismiss', { duration: 6000 }));
       },
     });
   }

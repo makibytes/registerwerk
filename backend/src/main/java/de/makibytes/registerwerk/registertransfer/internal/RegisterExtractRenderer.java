@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.registertransfer.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.RegisterReconciliationGuard;
 import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.registertransfer.api.InspectionLegalBasis;
 import de.makibytes.registerwerk.shared.DocumentSigningService;
@@ -74,6 +75,10 @@ class RegisterExtractRenderer {
             write(c, margin, y, fontRegular, 10, "Einsichtnehmer / Inspector: " + safe(requesterName));
             y -= 13;
             write(c, margin, y, fontRegular, 10, "Grundlage / Basis: " + basis);
+            y -= 13;
+            // 9A-05: always state how far the chain-derived register was reconciled; never imply more.
+            write(c, margin, y, fontRegular, 10,
+                    "Registerstand / Register status: " + RegisterReconciliationGuard.stamp(asset));
             y -= 24;
 
             write(c, margin, y, fontBold, 12, "Wertpapier / Security");

@@ -72,6 +72,8 @@ public interface TradeExecutionRepository extends JpaRepository<TradeExecution, 
 
     List<TradeExecution> findByAssetIdAndSettlementStatusIn(UUID assetId, Collection<SettlementStatus> statuses);
 
+    boolean existsByAssetIdAndSettlementStatusIn(UUID assetId, Collection<SettlementStatus> statuses);
+
     @Query("""
         SELECT e FROM TradeExecution e
         WHERE (e.buyerEntityId = :entityId OR e.sellerEntityId = :entityId)

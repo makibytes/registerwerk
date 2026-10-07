@@ -19,6 +19,7 @@ import { repoMarketAbi } from '../../../core/wallet/abi/repo-market.abi';
 import { InvestmentRecord, LendingMarket, LendingQuote } from '../../../core/models';
 import { LendingComplianceBannerComponent } from '../compliance-banner.component';
 import { formatUnits as formatTokenUnits, parseUnits, type Address } from 'viem';
+import { collateralPauseMessage } from '../../../core/utils/market-pause.util';
 
 /**
  * Guided pledge-and-borrow flow — replaces the dead end in `investment-detail` that used to
@@ -317,6 +318,10 @@ export class BorrowStepperComponent implements OnInit {
 
   /** Customer-facing wording for `market.pauseReason` (falls back to a generic operator pause). */
   get pauseMessage(): string {
+    const collateral = collateralPauseMessage(this.market?.pauseReason);
+    if (collateral) {
+      return collateral;
+    }
     switch (this.market?.pauseReason) {
       case 'COLLATERAL_SHORTFALL':
         return 'New borrowing is paused: the market holds less collateral than it has recorded (for example after a forced transfer) and the registry operator is reconciling it.';

@@ -32,6 +32,7 @@ import { Asset, AssetBondTerms, AssetDeployment, AssetDocument, AssetHolder, Cha
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 import { downloadBlob } from '../../../core/utils/download.util';
+import { blobErrorMessage } from '../../../core/utils/blob-error.util';
 
 /** Minimal ABI fragment for reading a confidential balance handle — see
  *  `investment-detail.component.ts`'s identical fragment for the fuller rationale. */
@@ -1332,10 +1333,12 @@ export class IssuanceDetailComponent implements OnInit {
         this.downloadingRegisterExtract = false;
         this.cdr.markForCheck();
       },
-      error: () => {
+      error: (err) => {
         this.downloadingRegisterExtract = false;
-        this.snackBar.open('Failed to generate the register extract. Please try again.', 'Close', { duration: 5000 });
         this.cdr.markForCheck();
+        // 9A-05: a 409 says the register is being reconciled with the chain - show the server message.
+        void blobErrorMessage(err, 'Failed to generate the register extract. Please try again.')
+          .then((message) => this.snackBar.open(message, 'Close', { duration: 6000 }));
       },
     });
   }

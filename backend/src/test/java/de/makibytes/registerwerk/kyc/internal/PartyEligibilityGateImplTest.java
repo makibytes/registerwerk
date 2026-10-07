@@ -101,4 +101,37 @@ class PartyEligibilityGateImplTest {
         assertThat(gate.check(entityId, null)).hasSize(1);
         assertThatThrownBy(() -> gate.require(entityId, null, "repo desk")).isInstanceOf(RuntimeException.class);
     }
+
+    @Test
+    @DisplayName("hardStopsAreASubsetOfReasons: status and sanctions are hard; KYC expiry and Sperrvermerk are not (9A-08)")
+    void hardStopsAreASubsetOfReasons() {
+        // KYC expired + a legal block: soft only -> no hard stop although the party is not eligible
+        entity.setKycExpiryDate(LocalDate.now().minusDays(1));
+        when(blocks.isBlocked(entityId, null)).thenReturn(true);
+        assertThat(gate.check(entityId, null)).hasSize(2);
+        assertThat(gate.hardStops(entityId)).isEmpty();
+
+        // not-approved KYC is soft too
+        entity.setKycStatus(KycStatus.IN_PROGRESS);
+        assertThat(gate.hardStops(entityId)).isEmpty();
+
+        // entity status and an unresolved sanctions-screening result are hard
+        entity.setStatus(EntityStatus.SUSPENDED);
+        when(screening.hasUnresolvedHit(entityId)).thenReturn(true);
+        assertThat(gate.hardStops(entityId)).hasSize(2);
+        assertThat(gate.check(entityId, null)).containsAll(gate.hardStops(entityId));
+
+        // a beneficial-owner hit alone is hard
+        entity.setStatus(EntityStatus.ACTIVE);
+        when(screening.hasUnresolvedHit(entityId)).thenReturn(false);
+        when(screening.hasUnresolvedBeneficialOwnerHit(entityId)).thenReturn(true);
+        assertThat(gate.hardStops(entityId)).containsExactly("has an unresolved sanctions-screening result");
+    }
+
+    @Test
+    @DisplayName("an unknown entity is a hard stop (fail closed)")
+    void unknownEntityIsAHardStop() {
+        assertThat(gate.hardStops(UUID.randomUUID())).containsExactly("is unknown");
+        assertThat(gate.hardStops(null)).containsExactly("is unknown");
+    }
 }

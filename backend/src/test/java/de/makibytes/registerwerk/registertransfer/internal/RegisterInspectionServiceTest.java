@@ -340,4 +340,27 @@ class RegisterInspectionServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unknown inspection request");
     }
+
+    // ── 9A-05: the §10 extract is refused while the holder sync is BLOCKED ──
+
+    @Test
+    void fulfil_refusedWhileBlockedAndRequestStaysApproved() {
+        UUID requestId = UUID.randomUUID();
+        RegisterInspectionRequest request = new RegisterInspectionRequest();
+        request.setAssetId(ASSET_ID);
+        request.setStatus(InspectionStatus.APPROVED);
+        request.setLegalBasis(InspectionLegalBasis.ISSUER);
+        when(requestRepository.findById(requestId)).thenReturn(Optional.of(request));
+        Asset blocked = assetWithId();
+        blocked.setHolderSyncStatus(de.makibytes.registerwerk.asset.api.HolderSyncStatus.BLOCKED);
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(blocked));
+
+        assertThatThrownBy(() -> service.fulfil(requestId))
+                .isInstanceOf(de.makibytes.registerwerk.shared.RegisterNotReconciledException.class);
+
+        assertThat(request.getStatus()).isEqualTo(InspectionStatus.APPROVED);
+        assertThat(request.getContentHash()).isNull();
+        verifyNoInteractions(extractRenderer);
+        verify(requestRepository, never()).save(any(RegisterInspectionRequest.class));
+    }
 }

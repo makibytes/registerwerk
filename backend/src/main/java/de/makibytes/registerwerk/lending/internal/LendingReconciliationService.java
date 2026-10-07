@@ -65,7 +65,13 @@ public class LendingReconciliationService {
     private final ApplicationEventPublisher eventPublisher;
     private final Counter detections;
     private final Counter guardFailures;
+    private final MeterRegistry meterRegistry;
     private final TransactionTemplate perMarketTx;
+    /** 9A-06: market id -> when the system last submitted an automatic pause (suppresses re-submission while the
+     *  first transaction is still pending; the on-chain flag is the durable idempotency check). */
+    private final java.util.concurrent.ConcurrentHashMap<UUID, Instant> autoPauseSubmittedAt =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    static final java.time.Duration AUTO_PAUSE_RESUBMIT_AFTER = java.time.Duration.ofMinutes(30);
 
     LendingReconciliationService(
             LendingMarketRepository marketRepository,
@@ -84,6 +90,7 @@ public class LendingReconciliationService {
         this.durableTransactions = durableTransactions;
         this.releaseGate = releaseGate;
         this.eventPublisher = eventPublisher;
+        this.meterRegistry = meterRegistry;
         this.perMarketTx = new TransactionTemplate(txManager);
         this.perMarketTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         Gauge.builder("registerwerk_lending_reconciliation_tasks_open", taskRepository,
@@ -249,6 +256,49 @@ public class LendingReconciliationService {
         eventPublisher.publishEvent(new LendingOperatorActionEvent("BORROW_PAUSE_SUBMITTED", marketId, actorId,
                 "REGISTRY_ADMIN", Map.of("paused", paused, "reason", reason == null ? "" : reason, "txHash", txHash)));
         return txHash;
+    }
+
+    /**
+     * 9A-06: the system's own pause of a market whose collateral can no longer back new borrowing (asset suspended /
+     * redeemed / transferring, bond overdue / defaulted). Submits {@code setBorrowPaused(true)} through the durable
+     * outbox as SYSTEM, audited as {@code BORROW_PAUSE_SUBMITTED}. Idempotent: nothing is submitted when the
+     * on-chain flag already reads {@code true}, when this service submitted a pause for the market in the last
+     * {@link #AUTO_PAUSE_RESUBMIT_AFTER}, or when the chain cannot be read (reported, never guessed). It NEVER lifts a
+     * pause: reactivation restores the backend view only; the 4-eyes {@code borrow-paused} action stays the single
+     * way back (asymmetric on purpose, SRE).
+     *
+     * @return the submitted transaction hash, or empty when nothing was submitted
+     */
+    public java.util.Optional<String> pauseBorrowingBySystem(UUID marketId, String cause) {
+        if (!releaseGate.isReleased()) return java.util.Optional.empty();
+        LendingMarket market = marketService.requireMarket(marketId);
+        if (market.getStatus() == LendingMarketStatus.RETIRED) return java.util.Optional.empty();
+        Instant last = autoPauseSubmittedAt.get(marketId);
+        if (last != null && last.plus(AUTO_PAUSE_RESUBMIT_AFTER).isAfter(Instant.now())) {
+            return java.util.Optional.empty();
+        }
+        boolean alreadyPaused;
+        try {
+            alreadyPaused = onchainReader.borrowPaused(
+                    marketService.resolveChainIdentifier(market.getChainConfigId()), market.getMarketAddress());
+        } catch (RuntimeException e) {
+            log.warn("Automatic borrow pause of market {} ({}) could not read borrowPaused, will retry on the next "
+                    + "re-verification run: {}", market.getMarketAddress(), cause, e.getMessage());
+            return java.util.Optional.empty();
+        }
+        if (alreadyPaused) return java.util.Optional.empty();
+        Function fn = new Function("setBorrowPaused", List.of(new Bool(true)), Collections.emptyList());
+        String reason = "Automatic pause (" + cause + "): the collateral can no longer back new borrowing";
+        String txHash = durableTransactions.submit(market.getChainConfigId(), market.getMarketAddress(), fn,
+                Map.of("paused", true, "reason", reason, "automatic", true, "cause", cause));
+        autoPauseSubmittedAt.put(marketId, Instant.now());
+        Counter.builder("registerwerk_lending_market_auto_paused_total").tag("cause", cause)
+                .register(meterRegistry).increment();
+        log.warn("Lending market {} ({}) paused automatically on-chain: {} (tx {})",
+                market.getId(), market.getMarketAddress(), cause, txHash);
+        eventPublisher.publishEvent(new LendingOperatorActionEvent("BORROW_PAUSE_SUBMITTED", marketId, null, "SYSTEM",
+                Map.of("paused", true, "reason", reason, "automatic", true, "cause", cause, "txHash", txHash)));
+        return java.util.Optional.of(txHash);
     }
 
     public record PauseEnforcement(UUID marketId, String marketAddress, String outcome, String txHash) {}

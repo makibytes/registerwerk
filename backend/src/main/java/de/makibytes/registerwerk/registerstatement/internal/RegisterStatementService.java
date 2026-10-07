@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.asset.api.AssetDocumentRepository;
 import de.makibytes.registerwerk.asset.api.AssetDocumentType;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
 import de.makibytes.registerwerk.asset.api.RegisterFreezeGuard;
+import de.makibytes.registerwerk.asset.api.RegisterReconciliationGuard;
 import de.makibytes.registerwerk.auth.api.AppUser;
 import de.makibytes.registerwerk.auth.api.AppUserRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
@@ -134,8 +135,7 @@ public class RegisterStatementService {
 
     private DocumentContext buildContext(Asset asset, AssetHolder holder) {
         LegalEntity issuer = entityRepository.findById(asset.getIssuerId()).orElse(null);
-        List<HolderBlock> blocks = blockRepository
-                .findByWalletAddressAndStatusIn(holder.getWalletAddress(), HolderBlock.BLOCKING);
+        List<HolderBlock> blocks = blocksFor(asset, holder);
         AssetBondTerms bondTerms = bondTermsRepository.findById(asset.getId()).orElse(null);
         AssetDocument termSheet = documentRepository
                 .findByAssetIdAndDocumentTypeAndDeletedAtIsNull(asset.getId(), AssetDocumentType.TERM_SHEET)
@@ -144,6 +144,27 @@ public class RegisterStatementService {
         RegisterDocumentProfile profile = jurisdictionConfig
                 .resolveRegisterDocumentProfile(asset.getJurisdiction(), individualEntry);
         return new DocumentContext(issuer, blocks, bondTerms, termSheet, profile);
+    }
+
+    /**
+     * Every enforced Sperrvermerk that applies to this holding (9A-05): blocks on the holder's wallet AND entity-level
+     * blocks on the investor (a block placed through another of the entity's wallets still restricts this holding),
+     * limited to blocks that cover this asset ({@code assetId} null = all assets) and de-duplicated. Same predicate as
+     * {@code RegisterTransferService.blockSnapshots}. The content hash includes these rows.
+     */
+    private List<HolderBlock> blocksFor(Asset asset, AssetHolder holder) {
+        java.util.Map<Object, HolderBlock> byIdentity = new java.util.LinkedHashMap<>();
+        List<HolderBlock> found = new java.util.ArrayList<>(
+                blockRepository.findByWalletAddressAndStatusIn(holder.getWalletAddress(), HolderBlock.BLOCKING));
+        if (holder.getInvestorId() != null) {
+            found.addAll(blockRepository.findByEntityIdAndStatusIn(holder.getInvestorId(), HolderBlock.BLOCKING));
+        }
+        for (HolderBlock b : found) {
+            if (b.getAssetId() == null || b.getAssetId().equals(asset.getId())) {
+                byIdentity.putIfAbsent(b.getId() != null ? b.getId() : b, b);
+            }
+        }
+        return List.copyOf(byIdentity.values());
     }
 
     private byte[] renderStatement(Asset asset, AssetHolder holder, LegalEntity investor,
@@ -177,6 +198,8 @@ public class RegisterStatementService {
             return Optional.empty();
         }
         RegisterFreezeGuard.requireAdministeredHere(asset, "Register document download");
+        // 9A-05 (interim T9-01): a BLOCKED holder sync wrote no holder row, so every nominal may be stale.
+        RegisterReconciliationGuard.requireReconciled(asset, "Register document download");
 
         Instant issuedAt = Instant.now();
         LocalDate issuedDate = issuedAt.atZone(ZoneOffset.UTC).toLocalDate();
@@ -239,6 +262,9 @@ public class RegisterStatementService {
             log.info("Register statement skipped: asset {} was transferred out", asset.getId());
             return Optional.empty();
         }
+        // 9A-05 (interim T9-01): never issue/e-mail a statement from an unreconciled register (it cannot be un-sent).
+        // lastStatementAt stays untouched, so the daily annual job issues it once the register is reconciled again.
+        RegisterReconciliationGuard.requireReconciled(asset, "Register statement");
 
         // The first real FinalityGate call site (P8 — closes the "irreversible hole" the plan
         // flagged: a §19 statement PDF, once emailed, cannot be un-sent, matching this operation's

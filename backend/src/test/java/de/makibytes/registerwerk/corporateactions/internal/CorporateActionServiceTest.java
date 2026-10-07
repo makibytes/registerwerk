@@ -354,4 +354,62 @@ class CorporateActionServiceTest {
         service.processDailyTransitions();
         assertThat(payment.getCouponStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.CouponStatus.MISSED);
     }
+
+    @Test
+    @DisplayName("9A-04R: coupon OVERDUE and MISSED each publish one audited event; an unchanged status publishes none")
+    void couponMissedPublishesEvent() {
+        init();
+        var payment = new de.makibytes.registerwerk.deployment.api.AssetCouponPayment();
+        UUID paymentId = UUID.randomUUID();
+        ReflectionTestUtils.setField(payment, "id", paymentId);
+        payment.setAssetId(UUID.randomUUID());
+        payment.setCouponStatus(de.makibytes.registerwerk.deployment.api.CouponStatus.SCHEDULED);
+        CorporateAction overdue = actionWithId(UUID.randomUUID(), CorporateAction.Status.COMPUTED);
+        overdue.setCouponPaymentId(paymentId);
+        overdue.setPaymentDate(LocalDate.now().minusDays(1));
+        var terms = new de.makibytes.registerwerk.deployment.api.AssetBondTerms();
+        when(repository.findReadyToCompute(any())).thenReturn(List.of());
+        when(repository.findDueForSettlement(any())).thenReturn(List.of());
+        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
+        when(repository.findOverdueCoupons(any())).thenReturn(List.of(overdue));
+        when(couponPaymentRepository.findById(paymentId)).thenReturn(Optional.of(payment));
+        when(bondTermsRepository.findById(payment.getAssetId())).thenReturn(Optional.of(terms));
+
+        service.processDailyTransitions();      // SCHEDULED -> OVERDUE
+        service.processDailyTransitions();      // unchanged: no second event
+        overdue.setPaymentDate(LocalDate.now().minusDays(31));
+        service.processDailyTransitions();      // OVERDUE -> MISSED
+
+        org.mockito.ArgumentCaptor<Object> published = org.mockito.ArgumentCaptor.forClass(Object.class);
+        org.mockito.Mockito.verify(events, org.mockito.Mockito.atLeast(0)).publishEvent(published.capture());
+        assertThat(published.getAllValues())
+                .filteredOn(de.makibytes.registerwerk.audit.api.AuditableEvent.class::isInstance)
+                .map(e -> ((de.makibytes.registerwerk.audit.api.AuditableEvent) e).eventType())
+                .containsExactly("COUPON_OVERDUE", "COUPON_MISSED");
+    }
+
+    @Test
+    @DisplayName("9A-04R: a coupon whose action only waits for the operator's confirmation is not flagged OVERDUE/MISSED")
+    void couponWaitingForOperatorIsNotFlagged() {
+        init();
+        var payment = new de.makibytes.registerwerk.deployment.api.AssetCouponPayment();
+        UUID paymentId = UUID.randomUUID();
+        ReflectionTestUtils.setField(payment, "id", paymentId);
+        payment.setAssetId(UUID.randomUUID());
+        payment.setCouponStatus(de.makibytes.registerwerk.deployment.api.CouponStatus.SCHEDULED);
+        CorporateAction waiting = actionWithId(UUID.randomUUID(), CorporateAction.Status.COMPUTED);
+        waiting.setCouponPaymentId(paymentId);
+        waiting.setPaymentDate(LocalDate.now().minusDays(90));
+        waiting.setIssuerAttestedAt(java.time.Instant.parse("2025-06-25T10:00:00Z"));
+        when(repository.findReadyToCompute(any())).thenReturn(List.of());
+        when(repository.findDueForSettlement(any())).thenReturn(List.of());
+        when(repository.findByStatus(CorporateAction.Status.SETTLED)).thenReturn(List.of());
+        when(repository.findOverdueCoupons(any())).thenReturn(List.of(waiting));
+
+        service.processDailyTransitions();
+
+        // the status lookup is never even reached: the action is operator-side
+        org.mockito.Mockito.verify(couponPaymentRepository, org.mockito.Mockito.never()).findById(any());
+        assertThat(payment.getCouponStatus()).isEqualTo(de.makibytes.registerwerk.deployment.api.CouponStatus.SCHEDULED);
+    }
 }

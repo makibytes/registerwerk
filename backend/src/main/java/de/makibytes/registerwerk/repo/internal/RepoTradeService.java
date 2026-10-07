@@ -126,6 +126,8 @@ public class RepoTradeService {
         if (LocalDate.now(ZoneOffset.UTC).isBefore(trade.getStartDate())) {
             throw new IllegalStateException("Opening settlement cannot be confirmed before the start date");
         }
+        // 9A-07: the pledge becomes effective with the open legs - not on a register frozen for a handover
+        RegisterFreezeGuard.requireOpen(assets, trade.getCollateralAssetId(), "Repo opening settlement");
         if (leg == SettlementLeg.CASH) {
             requireEntityRole(entityId, trade.getCashBorrowerEntityId(), "cash borrower");
             if (!trade.isOpenCashConfirmed()) {
@@ -166,7 +168,7 @@ public class RepoTradeService {
         requireEntityRole(entityId, trade.getCashLenderEntityId(), "cash lender");
         if (trade.getStatus() != TradeStatus.OPEN) throw new IllegalStateException("Trade is not open");
         requireNoLiveSubstitution(trade, "a margin call");
-        requireActorEligible(entityId, "a margin call");
+        requireProtectiveActor(trade, entityId, userId, "a margin call");
         requirePositive(amount, "Margin amount");
         requirePositive(valuationAmount, "Valuation amount");
         if (valuationReference == null || valuationReference.isBlank()) throw new IllegalArgumentException("A valuation reference is required");
@@ -405,7 +407,7 @@ public class RepoTradeService {
         DefaultGround ground = overdueGround(trade).orElseThrow(() ->
                 new IllegalStateException("No overdue obligation permits a default notice"));
         requireEntityRole(entityId, creditor(trade, ground), "creditor of the overdue obligation");
-        requireActorEligible(entityId, "a default notice");
+        requireProtectiveActor(trade, entityId, userId, "a default notice");
         requireNotCoveredByDeclaration(trade, ground);
         if (trade.getDefaultNoticeAt() != null && ground == trade.getDefaultNoticeGround()) {
             throw new IllegalStateException("A default notice for this obligation was already served");
@@ -427,7 +429,7 @@ public class RepoTradeService {
         DefaultGround ground = overdueGround(trade).orElseThrow(() ->
                 new IllegalStateException("No overdue obligation permits default declaration"));
         requireEntityRole(entityId, creditor(trade, ground), "creditor of the overdue obligation");
-        requireActorEligible(entityId, "a default declaration");
+        requireProtectiveActor(trade, entityId, userId, "a default declaration");
         if (trade.getDefaultNoticeAt() == null || trade.getDefaultNoticeGround() != ground) {
             throw new IllegalStateException("A default notice must be served first");
         }
@@ -590,19 +592,38 @@ public class RepoTradeService {
         controls.requireEligible(entities.findById(entityId).orElseThrow(() -> new AccessDeniedException("Company context not found")), purpose);
     }
 
+    /**
+     * 9A-08: the creditor's PROTECTIVE actions (margin call, default notice, default declaration) protect an exposure that
+     * already exists, so they are refused only on HARD stops (entity not ACTIVE, unresolved sanctions-screening result).
+     * A lapsed KYC or a Sperrvermerk on any wallet no longer disarms the lender while the debtor keeps its cure rights:
+     * the action goes ahead, the trade is flagged and the operator gets a task. Opening NEW exposure
+     * ({@link #requireActorEligible}) keeps the full gate.
+     */
+    private void requireProtectiveActor(RepoTrade trade, UUID entityId, UUID userId, String purpose) {
+        List<String> soft = controls.requireProtectiveActor(
+                entities.findById(entityId).orElseThrow(() -> new AccessDeniedException("Company context not found")), purpose);
+        if (soft == null || soft.isEmpty()) return;
+        flagParty(trade, entityId, soft, userId);
+        controls.openEnforcementTask(entityId, trade.getId(), purpose, soft, userId);
+    }
+
     /** Leg confirmations stay possible (an unwinding must remain possible) but flag a party that became ineligible. */
     private void flagIneligibleParties(RepoTrade trade, UUID userId) {
         for (UUID party : List.of(trade.getCashBorrowerEntityId(), trade.getCashLenderEntityId())) {
             List<String> reasons = controls.eligibilityReasons(party);
             if (reasons.isEmpty()) continue;
-            String text = String.join("; ", reasons);
-            String reference = party + ":" + Integer.toHexString(text.hashCode());
-            if (events.existsByRepoTradeIdAndEventTypeAndReference(trade.getId(), LifecycleEventType.PARTY_FLAGGED, reference)) continue;
-            record(trade, LifecycleEventType.PARTY_FLAGGED, null, userId, null, null, null, reference,
-                    "A party to this trade is no longer eligible; the registry operator has been informed.");
-            audit(trade, "PARTY_FLAGGED", userId, Map.of("partyId", party.toString(), "reasons", text));
-            log.warn("Repo trade {} party {} flagged: {}", trade.getId(), party, text);
+            flagParty(trade, party, reasons, userId);
         }
+    }
+
+    private void flagParty(RepoTrade trade, UUID party, List<String> reasons, UUID userId) {
+        String text = String.join("; ", reasons);
+        String reference = party + ":" + Integer.toHexString(text.hashCode());
+        if (events.existsByRepoTradeIdAndEventTypeAndReference(trade.getId(), LifecycleEventType.PARTY_FLAGGED, reference)) return;
+        record(trade, LifecycleEventType.PARTY_FLAGGED, null, userId, null, null, null, reference,
+                "A party to this trade is no longer eligible; the registry operator has been informed.");
+        audit(trade, "PARTY_FLAGGED", userId, Map.of("partyId", party.toString(), "reasons", text));
+        log.warn("Repo trade {} party {} flagged: {}", trade.getId(), party, text);
     }
 
     private void notifyBoth(RepoTrade trade, String subject, String message) {

@@ -17,6 +17,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import org.springframework.test.util.ReflectionTestUtils;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -263,6 +265,109 @@ class BondMaturityJobTest {
         jobOn(MATURITY.plusDays(90)).processMaturitiesAndDefaults();
 
         assertThat(t.getBondStatus()).isEqualTo(BondStatus.DEFAULTED);
+    }
+
+    // ── Wave 2b 9A-04R: operator-side waits never count; transitions are audited and notified ──────────
+
+    private java.util.List<de.makibytes.registerwerk.audit.api.AuditableEvent> publishedAuditable() {
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        org.mockito.Mockito.verify(events, org.mockito.Mockito.atLeast(0)).publishEvent(captor.capture());
+        return captor.getAllValues().stream()
+                .filter(de.makibytes.registerwerk.audit.api.AuditableEvent.class::isInstance)
+                .map(de.makibytes.registerwerk.audit.api.AuditableEvent.class::cast).toList();
+    }
+
+    private CorporateAction operatorWaitingRedemption(CorporateAction.Status status, boolean attested) {
+        CorporateAction ca = blockedRedemption(status);
+        if (attested) {
+            ca.setIssuerAttestedAt(java.time.Instant.parse("2025-06-25T10:00:00Z"));
+        }
+        return ca;
+    }
+
+    @Test
+    @DisplayName("9A-04R: a redemption the OPERATOR has not confirmed yet never makes the bond DEFAULTED")
+    void operatorSideWaitIsNeverEscalated() {
+        AssetBondTerms t = terms(BondStatus.MATURED);
+        when(corporateActionRepository.existsActiveRedemptionForAsset(t.getAssetId())).thenReturn(true);
+        CorporateAction waiting = operatorWaitingRedemption(CorporateAction.Status.COMPUTED, true);
+        when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of(waiting));
+        Asset asset = new Asset();
+        asset.setIssuerId(UUID.randomUUID());
+        asset.setStatus(AssetStatus.ISSUED);
+        when(assetRepository.findById(t.getAssetId())).thenReturn(Optional.of(asset));
+        when(entityTasks.open(any(), any(), any(), any(), any())).thenReturn(true);
+
+        jobOn(MATURITY.plusDays(90)).processMaturitiesAndDefaults();
+
+        assertThat(t.getBondStatus()).isEqualTo(BondStatus.MATURED);
+        verify(entityTasks).open(org.mockito.ArgumentMatchers.eq(asset.getIssuerId()),
+                org.mockito.ArgumentMatchers.eq("BOND_REDEMPTION_OPERATOR_PENDING"),
+                org.mockito.ArgumentMatchers.eq(waiting.getId().toString()), any(), any());
+        assertThat(publishedAuditable()).anySatisfy(e -> {
+            assertThat(e.eventType()).isEqualTo("BOND_REDEMPTION_BLOCKED");
+            assertThat(String.valueOf(e.payload().get("cause"))).contains("OPERATOR_CONFIRMATION_MISSING");
+        });
+    }
+
+    @Test
+    @DisplayName("9A-04R: a redemption sitting in AWAITING_SETTLEMENT (manual-settle lag) is operator-side, never DEFAULTED")
+    void awaitingSettlementIsNeverEscalated() {
+        AssetBondTerms t = terms(BondStatus.OVERDUE);
+        when(corporateActionRepository.existsActiveRedemptionForAsset(t.getAssetId())).thenReturn(true);
+        CorporateAction waiting = operatorWaitingRedemption(CorporateAction.Status.AWAITING_SETTLEMENT, true);
+        when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of(waiting));
+
+        jobOn(MATURITY.plusDays(90)).processMaturitiesAndDefaults();
+
+        assertThat(t.getBondStatus()).isEqualTo(BondStatus.OVERDUE);
+        assertThat(publishedAuditable()).extracting(e -> e.eventType()).doesNotContain("BOND_DEFAULTED");
+        assertThat(publishedAuditable()).anySatisfy(e ->
+                assertThat(String.valueOf(e.payload().get("cause"))).contains("SETTLEMENT_NOT_DISPATCHED"));
+    }
+
+    @Test
+    @DisplayName("9A-04R: an issuer that has not attested still escalates (the issuer side is unchanged)")
+    void issuerNotAttestedStillEscalates() {
+        AssetBondTerms t = terms(BondStatus.MATURED);
+        when(corporateActionRepository.existsActiveRedemptionForAsset(t.getAssetId())).thenReturn(true);
+        when(corporateActionRepository.findOverdueRedemptions(any(), any()))
+                .thenReturn(List.of(operatorWaitingRedemption(CorporateAction.Status.COMPUTED, false)));
+
+        jobOn(MATURITY.plusDays(90)).processMaturitiesAndDefaults();
+
+        assertThat(t.getBondStatus()).isEqualTo(BondStatus.DEFAULTED);
+    }
+
+    @Test
+    @DisplayName("9A-04R: MATURED, OVERDUE and DEFAULTED each publish one audited event and notify the issuer; unchanged status publishes nothing")
+    void bondStatusTransitionsPublishAuditEvents() {
+        AssetBondTerms t = terms(BondStatus.ACTIVE);
+        when(bondTermsRepository.findMaturedButNotTransitioned(any())).thenReturn(List.of(t)).thenReturn(List.of());
+        when(corporateActionRepository.existsActiveRedemptionForAsset(t.getAssetId())).thenReturn(true);
+        CorporateAction unsettled = unsettledRedemption(MATURITY);
+        ReflectionTestUtils.setField(unsettled, "id", UUID.randomUUID());
+        when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of());
+        Asset asset = new Asset();
+        asset.setIssuerId(UUID.randomUUID());
+        asset.setStatus(AssetStatus.ISSUED);
+        when(assetRepository.findById(t.getAssetId())).thenReturn(Optional.of(asset));
+        when(entityTasks.open(any(), any(), any(), any(), any())).thenReturn(true);
+
+        jobOn(MATURITY).processMaturitiesAndDefaults();                 // ACTIVE -> MATURED (not yet overdue)
+        when(corporateActionRepository.findOverdueRedemptions(any(), any())).thenReturn(List.of(unsettled));
+        jobOn(MATURITY.plusDays(1)).processMaturitiesAndDefaults();     // MATURED -> OVERDUE
+        jobOn(MATURITY.plusDays(2)).processMaturitiesAndDefaults();     // still OVERDUE: no new event
+        when(bondTermsRepository.findByBondStatus(BondStatus.OVERDUE)).thenReturn(List.of(t));
+        jobOn(MATURITY.plusDays(8)).processMaturitiesAndDefaults();     // OVERDUE -> DEFAULTED
+
+        assertThat(publishedAuditable()).extracting(e -> e.eventType())
+                .containsExactly("BOND_MATURED", "BOND_OVERDUE", "BOND_DEFAULTED");
+        assertThat(publishedAuditable().get(2).payload()).containsKeys("from", "to", "actionIds", "graceDays");
+        verify(entityTasks).open(org.mockito.ArgumentMatchers.eq(asset.getIssuerId()),
+                org.mockito.ArgumentMatchers.eq("BOND_OVERDUE"), any(), any(), any());
+        verify(entityTasks).open(org.mockito.ArgumentMatchers.eq(asset.getIssuerId()),
+                org.mockito.ArgumentMatchers.eq("BOND_DEFAULT_REVIEW"), any(), any(), any());
     }
 
     // ── Wave 0b H8: one transaction per bond ───────────────────────────────────

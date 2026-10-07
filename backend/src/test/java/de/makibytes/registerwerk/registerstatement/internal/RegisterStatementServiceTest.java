@@ -514,4 +514,92 @@ class RegisterStatementServiceTest {
 
         verify(signingService).signPdf(any(), anyString());
     }
+
+    // ── 9A-05: no disclosure from an unreconciled register; entity-level blocks are disclosed ──
+
+    private Asset blockAsset(AssetHolder h) {
+        Asset asset = assetRepository.findById(h.getAssetId()).orElseThrow();
+        asset.setHolderSyncStatus(de.makibytes.registerwerk.asset.api.HolderSyncStatus.BLOCKED);
+        asset.setLastSuccessfulHolderSyncAt(Instant.parse("2026-09-01T10:15:00Z"));
+        return asset;
+    }
+
+    @Test
+    @DisplayName("issueForHolder is refused while the asset's holder sync is BLOCKED: nothing is saved or e-mailed")
+    void issueForHolder_refusedWhileHolderSyncBlocked() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true);
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        wireSupportingData(h);
+        blockAsset(h);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL))
+                .isInstanceOf(de.makibytes.registerwerk.shared.RegisterNotReconciledException.class)
+                .hasMessageContaining("2026-09-01 10:15 UTC");
+        verify(statementRepository, never()).save(any());
+        verify(emailPort, never()).sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("the self-service download is refused while BLOCKED and writes no ON_DEMAND row")
+    void renderForDownload_refusedWhileBlocked() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true);
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        wireSupportingData(h);
+        blockAsset(h);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> newService().renderForDownload(h.getId()))
+                .isInstanceOf(de.makibytes.registerwerk.shared.RegisterNotReconciledException.class);
+        verify(statementRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("an entity-level Sperrvermerk (placed via another wallet) is disclosed: the digest covers it")
+    void entityScopedBlockOnOtherWalletIsDisclosed() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true); // holder row on wallet W2
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        wireSupportingData(h);
+        when(emailPort.sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString())).thenReturn(true);
+
+        String baseline = newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL).orElseThrow().getContentHash();
+
+        de.makibytes.registerwerk.kyc.api.HolderBlock block = new de.makibytes.registerwerk.kyc.api.HolderBlock();
+        block.setBlockType(de.makibytes.registerwerk.kyc.api.HolderBlock.BlockType.PFAENDUNG);
+        block.setEntityId(h.getInvestorId());
+        block.setWalletAddress("0xw1-another-wallet-of-the-same-entity");
+        block.setLegalBasis("AG Bonn 12 C 34/26");
+        when(blockRepository.findByEntityIdAndStatusIn(eq(h.getInvestorId()), any())).thenReturn(List.of(block));
+
+        String withBlock = newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL).orElseThrow().getContentHash();
+        assertThat(withBlock).isNotEqualTo(baseline);
+    }
+
+    @Test
+    @DisplayName("a block scoped to another asset is not disclosed here; a block found by wallet AND entity counts once")
+    void blocksAreFilteredByAssetAndDeduplicated() {
+        AssetHolder h = holder(EntryType.INDIVIDUAL, true);
+        when(holderRepository.findById(h.getId())).thenReturn(Optional.of(h));
+        wireSupportingData(h);
+        when(emailPort.sendHtmlWithPdf(anyString(), anyString(), anyString(), any(), any(), anyString())).thenReturn(true);
+        String baseline = newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL).orElseThrow().getContentHash();
+
+        de.makibytes.registerwerk.kyc.api.HolderBlock other = new de.makibytes.registerwerk.kyc.api.HolderBlock();
+        other.setBlockType(de.makibytes.registerwerk.kyc.api.HolderBlock.BlockType.PFAENDUNG);
+        other.setEntityId(h.getInvestorId());
+        other.setAssetId(UUID.randomUUID()); // some OTHER asset
+        when(blockRepository.findByEntityIdAndStatusIn(eq(h.getInvestorId()), any())).thenReturn(List.of(other));
+        assertThat(newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL).orElseThrow().getContentHash())
+                .isEqualTo(baseline);
+
+        de.makibytes.registerwerk.kyc.api.HolderBlock both = new de.makibytes.registerwerk.kyc.api.HolderBlock();
+        both.setBlockType(de.makibytes.registerwerk.kyc.api.HolderBlock.BlockType.PFAENDUNG);
+        both.setEntityId(h.getInvestorId());
+        both.setLegalBasis("x");
+        org.springframework.test.util.ReflectionTestUtils.setField(both, "id", UUID.randomUUID());
+        when(blockRepository.findByWalletAddressAndStatusIn(eq(h.getWalletAddress()), any())).thenReturn(List.of(both));
+        when(blockRepository.findByEntityIdAndStatusIn(eq(h.getInvestorId()), any())).thenReturn(List.of());
+        String viaWallet = newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL).orElseThrow().getContentHash();
+        when(blockRepository.findByEntityIdAndStatusIn(eq(h.getInvestorId()), any())).thenReturn(List.of(both));
+        assertThat(newService().issueForHolder(h.getId(), StatementTrigger.ANNUAL).orElseThrow().getContentHash()).isEqualTo(viaWallet);
+    }
 }

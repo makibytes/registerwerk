@@ -61,6 +61,9 @@ class RegisterTransferServiceTest {
     @Mock private de.makibytes.registerwerk.asset.api.OpenSubscriptionOrdersPort subscriptionOrdersPort;
     @Mock private de.makibytes.registerwerk.registertransfer.internal.OnchainHandoverVerifier handoverVerifier;
 
+    @Mock private org.springframework.beans.factory.ObjectProvider<de.makibytes.registerwerk.asset.api.HandoverBlocker> handoverBlockers;
+    private final java.util.List<de.makibytes.registerwerk.asset.api.HandoverBlocker> blockers = new java.util.ArrayList<>();
+
     private RegisterTransferService service;
 
     private static final UUID ASSET_ID = UUID.randomUUID();
@@ -74,7 +77,8 @@ class RegisterTransferServiceTest {
                 corporateActionPort, subscriptionOrdersPort, handoverVerifier,
                 new de.makibytes.registerwerk.shared.RegisterClock(java.time.Clock.systemUTC(),
                         java.time.ZoneId.of("Europe/Berlin")),
-                null);
+                null, handoverBlockers);
+        lenient().when(handoverBlockers.orderedStream()).thenAnswer(inv -> blockers.stream());
         lenient().when(transferRepository.save(any(RegisterTransfer.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -176,6 +180,56 @@ class RegisterTransferServiceTest {
         assertThat(transfer.getStatus()).isEqualTo(TransferStatus.INITIATED);
         verify(transferRepository, never()).save(any());
         verifyNoInteractions(holderRepository, deploymentRepository, auditApi);
+    }
+
+    // ── 9A-07: encumbrances block the handover ───────────────────────────────
+
+    private RegisterTransfer initiatedTransfer(UUID transferId, TransferStatus status) {
+        RegisterTransfer transfer = new RegisterTransfer();
+        transfer.setAssetId(ASSET_ID);
+        transfer.setStatus(status);
+        when(transferRepository.findById(transferId)).thenReturn(Optional.of(transfer));
+        when(assetRepository.findById(ASSET_ID)).thenReturn(Optional.of(asset()));
+        return transfer;
+    }
+
+    @Test
+    void exportRefusedWhileRepoOpen() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = initiatedTransfer(transferId, TransferStatus.INITIATED);
+        blockers.add(id -> Optional.of("it is pledged as collateral in an open repo trade"));
+
+        assertThatThrownBy(() -> service.export(transferId, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Register handover refused").hasMessageContaining("open repo trade");
+
+        assertThat(transfer.getStatus()).isEqualTo(TransferStatus.INITIATED);
+        verify(transferRepository, never()).save(any());
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void exportNamesEveryEncumbrance_lendingPositionAndUnresolvedTrade() {
+        UUID transferId = UUID.randomUUID();
+        initiatedTransfer(transferId, TransferStatus.INITIATED);
+        blockers.add(id -> Optional.of("locked by an open lending position"));
+        blockers.add(id -> Optional.empty());
+        blockers.add(id -> Optional.of("a trade is still in flight (PAYMENT_UNRESOLVED)"));
+
+        assertThatThrownBy(() -> service.export(transferId, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("open lending position").hasMessageContaining("PAYMENT_UNRESOLVED");
+    }
+
+    @Test
+    void reExportIsRefusedToo_whenAPledgeWasOpenedAfterTheFirstExport() {
+        UUID transferId = UUID.randomUUID();
+        RegisterTransfer transfer = initiatedTransfer(transferId, TransferStatus.EXPORTED);
+        blockers.add(id -> Optional.of("it is pledged as collateral in an open repo trade"));
+
+        assertThatThrownBy(() -> service.export(transferId, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("Register handover refused");
+        assertThat(transfer.getStatus()).isEqualTo(TransferStatus.EXPORTED);
     }
 
     @Test

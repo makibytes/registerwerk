@@ -27,13 +27,8 @@ import {
 import { AsyncSectionStatus } from '../../core/async/async-section';
 import { StepUpDialogComponent, StepUpDialogResult } from '../../shared/components/step-up/step-up-dialog.component';
 import { MarketRegisterDialogComponent } from './market-register-dialog.component';
+import { pauseReasonText } from './lending-pause-reason';
 
-const PAUSE_REASON_TEXT: Record<string, string> = {
-  COLLATERAL_SHORTFALL: 'Collateral shortfall (reconcile)',
-  BINDING_UNVERIFIED: 'Binding unverified (re-verify)',
-  BORROW_PAUSED_ONCHAIN: 'Borrowing paused on-chain',
-  CHAIN_READ_FAILED: 'Chain read failed',
-};
 
 /**
  * Operator view of the lending read-model: registered markets (with binding verification and pause reason) and the
@@ -213,7 +208,7 @@ export class LendingAdminComponent implements OnInit {
     {
       key: 'pauseReason',
       header: 'Paused because',
-      cell: (m: LendingMarketAdminView) => (m.pauseReason ? (PAUSE_REASON_TEXT[m.pauseReason] ?? m.pauseReason) : '—'),
+      cell: (m: LendingMarketAdminView) => (m.pauseReason ? pauseReasonText(m.pauseReason) : '—'),
     },
     {
       key: 'binding',

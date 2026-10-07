@@ -4,6 +4,8 @@ import de.makibytes.registerwerk.registerstatement.api.StatementTrigger;
 import de.makibytes.registerwerk.asset.events.HolderEnteredEvent;
 import de.makibytes.registerwerk.asset.events.HolderRegisterChangedEvent;
 import de.makibytes.registerwerk.indexer.events.HolderBalanceSyncedEvent;
+import de.makibytes.registerwerk.shared.RegisterNotReconciledException;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -25,9 +27,11 @@ class RegisterStatementEventListener {
     private static final Logger log = LoggerFactory.getLogger(RegisterStatementEventListener.class);
 
     private final RegisterStatementService statementService;
+    private final MeterRegistry meters;
 
-    RegisterStatementEventListener(RegisterStatementService statementService) {
+    RegisterStatementEventListener(RegisterStatementService statementService, MeterRegistry meters) {
         this.statementService = statementService;
+        this.meters = meters;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -53,6 +57,11 @@ class RegisterStatementEventListener {
     private void safeIssue(java.util.UUID holderId, StatementTrigger trigger) {
         try {
             statementService.issueForHolder(holderId, trigger);
+        } catch (RegisterNotReconciledException e) {
+            // 9A-05: refused on purpose while the asset's holder sync is BLOCKED. Not re-issued automatically;
+            // the operator can issue it through RegisterStatementController once the register is reconciled.
+            StatementRefusalMetrics.unreconciled(meters).increment();
+            log.warn("{} statement for holder {} refused, register unreconciled: {}", trigger, holderId, e.getMessage());
         } catch (Exception e) {
             // Never let statement issuance break the register operation that triggered it.
             log.error("Failed to issue {} statement for holder {}: {}",

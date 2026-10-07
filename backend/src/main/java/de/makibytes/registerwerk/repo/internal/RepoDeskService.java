@@ -250,6 +250,8 @@ public class RepoDeskService {
         controls.requireLei(quoterEntity);
         controls.requireHolding(borrowerId, rfq.getCollateralAssetId(), rfq.getCollateralQuantity());
         controls.requireTermWithinCollateralLife(rfq.getCollateralAssetId(), rfq.getEndDate());
+        // 9A-07: no new pledge on a register frozen for a §§21/22 handover (the RFQ may predate the freeze)
+        RegisterFreezeGuard.requireOpen(assets, rfq.getCollateralAssetId(), "Repo trade");
         if (rfq.getStartDate().isBefore(LocalDate.now(ZoneOffset.UTC))) {
             throw new IllegalStateException("The repo start date has passed");
         }

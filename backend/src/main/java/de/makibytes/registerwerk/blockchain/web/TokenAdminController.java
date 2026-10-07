@@ -62,8 +62,10 @@ import jakarta.validation.Valid;
  * {@code force-burn-single} carry the same {@code requireSecondApprover=true} guard as
  * {@code force-burn} — a wrongful forced-transfer moves assets to an attacker-chosen
  * address and is at least as destructive as a burn, so it must not be reachable by a
- * single actor. {@code set-supply-cap} requires single step-up (not dual-control: it
- * changes a ceiling, not custody of specific holdings).
+ * single actor. {@code set-supply-cap} carries the same guard (review B-12): the on-chain
+ * ceiling ({@code 0} removes it) is the weaker of two controls over the same quantity as the
+ * register-layer {@code issueSize}, which is already a 4-eyes terms amendment, so it must not
+ * be reachable by a single actor either.
  *
  * <pre>
  *   POST .../pause                    — suspend all transfers
@@ -77,7 +79,7 @@ import jakarta.validation.Valid;
  *   POST .../forced-approve           — BaFin/court-ordered approval override (step-up + 4-eyes)
  *   POST .../force-burn               — compulsory cancellation (step-up + 4-eyes)
  *   POST .../force-burn-single        — ERC-1155: forced burn of specific token id (step-up + 4-eyes)
- *   POST .../set-supply-cap           — regulatory issuance ceiling (step-up)
+ *   POST .../set-supply-cap           — regulatory issuance ceiling (step-up + 4-eyes)
  * </pre>
  */
 @RestController
@@ -363,7 +365,7 @@ public class TokenAdminController {
     }
 
     @PostMapping("/set-supply-cap")
-    @RequiresStepUp(reason = "SUPPLY_CAP_CHANGE_MICAR46")
+    @RequiresStepUp(requireSecondApprover = true, reason = "SUPPLY_CAP_CHANGE_MICAR46")
     public ResponseEntity<TxSubmissionResponse> setSupplyCap(
             @PathVariable UUID assetId, @PathVariable UUID depId,
             @RequestBody @Valid SetSupplyCapRequest request, Authentication auth) {

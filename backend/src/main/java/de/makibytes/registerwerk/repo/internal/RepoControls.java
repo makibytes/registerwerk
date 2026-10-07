@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.repo.internal;
 
 import de.makibytes.registerwerk.customer.api.ClientCategory;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
+import de.makibytes.registerwerk.customer.api.EntityTaskPort;
 import de.makibytes.registerwerk.customer.api.EntityType;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
@@ -57,14 +58,17 @@ class RepoControls {
     private final RepoSubstitutionRequestRepository substitutions;
     private final AssetBondTermsRepository bondTerms;
     private final CorporateActionRepository corporateActions;
+    private final EntityTaskPort entityTasks;
 
     RepoControls(PartyEligibilityGate gate, LegalEntityRepository entities, RepoDeskParticipantRepository participants,
                  AssetHolderRepository holders, TradeListingRepository listings, TradeExecutionRepository executions,
                  RepoTradeRepository trades, RepoSubstitutionRequestRepository substitutions,
-                 AssetBondTermsRepository bondTerms, CorporateActionRepository corporateActions) {
+                 AssetBondTermsRepository bondTerms, CorporateActionRepository corporateActions,
+                 EntityTaskPort entityTasks) {
         this.gate = gate; this.entities = entities; this.participants = participants; this.holders = holders;
         this.listings = listings; this.executions = executions; this.trades = trades;
         this.substitutions = substitutions; this.bondTerms = bondTerms; this.corporateActions = corporateActions;
+        this.entityTasks = entityTasks;
     }
 
     /** Active opt-in, professional / eligible-counterparty category, KYC/screening gate (T5-07, 5C-03). */
@@ -107,6 +111,32 @@ class RepoControls {
                     + ": " + String.join("; ", reasons) + ".");
         }
         gate.require(entity.getId(), null, purpose);
+    }
+
+    /**
+     * 9A-08: the gate for a creditor's PROTECTIVE actions on an existing trade (margin call, default notice, default
+     * declaration). Unlike {@link #requireEligible} (used when NEW exposure is opened) it refuses only on HARD stops: an
+     * entity that is not ACTIVE, or an unresolved sanctions-screening result. Everything else (expired / unapproved KYC,
+     * a Sperrvermerk on any wallet, client category) is returned as a SOFT reason: the action is allowed, the caller
+     * flags the trade and {@link #openEnforcementTask} hands it to the operator. The debtor keeps its cure rights
+     * regardless, so disarming only the creditor was an asymmetry nobody decided.
+     *
+     * @return the soft reasons (empty = fully eligible)
+     */
+    List<String> requireProtectiveActor(LegalEntity entity, String purpose) {
+        List<String> hard = gate.hardStops(entity.getId());
+        if (!hard.isEmpty()) {
+            throw new ComplianceGateException("Entity " + entity.getId() + " cannot perform " + purpose + ": "
+                    + String.join("; ", hard) + ".");
+        }
+        return eligibilityReasons(entity.getId());
+    }
+
+    /** Operator task on the enforcing entity for a protective action taken while soft-ineligible (9A-08). */
+    void openEnforcementTask(UUID entityId, UUID tradeId, String purpose, List<String> softReasons, UUID actorId) {
+        entityTasks.open(entityId, "REPO_PARTY_INELIGIBLE_ENFORCEMENT", tradeId.toString(),
+                "Repo trade " + tradeId + ": " + purpose + " was taken although the entity "
+                        + String.join("; ", softReasons) + ". Review the party status.", actorId);
     }
 
     private void categoryReason(LegalEntity entity, List<String> reasons) {

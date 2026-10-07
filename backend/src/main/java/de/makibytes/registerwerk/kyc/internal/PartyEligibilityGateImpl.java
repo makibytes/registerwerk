@@ -44,6 +44,15 @@ class PartyEligibilityGateImpl implements PartyEligibilityGate {
     }
 
     @Override
+    public List<String> hardStops(UUID entityId) {
+        LegalEntity entity = entityId == null ? null : entityRepository.findById(entityId).orElse(null);
+        if (entity == null) {
+            return List.of("is unknown");
+        }
+        return PartyEligibility.hardStops(entity, screeningGate);
+    }
+
+    @Override
     public List<String> check(UUID entityId, String walletAddress) {
         if (entityId == null) {
             return List.of("is unknown");

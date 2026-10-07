@@ -120,6 +120,34 @@ groups:
           summary: "Corporate-action entitlement snapshot refused"
           description: "{{ $value }} corporate action(s) are SNAPSHOT_BLOCKED — record date reached on a register that is not reconciled. Coupons/redemptions will not compute until the register is fixed."
 
+      # 9A-04R: a past-due coupon/redemption that waits for the OPERATOR (confirmation missing, settlement not
+      # dispatched, manual-settle lag) is deliberately NOT escalated to bond OVERDUE/DEFAULTED or coupon MISSED; this
+      # alert is how the operator's own lag stays visible. Live count from the DB.
+      - alert: CorporateActionOperatorSideOverdue
+        expr: |
+          registerwerk_corporate_action_operator_side_overdue{job="registerwerk-backend"} > 0
+        for: 6h
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "Corporate action past its payment date, waiting for the operator"
+          description: "{{ $value }} coupon/redemption action(s) are past their payment date and wait for the operator's confirmation or settlement dispatch. They are not counted as issuer non-payment; confirm or settle them (entity tasks BOND_REDEMPTION_OPERATOR_PENDING / COUPON_OPERATOR_PENDING)."
+
+      # 9A-06: the system paused a lending market on-chain because its collateral can no longer back new borrowing
+      # (asset suspended / redeemed / transferring, bond overdue / defaulted). Lifting the pause stays the 4-eyes
+      # borrow-paused action; the alert makes sure someone looks at the market.
+      - alert: LendingMarketAutoPaused
+        expr: |
+          sum by (cause) (increase(registerwerk_lending_market_auto_paused_total{job="registerwerk-backend"}[15m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+          dora_category: DATA_INTEGRITY
+        annotations:
+          summary: "A lending market was paused automatically"
+          description: "A lending market was paused on-chain by the system (cause {{ $labels.cause }}). New borrowing is stopped; repay, liquidate and withdraw are unaffected. Review the collateral; lifting the pause is the 4-eyes borrow-paused action."
+
       # ── Outcome-based settlement (Wave 0b C7) ─────────────────────────────
       # Live counts from the DB. A paid subscription whose mint reverted, or a redemption whose burn reverted, is
       # not an incident the user can see: the investor has paid and holds nothing / the asset is REDEEMED-pending

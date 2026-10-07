@@ -43,6 +43,14 @@ public interface CorporateActionRepository extends JpaRepository<CorporateAction
             + "AND ca.status NOT IN ('SETTLED','CLOSED','CANCELLED') AND ca.paymentDate < :today")
     List<CorporateAction> findOverdueRedemptions(@Param("assetId") UUID assetId, @Param("today") LocalDate today);
 
+    /** 9A-04R: past-due COUPON / REDEMPTION actions that wait for the OPERATOR (issuer attested but not confirmed, both
+     *  signed but not dispatched, or AWAITING_SETTLEMENT) and that the system is not holding back itself. These are
+     *  never counted toward OVERDUE / DEFAULTED / MISSED; the gauge makes the operator's lag visible instead. */
+    @Query("SELECT COUNT(ca) FROM CorporateAction ca WHERE ca.actionType IN ('COUPON','REDEMPTION') "
+            + "AND ca.paymentDate < :today AND (ca.settlementHoldReason IS NULL OR ca.settlementHoldReason = '') "
+            + "AND (ca.status = 'AWAITING_SETTLEMENT' OR (ca.status = 'COMPUTED' AND ca.issuerAttestedAt IS NOT NULL))")
+    long countOperatorSideOverdue(@Param("today") LocalDate today);
+
     /** COUPON actions whose payment date has passed without settling — the OVERDUE/MISSED coupon
      *  detection input for {@code CorporateActionService}, which applies the bond's interest grace
      *  period on top (T3-05; mirrors {@link #findOverdueRedemptions}). */

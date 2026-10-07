@@ -21,6 +21,7 @@ import { LendingMarket, LendingSupplyPosition } from '../../../core/models';
 import { type Address } from 'viem';
 import { executeWithdraw } from '../../../core/lending/withdraw.flow';
 import { formatTokenAmountGrouped, parseTokenAmount } from '../../../core/lending/token-amount.util';
+import { collateralPauseMessage } from '../../../core/utils/market-pause.util';
 
 /**
  * Lender side of the securities-backed lending facility — deliberately ungated (any stablecoin holder, no
@@ -94,9 +95,10 @@ import { formatTokenAmountGrouped, parseTokenAmount } from '../../../core/lendin
               <p class="hint-text" role="status">
                 {{ selectedMarket.riskParametersLegacy
                   ? 'This market was set up under earlier risk parameters and takes no new supply. You can still withdraw.'
-                  : (selectedMarket.pauseReason === 'COLLATERAL_SHORTFALL'
+                  : (collateralHint(selectedMarket.pauseReason)
+                    ?? (selectedMarket.pauseReason === 'COLLATERAL_SHORTFALL'
                       ? 'This market is paused while the operator reconciles a collateral shortfall. You can still withdraw, subject to available liquidity.'
-                      : 'This market is paused. You can still withdraw.') }}
+                      : 'This market is paused. You can still withdraw.')) }}
               </p>
             }
             @if (actionError) {
@@ -163,6 +165,11 @@ export class SupplyEarnComponent implements OnInit {
   private readonly wallet = inject(WalletService);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly snackBar = inject(MatSnackBar);
+
+  /** 9A-06 wording for a market paused because its collateral is suspended / redeeming / overdue; else null. */
+  collateralHint(reason: string | null | undefined): string | null {
+    return collateralPauseMessage(reason);
+  }
 
   loading = true;
   markets: LendingMarket[] = [];

@@ -6,7 +6,9 @@ import de.makibytes.registerwerk.asset.api.AssetStatus;
 import de.makibytes.registerwerk.blockchain.api.ContractAddressConfig;
 import de.makibytes.registerwerk.customer.api.ClientCategory;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
+import de.makibytes.registerwerk.deployment.api.AssetBondTermsRepository;
 import de.makibytes.registerwerk.deployment.api.AssetDeployment;
+import de.makibytes.registerwerk.deployment.api.BondStatus;
 import de.makibytes.registerwerk.deployment.api.AssetDeploymentRepository;
 import de.makibytes.registerwerk.payment.api.PaymentRail;
 import de.makibytes.registerwerk.payment.api.PaymentRailChainAddressRepository;
@@ -63,6 +65,7 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
     private final PaymentRailRepository railRepository;
     private final PaymentRailChainAddressRepository railAddressRepository;
     private final LegalEntityRepository legalEntityRepository;
+    private final AssetBondTermsRepository bondTermsRepository;
 
     LendingMarketService(
             LendingMarketRepository marketRepository,
@@ -77,7 +80,9 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
             AssetDeploymentRepository deploymentRepository,
             PaymentRailRepository railRepository,
             PaymentRailChainAddressRepository railAddressRepository,
-            LegalEntityRepository legalEntityRepository) {
+            LegalEntityRepository legalEntityRepository,
+            AssetBondTermsRepository bondTermsRepository) {
+        this.bondTermsRepository = bondTermsRepository;
         this.properties = properties;
         this.contractAddresses = contractAddresses;
         this.deploymentRepository = deploymentRepository;
@@ -301,47 +306,78 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
         List<ReverifyResult> results = new java.util.ArrayList<>();
         for (LendingMarket market : marketRepository.findAll()) {
             if (market.getStatus() == LendingMarketStatus.RETIRED) continue;
-            try {
-                ChainConfig chain = resolveChainConfig(market.getChainConfigId());
-                Asset asset = market.getCollateralAssetId() == null ? null
-                        : assetRepository.findById(market.getCollateralAssetId()).orElse(null);
-                String failure;
-                if (asset == null) {
-                    failure = "Collateral asset link is missing";
-                } else {
-                    failure = bindingFailure(chain, market.getMarketAddress(), market.getVaultAddress(), asset,
-                            market.getLoanRailCode(), market.getCollateralTokenAddress(),
-                            market.getLoanTokenAddress(),
-                            market.getLoanTokenDecimals() == null ? -1 : market.getLoanTokenDecimals());
-                }
-                String hash = onchainReader.codeHash(chain.getIdentifier(), market.getMarketAddress());
-                if (failure == null && market.getCodeHash() != null && !market.getCodeHash().equalsIgnoreCase(hash)) {
-                    failure = "Market runtime code changed since registration";
-                }
-                if (failure == null && market.getCodeHash() == null) {
-                    market.setCodeHash(hash);
-                    market.setSurplusSupported(
-                            onchainReader.surplusSupported(chain.getIdentifier(), market.getMarketAddress()));
-                }
-                market.setBindingVerified(failure == null);
-                market.setBindingVerifiedAt(Instant.now());
-                market.setBindingFailure(failure == null ? null
-                        : failure.substring(0, Math.min(failure.length(), 500)));
-                marketRepository.save(market);
-                results.add(new ReverifyResult(market.getId(), market.getMarketAddress(), failure == null, failure));
-            } catch (RuntimeException e) {
-                log.warn("Re-verification of market {} skipped: {}", market.getMarketAddress(), e.getMessage());
-                // H11: unreadable chain = unchanged state, but never reported as verified; a row without a
-                // recorded successful verification (legacy default) must not stay "verified" by omission.
-                if (market.getBindingVerifiedAt() == null && market.isBindingVerified()) {
-                    market.setBindingVerified(false);
-                    marketRepository.save(market);
-                }
-                results.add(new ReverifyResult(market.getId(), market.getMarketAddress(), false,
-                        "not checked: " + e.getMessage()));
-            }
+            results.add(reverifyOne(market));
         }
         return results;
+    }
+
+    /** 9A-06: single-market re-verification, run by the collateral-availability listener and the hourly job. */
+    public ReverifyResult reverifyMarket(UUID marketId) {
+        LendingMarket market = requireMarket(marketId);
+        if (market.getStatus() == LendingMarketStatus.RETIRED) {
+            return new ReverifyResult(market.getId(), market.getMarketAddress(), false, "market is retired");
+        }
+        return reverifyOne(market);
+    }
+
+    private ReverifyResult reverifyOne(LendingMarket market) {
+        try {
+            ChainConfig chain = resolveChainConfig(market.getChainConfigId());
+            Asset asset = market.getCollateralAssetId() == null ? null
+                    : assetRepository.findById(market.getCollateralAssetId()).orElse(null);
+            String failure;
+            if (asset == null) {
+                failure = "Collateral asset link is missing";
+            } else {
+                failure = bindingFailure(chain, market.getMarketAddress(), market.getVaultAddress(), asset,
+                        market.getLoanRailCode(), market.getCollateralTokenAddress(),
+                        market.getLoanTokenAddress(),
+                        market.getLoanTokenDecimals() == null ? -1 : market.getLoanTokenDecimals());
+            }
+            String hash = onchainReader.codeHash(chain.getIdentifier(), market.getMarketAddress());
+            if (failure == null && market.getCodeHash() != null && !market.getCodeHash().equalsIgnoreCase(hash)) {
+                failure = "Market runtime code changed since registration";
+            }
+            if (failure == null && market.getCodeHash() == null) {
+                market.setCodeHash(hash);
+                market.setSurplusSupported(
+                        onchainReader.surplusSupported(chain.getIdentifier(), market.getMarketAddress()));
+            }
+            market.setBindingVerified(failure == null);
+            market.setBindingVerifiedAt(Instant.now());
+            market.setBindingFailure(failure == null ? null
+                    : failure.substring(0, Math.min(failure.length(), 500)));
+            marketRepository.save(market);
+            return new ReverifyResult(market.getId(), market.getMarketAddress(), failure == null, failure);
+        } catch (RuntimeException e) {
+            log.warn("Re-verification of market {} skipped: {}", market.getMarketAddress(), e.getMessage());
+            // H11: unreadable chain = unchanged state, but never reported as verified; a row without a
+            // recorded successful verification (legacy default) must not stay "verified" by omission.
+            if (market.getBindingVerifiedAt() == null && market.isBindingVerified()) {
+                market.setBindingVerified(false);
+                marketRepository.save(market);
+            }
+            return new ReverifyResult(market.getId(), market.getMarketAddress(), false,
+                    "not checked: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 9A-06: why the collateral can no longer back new borrowing, from the LIVE asset / bond state (no RPC, no job
+     * needed): {@code COLLATERAL_ASSET_<STATUS>} when the asset is not ISSUED (SUSPENDED, REDEMPTION_PENDING, REDEEMED,
+     * TRANSFER_PENDING, TRANSFERRED_OUT, ...), {@code COLLATERAL_BOND_<STATUS>} when its bond is not ACTIVE (same rule
+     * as {@code RepoControls.requireTermWithinCollateralLife}). An unlinked / unknown asset is left to re-verification.
+     */
+    Optional<String> collateralUnavailableReason(LendingMarket market) {
+        if (market.getCollateralAssetId() == null) return Optional.empty();
+        Optional<Asset> asset = assetRepository.findById(market.getCollateralAssetId());
+        if (asset.isEmpty()) return Optional.empty();
+        if (asset.get().getStatus() != null && asset.get().getStatus() != AssetStatus.ISSUED) {
+            return Optional.of("COLLATERAL_ASSET_" + asset.get().getStatus());
+        }
+        return bondTermsRepository.findById(market.getCollateralAssetId())
+                .filter(terms -> terms.getBondStatus() != null && terms.getBondStatus() != BondStatus.ACTIVE)
+                .map(terms -> "COLLATERAL_BOND_" + terms.getBondStatus());
     }
 
     /**
@@ -551,6 +587,8 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
 
     private String pauseReason(LendingMarket market, LendingMarketStatus effective) {
         if (market.getStatus() != LendingMarketStatus.ACTIVE || effective == LendingMarketStatus.ACTIVE) return null;
+        Optional<String> unavailable = collateralUnavailableReason(market);
+        if (unavailable.isPresent()) return unavailable.get();
         if (market.isCollateralShortfall()) return "COLLATERAL_SHORTFALL";
         if (!market.isBindingVerified()) return "BINDING_UNVERIFIED";
         return lastPauseCause.getOrDefault(market.getId(), "BORROW_PAUSED_ONCHAIN");
@@ -569,6 +607,11 @@ public class LendingMarketService implements de.makibytes.registerwerk.lending.a
     private LendingMarketStatus resolveEffectiveStatus(LendingMarket market) {
         if (market.getStatus() != LendingMarketStatus.ACTIVE) {
             return market.getStatus();
+        }
+        // 9A-06: a suspended / redeemed / transferring collateral asset, or an overdue / defaulted bond, pauses the
+        // market at once from the live state - discovery and quotes must not wait for a job or an RPC read.
+        if (collateralUnavailableReason(market).isPresent()) {
+            return LendingMarketStatus.PAUSED;
         }
         // 5B-10 / 5B-09: a recorded collateral shortfall or failed binding pauses the market for new
         // borrowing independently of the on-chain flag (the operator pauses on-chain separately).

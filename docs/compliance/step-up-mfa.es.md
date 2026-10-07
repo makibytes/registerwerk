@@ -40,6 +40,7 @@ La anotación `@RequiresStepUp` se coloca en los siguientes endpoints y métodos
 | `forceBurn` | ✅ | ✅ | Destrucción permanente de tokens |
 | `forceApprove` | ✅ | ✅ | Anulación de cumplimiento |
 | `setSupplyCap` | ✅ | ✅ | Cambio de parámetro económico |
+| Creación de slot ERC-3525, mint en slot, forced value transfer | ✅ | ✅ | Fija el límite del slot / emite valor de bono en un slot |
 | Anulación de KYC (aprobar pese a un indicador) | ✅ | ✅ | Elusión de la puerta AML |
 | Crear Sperrvermerk | ✅ | ✅ | Restricción legal sobre el titular |
 | Levantar Sperrvermerk | ✅ | ✅ | Eliminación de una restricción legal |

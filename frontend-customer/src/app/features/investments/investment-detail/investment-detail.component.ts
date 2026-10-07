@@ -32,6 +32,7 @@ import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 import { AuthService } from '../../../core/auth/auth.service';
 import { downloadBlob } from '../../../core/utils/download.util';
+import { blobErrorMessage } from '../../../core/utils/blob-error.util';
 import { PlatformCapabilitiesService } from '../../../core/feature/platform-capabilities';
 
 /** Minimal ABI fragments for the two confidential-token calls this component makes directly
@@ -1011,10 +1012,12 @@ export class InvestmentDetailComponent implements OnInit {
         this.downloadingRegisterDoc = false;
         this.cdr.markForCheck();
       },
-      error: () => {
+      error: (err) => {
         this.downloadingRegisterDoc = false;
-        this.snackBar.open('Failed to generate the register document. If the register was transferred to a successor registrar, request it there.', 'Dismiss', { duration: 6000 });
         this.cdr.markForCheck();
+        // 9A-05: a 409 says the register is being reconciled with the chain - show the server message.
+        void blobErrorMessage(err, 'Failed to generate the register document. If the register was transferred to a successor registrar, request it there.')
+          .then((message) => this.snackBar.open(message, 'Dismiss', { duration: 6000 }));
       },
     });
   }

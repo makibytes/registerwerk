@@ -1,6 +1,7 @@
 package de.makibytes.registerwerk.registerstatement.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
+import de.makibytes.registerwerk.asset.api.RegisterReconciliationGuard;
 import de.makibytes.registerwerk.asset.api.AssetDocument;
 import de.makibytes.registerwerk.asset.api.OnchainLevel;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
@@ -72,6 +73,10 @@ final class RegisterStatementPdfRenderer {
             y -= 14;
             write(c, MARGIN, y, fontRegular, 10,
                     "Registerführende Stelle / Registry operator: " + safe(registryName));
+            y -= 14;
+            // 9A-05: always state how far the chain-derived register was reconciled; never imply more.
+            write(c, MARGIN, y, fontRegular, 10,
+                    "Registerstand / Register status: " + RegisterReconciliationGuard.stamp(asset));
             y -= 24;
 
             // ── Holder block (pseudonymous in single entry) ───────────────

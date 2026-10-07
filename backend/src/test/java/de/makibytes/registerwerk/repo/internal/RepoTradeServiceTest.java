@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.asset.api.*;
 import de.makibytes.registerwerk.customer.api.*;
 import de.makibytes.registerwerk.repo.api.*;
 import de.makibytes.registerwerk.repo.api.RepoTypes.*;
+import de.makibytes.registerwerk.shared.ComplianceGateException;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
@@ -53,6 +54,16 @@ class RepoTradeServiceTest {
         assertThat(trade.isOpenCollateralConfirmed()).isTrue();assertThat(trade.getStatus()).isEqualTo(TradeStatus.OPEN);
         service.confirmOpenLeg(trade.getId(),borrower,user,RepoTradeService.SettlementLeg.CASH,"cash-1");
         verify(events,times(3)).save(any());
+    }
+
+    @Test void openingSettlementRefusedOnFrozenRegister(){
+        Asset frozen=asset();frozen.setStatus(AssetStatus.TRANSFER_PENDING);
+        when(assets.findById(trade.getCollateralAssetId())).thenReturn(Optional.of(frozen));
+        trade.setStatus(TradeStatus.PENDING_OPEN_SETTLEMENT);
+        assertThatThrownBy(() -> service.confirmOpenLeg(trade.getId(),borrower,user,RepoTradeService.SettlementLeg.CASH,"cash-1"))
+                .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+        assertThat(trade.getStatus()).isEqualTo(TradeStatus.PENDING_OPEN_SETTLEMENT);
+        verifyNoInteractions(events);
     }
 
     @Test void rejectsInvalidAmountsEvenWhenCalledOutsideTheWebLayer(){
@@ -203,6 +214,77 @@ class RepoTradeServiceTest {
         ArgumentCaptor<Object> published=ArgumentCaptor.forClass(Object.class);
         verify(publisher,atLeastOnce()).publishEvent(published.capture());
         assertThat(published.getAllValues().toString()).contains("sanctions-screening");
+    }
+
+    // ── 9A-08: the creditor's protective actions are refused only on HARD stops ──
+
+    private static final String EXPIRED_KYC = "has an expired KYC (expired 2026-01-01)";
+    private static final String SPERRVERMERK = "(or its wallet) is subject to an active §16 eWpG Sperrvermerk (legal block)";
+
+    /** requireEligible is what the unfixed service called for the creditor; it refuses a lapsed KYC / any wallet block. */
+    private void creditorFailsTheOpeningGateButNotTheProtectiveGate(String softReason){
+        lenient().doThrow(new ComplianceGateException("Entity " + lender + " is not eligible: " + softReason))
+                .when(controls).requireEligible(any(), any());
+        lenient().when(controls.requireProtectiveActor(any(), any())).thenReturn(List.of(softReason));
+    }
+
+    private long flagged(){
+        ArgumentCaptor<RepoLifecycleEvent> saved=ArgumentCaptor.forClass(RepoLifecycleEvent.class);
+        verify(events,atLeast(0)).save(saved.capture());
+        return saved.getAllValues().stream().filter(e->e.getEventType()==LifecycleEventType.PARTY_FLAGGED).count();
+    }
+
+    @Test void lenderWithExpiredKycCanStillIssueMarginCallAndIsFlagged(){
+        trade.setStatus(TradeStatus.OPEN);
+        creditorFailsTheOpeningGateButNotTheProtectiveGate(EXPIRED_KYC);
+        service.issueMarginCall(trade.getId(), lender, user, new BigDecimal("14500"),
+                Instant.now().plus(2, ChronoUnit.DAYS), "val", new BigDecimal("80000"), null);
+        assertThat(trade.getStatus()).isEqualTo(TradeStatus.MARGIN_CALL);
+        assertThat(flagged()).isEqualTo(1);
+        verify(controls).openEnforcementTask(eq(lender), eq(trade.getId()), any(), eq(List.of(EXPIRED_KYC)), eq(user));
+    }
+
+    @Test void lenderWithSperrvermerkOnOtherWalletCanServeDefaultNotice(){
+        trade.setStatus(TradeStatus.MARGIN_CALL);trade.setMarginCallAmount(new BigDecimal("100"));
+        trade.setMarginCallDueAt(Instant.now().minusSeconds(3600));
+        creditorFailsTheOpeningGateButNotTheProtectiveGate(SPERRVERMERK);
+        service.serveDefaultNotice(trade.getId(), lender, user, null);
+        assertThat(trade.getDefaultNoticeAt()).isNotNull();
+        assertThat(flagged()).isEqualTo(1);
+        verify(controls).openEnforcementTask(eq(lender), eq(trade.getId()), any(), eq(List.of(SPERRVERMERK)), eq(user));
+    }
+
+    @Test void lenderWithExpiredKycCanStillDeclareDefaultAfterGrace(){
+        trade.setStatus(TradeStatus.MARGIN_CALL);trade.setMarginCallAmount(new BigDecimal("100"));
+        trade.setMarginCallDueAt(Instant.now().minusSeconds(3600));
+        trade.setDefaultNoticeAt(Instant.now().minus(25, ChronoUnit.HOURS));trade.setDefaultNoticeBy(lender);
+        trade.setDefaultNoticeGround(DefaultGround.MARGIN_NOT_MET);
+        creditorFailsTheOpeningGateButNotTheProtectiveGate(EXPIRED_KYC);
+        service.declareDefault(trade.getId(), lender, user, "n");
+        assertThat(trade.getStatus()).isEqualTo(TradeStatus.DEFAULTED);
+    }
+
+    @Test void lenderWithSanctionsHitIsRefused(){
+        trade.setStatus(TradeStatus.OPEN);
+        when(controls.requireProtectiveActor(any(), any())).thenThrow(
+                new ComplianceGateException("Entity " + lender + " cannot perform a margin call: has an unresolved sanctions-screening result."));
+        assertThatThrownBy(() -> service.issueMarginCall(trade.getId(), lender, user, new BigDecimal("14500"),
+                Instant.now().plus(2, ChronoUnit.DAYS), "val", new BigDecimal("80000"), null))
+                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("sanctions");
+        assertThat(trade.getStatus()).isEqualTo(TradeStatus.OPEN);
+    }
+
+    @Test void lenderSuspendedIsRefusedForNoticeAndDeclaration(){
+        trade.setStatus(TradeStatus.MARGIN_CALL);trade.setMarginCallAmount(new BigDecimal("100"));
+        trade.setMarginCallDueAt(Instant.now().minusSeconds(3600));
+        when(controls.requireProtectiveActor(any(), any())).thenThrow(
+                new ComplianceGateException("Entity " + lender + " cannot perform a default notice: is in status SUSPENDED."));
+        assertThatThrownBy(() -> service.serveDefaultNotice(trade.getId(), lender, user, null))
+                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("SUSPENDED");
+        assertThatThrownBy(() -> service.declareDefault(trade.getId(), lender, user, "n"))
+                .isInstanceOf(ComplianceGateException.class);
+        assertThat(trade.getDefaultNoticeAt()).isNull();
+        assertThat(trade.getStatus()).isEqualTo(TradeStatus.MARGIN_CALL);
     }
 
     @Test void lifecycleNotesAreClippedToTheColumnLength(){

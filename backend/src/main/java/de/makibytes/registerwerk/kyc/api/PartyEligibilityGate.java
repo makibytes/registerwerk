@@ -22,4 +22,13 @@ public interface PartyEligibilityGate {
 
     /** Same tests, non-throwing: every reason the party is NOT eligible (empty = eligible). */
     List<String> check(UUID entityId, String walletAddress);
+
+    /**
+     * The HARD subset of {@link #check} (empty = no hard stop): entity status other than ACTIVE, or an
+     * unresolved sanctions-screening result on the entity or a beneficial owner; an unknown entity is a
+     * hard stop. KYC expiry / not-approved and a Sperrvermerk are NOT hard stops. For actions that protect
+     * an existing exposure (a repo creditor's margin call, default notice and declaration) rather than
+     * open a new one (9A-08).
+     */
+    List<String> hardStops(UUID entityId);
 }

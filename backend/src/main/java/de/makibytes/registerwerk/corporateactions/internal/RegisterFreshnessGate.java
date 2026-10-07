@@ -67,6 +67,12 @@ class RegisterFreshnessGate {
     }
 
     /** T3-07: a register frozen for (or handed over in) a §§21/22 handover accepts no corporate-action work. */
+    /** The issuing entity of the asset, for operator tasks raised about it (9A-04R). */
+    java.util.Optional<UUID> issuerOf(UUID assetId) {
+        return assetId == null ? java.util.Optional.empty()
+                : assetRepository.findById(assetId).map(a -> a.getIssuerId());
+    }
+
     boolean isRegisterFrozen(UUID assetId) {
         return assetId != null && assetRepository.findById(assetId)
                 .map(a -> a.getStatus() != null && a.getStatus().isRegisterFrozen()).orElse(false);

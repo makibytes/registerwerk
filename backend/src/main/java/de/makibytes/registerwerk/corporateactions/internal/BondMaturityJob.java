@@ -2,6 +2,7 @@ package de.makibytes.registerwerk.corporateactions.internal;
 
 import de.makibytes.registerwerk.asset.api.Asset;
 import de.makibytes.registerwerk.asset.api.AssetRepository;
+import de.makibytes.registerwerk.deployment.api.BondLifecycleTransitionEvent;
 import de.makibytes.registerwerk.corporateactions.api.BondRedemptionBlockedEvent;
 import de.makibytes.registerwerk.corporateactions.api.CorporateAction;
 import de.makibytes.registerwerk.corporateactions.api.CorporateActionRepository;
@@ -25,7 +26,6 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -54,6 +54,13 @@ import java.util.UUID;
  * settlement held by the system - see {@link CorporateActionBlocks}) is not the issuer's non-payment: it never
  * counts toward OVERDUE / DEFAULTED. The bond is left as it is, the cause is audited once
  * ({@link BondRedemptionBlockedEvent}) and an operator task is raised on the issuer.
+ *
+ * <p>9A-04R: only a redemption that waits for the ISSUER counts. One that waits for the OPERATOR (confirmation
+ * missing, settlement not dispatched / manual-settle lag) is reported like a registry-side hold
+ * ({@link CorporateActionBlocks#responsibleSide}), never escalated. Every real status change (MATURED, CALLED,
+ * OVERDUE, DEFAULTED) publishes one audited {@link BondLifecycleTransitionEvent}; OVERDUE and DEFAULTED also open an
+ * operator task on the issuer ({@code BOND_OVERDUE}, {@code BOND_DEFAULT_REVIEW}). DEFAULTED stays automatic for
+ * issuer-side non-payment after the grace period (interim, T9-05).
  *
  * <p>H8: the job holds no transaction of its own; every bond is handled in its own {@code REQUIRES_NEW}
  * transaction, so one failing bond cannot roll back the others' transitions.
@@ -149,14 +156,44 @@ class BondMaturityJob {
             return;
         }
         if (corporateActionRepository.existsSettledCallForAsset(terms.getAssetId())) {
-            terms.setBondStatus(BondStatus.CALLED);
-            bondTermsRepository.save(terms);
+            transition(terms, BondStatus.CALLED, "maturity date reached after a settled CALL", List.of(), null);
             log.info("Bond assetId={} reached maturity but was already called — marked CALLED.", terms.getAssetId());
             return;
         }
-        terms.setBondStatus(BondStatus.MATURED);
-        bondTermsRepository.save(terms);
+        transition(terms, BondStatus.MATURED, "maturity date " + terms.getMaturityDate() + " reached", List.of(), null);
         log.info("Bond matured: assetId={} maturityDate={}", terms.getAssetId(), terms.getMaturityDate());
+    }
+
+    /**
+     * Sets the bond status and, only when it really changes, publishes the audited event (9A-04R) and opens the
+     * operator task for OVERDUE / DEFAULTED. Returns whether the status changed.
+     */
+    private boolean transition(AssetBondTerms terms, BondStatus to, String cause, List<UUID> actionIds,
+                               LocalDate earliestPayment) {
+        BondStatus from = terms.getBondStatus();
+        if (from == to) {
+            return false;
+        }
+        terms.setBondStatus(to);
+        bondTermsRepository.save(terms);
+        events.publishEvent(new BondLifecycleTransitionEvent(terms.getAssetId(), from, to, cause, actionIds,
+                earliestPayment, to == BondStatus.OVERDUE || to == BondStatus.DEFAULTED
+                        ? terms.getPrincipalGraceDays() : null));
+        if (to == BondStatus.OVERDUE || to == BondStatus.DEFAULTED) {
+            UUID issuerId = assetRepository.findById(terms.getAssetId()).map(Asset::getIssuerId).orElse(null);
+            if (issuerId != null) {
+                entityTasks.open(issuerId,
+                        to == BondStatus.OVERDUE ? CorporateActionBlocks.TASK_BOND_OVERDUE
+                                : CorporateActionBlocks.TASK_BOND_DEFAULT_REVIEW,
+                        terms.getAssetId().toString(),
+                        "Bond " + terms.getAssetId() + " moved " + from + " -> " + to + ": " + cause
+                                + (to == BondStatus.DEFAULTED
+                                ? ". Review the declaration - the system sets DEFAULTED automatically for issuer-side "
+                                + "non-payment after the grace period." : "."),
+                        null);
+            }
+        }
+        return true;
     }
 
     private void raiseRedemptionIfAnnounceable(AssetBondTerms terms, LocalDate today) {
@@ -201,30 +238,33 @@ class BondMaturityJob {
         boolean frozen = isTransferredOut(terms.getAssetId());
         List<CorporateAction> issuerSide = new ArrayList<>();
         for (CorporateAction ca : overdue) {
-            Optional<String> cause = CorporateActionBlocks.systemBlockCause(ca, frozen);
-            if (cause.isPresent()) {
-                reportBlocked(terms, ca, cause.get());
-            } else {
-                issuerSide.add(ca);
+            CorporateActionBlocks.Responsibility who = CorporateActionBlocks.responsibleSide(ca, frozen);
+            switch (who.side()) {
+                case REGISTRY -> reportBlocked(terms, ca, who.cause(), CorporateActionBlocks.TASK_REDEMPTION_BLOCKED,
+                        "blocked on the registry side");
+                case OPERATOR -> reportBlocked(terms, ca, who.cause(),
+                        CorporateActionBlocks.TASK_REDEMPTION_OPERATOR_PENDING, "waiting for the operator");
+                case ISSUER -> issuerSide.add(ca);
             }
         }
         if (issuerSide.isEmpty()) {
-            log.warn("Bond assetId={} redemption is past its payment date but blocked on the registry side — status "
-                    + "left unchanged ({}), not escalated.", terms.getAssetId(), terms.getBondStatus());
+            log.warn("Bond assetId={} redemption is past its payment date but waits on the registry / operator side "
+                    + "— status left unchanged ({}), not escalated.", terms.getAssetId(), terms.getBondStatus());
             return;
         }
         LocalDate earliestPayment = issuerSide.stream().map(CorporateAction::getPaymentDate)
                 .min(Comparator.naturalOrder()).orElseThrow();
         List<UUID> ids = issuerSide.stream().map(CorporateAction::getId).toList();
         if (today.isAfter(earliestPayment.plusDays(terms.getPrincipalGraceDays()))) {
-            terms.setBondStatus(BondStatus.DEFAULTED);
-            bondTermsRepository.save(terms);
+            transition(terms, BondStatus.DEFAULTED, "redemption action(s) " + ids + " unsettled after payment date "
+                    + earliestPayment + " + principal grace of " + terms.getPrincipalGraceDays() + " day(s)",
+                    ids, earliestPayment);
             log.warn("Bond defaulted: assetId={} — redemption action(s) {} unsettled {} day(s) past payment date {} "
                             + "(principal grace {} day(s))", terms.getAssetId(), ids,
                     today.toEpochDay() - earliestPayment.toEpochDay(), earliestPayment, terms.getPrincipalGraceDays());
         } else if (terms.getBondStatus() != BondStatus.OVERDUE) {
-            terms.setBondStatus(BondStatus.OVERDUE);
-            bondTermsRepository.save(terms);
+            transition(terms, BondStatus.OVERDUE, "redemption action(s) " + ids + " unsettled after payment date "
+                    + earliestPayment, ids, earliestPayment);
             log.warn("Bond redemption overdue: assetId={} — action(s) {} unsettled after payment date {} "
                     + "(inside the {}-day principal grace period)", terms.getAssetId(), ids, earliestPayment,
                     terms.getPrincipalGraceDays());
@@ -232,13 +272,13 @@ class BondMaturityJob {
     }
 
     /** One operator task per (issuer, action) while it is open; the audit event only when the task is new. */
-    private void reportBlocked(AssetBondTerms terms, CorporateAction ca, String cause) {
+    private void reportBlocked(AssetBondTerms terms, CorporateAction ca, String cause, String taskKind, String where) {
         UUID issuerId = assetRepository.findById(terms.getAssetId()).map(Asset::getIssuerId).orElse(null);
         boolean fresh = true;
         if (issuerId != null) {
-            fresh = entityTasks.open(issuerId, CorporateActionBlocks.TASK_REDEMPTION_BLOCKED, ca.getId().toString(),
+            fresh = entityTasks.open(issuerId, taskKind, ca.getId().toString(),
                     "The redemption " + ca.getId() + " of asset " + terms.getAssetId() + " (payment date "
-                            + ca.getPaymentDate() + ") is blocked on the registry side — " + cause
+                            + ca.getPaymentDate() + ") is " + where + " — " + cause
                             + ". The bond is NOT marked overdue or defaulted.", null);
         }
         if (fresh) {
