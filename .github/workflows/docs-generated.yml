@@ -1,0 +1,49 @@
+name: Docs generated pages and translation parity
+
+# Cheap, Node-only checks (no Docker build): the step-up matrix and API route index are generated from
+# the backend sources and must be committed up to date; translated pages must not fall behind their
+# English page (admonitions and fenced blocks) beyond the committed baseline.
+
+on:
+  push:
+    branches: [main, develop, feat/**, fix/**, release/**]
+    paths:
+      - 'backend/src/main/java/**'
+      - 'backend/src/main/resources/application.yml'
+      - 'docs/**'
+      - 'scripts/gen-stepup-matrix.mjs'
+      - 'scripts/verify-docs-parity.mjs'
+      - 'scripts/docs-parity-baseline.json'
+      - '.github/workflows/docs-generated.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/src/main/java/**'
+      - 'backend/src/main/resources/application.yml'
+      - 'docs/**'
+      - 'scripts/gen-stepup-matrix.mjs'
+      - 'scripts/verify-docs-parity.mjs'
+      - 'scripts/docs-parity-baseline.json'
+      - '.github/workflows/docs-generated.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-generated-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generated:
+    name: Generated pages are current, translations keep up
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.19.0"
+      - name: Step-up matrix and API route index are up to date
+        run: node scripts/gen-stepup-matrix.mjs --check
+      - name: Translated pages have not fallen behind English
+        run: node scripts/verify-docs-parity.mjs

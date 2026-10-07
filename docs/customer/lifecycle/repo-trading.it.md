@@ -25,6 +25,9 @@ Il Repo Desk modella questo flusso bilaterale. È separato dal [prestito garanti
 5. In apertura e chiusura ogni destinatario conferma la gamba contante o titoli ricevuta con un riferimento.
 6. Margin call e sostituzioni restano nello storico condiviso e immutabile.
 
+!!! warning "Il broadcast non è anonimo"
+    Le società idonee vedono il richiedente e i termini richiesti. Le quotazioni sono private, ma la RFQ no. Usa la distribuzione mirata per esigenze di finanziamento sensibili.
+
 ## Controlli del desk
 
 - **Le quotazioni sono versionate.** Una quotazione sostituita diventa `SUPERSEDED` e non può più essere accettata. L'accettazione contiene il `termsHash` del server; se differisce (409), verificare le condizioni attuali. Le condizioni accettate sono fissate sull'operazione. Importi e interessi sono arrotondati alla sottounità della valuta (ACT/360, ACT/365 per GBP e altre).
@@ -38,3 +41,6 @@ Il Repo Desk modella questo flusso bilaterale. È separato dal [prestito garanti
 
 !!! warning "Il contratto quadro resta indispensabile"
     Il flusso non sostituisce contratto quadro, lista delle garanzie, agente di valutazione, custodia, controversie o parere sul netting. DvP resta preferibile a FoP.
+
+!!! info "Che cosa dimostra la demo"
+    La demo dimostra la riservatezza delle RFQ, il calcolo della durata, le transizioni di stato e un registro operativo condiviso. Non rivendica esecutività giuridica, definitività del regolamento su canali esterni, trattamento contabile, riconoscimento del capitale regolamentare né close-out netting opponibile.

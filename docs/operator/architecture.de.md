@@ -70,7 +70,7 @@ Es gibt genau eine PostgreSQL-Instanz, die eine Datenbank hostet. Kong läuft DB
 
 ### 4. Das Register und die Chain sind getrennte Aufzeichnungen
 
-Die Datenbank ist maßgeblich für den Bestand. Die Blockchain ist das, was ausführt und was jeder unabhängig überprüfen kann. **Indexer** beobachten die Chains und schreiben zurück, was sie sehen.
+Die Datenbank ist Registerwerks maßgebliche Quelle für den Bestand (operativ; ob sie ein Register mit Rechtswirkung ist, hängt vom Betreiber und vom Instrument ab). Die Blockchain ist das, was ausführt und was jeder unabhängig überprüfen kann. **Indexer** beobachten die Chains und schreiben zurück, was sie sehen.
 
 **Betriebliche Konsequenz — und das Nützlichste auf dieser Seite:** Wenn ein Kunde sagt „mein Bestand ist falsch", lautet die erste Frage nicht *was ist richtig*, sondern *hinkt ein Indexer hinterher?* Ein nachlaufender Indexer erzeugt genau dieses Symptom und löst sich von selbst, sobald er aufholt. [Indexer-Resilienz](indexers/resilience.md).
 

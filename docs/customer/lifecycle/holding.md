@@ -22,7 +22,7 @@ Say it plainly, because everything else follows from it:
 !!! abstract "The register"
     A row in the operator's database. Names the holder, the nominal amount, the entry type, restrictions, third-party rights.
 
-    **This is the record with legal significance.** Under §16 eWpG, ownership of an electronic security is determined by the register.
+    **This is the record Registerwerk treats as the source of truth.** Under the eWpG, legal effect attaches to an entry in an electronic securities register kept by an authorised register keeper; whether this database is such a register depends on the operator and the instrument, which this repository does not establish.
 
 !!! abstract "The token"
     A balance in a smart contract on a blockchain. Public, verifiable by anyone, and the thing that actually moves when a transfer happens.
@@ -51,7 +51,7 @@ sequenceDiagram
 Between the second and fourth step, the two records disagree — usually for seconds, occasionally for longer if an indexer is behind or a chain is congested.
 
 !!! question "So which one is right?"
-    **The register.** Always. The blockchain is authoritative about what the blockchain did; it is not authoritative about who owns a security under German law.
+    **The register — for Registerwerk's own reconciliation.** The blockchain is authoritative about what the blockchain did. It does not decide who owns a security under German law, and neither does this database unless the operator is an authorised register keeper for the instrument.
 
     In practice this matters in one specific situation: someone moves tokens directly on-chain, wallet to wallet, bypassing the platform. For an ERC-3643 security both wallets must already be admitted, so this cannot put the bond in unauthorised hands — but it *can* produce a register that no longer matches reality until the indexer catches up, and it produces a transfer with no order behind it.
 
@@ -154,7 +154,7 @@ Institutional holders in a collective entry are outside this obligation, which i
 
 ## Where you are
 
-Fifty investors hold a claim on Nordwind, recorded in a register that is legally authoritative and mirrored on a blockchain that is publicly verifiable. The bond will sit like this for five years.
+Fifty investors hold a claim on Nordwind, recorded in a register that Registerwerk treats as the source of truth (its legal effect depends on the operator and the instrument) and mirrored on a blockchain that is publicly verifiable. The bond will sit like this for five years.
 
 Except that one of them wants their money back early.
 

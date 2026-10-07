@@ -68,13 +68,13 @@ Tre elementi stanno fuori dalle aree di lavoro, perché valgono qualunque cosa t
 
 Registerwerk tiene **due registrazioni della stessa cosa**, e deliberatamente non finge il contrario.
 
-C'è il **registro** — una banca dati presso l'operatore, la registrazione con rilevanza giuridica. E c'è il **token** — un'iscrizione su una blockchain, ciò che si muove davvero quando avviene un trasferimento.
+C'è il **registro** — una banca dati presso l'operatore, che Registerwerk tratta come fonte di verità (che sia un registro con effetti giuridici dipende dall'operatore e dallo strumento). E c'è il **token** — un'iscrizione su una blockchain, ciò che si muove davvero quando avviene un trasferimento.
 
-Un software osserva la chain e riscrive nel registro ciò che vede. Nella maggior parte dei casi coincidono. Quando non coincidono, fa fede il registro e la differenza va risolta da una persona.
+Un software osserva la chain e riscrive nel registro ciò che vede. Nella maggior parte dei casi coincidono. Quando non coincidono, il registro è la fonte di verità per la riconciliazione e la differenza va risolta da una persona.
 
 ```mermaid
 graph LR
-    R[("Registro<br/><small>la registrazione giuridica</small>")]
+    R[("Registro<br/><small>la fonte di verità</small>")]
     T["Token sulla chain<br/><small>ciò che si muove</small>"]
     R -.->|"istruisce"| T
     T -.->|"osservato dagli indicizzatori"| R

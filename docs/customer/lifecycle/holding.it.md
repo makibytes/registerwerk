@@ -22,7 +22,7 @@ Diciamolo chiaramente, perché tutto il resto ne discende:
 !!! abstract "Il registro"
     Una riga nella banca dati dell'operatore. Indica il titolare, il valore nominale, il tipo di iscrizione, le restrizioni, i diritti di terzi.
 
-    **È la registrazione con rilevanza giuridica.** Ai sensi del §16 eWpG, la titolarità di uno strumento elettronico è determinata dal registro.
+    **È la registrazione che Registerwerk tratta come fonte di verità.** Secondo l'eWpG, l'effetto giuridico si collega a un'iscrizione in un registro di strumenti elettronici tenuto da un responsabile del registro autorizzato; che questo database sia un registro di tale tipo dipende dall'operatore e dallo strumento, il che questo repository non stabilisce.
 
 !!! abstract "Il token"
     Un saldo in uno smart contract su una blockchain. Pubblico, verificabile da chiunque, ed è ciò che si muove davvero quando avviene un trasferimento.
@@ -51,7 +51,7 @@ sequenceDiagram
 Tra il secondo e il quarto passaggio le due registrazioni divergono — di solito per secondi, occasionalmente più a lungo se un indicizzatore è indietro o una chain è congestionata.
 
 !!! question "Quale fa fede, allora?"
-    **Il registro.** Sempre. La blockchain fa fede di ciò che la blockchain ha fatto; non fa fede di chi sia proprietario di uno strumento secondo il diritto tedesco.
+    **Il registro — per la riconciliazione propria di Registerwerk.** La blockchain fa fede di ciò che la blockchain ha fatto. Non decide chi sia proprietario di uno strumento secondo il diritto tedesco, e nemmeno questo database, a meno che l'operatore non sia un responsabile del registro autorizzato per lo strumento.
 
     In pratica questo conta in una situazione precisa: qualcuno muove token direttamente on-chain, da wallet a wallet, aggirando la piattaforma. Per uno strumento ERC-3643 entrambi i wallet devono essere già ammessi, quindi l'obbligazione non può finire in mani non autorizzate — ma *può* produrre un registro che non corrisponde più alla realtà finché l'indicizzatore non recupera, e un trasferimento senza alcun ordine dietro.
 
@@ -154,7 +154,7 @@ I titolari istituzionali in un'iscrizione collettiva non rientrano in questo obb
 
 ## Dove sei
 
-Cinquanta investitori detengono un credito verso Nordwind, annotato in un registro che fa fede e rispecchiato su una blockchain verificabile pubblicamente. L'obbligazione resterà così per cinque anni.
+Cinquanta investitori detengono un credito verso Nordwind, annotato in un registro che Registerwerk tratta come fonte di verità (i suoi effetti giuridici dipendono dall'operatore e dallo strumento) e rispecchiato su una blockchain verificabile pubblicamente. L'obbligazione resterà così per cinque anni.
 
 Solo che uno di loro vuole indietro il proprio denaro in anticipo.
 

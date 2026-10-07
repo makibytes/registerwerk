@@ -100,7 +100,34 @@ pg_restore -h new-host -U registerwerk -d registerwerk \
   /backups/registerwerk_$(date +%Y%m%d).dump
 ```
 
+**`scripts/dr-restore-drill.sh` automatiza solo esta vía alternativa de pg_dump (`scripts/pitr-drill.sh` cubre la vía WAL-G de 2a)** (pg_dump del servicio compose `postgres` en ejecución → restauración en un contenedor desechable → comparación del número de filas de cada tabla → informe de una cifra de RTO) y, con `--record-dora <backend-base-url> <bearer-token>`, registra el resultado como una entrada `SCENARIO_BASED` real en `POST /api/v1/dora/resilience-tests` — un simulacro de continuidad que un operador realmente ejecutó, no un marcador de posición sembrado por la demo. Deliberadamente no ejercita 2a, que tiene su propio simulacro (`scripts/pitr-drill.sh`, más abajo). Ejecútelo periódicamente (p. ej., cada trimestre) y tras cualquier cambio de esquema que toque migraciones, para mantener al día el «probada» de «continuidad probada».
+
+Con `--verify-audit-chain`, además automatiza la mitad de la cadena hash de auditoría de esta sección: arranca un contenedor backend real y desechable contra la copia restaurada (HSM desactivado solo para ese contenedor desechable — no necesita maquinaria de wallet/firma, solo conectividad con la base de datos — de modo que la opción funciona con solo el servicio `postgres` en marcha, sin la pila de demostración completa) y llama al propio `POST /api/v1/audit/chain/verify` de la aplicación, en lugar de reimplementar en bash la canonicalización SHA-256 de `AuditChainVerificationService`, lo que correría el riesgo de divergir en silencio y dar una falsa confianza. Necesita `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` disponibles (entorno del shell o `.env` en la raíz del repositorio) y coincidentes con las credenciales con las que se sembró realmente la base de datos *de origen*; sin ellas, este paso se notifica como `SKIPPED`, no se trata como un fallo del simulacro.
+
 **`scripts/pitr-drill.sh` ejercita la ruta WAL-G (2a).** Construye la misma imagen `postgres-wal` que el overlay de Compose, arranca un servidor desechable con `archive_mode=on`, hace una copia base, inserta filas antes y después de una hora objetivo registrada, espera sin forzar un cambio de segmento a que se archive el segmento de la última fila (la muestra de RPO), elimina el contenedor y su volumen, restaura copia base más WAL a la hora objetivo y comprueba que existen exactamente las filas confirmadas hasta entonces. Imprime el RPO y el RTO y dura unos 6 minutos con `archive_timeout` 300 s. Con `--record <backend-base-url> <operator-bearer-token>` registra el resultado como entrada `SCENARIO_BASED` mediante `POST /api/v1/dora/resilience-tests` (desactivado por defecto).
+
+### 2c. Promoción de la réplica de lectura (Helm/Kubernetes, solo `values-production.yaml`)
+
+`values-production.yaml` ejecuta opcionalmente una réplica de lectura de Postgres por streaming junto al primario (`postgresql.architecture: replication`) — un standby en caliente en tiempo real, no una copia de seguridad periódica. **No** es una conmutación automática: nada reapunta el `DB_URL` del backend a la réplica si el primario cae, y la réplica sigue siendo de solo lectura hasta que se promueve explícitamente. Si el primario se pierde y la réplica está intacta, esto es más rápido que una restauración completa con WAL-G (§2a):
+
+```bash
+# 1. Confirmar que el retraso de replicación de la réplica es lo bastante bajo para aceptar la pérdida de datos
+kubectl exec -it <release-name>-postgresql-read-0 -- \
+  psql -U postgres -c "SELECT now() - pg_last_xact_replay_timestamp() AS replication_lag;"
+
+# 2. Promover la réplica fuera del modo de recuperación
+kubectl exec -it <release-name>-postgresql-read-0 -- pg_ctl promote -D /bitnami/postgresql/data
+
+# 3. Apuntar el backend a la instancia promovida
+kubectl set env deployment/<release-name> \
+  DB_URL="jdbc:postgresql://<release-name>-postgresql-read:5432/registerwerk"
+
+# 4. Cuando el antiguo primario sea recuperable, reconstrúyalo como nueva réplica (NO deje que
+#    vuelva a unirse como primario — él y la instancia promovida ya han divergido) o ejecute un nuevo
+#    `helm upgrade` para que el subchart recree desde cero la topología primario/réplica.
+```
+
+Cualquier transacción que aún no se haya transmitido a la réplica en el momento de la promoción se pierde — es un RPO real, no cero; como en la vía WAL-G anterior, el RPO queda acotado por lo último capturado (aquí: por el retraso de replicación, no por el archivo). Practique esta promoción en un espacio de nombres que no sea de producción antes de confiar en ella durante un incidente real.
 
 ### 2d. Filas en una partición DEFAULT
 
@@ -192,3 +219,17 @@ En Kubernetes el mismo archivo se entrega como `deploy/helm/registerwerk/files/k
 - [ ] Filtrado de sanciones: confirmar que no hay filas `screening_hit` abiertas con más de 4 h de antigüedad
 - [ ] Resumen del registro: verificar que los importes nominales totales coincidan con la instantánea previa al incidente
 - [ ] Si el incidente se clasificó como grave, presentar las notificaciones DORA dentro de los plazos del acto delegado (verificar el texto vigente, sección 1)
+
+## 8. Simulacros de caos (Docker Compose)
+
+Dos scripts ejercitan un comportamiento real de fallo/recuperación contra la pila Compose en ejecución — no es una simulación — y, en el caso de `chaos-drill.sh`, registran el resultado como una fila real de DORA `ResilienceTest`, el mismo mecanismo que ya usa `dr-restore-drill.sh --record-dora`. Ambos reinician lo que detuvieron antes de salir, pero cuente con un breve reinicio del backend; no los ejecute contra una pila que otras personas estén usando activamente.
+
+```bash
+scripts/chaos-drill.sh kill-postgres   # SIGKILL a postgres en pleno tráfico; medir degradación + recuperación
+scripts/chaos-drill.sh kill-backend    # SIGKILL al backend en plena petición; medir la recuperación
+scripts/verify-graceful-shutdown.sh    # docker stop (SIGTERM) frente a lo anterior — el caso de contraste
+```
+
+**`kill-backend` encontró una brecha real y no documentada hasta entonces la primera vez que se ejecutó**: la política `restart: unless-stopped` de Docker **no** reinicia un contenedor tras `docker kill` o `docker stop` — confirmado porque `docker inspect ... RestartCount` se quedó en 0 tras la parada. Solo se recupera de un fallo genuino dentro del proceso que el propio runtime del contenedor observa, no de una terminación iniciada mediante la API del motor. `kill-backend` ahora lo mide con honestidad: espera 20 s a la recuperación automática y, si no ocurre, recurre a un `docker start` explícito y registra el resultado como `FINDINGS_OPEN`, no como `PASSED`. La vía Helm/Kubernetes no comparte esta brecha — `restartPolicy: Always` (el valor implícito de un Deployment) reinicia un pod tras *cualquier* salida del contenedor, administrativa o no. Si la autorreparación tras matar un contenedor importa específicamente para la vía Compose, eso es un seguimiento real (un supervisor externo, o aceptar la recuperación manual como modelo documentado), no algo que ninguno de los scripts disimule.
+
+`verify-graceful-shutdown.sh` es el caso de contraste: lanza una ráfaga de peticiones concurrentes, envía un `docker stop` real (SIGTERM) a mitad de la ráfaga y confirma que el contenedor termina por sí solo dentro de su `stop_grace_period` (35 s, `docker-compose.yml` — alineado con `spring.lifecycle.timeout-per-shutdown-phase`, `application.yml`) en lugar de ser forzado por la escalada a SIGKILL de Docker, y que las peticiones en curso se completan en lugar de reiniciarse. Para eso sirve realmente `server.shutdown: graceful` — una parada/recreación normal, no un fallo — y es la razón por la que el servicio backend de `docker-compose.yml` necesita un `stop_grace_period` explícito: el tiempo de parada por defecto de Docker (10 s) es más corto que los 30 s que la aplicación usa para su propio vaciado.

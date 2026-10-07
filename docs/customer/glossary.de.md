@@ -167,7 +167,7 @@ Klare Definitionen. Wo ein Begriff eine präzise fachliche Bedeutung hat, die vo
 : Eine Organisation im Register. Nutzer gehören zu einem; Verifizierung und Berechtigungen hängen an ihm.
 
 **Register**
-: Der Datenbankbestand des Registerbetreibers darüber, wer was hält. **Der rechtlich maßgebliche Nachweis**, zu unterscheiden vom Token.
+: Der Datenbankbestand des Registerbetreibers darüber, wer was hält. **Die Aufzeichnung, die Registerwerk als maßgebliche Quelle behandelt** (die Rechtswirkung hängt vom Betreiber und vom Instrument ab), zu unterscheiden vom Token.
 
 **Registerauszug**
 : Eine Auskunft über den Registerinhalt zu einem Inhaber. Nach §19(2) eWpG Verbrauchern mit Einzeleintragung geschuldet. Ein aufbewahrter Registerdatensatz, keine Benachrichtigung.

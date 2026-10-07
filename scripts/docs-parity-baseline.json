@@ -1,0 +1,50 @@
+{
+  "customer/lifecycle/repo-trading.md|de": {
+    "admonitions": 0,
+    "fences": 2
+  },
+  "customer/lifecycle/repo-trading.md|es": {
+    "admonitions": 0,
+    "fences": 2
+  },
+  "customer/lifecycle/repo-trading.md|fr": {
+    "admonitions": 0,
+    "fences": 2
+  },
+  "customer/lifecycle/repo-trading.md|it": {
+    "admonitions": 0,
+    "fences": 2
+  },
+  "operator/dr/runbook.md|de": {
+    "admonitions": 0,
+    "fences": 1
+  },
+  "operator/dr/runbook.md|es": {
+    "admonitions": 0,
+    "fences": 1
+  },
+  "operator/dr/runbook.md|fr": {
+    "admonitions": 0,
+    "fences": 1
+  },
+  "operator/dr/runbook.md|it": {
+    "admonitions": 0,
+    "fences": 1
+  },
+  "operator/maintenance/monitoring.md|de": {
+    "admonitions": 0,
+    "fences": 1
+  },
+  "operator/maintenance/monitoring.md|es": {
+    "admonitions": 0,
+    "fences": 1
+  },
+  "operator/maintenance/monitoring.md|fr": {
+    "admonitions": 0,
+    "fences": 1
+  },
+  "operator/maintenance/monitoring.md|it": {
+    "admonitions": 0,
+    "fences": 1
+  }
+}

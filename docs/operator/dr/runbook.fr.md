@@ -98,7 +98,34 @@ pg_restore -h new-host -U registerwerk -d registerwerk \
   /backups/registerwerk_$(date +%Y%m%d).dump
 ```
 
+**`scripts/dr-restore-drill.sh` n'automatise que ce chemin de repli pg_dump (`scripts/pitr-drill.sh` couvre le chemin WAL-G de 2a)** (pg_dump du service compose `postgres` en cours d'exécution → restauration dans un conteneur jetable → comparaison du nombre de lignes de chaque table → affichage d'un chiffre de RTO) et, avec `--record-dora <backend-base-url> <bearer-token>`, enregistre le résultat comme une vraie entrée `SCENARIO_BASED` dans `POST /api/v1/dora/resilience-tests` — un exercice de continuité réellement exécuté, et non un espace réservé alimenté par la démo. Il n'exerce volontairement pas 2a, qui a son propre exercice (`scripts/pitr-drill.sh`, ci-dessous). Exécutez-le périodiquement (par exemple chaque trimestre) et après tout changement de schéma touchant les migrations, afin que le « testé » de « continuité testée » reste d'actualité.
+
+Avec `--verify-audit-chain`, il automatise en plus la moitié « chaîne de hachage d'audit » de cette section : il démarre un vrai conteneur backend jetable sur la copie restaurée (HSM désactivé pour ce seul conteneur jetable — il n'a besoin d'aucun mécanisme de portefeuille/signature, seulement de la connectivité à la base — de sorte que l'option fonctionne avec le seul service `postgres` en marche, sans la pile de démonstration complète) et appelle le propre `POST /api/v1/audit/chain/verify` de l'application, au lieu de réimplémenter en bash la canonicalisation SHA-256 de `AuditChainVerificationService`, ce qui risquerait de diverger silencieusement et de donner une fausse assurance. Il exige que `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` soient disponibles (environnement du shell ou `.env` à la racine du dépôt) et correspondent aux identifiants avec lesquels la base *source* a réellement été alimentée ; sans eux, cette étape est signalée `SKIPPED`, et non traitée comme un échec de l'exercice.
+
 **`scripts/pitr-drill.sh` exerce le chemin WAL-G (2a).** Il construit la même image `postgres-wal` que le overlay Compose, lance un serveur jetable avec `archive_mode=on`, prend une sauvegarde de base, insère des lignes avant et après une heure cible enregistrée, attend sans forcer de changement de segment que le segment de la dernière ligne soit archivé (l'échantillon de RPO), supprime le conteneur et son volume, restaure sauvegarde de base plus WAL à l'heure cible et vérifie que seules les lignes validées jusque-là existent. Il affiche le RPO et le RTO et dure environ 6 minutes avec `archive_timeout` 300 s. Avec `--record <backend-base-url> <operator-bearer-token>`, le résultat est enregistré comme entrée `SCENARIO_BASED` via `POST /api/v1/dora/resilience-tests` (désactivé par défaut).
+
+### 2c. Promotion du réplica en lecture (Helm/Kubernetes, `values-production.yaml` uniquement)
+
+`values-production.yaml` exécute en option un réplica Postgres en lecture par réplication en flux à côté du primaire (`postgresql.architecture: replication`) — un secours à chaud en temps réel, et non une sauvegarde périodique. Ce n'est **pas** un basculement automatique : rien ne redirige le `DB_URL` du backend vers le réplica si le primaire tombe, et le réplica reste en lecture seule jusqu'à sa promotion explicite. Si le primaire est perdu et que le réplica est intact, c'est plus rapide qu'une restauration WAL-G complète (§2a) :
+
+```bash
+# 1. Confirmer que le retard de réplication du réplica est assez faible pour accepter la perte de données
+kubectl exec -it <release-name>-postgresql-read-0 -- \
+  psql -U postgres -c "SELECT now() - pg_last_xact_replay_timestamp() AS replication_lag;"
+
+# 2. Promouvoir le réplica hors du mode de récupération
+kubectl exec -it <release-name>-postgresql-read-0 -- pg_ctl promote -D /bitnami/postgresql/data
+
+# 3. Pointer le backend vers l'instance promue
+kubectl set env deployment/<release-name> \
+  DB_URL="jdbc:postgresql://<release-name>-postgresql-read:5432/registerwerk"
+
+# 4. Une fois l'ancien primaire récupérable, reconstruisez-le comme nouveau réplica (NE le laissez PAS
+#    revenir comme primaire — lui et l'instance promue ont désormais divergé) ou exécutez un nouveau
+#    `helm upgrade` pour que le sous-chart recrée la topologie primaire/réplica de zéro.
+```
+
+Toute transaction pas encore diffusée au réplica au moment de la promotion est perdue — c'est un vrai RPO, non nul ; comme pour le chemin WAL-G ci-dessus, le RPO est borné par ce qui a été capturé en dernier (ici : par le retard de réplication, et non par l'archive). Répétez cette promotion dans un espace de noms hors production avant de vous y fier lors d'un incident réel.
 
 ### 2d. Lignes dans une partition DEFAULT
 
@@ -188,3 +215,17 @@ Sur Kubernetes, le même fichier est livré sous `deploy/helm/registerwerk/files
 - [ ] Vérification des sanctions : confirmer qu'aucune ligne `screening_hit` ouverte n'a plus de 4 h
 - [ ] Aperçu du registre : vérifier que les montants nominaux totaux correspondent à l'instantané pré-incident
 - [ ] Si l'incident a été classé comme majeur, déposer les déclarations DORA dans les délais de l'acte délégué (vérifier le texte en vigueur, section 1)
+
+## 8. Exercices de chaos (Docker Compose)
+
+Deux scripts exercent un vrai comportement de panne/reprise sur la pile Compose en cours d'exécution — pas une simulation — et, pour `chaos-drill.sh`, enregistrent le résultat comme une vraie ligne DORA `ResilienceTest`, le même mécanisme que `dr-restore-drill.sh --record-dora` utilise déjà. Les deux redémarrent ce qu'ils ont arrêté avant de se terminer, mais attendez-vous à un bref redémarrage du backend ; ne les lancez pas sur une pile que d'autres utilisent activement.
+
+```bash
+scripts/chaos-drill.sh kill-postgres   # SIGKILL de postgres en plein trafic ; mesurer dégradation + reprise
+scripts/chaos-drill.sh kill-backend    # SIGKILL du backend en pleine requête ; mesurer la reprise
+scripts/verify-graceful-shutdown.sh    # docker stop (SIGTERM) face aux cas ci-dessus — le cas de contraste
+```
+
+**`kill-backend` a révélé, dès sa première exécution, une lacune réelle et jusque-là non documentée** : la politique Docker `restart: unless-stopped` ne redémarre **pas** un conteneur après `docker kill` ou `docker stop` — confirmé par `docker inspect ... RestartCount` resté à 0 après l'arrêt brutal. Elle ne récupère que d'un véritable plantage dans le processus, observé par le runtime de conteneurs lui-même, pas d'une terminaison déclenchée via l'API du moteur. `kill-backend` le mesure désormais honnêtement : il attend 20 s une reprise automatique et, si elle n'a pas lieu, se rabat sur un `docker start` explicite et enregistre le résultat comme `FINDINGS_OPEN`, et non `PASSED`. Le chemin Helm/Kubernetes ne partage pas cette lacune — `restartPolicy: Always` (la valeur implicite d'un Deployment) redémarre un pod après *toute* sortie du conteneur, administrative ou non. Si l'auto-réparation après l'arrêt brutal d'un conteneur compte spécifiquement pour le chemin Compose, c'est un vrai suivi à mener (un superviseur externe, ou l'acceptation de la reprise manuelle comme modèle documenté), et non quelque chose qu'un des scripts masque.
+
+`verify-graceful-shutdown.sh` est le cas de contraste : il envoie une rafale de requêtes concurrentes, émet un vrai `docker stop` (SIGTERM) au milieu de la rafale et confirme que le conteneur se termine de lui-même dans son `stop_grace_period` (35 s, `docker-compose.yml` — aligné sur `spring.lifecycle.timeout-per-shutdown-phase`, `application.yml`) au lieu d'être forcé par l'escalade SIGKILL de Docker, et que les requêtes en cours se terminent au lieu d'être réinitialisées. C'est à cela que sert réellement `server.shutdown: graceful` — un arrêt/recréation normal, pas un plantage — et c'est la raison pour laquelle le service backend de `docker-compose.yml` a besoin d'un `stop_grace_period` explicite : le délai d'arrêt par défaut de Docker (10 s) est plus court que les 30 s que l'application utilise pour son propre drainage.

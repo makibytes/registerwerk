@@ -31,7 +31,7 @@ La storia è quella di un'obbligazione. La seguiamo dal momento in cui qualcuno 
     | Scadenza | 5 anni |
     | Rimborso | valore nominale integrale alla scadenza |
 
-    Questo è l'intero prodotto finanziario. Tutto il resto è la macchina che rende quella promessa efficace, negoziabile e opponibile — e che dimostra a un'autorità di vigilanza che tutto è stato fatto correttamente.
+    Questo è l'intero prodotto finanziario. Tutto il resto è la macchina che rende quella promessa efficace, negoziabile e opponibile — e che lascia registrazioni che un'autorità di vigilanza, un revisore o una controparte possono esaminare in seguito.
 
 ??? note "Per chi non viene dalla finanza: che cos'è davvero un'obbligazione"
 

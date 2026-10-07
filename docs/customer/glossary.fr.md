@@ -170,7 +170,7 @@ Des définitions simples. Lorsqu'un terme a un sens technique précis qui diffè
 : Une adresse de portefeuille que vous avez enregistrée auprès du registre, avec un libellé.
 
 **Registre**
-: La base de données de l'opérateur consignant qui détient quoi. **L'enregistrement juridiquement significatif**, distinct du jeton.
+: La base de données de l'opérateur consignant qui détient quoi. **L'enregistrement que Registerwerk traite comme source de vérité** (l'effet juridique dépend de l'opérateur et de l'instrument), distinct du jeton.
 
 **Rejet par défaut** (*fail closed*)
 : Lorsqu'un contrôle ne peut pas s'exécuter, refuser plutôt qu'autoriser. Le filtrage des sanctions fonctionne ainsi — une panne signifie que les transferts sont refusés, pas laissés passer sans contrôle.

@@ -68,13 +68,13 @@ Trois éléments se situent hors des espaces de travail, parce qu'ils s'applique
 
 Registerwerk tient **deux enregistrements de la même chose**, et ne prétend délibérément pas le contraire.
 
-Il y a le **registre** — une base de données, tenue par l'opérateur, qui est l'enregistrement doté d'une portée juridique. Et il y a le **jeton** — une inscription sur une blockchain, ce qui se déplace réellement lors d'un transfert.
+Il y a le **registre** — une base de données, tenue par l'opérateur, que Registerwerk traite comme source de vérité (qu'il constitue un registre ayant un effet juridique dépend de l'opérateur et de l'instrument). Et il y a le **jeton** — une inscription sur une blockchain, ce qui se déplace réellement lors d'un transfert.
 
-Un logiciel observe la chaîne et réinscrit ce qu'il voit dans le registre. La plupart du temps, les deux concordent. Quand ce n'est pas le cas, le registre fait foi et l'écart doit être résolu par un humain.
+Un logiciel observe la chaîne et réinscrit ce qu'il voit dans le registre. La plupart du temps, les deux concordent. Quand ce n'est pas le cas, le registre est la source de vérité pour le rapprochement et l'écart doit être résolu par un humain.
 
 ```mermaid
 graph LR
-    R[("Registre<br/><small>l'enregistrement juridique</small>")]
+    R[("Registre<br/><small>la source de vérité</small>")]
     T["Jeton sur la chaîne<br/><small>ce qui se déplace</small>"]
     R -.->|"donne l'instruction"| T
     T -.->|"observé par les indexeurs"| R

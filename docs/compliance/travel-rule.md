@@ -163,7 +163,9 @@ Outbound payloads are enriched from the asset holder registry: the originator's 
 
 ## Bulk import of the CASP register
 
-`POST /api/v1/compliance/casp-register/import` (operator UI: *Compliance → CASP Register → Import CSV*) accepts a CSV with the canonical columns `legal_name`, `vasp_did` (or `lei`, from which `lei:<LEI>` is synthesized), `status`, and optionally `home_member_state`, `authorization_id`, `valid_from`, `valid_until`, `notes`. Status mapping is tolerant of ESMA's British spelling ("Authorised") and maps "Withdrawn" to `REVOKED`. The import is best-effort per row: valid rows are upserted keyed by `vaspDid`, failures are reported per line.
+The step-by-step procedure (preview, diff digest, commit) is on its own page: [CASP register import](casp-register-import.md).
+
+The import is two steps: `POST /api/v1/compliance/casp-register/import/preview` (writes nothing) and `POST /api/v1/compliance/casp-register/import?diffDigest=...` (operator UI: *Compliance → CASP Register → Import CSV*), which accepts a CSV with the canonical columns `legal_name`, `vasp_did` (or `lei`, from which `lei:<LEI>` is synthesized), `status`, and optionally `home_member_state`, `authorization_id`, `valid_from`, `valid_until`, `notes`. Status mapping is tolerant of ESMA's British spelling ("Authorised") and maps "Withdrawn" to `REVOKED`. The import is best-effort per row: valid rows are upserted keyed by `vaspDid`, failures are reported per line.
 
 
 ## Delivery, proofs and register controls { #delivery-proofs-register-controls }

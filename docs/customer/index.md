@@ -61,13 +61,13 @@ Three things sit outside the workspaces because they apply to you no matter what
 
 Registerwerk keeps **two records of the same thing**, and deliberately does not pretend otherwise.
 
-There is the **register** — a database, held by the operator, which is the record with legal significance. And there is the **token** — an entry on a blockchain, which is what actually moves when a transfer happens.
+There is the **register** — a database, held by the operator, which Registerwerk treats as the source of truth (whether it is a register with legal effect depends on the operator and the instrument). And there is the **token** — an entry on a blockchain, which is what actually moves when a transfer happens.
 
-They are kept in step by software that watches the chain and writes what it sees back into the register. Most of the time they agree. When they do not, the register is authoritative and the difference is something a human has to resolve.
+They are kept in step by software that watches the chain and writes what it sees back into the register. Most of the time they agree. When they do not, the register is the source of truth for reconciliation and the difference is something a human has to resolve.
 
 ```mermaid
 graph LR
-    R[("Register<br/><small>the legal record</small>")]
+    R[("Register<br/><small>the source of truth</small>")]
     T["Token on chain<br/><small>the thing that moves</small>"]
     R -.->|"instructs"| T
     T -.->|"observed by indexers"| R

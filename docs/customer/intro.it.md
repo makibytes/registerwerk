@@ -32,7 +32,7 @@ Registerwerk realizza un registro di questo tipo e aggiunge un secondo livello ‚
 !!! abstract "Il registro"
     Un database, tenuto dall'operatore. Indica il titolare, l'importo, le restrizioni.
 
-    **La registrazione con rilievo giuridico.**
+    **La registrazione che Registerwerk tratta come fonte di verit√†.** Che sia un registro con effetti giuridici dipende dall'operatore e dallo strumento.
 
 !!! abstract "Il token"
     Un saldo in uno smart contract su una blockchain. Pubblico e verificabile in modo indipendente.
@@ -41,7 +41,7 @@ Registerwerk realizza un registro di questo tipo e aggiunge un secondo livello ‚
 
 </div>
 
-Un software osserva la chain e tiene il registro allineato. Quasi sempre concordano. Quando non lo fanno, il registro fa fede e la differenza la risolve una persona.
+Un software osserva la chain e tiene il registro allineato. Quasi sempre concordano. Quando non lo fanno, il registro √® la fonte di verit√† per la riconciliazione propria di Registerwerk e la differenza la risolve una persona.
 
 [:octicons-arrow-right-24: Detenzione e custodia](lifecycle/holding.md) entra nel merito come si deve.
 

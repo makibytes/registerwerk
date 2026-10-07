@@ -51,7 +51,7 @@ Per i token su blockchain pubbliche, il §16 richiede un "registro dei titoli cr
 
 - La tabella `asset_holder` in PostgreSQL è l'attuale record del titolare dell'applicazione; se si tratta del registro legale richiede una politica di autorità approvata specifica dello strumento
 - `ChainDriftDetectionJob` viene eseguito ogni 15 minuti per verificare che i saldi sulla catena corrispondano al DB. Le discrepanze rilevate vengono memorizzate come record `chain_drift_event` e attivano le notifiche `ChainDriftDetectedEvent`.
-- La tabella `holder_block` implementa Sperrvermerk con i tipi di blocco: `PFANDRECHT`, `PFAENDUNG`, `GERICHTSBESCHLUSS`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `INSOLVENZ`
+- La tabella `holder_block` implementa Sperrvermerk con i tipi di blocco: `PFANDRECHT`, `PFAENDUNG`, `GERICHTSBESCHLUSS`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `INSOLVENZ`, `REGULATORISCH`
 
 Vedere [Sperrvermerk](../compliance/sperrvermerk.md) per l'implementazione completa.
 
@@ -88,7 +88,7 @@ La **Kryptowertpapier-Festlegungs-Verordnung** (KryptoFAV) specifica i requisiti
 | Emittente identificato tramite LEI o numero di registrazione | `LegalEntity.lei`, `LegalEntity.registrationNumber` |
 | Hash dei termini e delle condizioni | `Asset.termsHash` memorizzato all'emissione |
 | Prova crittografica della voce di registro | Catena di hash di controllo (`audit_event.entry_hash`) |
-| Accessibilità per l'ispezione BaFin | Ruolo `AUDITOR` con accesso completo in lettura; endpoint di esportazione dell'audit |
+| Accessibilità per l'ispezione BaFin | Ruolo `AUDIT` con accesso completo in lettura; endpoint di esportazione dell'audit |
 
 ---
 

@@ -110,6 +110,41 @@ Danach:
 
 Melden Sie sich mit `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` aus Ihrer `.env` an.
 
+### Lending und Repo lokal ausprobieren
+
+Setzen Sie `SEED_DEMO_DATA=true`, bevor Sie Compose starten. Der Stack stellt zwei echte Lending-Märkte auf seiner Wegwerf-Anvil-Chain bereit, registriert deren geprüfte, unveränderliche Parameter und befüllt ein separates bilaterales Repo-Desk-Buch.
+
+Befindet sich der Browser auf einem anderen Host (zum Beispiel `nibbler.local`), setzen Sie zusätzlich die Adresse, die der **Browser** erreichen kann:
+
+```dotenv
+SEED_DEMO_DATA=true
+ANVIL_HOST_PORT=48545
+ANVIL_PUBLIC_RPC_URL=http://nibbler.local:48545
+```
+
+`ANVIL_HOST_PORT` ist nur der veröffentlichte Host-/Browser-Port. Backend- und Deployment-Container verbinden sich immer mit `http://anvil:8545` im Compose-Netzwerk. `localhost` oder Port `48545` innerhalb dieser Container zeigt auf den falschen Netzwerk-Namensraum und führt zu „connection refused“.
+
+Fügen Sie diesen RPC einer Wegwerf-Browser-Wallet mit der Chain-ID `11155111` hinzu. Die Anvil-Mnemonic ist die übliche öffentliche Entwicklungs-Mnemonic:
+
+```text
+test test test test test test test test test test test junk
+```
+
+!!! danger "Nur Demo-Schlüssel"
+    Diese Mnemonic und jedes daraus abgeleitete Konto sind öffentlich. Verwenden Sie ein separates Browserprofil und senden Sie niemals echte Werte an diese Adressen. Das Importieren der Mnemonic in eine bestehende Wallet kann echte Konten ersetzen oder mit ihnen vermischt werden.
+
+Die Demo ordnet Unternehmensnutzer diesen abgeleiteten Konten zu:
+
+| Kunden-Login (Passwort `demo1234!`) | Unternehmen | Anvil-Konto |
+|---|---|---|
+| `maria.braun@nordbank-invest.de` | Nordbank Invest | Konto 1 |
+| `sabine.mueller@rheinische-kapital.de` | Rheinische Kapital | Konto 2 |
+| `lisa.hoffmann@aurora-finance.de` | Aurora Finance | Konto 3 |
+| `sandra.richter@fd-fonds.de` | Frankfurt Digital Fonds | Konto 4 |
+| `ute.koenig@wi-invest.de` | Württemberg Invest | Konto 5 |
+
+Alle fünf können den Repo Desk nutzen. Die ersten drei halten Green-Bond-Sicherheiten; Rheinische, Frankfurt und Württemberg halten Sicherheiten in Infrastructure Notes. Die On-Chain-Lending-Demo wird vom einmaligen Dienst `demo-onchain-deploy` zurückgesetzt/neu bereitgestellt, während der Repo Desk mit drei RFQs und zwei privaten Quotes startet.
+
 Kong läuft DB-los aus `gateway/kong.yml`, daher gibt es keine Gateway-Datenbank-Anmeldedaten und keine `kong`- oder `konga`-Datenbank. Seine Admin-API ist an Loopback gebunden — erreichen Sie sie mit `docker compose exec kong kong health`, legen Sie sie niemals offen.
 
 Für alles über einen lokalen Testlauf hinaus lesen Sie [Voraussetzungen](installation/prerequisites.md) und danach sorgfältig [Umgebung](configuration/environment.md).

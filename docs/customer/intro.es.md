@@ -32,7 +32,7 @@ Es la única idea estructural que merece la pena entender, porque de ella se der
 !!! abstract "El registro"
     Una base de datos, en manos del operador. Nombra al titular, el importe, las restricciones.
 
-    **La anotación con relevancia jurídica.**
+    **La anotación que Registerwerk trata como fuente de verdad.** Que sea un registro con eficacia jurídica depende del operador y del instrumento.
 
 !!! abstract "El token"
     Un saldo en un contrato inteligente sobre una blockchain. Público y verificable de forma independiente.
@@ -41,7 +41,7 @@ Es la única idea estructural que merece la pena entender, porque de ella se der
 
 </div>
 
-Un software vigila la cadena y mantiene el registro acompasado. Casi siempre coinciden. Cuando no, manda el registro y la diferencia la resuelve una persona.
+Un software vigila la cadena y mantiene el registro acompasado. Casi siempre coinciden. Cuando no, el registro es la fuente de verdad para la conciliación propia de Registerwerk, y la diferencia la resuelve una persona.
 
 [:octicons-arrow-right-24: Tenencia y custodia](lifecycle/holding.md) entra en ello como es debido.
 

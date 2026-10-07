@@ -4,6 +4,9 @@ title: Surveillance
 
 # Surveillance
 
+!!! warning "Traduction partiellement obsolète"
+    Cette page n'est pas entièrement synchronisée avec l'original anglais : les sections sur l'exécution des tâches planifiées, l'arriéré opérationnel, la latence de confirmation des transactions et les tests de charge manquent, et les noms d'alertes et de métriques peuvent être périmés. La page anglaise fait foi.
+
 Le registre est livré avec une pile de surveillance Prometheus + Grafana. Cette page décrit ce qu'il faut surveiller, quelles mesures sont importantes et comment configurer les alertes.
 
 ## Démarrage de la pile de surveillance

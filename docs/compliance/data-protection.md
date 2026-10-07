@@ -108,7 +108,7 @@ Technical measures implemented:
 | Encryption at rest | `NaturalPerson` field encryption is not implemented; deployment-level database/object-store encryption must be separately configured and verified |
 | Access control | Role-based (`@PreAuthorize`) + step-up for sensitive reads |
 | Audit logging | Tamper-evident hash chain for all operations |
-| MFA | WebAuthn / TOTP for all operator accounts |
+| MFA | TOTP step-up for protected operations (local mode) or Entra Conditional Access (`ENTRA_ENABLED=true`); WebAuthn is not implemented in the application |
 | Pseudonymisation | `NaturalPerson.id` (UUID) used in cross-module references instead of name |
 | Incident response | Manual incident records and deadline monitoring exist; authority/data-subject notification automation is not implemented |
 

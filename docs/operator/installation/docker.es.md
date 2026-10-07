@@ -61,6 +61,34 @@ además la base de datos y el rol `chaincache` para los workloads Chaincache opc
 siempre, esté o no `CHAINCACHE_ENABLED=true`; si no, simplemente queda como una base de datos vacía
 sin usar.
 
+!!! warning "Actualizar un despliegue existente al volumen pg18data"
+    PostgreSQL 18 movió PGDATA a `/var/lib/postgresql/<major>/docker` y declara
+    `VOLUME /var/lib/postgresql` (no `.../data`, como en la 17 y anteriores). Por eso el servicio
+    `postgres` de `docker-compose.yml` monta un volumen llamado `pg18data`, no el antiguo `pgdata` — un
+    cambio de nombre deliberado, no un error tipográfico: montar un volumen anterior a la 18 en la ruta
+    que espera la nueva imagen arrancaría en silencio un clúster nuevo y vacío en lugar de fallar de forma
+    visible. Un despliegue que actualiza desde un volumen `pgdata` antiguo debe hacer un `pg_dump` del
+    volumen antiguo y restaurarlo en el nuevo como paso de migración explícito, antes de ejecutar
+    `docker compose up -d` con este archivo compose — no dé nunca por hecho que el cambio de nombre
+    basta para llevar los datos. El servicio `graph-db` de `indexer/evm/docker-compose.yml` necesita el
+    mismo tratamiento (`graphdata` → `graph_pg18`).
+
+!!! warning "Actualizar desde un contenedor chaincache-postgres independiente"
+    Las revisiones anteriores de esta pila ejecutaban la base de datos de Chaincache en su propio
+    contenedor `chaincache-postgres` (volumen `chaincache_pg18`) en lugar de como segunda base de datos
+    del servicio `postgres` compartido. `postgres-init/01-create-chaincache-db.sql` solo se ejecuta contra
+    un volumen `pg18data` realmente nuevo y vacío — igual que con el cambio de nombre de pg18data
+    anterior —, así que un despliegue existente que pase a este archivo compose **no** obtendrá la base
+    de datos `chaincache` automáticamente. Antes de eliminar el antiguo contenedor `chaincache-postgres`:
+    haga un `pg_dump` de él (`docker compose exec chaincache-postgres pg_dump -U chaincache chaincache | gzip > chaincache.sql.gz`).
+    Tras la actualización, cree la base de datos a mano en el volumen `postgres` existente y restaure en
+    ella:
+    ```bash
+    docker compose exec postgres psql -U ${DB_USER:-registerwerk} -d registerwerk -c \
+      "CREATE USER chaincache WITH PASSWORD 'chaincache'; CREATE DATABASE chaincache OWNER chaincache;"
+    gunzip -c chaincache.sql.gz | docker compose exec -T postgres psql -U chaincache chaincache
+    ```
+
 ### Registros { #logs }
 
 ```bash

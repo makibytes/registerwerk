@@ -749,6 +749,7 @@ nav:
       - Reviewing KYC: operator/customers/kyc-process.md
       - Approving an issuance: operator/customers/approving-issuances.md
       - Impersonation — seeing what they see: operator/customers/impersonation.md
+      - Entity tasks: operator/customers/entity-tasks.md
       - Two-factor support (lost phone): operator/customers/two-factor-support.md
       - Offboarding and register transfer: operator/customers/offboarding.md
     - Installation:
@@ -759,6 +760,7 @@ nav:
       - API gateway: operator/installation/api-gateway.md
     - Configuration:
       - Environment: operator/configuration/environment.md
+      - Operational settings reference: operator/configuration/environment-settings.md
       - Blockchains: operator/configuration/chains.md
       - Identity provider: operator/configuration/identity-provider.md
       - Email: operator/configuration/email.md
@@ -771,8 +773,13 @@ nav:
       - ERC-3643 setup: operator/blockchain/erc3643-setup.md
       - Confidential tokens: operator/blockchain/confidential-tokens.md
       - chaincache integration: operator/blockchain/chaincache-integration.md
+      - Forward pricing and dealing cut-off: operator/blockchain/forward-pricing.md
     - Security operations:
+      - Production mode and release gates: operator/security/production-mode.md
+      - Approval queue (four eyes): operator/security/approval-queue.md
       - HSM-backed wallets: operator/security/hsm-wallets.md
+      - Cloud-KMS signer setup: operator/security/kms-signer.md
+      - KEK rotation runbook: operator/security/kek-rotation.md
       - On-chain security review: operator/security/onchain-review.md
     - Indexers:
       - The Graph: operator/indexers/the-graph.md
@@ -812,14 +819,17 @@ nav:
       - KYC & AML: compliance/kyc-aml.md
       - Sanctions screening: compliance/sanctions-screening.md
       - Travel Rule (TFR): compliance/travel-rule.md
+      - CASP register import: compliance/casp-register-import.md
       - Sperrvermerk §16 eWpG: compliance/sperrvermerk.md
       - Step-up MFA & 4-eyes: compliance/step-up-mfa.md
+      - Step-up matrix (generated): compliance/step-up-matrix.md
       - Token admin grants: compliance/token-admin-grants.md
       - DORA — ICT risk: compliance/dora.md
       - MiFIR transaction reporting: compliance/mifir.md
       - DAC8 / CARF: compliance/dac8.md
       - Data protection (DSGVO): compliance/data-protection.md
       - Records of processing: compliance/ropa.md
+      - Retention matrix: compliance/retention.md
       - DPIA — Germany: compliance/dpia-DE.md
       - DPIA — Luxembourg: compliance/dpia-LU.md
       - DPIA — France: compliance/dpia-FR.md
@@ -851,8 +861,10 @@ nav:
       - Microsoft Entra ID setup: platform/entra-setup.md
       - Audit log: platform/audit-log.md
       - REST API overview: platform/api.md
+      - API route index (generated): platform/api-routes.md
       - Webhooks: platform/webhooks.md
       - Register units: platform/register-units.md
+      - Open decisions and known limitations: platform/known-limitations.md
       - Account abstraction: platform/account-abstraction.md
       - DeFi interoperability: platform/defi-interoperability.md
       - dApp development & marketplace: platform/dapp-development.md

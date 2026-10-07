@@ -32,7 +32,7 @@ Das ist der eine strukturelle Gedanke, den zu verstehen sich lohnt, denn die mei
 !!! abstract "Das Register"
     Eine Datenbank beim Betreiber. Nennt den Inhaber, den Betrag, Beschränkungen.
 
-    **Die rechtlich maßgebliche Aufzeichnung.**
+    **Die Aufzeichnung, die Registerwerk als maßgebliche Quelle behandelt.** Ob sie ein Register mit Rechtswirkung ist, hängt vom Betreiber und vom Instrument ab.
 
 !!! abstract "Der Token"
     Ein Saldo in einem Smart Contract auf einer Blockchain. Öffentlich und unabhängig überprüfbar.
@@ -41,7 +41,7 @@ Das ist der eine strukturelle Gedanke, den zu verstehen sich lohnt, denn die mei
 
 </div>
 
-Software beobachtet die Chain und hält das Register im Gleichlauf. Meist stimmen beide überein. Tun sie es nicht, ist das Register maßgeblich, und die Differenz klärt ein Mensch.
+Software beobachtet die Chain und hält das Register im Gleichlauf. Meist stimmen beide überein. Tun sie es nicht, ist das Register die maßgebliche Quelle für Registerwerks eigenen Abgleich, und die Differenz klärt ein Mensch.
 
 [:octicons-arrow-right-24: Verwahrung und Bestand](lifecycle/holding.md) geht darauf richtig ein.
 

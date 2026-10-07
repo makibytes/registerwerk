@@ -19,7 +19,7 @@ Liechtenstein war das erste europäische Land, das umfassende tokenspezifische R
 
 Das TVTG etabliert den Begriff des **Token** als Dateneintrag in einem VT-System (Vertrauenswürdige Technologien, d. h. einem Distributed Ledger oder einem gleichwertigen kryptografisch gesicherten System). Rechte werden dem Token zugeordnet und nicht direkt dem zugrunde liegenden Vermögenswert, wodurch eine saubere rechtliche Trennung zwischen dem Recht (Token) und seiner technischen Darstellung (Blockchain) entsteht.
 
-Das passt gut zum kanonischen Registermodell von Registerwerk: Der Registereintrag ist das rechtsmaßgebliche Instrument; die Blockchain ist eine Darstellung.
+Das passt gut zum kanonischen Registermodell von Registerwerk: Der Registereintrag ist die operative Aufzeichnung, die Blockchain eine Darstellung. Ob ein Eintrag rechtlich das Instrument ist, hängt vom TT-System und vom Status des Betreibers ab, was dieses Repository nicht begründet.
 
 ---
 
@@ -111,7 +111,7 @@ Anwendbarkeit von DORA/EWR, Zuständigkeit und Fristen erfordern eine aktuelle e
 
 Liechtenstein bietet den blockchain-nativsten Rechtsrahmen in Europa:
 
-- Token werden unabhängig von der zugrunde liegenden Technologie rechtlich anerkannt
+- Das Token-Container-Modell des TVTG ist technologieneutral; ob ein bestimmtes Token rechtlich anerkannt ist, hängt vom Instrument und vom TT-System ab, auf dem es ausgegeben wird
 - Jedes Recht kann tokenisiert werden – Finanzinstrumente, Immobilien, IP-Rechte
 - Das TVTG ist technologieneutral (EVM, UTXO und DAG qualifizieren sich alle)
 - Keine gesonderte Bezeichnung als „Kryptowertpapier" erforderlich – der Token selbst trägt das Recht

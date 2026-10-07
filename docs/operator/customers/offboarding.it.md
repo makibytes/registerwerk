@@ -121,6 +121,14 @@ Quando un'organizzazione smette di usare il registro:
 
     Rimborsalo, oppure trasferiscilo a un registrar successore, prima di cessare l'emittente. Altrimenti hai obblighi in corso in un registro che nessuno amministra più.
 
+### Reintegrare un cliente chiuso o sciolto { #reinstating-a-closed-or-dissolved-customer }
+
+Un cliente `CLOSED` o `DISSOLVED` non torna mai direttamente `ACTIVE`. Un `REGISTRY_ADMIN` avvia il reintegro con `POST /api/v1/entities/{id}/reinstate`; sono obbligatori un motivo e un riferimento giuridico, e la chiamata richiede autenticazione rafforzata e un secondo approvatore (`ENTITY_REINSTATE`).
+
+- Il cliente passa a `PENDING_REACTIVATION`: il KYC viene riportato a «non avviato», lo screening viene rieseguito e vengono create due [attività del soggetto](entity-tasks.md) (`REINSTATEMENT_KYC_REQUIRED`, `REINSTATEMENT_USERS_REVIEW`). Finché è in sospeso, nessuno del cliente può accedere, negoziare o essere impersonato, e i suoi utenti restano disabilitati.
+- Una nuova approvazione del KYC (valgono tutti i gate KYC consueti) rende il cliente `ACTIVE` e crea `CHAIN_REINSTATEMENT_REQUIRED`. I claim di identità on-chain e il legame con l'organizzazione **non** vengono riemessi automaticamente; ripristinarli è un passo esplicito a quattro occhi dell'operatore. I precedenti record di chiusura e di propagazione on-chain restano in vigore finché il KYC non viene approvato.
+- Un reintegro in sospeso può essere abbandonato cessando di nuovo il cliente. Al completamento non c'è alcun controllo dello Sperrvermerk; i gate delle parti applicano i blocchi a ogni transazione.
+
 ---
 
 ## Cosa deve essere conservato { #what-must-be-retained }

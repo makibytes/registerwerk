@@ -22,6 +22,8 @@ Los tres se aplican en el **backend**, en cada solicitud. La navegación de ning
 | `REGISTRY_ADMIN` | Personal del operador | Todo, en todos los clientes. Incluye [suplantación](impersonation.md). |
 | `COMPLIANCE_OFFICER` | Personal del operador | Aprobaciones y rechazos del flujo de trabajo KYC/KYB. |
 | `AUDIT` | Auditores, inspectores | Leer todo el registro. Sin escritura. |
+| `RELATIONSHIP_MANAGER` | Personal del operador | Solo lectura, limitada a las entidades cliente que se les asignan. No puede aprobar ni cambiar nada. |
+| `SUPPORT_AGENT` | Personal del operador | Listar clientes e iniciar sesiones de [suplantación](impersonation.md) de **solo lectura** (step-up y motivo registrado). Nada más; sin acceso de escritura. Conceder o retirar el rol exige step-up y un segundo aprobador. |
 | `COMPANY_ADMIN` | Cliente | Administrar los usuarios de su propia organización, la configuración del IdP y la identidad en cadena. |
 | `ISSUER` | Cliente | Crear y administrar sus propias emisiones. |
 | `INVESTOR` | Cliente | Mantener y consultar sus propios valores. |

@@ -31,7 +31,7 @@ Luxembourg is Europe's largest fund domicile and a leading jurisdiction for toke
 
 | Dimension | DE (eWpG) | LU (CSSF) |
 |---|---|---|
-| Authoritative register | DB is canonical (§16 eWpG) | DB is canonical (CSSF guidance) |
+| Source of truth in Registerwerk | The database (operational; the legal status of the register is instrument- and operator-specific) | The database (operational; the legal status of the register is instrument- and operator-specific) |
 | Retention period | 10 years | 5 years |
 | MiCAR applicability | Exempted (eWpG tokens ≠ e-money tokens) | Applies to crypto-asset services |
 | UBO threshold | 25% (GwG §3) | 25% (AML Law Art. 1(7)) |

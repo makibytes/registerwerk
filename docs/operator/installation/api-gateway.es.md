@@ -4,7 +4,7 @@ title: Puerta de enlace API (Kong)
 
 # Puerta de enlace API (Kong) { #api-gateway-kong }
 
-Kong 3.8 (OSS, sin base de datos) se sitúa únicamente delante del **tráfico de la API de la interfaz del cliente**. Se encarga de la
+Kong 3.9 (OSS, sin base de datos) se sitúa únicamente delante del **tráfico de la API de la interfaz del cliente**. Se encarga de la
 limitación de velocidad, el almacenamiento en caché de respuestas y las cabeceras de seguridad. **No** se sitúa delante de la interfaz de usuario
 de ninguna de las dos aplicaciones; ambas se abren siempre directamente en el navegador, en su propio puerto (`:44200`, `:44201`), y
 la **interfaz del operador omite Kong por completo**, incluso para sus propias llamadas a la API (su nginx reenvía
@@ -23,11 +23,14 @@ Kong se ejecuta en modo sin base de datos (declarativo): lee `gateway/kong.yml` 
 
 ## Configuración declarativa { #declarative-configuration }
 
-Kong se configura a través de `gateway/kong.yml` en formato deck. Para aplicar cambios:
+`gateway/kong.yml` es la única fuente de verdad. Se monta en solo lectura en `/etc/kong/kong.yml` y se carga al arrancar mediante `KONG_DECLARATIVE_CONFIG`. Kong funciona sin base de datos, así que no hay base de datos ni `deck sync` (deck escribe en una Admin API respaldada por una base de datos, y esta pila no publica ninguna). Para cambiar el enrutamiento o los plugins, edite el archivo, valídelo y vuelva a crear el contenedor:
 
 ```bash
-deck sync --config gateway/kong.yml
+docker compose run --rm kong kong config parse /etc/kong/kong.yml   # debe imprimir «parse successful»
+docker compose up -d --force-recreate kong
 ```
+
+En Kubernetes, edite `deploy/helm/registerwerk/files/kong.yml` (se renderiza en el ConfigMap `registerwerk-kong-config`) y ejecute `helm upgrade`; reinicie el despliegue de Kong si los pods no recogen el ConfigMap modificado.
 
 ## Complementos clave { #key-plugins }
 
@@ -63,14 +66,10 @@ El rate limiting, la `ip-restriction` de administración y la limitación de ini
 
 ## Kong admin API { #kong-admin-api }
 
-Kong se ejecuta sin base de datos y en esta pila no incluye **ninguna GUI de administración** (ni Konga ni Kong Manager; ambos fueron
-eliminados o nunca se llegaron a conectar). El acceso a la API de administración está intencionadamente restringido a loopback:
+Kong funciona sin base de datos y **no incluye interfaz de administración** en esta pila (ni Konga ni Kong Manager). La Admin API escucha solo en `127.0.0.1:8001` **dentro del contenedor** (`KONG_ADMIN_LISTEN`) y no se publica en el host; no está autenticada y nunca debe exponerse. La imagen de Kong no incluye `curl`, así que use la CLI incorporada:
 
 ```bash
-# Bound to 127.0.0.1:48001 on the host — never expose this publicly, it's unauthenticated
 docker compose exec kong kong health
-curl http://127.0.0.1:48001/status
 ```
 
-Para cambiar el enrutamiento o los complementos, edite `gateway/kong.yml` y reinicie el servicio `kong`; es la única fuente de verdad
-en modo sin base de datos.
+Para cambiar el enrutamiento o los plugins, edite `gateway/kong.yml` y vuelva a crear el servicio `kong` como se describe arriba — es la única fuente de verdad en el modo sin base de datos.

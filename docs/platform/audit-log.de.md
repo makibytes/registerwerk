@@ -96,11 +96,11 @@ müssen.
 |---|---|
 | `ASSET_CREATED` / `ASSET_DEPLOYED` / `ASSET_STATUS_CHANGED` | Asset-Lebenszyklus |
 | `KYC_SUBMITTED` / `KYC_APPROVED` / `KYC_REJECTED` / `KYC_EXPIRED` | KYC-Workflow |
-| `HOLDER_BLOCK_CREATED` / `HOLDER_BLOCK_LIFTED` / `HOLDER_BLOCK_EXPIRED` | Sperrvermerk |
+| `HOLDER_BLOCK_CREATED` / `HOLDER_BLOCK_LIFTED` / `HOLDER_BLOCK_EXPIRY_REVIEW` | Sperrvermerk |
 | `SCREENING_RUN_COMPLETED` / `SCREENING_HIT_ACCEPTED` | Sanktionsprüfung |
 | `FORCE_TRANSFER` / `FORCE_BURN` / `FORCE_APPROVE` | Privilegierte Token-Operationen |
-| `STEP_UP_ISSUED` / `DUAL_CONTROL_CONFIRMED` / `PROTECTED_OPERATION_EXECUTED` | Step-up-Authentifizierung |
-| `IMPERSONATION_STARTED` / `IMPERSONATION_ENDED` | Admin-Impersonation |
+| `TOTP_ENROLLED` / `TOTP_RESET` / `DUAL_CONTROL_APPROVED` / `DUAL_CONTROL_BOOTSTRAP_USED` / `APPROVAL_REQUEST_CREATED` / `_APPROVED` / `_CLAIMED` | Step-up-Authentifizierung |
+| `ADMIN_IMPERSONATION_STARTED` / `ADMIN_IMPERSONATION_HANDOFF_EXCHANGED` / `ADMIN_IMPERSONATION_ENDED` | Admin-Impersonation |
 | `ICT_INCIDENT_CREATED` / `ICT_INCIDENT_RESOLVED` | DORA-Vorfälle |
 | `REGREPORT_SUBMITTED` | MiFIR-/DAC8-Meldung |
 | `NATURAL_PERSON_REDACTED` | DSGVO-Löschung |
@@ -127,24 +127,35 @@ müssen.
 ## Prüfung der Audit-Kette { #verifying-the-audit-chain }
 
 ```
-GET /api/v1/admin/audit/verify
+GET  /api/v1/audit/chain/status    # zuletzt erfasstes Ergebnis (Nachtlauf oder früherer Lauf)
+POST /api/v1/audit/chain/verify    # jetzt eine vollständige Prüfung ausführen
 ```
 
-Liefert:
+Beide erfordern `REGISTRY_ADMIN` oder `AUDIT`. Die Antwort:
 
 ```json
 {
-  "status": "OK",
-  "lastVerifiedAt": "2026-05-22T03:00:00Z",
-  "lastSequenceNo": 1847293,
-  "lastEntryHash": "a3f7...",
-  "brokenAt": null
+  "valid": true,
+  "rowsChecked": 1847293,
+  "firstBrokenSequenceNo": null,
+  "checkedAt": "2026-05-22T03:00:00Z",
+  "reason": null,
+  "status": "VALID",
+  "verificationId": "6d1f..."
 }
 ```
 
-Ist `brokenAt` nicht null, enthält es die `sequence_no` des ersten Eintrags, an dem die Hash-Kette
-unterbrochen ist. Das löst automatisch einen `IctIncident` mit Schweregrad `MAJOR` und Kategorie
-`INTEGRITY` aus.
+Ist `valid` gleich `false` (`status` `BROKEN`), nennt `firstBrokenSequenceNo` die `sequence_no` des ersten Eintrags, an dem die Kette bricht, und `reason` den Grund. Das Ergebnis wird gespeichert und speist den Health-Indikator, die Kennzahl `registerwerk_audit_chain_valid` (`1` gültig, `0` gebrochen, `-1` kein Lauf erfasst) und die Alarme `AuditChainBroken`, `AuditChainUnverified` und `AuditChainVerificationStale`.
+
+### Ein BROKEN-Ergebnis quittieren
+
+Ein gebrochenes Ergebnis hält `/actuator/health` auf **DOWN** (die Readiness bleibt unberührt), bis **beides** zutrifft: Ein **späterer** Lauf ist gültig, **und** der gebrochene Lauf wurde quittiert:
+
+```
+POST /api/v1/audit/verification/{verificationId}/ack?note=<Freitext>
+```
+
+Die Quittierung ist nur `REGISTRY_ADMIN` vorbehalten und erfordert Step-up **und einen zweiten Genehmiger** (Grund `AUDIT_CHAIN_VERIFICATION_ACK`); die Audit-Log-Seite des Betreiberportals hat dafür eine Schaltfläche. Quittiert werden kann nur eine gebrochene Prüfung, und nur einmal. Führen Sie nach einer Wiederherstellung aus der Sicherung `POST /api/v1/audit/chain/verify` aus, untersuchen Sie jedes BROKEN-Ergebnis und quittieren Sie es, damit der Health-Indikator wieder auf UP gehen kann.
 
 ---
 
@@ -155,5 +166,6 @@ unterbrochen ist. Das löst automatisch einen `IctIncident` mit Schweregrad `MAJ
 - **Die Prüfung** erkennt: eine erste Zeile, die nicht der Anfang der Kette ist (abgeschnittener Kopf, entfernte Partition), eine letzte Zeile, die von `audit_chain_tip` abweicht, nach einem signierten Tagesanker (`audit_chain_anchor`, optional über eine externe `AuditAnchorSink` veröffentlicht) entfernte Zeilen sowie eine fehlende `entry_sig` ab der Signatur-Wasserlinie (erste signierte Sequenznummer, nur einmal beschreibbar). Eine später aktivierte Signierung signiert frühere Zeilen nicht nachträglich.
 - **Nachweis-Export.** `/audit/events/export[/signed]` ist nach `sequence_no` sortiert und beginnt mit einem `# key=value`-Block (`firstSeq`, `lastSeq`, `rowCount`, `truncated`, `nextAfterSeq`, `tipSeq`, `tipEntryHash`); die Zeilen enthalten `prevHash` und `entryHash`. Die Signatur deckt Kopfblock und Zeilen ab. Mit `afterSeq` wird ein abgeschnittener Export fortgesetzt.
 - **Fehlgeschlagene Schreibvorgänge** werden jede Minute wiederholt (Veröffentlichungen älter als zwei Minuten) und nach `registerwerk.audit.max-attempts` (20) Versuchen in `audit_event_dead_letter` verschoben. Alarmieren Sie auf `registerwerk_audit_oldest_incomplete_seconds` und `registerwerk_audit_dead_letter_count`.
-- **Tabelleneigentümer.** `REVOKE UPDATE, DELETE, TRUNCATE` und die WORM-Trigger binden den Tabelleneigentümer nicht. Führt das Laufzeit-Login auch die Migrationen aus, besitzt es `audit_event`; im Produktionsmodus scheitert dann die Startprüfung, sofern nicht `registerwerk.audit.allow-owner-runtime-role=true` das Restrisiko vorübergehend bestätigt. Abhilfe: getrennte Logins für Migration und Laufzeit (offene Entscheidung T6-17). Der Produktionsmodus verlangt außerdem einen Signaturschlüssel-Provider.
+- **Tabelleneigentümer.** `REVOKE UPDATE, DELETE, TRUNCATE` und die WORM-Trigger binden den Tabelleneigentümer nicht; deshalb darf die Laufzeit-Anmeldung `audit_event` nicht besitzen. Verwenden Sie getrennte Anmeldungen: Migrator/Eigentümer (`DB_USER`, per `SPRING_FLYWAY_USER` an Flyway übergeben) und die Laufzeit-Anmeldung `registerwerk_app` (`DB_APP_USER`), die auf den Audit-Tabellen kein UPDATE, DELETE oder TRUNCATE und im Schema kein CREATE hält. Im Produktionsmodus schlägt die Startprüfung fehl, wenn die Laufzeit-Anmeldung die Tabelle besitzt oder diese Rechte noch hält oder wenn beide Anmeldungen identisch sind; `registerwerk.audit.allow-owner-runtime-role=true` ist eine ausdrückliche Bestätigung des Übergangsrisikos nur für den Eigentümerfall. Der Produktionsmodus verlangt außerdem einen Signaturschlüssel-Provider.
+- **Externer Anker.** Tägliche Anker können in einen S3-Bucket mit Object Lock veröffentlicht werden (`registerwerk.audit.anchor-sink=s3`, Standard `none`), sodass ein Angreifer mit Datenbankzugriff die Ankerhistorie nicht umschreiben kann; fehlgeschlagene Veröffentlichungen werden stündlich wiederholt und gezählt (`registerwerk_audit_anchor_sink_failures_total`).
 - **Umstellung.** `registerwerk.audit.legacy-listener=true` (Standard) arbeitet vor dem Upgrade erzeugte Veröffentlichungen ab; abschalten, sobald `event_publication` keine unvollständigen Audit-Zeilen mehr enthält.

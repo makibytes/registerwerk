@@ -4,7 +4,7 @@ title: Passerelle API (Kong)
 
 # Passerelle API (Kong)
 
-Kong 3.8 (OSS, sans DB) se trouve devant le **trafic API de l'interface client uniquement**. Il gère la limitation de débit, la mise en cache des réponses et les en-têtes de sécurité. Il ne dessert **pas** l'interface utilisateur de l'un ou l'autre frontend — les deux applications sont toujours ouvertes directement par le navigateur sur leur propre port (`:44200`, `:44201`) — et l'**interface opérateur contourne entièrement Kong**, même pour ses propres appels API (son nginx achemine `/api/` directement vers `backend:8080`). La validation JWT et l'extraction d'entité/rôle se produisent toujours dans le backend Spring lui-même, à partir des revendications propres au jeton — et non via un en-tête injecté par Kong, dans la configuration OSS livrée par ce dépôt.
+Kong 3.9 (OSS, sans DB) se trouve devant le **trafic API de l'interface client uniquement**. Il gère la limitation de débit, la mise en cache des réponses et les en-têtes de sécurité. Il ne dessert **pas** l'interface utilisateur de l'un ou l'autre frontend — les deux applications sont toujours ouvertes directement par le navigateur sur leur propre port (`:44200`, `:44201`) — et l'**interface opérateur contourne entièrement Kong**, même pour ses propres appels API (son nginx achemine `/api/` directement vers `backend:8080`). La validation JWT et l'extraction d'entité/rôle se produisent toujours dans le backend Spring lui-même, à partir des revendications propres au jeton — et non via un en-tête injecté par Kong, dans la configuration OSS livrée par ce dépôt.
 
 ## Démarrage de Kong
 
@@ -17,11 +17,14 @@ Kong fonctionne en mode sans base de données (déclaratif) — il lit `gateway/
 
 ## Configuration déclarative
 
-Kong est configuré via `gateway/kong.yml` au format deck. Pour appliquer les modifications :
+`gateway/kong.yml` est l'unique source de vérité. Il est monté en lecture seule sur `/etc/kong/kong.yml` et chargé au démarrage via `KONG_DECLARATIVE_CONFIG`. Kong fonctionne sans base de données, il n'y a donc ni base ni `deck sync` (deck écrit dans une API d'administration adossée à une base, et cette pile n'en publie aucune). Pour modifier le routage ou les plugins, éditez le fichier, validez-le et recréez le conteneur :
 
 ```bash
-deck sync --config gateway/kong.yml
+docker compose run --rm kong kong config parse /etc/kong/kong.yml   # doit afficher « parse successful »
+docker compose up -d --force-recreate kong
 ```
+
+Sur Kubernetes, éditez `deploy/helm/registerwerk/files/kong.yml` (rendu dans la ConfigMap `registerwerk-kong-config`) et exécutez `helm upgrade` ; redémarrez le déploiement Kong si les pods ne prennent pas en compte la ConfigMap modifiée.
 
 ## Plugins clés
 
@@ -55,13 +58,10 @@ Le rate limiting, l'`ip-restriction` admin et la limitation de connexion du back
 
 ## API d'administration de Kong
 
-Kong fonctionne sans base de données et ne fournit **aucune interface graphique d'administration** dans cette pile (pas de Konga, pas de Kong Manager — les deux ont été supprimés/jamais câblés). L'accès à l'API d'administration est volontairement limité au loopback :
+Kong fonctionne sans base de données et ne fournit **aucune interface d'administration** dans cette pile (ni Konga, ni Kong Manager). L'API d'administration n'écoute que sur `127.0.0.1:8001` **à l'intérieur du conteneur** (`KONG_ADMIN_LISTEN`) et n'est pas publiée sur l'hôte ; elle n'est pas authentifiée et ne doit jamais être exposée. L'image Kong ne contient pas `curl` ; utilisez la CLI fournie :
 
 ```bash
-# Bound to 127.0.0.1:48001 on the host — never expose this publicly, it's unauthenticated
 docker compose exec kong kong health
-curl http://127.0.0.1:48001/status
 ```
 
-Pour modifier le routage/les plugins, modifiez `gateway/kong.yml` et redémarrez le service `kong` — c'est la source unique de vérité
-en mode sans base de données.
+Pour modifier le routage ou les plugins, éditez `gateway/kong.yml` et recréez le service `kong` comme décrit ci-dessus — c'est l'unique source de vérité en mode sans base de données.

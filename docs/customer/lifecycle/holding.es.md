@@ -22,7 +22,7 @@ Digámoslo con claridad, porque todo lo demás se deriva de aquí:
 !!! abstract "El registro"
     Una fila en la base de datos del operador. Nombra al titular, el valor nominal, el tipo de inscripción, las restricciones, los derechos de terceros.
 
-    **Es el asiento con relevancia jurídica.** Conforme al §16 eWpG, la titularidad de un valor electrónico se determina por el registro.
+    **Es la anotación que Registerwerk trata como fuente de verdad.** Según la eWpG, la eficacia jurídica se vincula a una inscripción en un registro de valores electrónicos llevado por una entidad registral autorizada; que esta base de datos sea un registro de ese tipo depende del operador y del instrumento, lo que este repositorio no establece.
 
 !!! abstract "El token"
     Un saldo en un contrato inteligente sobre una blockchain. Público, verificable por cualquiera, y es lo que realmente se mueve en una transmisión.
@@ -51,7 +51,7 @@ sequenceDiagram
 Entre el segundo y el cuarto paso, los dos asientos difieren — normalmente segundos, a veces más si un indexador va retrasado o una cadena está congestionada.
 
 !!! question "¿Cuál prevalece, entonces?"
-    **El registro.** Siempre. La blockchain hace fe de lo que la blockchain hizo; no hace fe de quién es dueño de un valor conforme al Derecho alemán.
+    **El registro — para la conciliación propia de Registerwerk.** La blockchain hace fe de lo que la blockchain hizo. No decide quién es dueño de un valor conforme al Derecho alemán, y esta base de datos tampoco, salvo que el operador sea una entidad registral autorizada para el instrumento.
 
     En la práctica esto importa en una situación concreta: alguien mueve tokens directamente on-chain, de monedero a monedero, sorteando la plataforma. En un valor ERC-3643 ambos monederos deben estar ya admitidos, así que el bono no puede acabar en manos no autorizadas — pero *sí* puede producir un registro que ya no se corresponde con la realidad hasta que el indexador se ponga al día, y una transmisión sin una orden detrás.
 
@@ -154,7 +154,7 @@ Los titulares institucionales en una inscripción colectiva quedan fuera de esta
 
 ## Dónde está usted
 
-Cincuenta inversores tienen un derecho de crédito frente a Nordwind, anotado en un registro que hace fe y reflejado en una blockchain verificable públicamente. El bono permanecerá así durante cinco años.
+Cincuenta inversores tienen un derecho de crédito frente a Nordwind, anotado en un registro que Registerwerk trata como fuente de verdad (su eficacia jurídica depende del operador y del instrumento) y reflejado en una blockchain verificable públicamente. El bono permanecerá así durante cinco años.
 
 Salvo que uno de ellos quiere recuperar su dinero antes.
 

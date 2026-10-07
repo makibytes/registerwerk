@@ -32,7 +32,7 @@ Luxemburg ist Europas größter Fondsstandort und eine führende Jurisdiktion f�
 
 | Dimension | DE (eWpG) | LU (CSSF) |
 |---|---|---|
-| Maßgebliches Register | Datenbank ist maßgeblich (§16 eWpG) | Datenbank ist maßgeblich (CSSF-Leitlinien) |
+| Maßgebliche Quelle in Registerwerk | Die Datenbank (operativ; der rechtliche Status des Registers ist instrument- und betreiberspezifisch) | Die Datenbank (operativ; der rechtliche Status des Registers ist instrument- und betreiberspezifisch) |
 | Aufbewahrungsfrist | 10 Jahre | 5 Jahre |
 | MiCAR-Anwendbarkeit | Ausgenommen (eWpG-Token ≠ E-Geld-Token) | Gilt für Kryptowerte-Dienstleistungen |
 | UBO-Schwellenwert | 25 % (GwG §3) | 25 % (AML-Gesetz Art. 1(7)) |

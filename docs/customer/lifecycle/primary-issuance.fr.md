@@ -63,7 +63,7 @@ Alors seulement il peut détenir l'obligation.
 
 ### Ce que contient une inscription au registre
 
-Chaque investisseur admis devient un **titulaire** — une ligne du registre. Au sens du §16 eWpG, c'est l'enregistrement qui fait foi, et le droit allemand en connaît deux formes :
+Chaque investisseur admis devient un **titulaire** — une ligne du registre. Dans le modèle de l'eWpG, c'est l'enregistrement qui compte, pour autant que l'opérateur soit un teneur de registre autorisé (ce que ce dépôt n'établit pas), et le droit allemand en connaît deux formes :
 
 === "Inscription collective (Sammeleintragung)"
 
@@ -159,7 +159,7 @@ Le troisième mérite l'attention. La **livraison contre paiement** supprime le 
 
 La transition finale : `APPROVED` → `ISSUED`.
 
-L'obligation est en vigueur. Le registre fait foi. Les investisseurs voient leurs positions, reçoivent leurs relevés et peuvent — à partir d'ici — négocier.
+L'obligation est en vigueur. Le registre est la source de vérité de Registerwerk. Les investisseurs voient leurs positions, reçoivent leurs relevés et peuvent — à partir d'ici — négocier.
 
 ```mermaid
 stateDiagram-v2

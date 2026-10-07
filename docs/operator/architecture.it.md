@@ -70,7 +70,7 @@ Esiste esattamente un'istanza PostgreSQL che ospita un database. Kong esegue DB-
 
 ### 4. Il registro e la catena sono record separati { #4-the-register-and-the-chain-are-separate-records }
 
-Il database è autorevole per la proprietà. La blockchain è ciò che esegue e ciò che chiunque può verificare in modo indipendente. **Gli indicizzatori** osservano le catene e scrivono ciò che vedono.
+Il database è la fonte di verità di Registerwerk per la proprietà (a fini operativi; che sia un registro con effetti giuridici dipende dall'operatore e dallo strumento). La blockchain è ciò che esegue e ciò che chiunque può verificare in modo indipendente. **Gli indicizzatori** osservano le catene e scrivono ciò che vedono.
 
 **Conseguenza operativa e la cosa più utile in questa pagina:** quando un cliente dice "il mio saldo è sbagliato", la prima domanda non è *quale è giusto* ma *c'è un indicizzatore indietro?* Un indicizzatore in ritardo produce esattamente questo sintomo e si risolve da solo una volta recuperato. [Resilienza dell'indicizzatore](indexers/resilience.md).
 

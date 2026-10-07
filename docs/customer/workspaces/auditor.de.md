@@ -94,7 +94,7 @@ Die häufigste Prüferaufgabe. Der Weg:
 6. **Kapitalmaßnahmen lesen** — Stichtagsaufnahmen, die genau zeigen, wer worauf Anspruch hatte und wann abgewickelt wurde.
 
 !!! tip "Zwei Aufzeichnungen, und sie können voneinander abweichen"
-    Registerwerk führt das Register (eine Datenbank, rechtlich maßgeblich) und den Token (on-chain, unabhängig verifizierbar) als getrennte Aufzeichnungen, die Indexer im Gleichlauf halten.
+    Registerwerk führt das Register (eine Datenbank, maßgebliche Quelle für Registerwerks Abgleich; ihr rechtlicher Status hängt vom Betreiber und vom Instrument ab) und den Token (on-chain, unabhängig verifizierbar) als getrennte Aufzeichnungen, die Indexer im Gleichlauf halten.
 
     Sie können auseinanderlaufen — kurz im Normalbetrieb, länger, wenn ein Indexer nachhinkt oder eine Chain überlastet ist. **Eine Abweichung zu finden heißt nicht automatisch, einen Defekt gefunden zu haben.** Stellen Sie fest, wann jede Aufzeichnung geschrieben wurde, bevor Sie schließen. [Verwahrung und Bestand](../lifecycle/holding.md) erklärt das Modell.
 

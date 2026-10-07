@@ -24,9 +24,17 @@
     "The platform is not audited though it is production-ready.",
     "The platform is not audited despite being production-ready.",
     "| The platform is production-ready | Status unknown | False |",
-    "| False | Registerwerk is fully compliant with eWpG | Approved |"
+    "| False | Registerwerk is fully compliant with eWpG | Approved |",
+    "The register is the record with legal significance.",
+    "Registerwerk keeps the register (a database, legally authoritative) and the token.",
+    "The machinery is there for satisfying a regulator that it was all done properly.",
+    "Das ist die rechtlich maßgebliche Aufzeichnung.",
+    "C'est l'enregistrement doté d'une portée juridique.",
+    "Es el asiento con relevancia jurídica.",
+    "È la registrazione con rilievo giuridico."
   ],
   "qualified": [
+    "This repository does not establish a record with legal significance.",
     "Registerwerk is not fully compliant with eWpG.",
     "The reporting integration is not production-ready.",
     "This code does not prove a legally effective register entry.",

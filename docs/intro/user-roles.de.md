@@ -5,7 +5,7 @@ description: Wer Registerwerk nutzt, was diese Personen dürfen und welche aufsi
 
 # Rollen und Berechtigungen
 
-Registerwerk ist mandantenfähig: Eine Betreiberinstallation bedient viele Kunden-Rechtsträger. Der Zugriff wird über einen Rollensatz gesteuert, der im Enum `AppRole` definiert und über `@PreAuthorize` an jeder Controller-Methode durchgesetzt wird.
+Registerwerk ist mandantenfähig: Eine Betreiberinstallation bedient viele Kunden-Rechtsträger. Der Zugriff wird über einen Rollensatz gesteuert, der im Enum `AppUserRole` definiert und über `@PreAuthorize` an jeder Controller-Methode durchgesetzt wird.
 
 ---
 
@@ -15,7 +15,8 @@ Registerwerk ist mandantenfähig: Eine Betreiberinstallation bedient viele Kunde
 |---|---|---|---|
 | `REGISTRY_ADMIN` | Betreiber | Registermitarbeitende | §15 eWpG registerführende Stelle; §10 GwG Geldwäschebeauftragter |
 | `COMPLIANCE_OFFICER` | Betreiber | Compliance-/AML-Team | §7 GwG Compliance-Beauftragter; Art. 8 AMLD6 |
-| `AUDITOR` | Betreiber | Interne/externe Prüfer | §15(3) eWpG Zugang zu Aufzeichnungen |
+| `AUDIT` | Betreiber | Interne/externe Prüfer | §15(3) eWpG Zugang zu Aufzeichnungen |
+| `SUPPORT_AGENT` | Betreiber | Support-Mitarbeitende | Nur schreibgeschützte Kundensitzungen; keine regulatorische Funktion |
 | `ISSUER` | Kunde | Wertpapieremittenten | §4 eWpG Emittentenpflichten |
 | `INVESTOR` | Kunde | Token-Inhaber / Anleger | |
 | `COMPANY_ADMIN` | Kunde | Administratoren des Emittenten | |
@@ -34,25 +35,25 @@ Die Rolle mit den weitreichendsten Rechten. Ein `REGISTRY_ADMIN` kann:
 - [Wertpapier-Token](../token-standards/index.md) ausbringen und verwalten
 - [Sperrvermerke](../compliance/sperrvermerk.md) (Handelsbeschränkungen) eintragen — erfordert [Step-up-Authentifizierung](../compliance/step-up-mfa.md)
 - Token zwangsübertragen und zwangsvernichten — erfordert Step-up + Vier-Augen-Prinzip
-- Kundennutzer zu Supportzwecken übernehmen — eine ständige Fähigkeit, siehe den Vorbehalt unten
+- Schreibgeschützte Identitätsübernahme-Sitzungen für Supportzwecke starten (Step-up und dokumentierte Begründung; Schreibsitzungen gibt es nur im Demo-Modus), siehe [Identitätsübernahme](#identitatsubernahme)
 - Auf sämtliche [Audit-Log](../platform/audit-log.md)-Einträge zugreifen
 - [MiFIR](../compliance/mifir.md)- und [DAC8](../compliance/dac8.md)-Meldeexporte auslösen
 
 !!! warning "Zwangsoperationen erfordern doppelte Kontrolle"
-    Zwangsübertragung, Zwangsvernichtung und Zwangsgenehmigung sind on-chain unumkehrbare Operationen. Die derzeitige Umsetzung verlangt, dass ein zweiter, anderer `REGISTRY_ADMIN` das Dual-Control-Token beisteuert; eine Anwendungsrolle `SECOND_APPROVER` gibt es nicht. Ihre rechtliche und regulatorische Angemessenheit bedarf externer Prüfung.
+    Zwangsübertragung, Zwangsvernichtung und Zwangsfreigabe sind unumkehrbare On-Chain-Vorgänge. Die aktuelle Implementierung verlangt, dass ein zweiter, anderer Betreiber (ein `REGISTRY_ADMIN` oder `COMPLIANCE_OFFICER`) die Vier-Augen-Genehmigung erteilt; eine eigene Anwendungsrolle `SECOND_APPROVER` gibt es nicht. Ob das rechtlich und richtlinienseitig genügt, erfordert eine externe Prüfung.
 
 ### COMPLIANCE_OFFICER
 
 Auf AML/KYC-Funktionen ausgerichtet:
 
 - Läufe und Treffer der [Sanktionsprüfung](../compliance/sanctions-screening.md) sichten und verwalten
-- Prüftreffer annehmen oder ablehnen (bei Rechtsträgern mit hohem Risiko im Vier-Augen-Prinzip)
+- Prüftreffer annehmen oder ablehnen (immer mit Step-up und einem zweiten Genehmiger)
 - KYC-Dokumente für die zugewiesenen Jurisdiktionen genehmigen
-- [Sperrvermerke](../compliance/sperrvermerk.md) eintragen und aufheben — erfordert Step-up
+- [Sperrvermerke](../compliance/sperrvermerk.md) einsehen (Eintragen und Aufheben ist nur `REGISTRY_ADMIN` vorbehalten, mit Step-up und einem zweiten Genehmiger)
 - Auf [DORA](../compliance/dora.md)-Vorfallsaufzeichnungen zugreifen
 - Eine erneute Sanktionsprüfung auf Anforderung auslösen
 
-### AUDITOR
+### AUDIT
 
 Lesender Zugriff auf den gesamten Prüfpfad:
 
@@ -63,7 +64,11 @@ Lesender Zugriff auf den gesamten Prüfpfad:
 
 ### Genehmiger im Vier-Augen-Prinzip
 
-Die Genehmigung im Vier-Augen-Prinzip ist derzeit eine Fähigkeit eines zweiten, anderen `REGISTRY_ADMIN`, keine eigene Anwendungsrolle. Der Genehmigende muss vom Auslösenden verschieden sein und die konfigurierten Step-up-Prüfungen bestehen.
+Die Genehmigung im Vier-Augen-Prinzip ist derzeit eine Fähigkeit eines zweiten, anderen Nutzers mit der Rolle `REGISTRY_ADMIN` oder `COMPLIANCE_OFFICER`, keine eigene Anwendungsrolle. Der Genehmigende muss vom Auslösenden verschieden sein, in der Datenbank noch aktiv sein und die konfigurierten Step-up-Prüfungen bestehen. Anträge lassen sich in der Freigabe-Warteschlange der Anwendung stellen und genehmigen (siehe [Step-up-MFA und Vier-Augen-Prinzip](../compliance/step-up-mfa.md)).
+
+### SUPPORT_AGENT
+
+Betreiberpersonal für den Kundensupport. Ein `SUPPORT_AGENT` kann Kunden-Rechtsträger auflisten und **schreibgeschützte** [Identitätsübernahme](#identitatsubernahme)-Sitzungen starten (Step-up und Begründung erforderlich). Er kann nichts ändern und hat keine regulatorische Funktion. Vergabe und Entzug der Rolle erfordern Step-up und einen zweiten Genehmiger.
 
 ---
 
@@ -115,16 +120,14 @@ Ein maschineller oder menschlicher Nutzer, der zur Interaktion mit Handelsplatz-
 
 ## Identitätsübernahme
 
-Nutzer mit `REGISTRY_ADMIN` können einen Kundennutzer übernehmen, um Probleme zu untersuchen oder beim Onboarding zu helfen. Die Übernahme:
+Mit der Identitätsübernahme öffnet Betreiberpersonal das Kundenportal innerhalb der Organisation eines Kunden, um Probleme zu untersuchen. Sie ist abgesichert und standardmäßig schreibgeschützt:
 
-- Stellt ein kurzlebiges Token aus, dessen `sub` die Nutzer-ID des **Betreibers** bleibt, sodass jede Handlung dem Betreiber und nie dem Kunden zugerechnet wird
-- Wird im [Audit-Log](../platform/audit-log.md) festgehalten, gekennzeichnet mit `imp`, sodass übernommene Handlungen unterscheidbar sind
-- Ist für alle `REGISTRY_ADMIN`-Nutzer über die Übernahmeleiste im Kunden-Frontend sichtbar
-- Endet mit dem Token; steigen Sie neu ein, statt zu verlängern
+- Der Start erfordert [Step-up-Authentifizierung](../compliance/step-up-mfa.md) und eine verpflichtende schriftliche Begründung (mindestens 15 Zeichen, dazu optional eine Ticket-Referenz)
+- Der Standardmodus ist **schreibgeschützt**; der Schreibmodus (`ACT_ON_BEHALF`) braucht einen zweiten Genehmiger und steht **nur im Demo-Modus** zur Verfügung. Im Produktionsmodus ist jede Sitzung schreibgeschützt
+- `REGISTRY_ADMIN` und `SUPPORT_AGENT` können schreibgeschützte Sitzungen starten; eine Schreibsitzung nur `REGISTRY_ADMIN`. `SUPPORT_AGENT` darf sonst nichts
+- Der Startaufruf liefert kein Token: Ein Einmalcode (60 Sekunden) wird gegen ein httpOnly-Sitzungscookie getauscht. Die Sitzung dauert höchstens 30 Minuten
+- Das `sub` des Tokens bleibt die Nutzer-ID des **Betreibers**, sodass jede Handlung dem Betreiber und nie dem Kunden zugerechnet wird; `imp` kennzeichnet sie im [Audit-Log](../platform/audit-log.md)
+- Sitzungen werden erfasst und sind für die Unternehmensadministratoren des Kunden sichtbar
+- Sie ist für alle `REGISTRY_ADMIN`-Nutzer über die Übernahmeleiste im Kunden-Frontend sichtbar
 
-!!! warning "Die Identitätsübernahme ist nicht step-up-geschützt"
-    Der `AdminImpersonationController` trägt kein `@RequiresStepUp`. Jeder `REGISTRY_ADMIN` kann das Portal jedes Kunden ohne zweite Authentifizierungsabfrage und ohne eine zweite Person betreten.
-
-    Behandeln Sie das als Frage der Kontrolle, nicht der Technik: Halten Sie den Adminkreis klein, verlangen Sie einen außerhalb der Plattform dokumentierten Grund, und sehen Sie Übernahmeereignisse regelmäßig durch. [Identitätsübernahme](../operator/customers/impersonation.md) behandelt ihre Steuerung.
-
-Bei `ENTRA_ENABLED=true` ist die Identitätsübernahme zudem vollständig nicht verfügbar — das Backend weigert sich, eine Sitzung im Namen eines Kunden auszustellen.
+Bei `ENTRA_ENABLED=true` ist die Identitätsübernahme vollständig nicht verfügbar — das Backend weigert sich, eine Sitzung im Namen eines Kunden auszustellen. [Identitätsübernahme](../operator/customers/impersonation.md) behandelt die Einzelheiten und die Steuerung.

@@ -31,7 +31,7 @@ The story is a bond. We follow it from the moment somebody wants to borrow money
     | Maturity | 5 years |
     | Repayment | full face value on the maturity date |
 
-That is the entire financial product. Everything that follows is the machinery for making that promise real, tradable, and enforceable — and for satisfying a regulator that it was all done properly.
+That is the entire financial product. Everything that follows is the machinery for making that promise real, tradable, and enforceable — and for leaving records that a supervisor, auditor or counterparty can examine afterwards.
 
 ??? note "For readers new to finance: what a bond actually is"
 

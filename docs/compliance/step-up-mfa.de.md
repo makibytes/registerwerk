@@ -29,29 +29,32 @@ Bestimmte Vorgänge in Registerwerk sind so folgenreich – oder durch Vorschrif
 
 ## Geschützte Vorgänge { #protected-operations }
 
-Die Annotation `@RequiresStepUp` wird auf den folgenden Endpunkten und Dienstmethoden platziert. Für mit **4-Augen** gekennzeichnete Vorgänge ist zusätzlich ein zweiter Genehmiger erforderlich.
+Jede `@RequiresStepUp`-Annotation im Backend ist mit Endpunkt, Grund, Höchstalter, Pflicht zum zweiten Genehmiger und Body-Bindung in der generierten [Step-up-Matrix](step-up-matrix.md) aufgeführt (nur Englisch). Diese Seite ist die vollständige Liste und wird aus dem Code erzeugt (eine CI-Prüfung schlägt fehl, wenn sie veraltet ist); die folgende Tabelle ist ein kurzer, kuratierter Auszug und **nicht vollständig**.
 
-| Vorgang | Step-up | 4-Augen | Grund |
+| Vorgang | Step-up | 4-Augen | Grund (`@RequiresStepUp`) |
 |---|---|---|---|
-| `forceTransfer` | ✅ | ✅ | Irreversibler On-Chain-Vorgang |
-| `forceBurn` | ✅ | ✅ | Dauerhafte Vernichtung von Token |
-| `forceApprove` | ✅ | ✅ | Compliance-Override |
-| `setSupplyCap` | ✅ | ✅ | Änderung eines wirtschaftlichen Parameters |
-| ERC-3525 Slot-Anlage, Slot-Mint, Forced Value Transfer | ✅ | ✅ | Legt Slot-Obergrenze an / erzeugt Anleihewert in einem Slot |
-| KYC-Override (Genehmigung trotz Flag) | ✅ | ✅ | Umgehung des AML-Gates |
-| Sperrvermerk erstellen | ✅ | ✅ | Gesetzliche Beschränkung des Inhabers |
-| Sperrvermerk aufheben | ✅ | ✅ | Aufhebung der gesetzlichen Beschränkung |
-| Identitätsübernahme (Impersonation) starten | ❌ ¹ | ❌ | Privilegierter Zugriff auf Kundendaten |
-| Screening-Treffer akzeptieren | ✅ (hohe Punktzahl) | ✅ (Score ≥ 80) | AML-Override für einen bestätigten Treffer |
-| Export des privaten Wallet-Schlüssels (Break-Glass) | ✅ | ✅ | Zugriff auf Schlüsselmaterial |
-| Entra: eine Authentifizierungsmethode löschen | ✅ | ❌ | Entfernt einen veralteten Faktor |
-| Entra: alle Authentifizierungsmethoden zurücksetzen | ✅ | ✅ | Erzwingt die erneute MFA-Registrierung für eine andere Person |
-| Entra: Anmeldesitzungen widerrufen | ✅ | ❌ | Nur Auswirkung auf die Verfügbarkeit, kein Berechtigungsgewinn |
-| Entra: temporären Zugangspass ausstellen | ✅ | ✅ | Eine Inhaber-Anmeldeinformation, die *als* der Kunde authentifiziert |
+| Zwangsübertragung, Zwangsvernichtung, Zwangsfreigabe (Betreiber- und Emittenten-Endpunkte) | ja | ja | `FORCED_TRANSFER_EWG24`, `FORCE_BURN_EWG26`, `FORCED_APPROVE_OVERRIDE`, `ISSUER_*`-Varianten |
+| Supply-Cap setzen | ja | ja | `SUPPLY_CAP_CHANGE_MICAR46` |
+| ERC-3525: Slot anlegen, Slot-Mint, erzwungene Wertübertragung | ja | ja | `ERC3525_SLOT_CREATE`, `ERC3525_SLOT_MINT`, `ERC3525_FORCED_VALUE_TRANSFER_EWG24` |
+| KYC genehmigen / ablehnen (auch Genehmigung mit Override) | ja | ja | `KYC_APPROVE`, `KYC_REJECT` |
+| Sperrvermerk eintragen / aufheben | ja | ja | `SPERRVERMERK_CREATE`, `SPERRVERMERK_LIFT` |
+| Identitätsübernahme starten (schreibgeschützt) | ja | nein | `ADMIN_IMPERSONATION` |
+| Identitätsübernahme starten, im Namen handeln (nur Demo-Modus) | ja | ja | `ADMIN_IMPERSONATION_ACT_ON_BEHALF` |
+| Prüftreffer annehmen, PEP bestätigen (immer, unabhängig vom Score) | ja, 15 Min. | ja | `SCREENING_HIT_ACCEPT`, `SCREENING_PEP_CONFIRM` |
+| Wallet-Schlüsselexport, Roh-Schlüsselimport, Keystore-Import | ja | ja | `WALLET_KEYSTORE_EXPORT`, `WALLET_IMPORT_RAW`, `WALLET_IMPORT_KEYSTORE` |
+| Wallet-KEK-Rotation, eine Wallet | ja | nein | `WALLET_KEK_ROTATION` |
+| Wallet-KEK-Rotation, alle Wallets | ja | ja | `WALLET_KEK_ROTATION_ALL` |
+| Wiedereinsetzung eines Rechtsträgers nach Schließung | ja | ja | `ENTITY_REINSTATE` |
+| Quittierung einer Audit-Ketten-Prüfung | ja | ja | `AUDIT_CHAIN_VERIFICATION_ACK` |
+| TOTP-Reset für einen anderen Betreiber | ja | ja | `TOTP_RESET` |
+| Entra: eine Authentifizierungsmethode löschen | ja | nein | `ENTRA_AUTH_METHOD_DELETE` |
+| Entra: alle Authentifizierungsmethoden zurücksetzen | ja | ja | `ENTRA_MFA_RESET` |
+| Entra: Anmeldesitzungen widerrufen | ja | nein | `ENTRA_REVOKE_SIGNIN_SESSIONS` |
+| Entra: Temporary Access Pass ausstellen | ja | ja | `ENTRA_TEMPORARY_ACCESS_PASS` |
 
-¹ `AdminImpersonationController` trägt heute kein `@RequiresStepUp`, und die Identitätsübernahme wird
-rundweg verweigert, wenn `ENTRA_ENABLED=true` gilt. Diese Zeile behauptete zuvor einen
-Step-up-Schutz, den der Code nicht implementiert.
+Ob der zweite Genehmiger verlangt wird, kann auch von der Anfrage abhängen: Änderungen an Betreibernutzern, Herabstufungen und Schließungen von DORA-Vorfällen sowie Herabstufungen der Kundenklassifizierung erzwingen ihn im Dienst (`DualControlGate`); diese Gründe stehen in der zweiten Tabelle der Matrix.
+
+Das Starten einer Identitätsübernahme ist unter [Identitätsübernahme](../operator/customers/impersonation.md) beschrieben; die Sitzung wird bei `ENTRA_ENABLED=true` vollständig abgelehnt.
 
 ---
 
@@ -101,7 +104,7 @@ Ein Entra-Zugriffstoken lebt 60–90 Minuten, und `acrs` bleibt für seine gesam
 
 ## 4-Augen-Implementierung { #4-eyes-implementation }
 
-Die aktuelle Durchsetzung der Doppelkontrolle erfordert zwei unterschiedliche `REGISTRY_ADMIN`-Benutzer. Es gibt keine Anwendungsrolle `SECOND_APPROVER`, und ein `COMPLIANCE_OFFICER` wird nicht als Ersatz akzeptiert, sofern die Implementierung nicht geändert und separat überprüft wird.
+Der zweite Genehmiger muss ein anderer Nutzer sein, der aktuell als `REGISTRY_ADMIN` **oder** `COMPLIANCE_OFFICER` aktiviert ist (`StepUpTokenValidator.ELIGIBLE_APPROVER_ROLES`; die Rollen des Genehmigers werden aus der Datenbank neu gelesen). Eine eigene Rolle `SECOND_APPROVER` gibt es nicht. Auslösende von KYC- und Prüftreffer-Entscheidungen können selbst `REGISTRY_ADMIN` oder `COMPLIANCE_OFFICER` sein, sodass für diese Vorgänge ein `COMPLIANCE_OFFICER`-Paar möglich ist; niemand kann den eigenen Antrag genehmigen.
 
 **Das Vier-Augen-Prinzip ist in beiden Wegen identisch**: Ein Doppelkontroll-Token wird immer lokal nach TOTP-Verifizierung geprägt und immer gegen den lokalen HS256-Decoder validiert; es hängt also nicht davon ab, wie der primäre Faktor nachgewiesen wurde.
 
@@ -120,17 +123,31 @@ sequenceDiagram
     Backend->>Backend: Validate both, then execute + audit with both identities
 ```
 
+Statt ein Token von Hand zu übergeben, kann der Auslösende die Freigabe-Warteschlange der Anwendung nutzen (nächster Abschnitt). Beide Wege enden in derselben Prüfung am geschützten Endpunkt.
+
 Von `StepUpEnforcementAspect` und `StepUpTokenValidator` erzwungene Schlüsselinvarianten:
 
 - Initiator und Genehmiger **müssen unterschiedliche Benutzer sein** (`sub`-Vergleich)
 - Das Token des Genehmigers muss `stepup_scope` **exakt gleich** dem `reason` der Annotation tragen — andernfalls wäre eine Genehmigung ein allgemeiner Berechtigungsnachweis, der für jede Vier-Augen-Aktion in ihrem Zeitfenster gültig wäre
-- Der Genehmiger muss weiterhin ein **aktivierter `REGISTRY_ADMIN` in der Datenbank** sein, nicht nur gemäß den Claims des Tokens, die den Status nur zum Zeitpunkt der Prägung widerspiegeln
+- Der Genehmiger muss in der **Datenbank** weiterhin als aktivierter `REGISTRY_ADMIN` **oder** `COMPLIANCE_OFFICER` geführt werden, nicht nur laut Token-Claims, die den Status nur zum Zeitpunkt der Ausstellung widerspiegeln
 - Die Genehmigung ist **an die Anfrage gebunden, für die sie erteilt wurde** (K3). Der Genehmiger prägt sie mit `action` *und* `target` (`"METHOD /pfad?query"` des genauen Aufrufs; zusätzlich `targetBody`, der JSON-Body der Anfrage, den jeder Grund bindet). Das Token trägt `stepup_target`, den base64url-SHA-256 der kanonischen Anfrage (`v1`, Methode in Großbuchstaben, Pfad ohne abschließenden Schrägstrich, sortierte Query und der Hash des kanonischen JSON-Bodys: sortierte Schlüssel, keine Leerzeichen, exakte Dezimalzahlen in einfacher Schreibweise). Das Backend leitet denselben Digest aus der laufenden Anfrage ab; weicht er ab, wird der Aufruf mit **403** abgelehnt. Token ohne Ziel werden nicht mehr akzeptiert
 - **Genehmigungs-Token gelten nur im Header.** Eine Genehmigung trägt `use=dual_control` und die Audience `registerwerk-dual-control`. Sie wird in `X-Dual-Control-Token` akzeptiert und sonst nirgends: Als `Authorization: Bearer` (oder Sitzungs-Cookie) wird sie auf jedem Endpunkt, auch auf `@RequiresStepUp`-Endpunkten, mit **403** abgelehnt; eine Genehmigung, die jemand in der Hand hält, lässt sich also nie als fremde Sitzung wiederverwenden. Gewöhnliche Step-up-Token (ohne Scope, ohne Markierung) bleiben der eigene Nachweis des Aufrufers.
 - **Der Body ist immer gebunden.** Jeder Grund bindet den kanonischen Request-Body (`targetBody`, entfällt, wenn die Anfrage keinen hat). Ausnahmen stehen in `registerwerk.auth.step-up.dual-control.body-opt-out-reasons`: Nutzdaten, die kein JSON sind (Term-Sheet-Upload, Keystore-Import, CASP-CSV-Import), und Nutzdaten, die geheimes Schlüsselmaterial oder ein Keystore-Passwort sind (Rohschlüssel-Import, Keystore-Export); Methode, Pfad und Query bleiben auch dort gebunden. Zahlen sind exakte Dezimalwerte, nie `double`; ein Body mit wiederholtem JSON-Schlüssel oder eine Anfrage mit wiederholtem Query-Parameter lässt sich nicht binden und wird abgelehnt. Das Genehmigungs-Token bleibt einmalig verwendbar, auch wenn `bind-target-reasons` eingeschränkt wird.
-- **Bootstrap ist eine Einbahntür.** Die Ausnahme „ein Step-up genügt" gilt nur, bis zwei aktivierte, TOTP-registrierte `REGISTRY_ADMIN`s gleichzeitig existiert haben. Die Datenbank hält diesen Moment fest (`dual_control_bootstrap`, per Trigger gesetzt, nie zurückgesetzt); danach kehrt die Ausnahme nie wieder, auch wenn ein Administrator später deaktiviert wird oder seinen Authenticator verliert. Das Deaktivieren oder Löschen eines Operator-, `REGISTRY_ADMIN`-, `COMPLIANCE_OFFICER`- oder `AUDIT`-Kontos braucht den zweiten Genehmiger (`OPERATOR_USER_DISABLE`, `OPERATOR_USER_DELETE`).
+- **Bootstrap ist eine Einbahntür.** Die Ausnahme „ein Step-up genügt" gilt nur, bis zwei aktivierte, TOTP-registrierte `REGISTRY_ADMIN`s gleichzeitig existiert haben. Die Datenbank hält diesen Moment fest (`dual_control_bootstrap`, per Trigger gesetzt, nie zurückgesetzt); danach kehrt die Ausnahme nie wieder, auch wenn ein Administrator später deaktiviert wird oder seinen Authenticator verliert. Das Deaktivieren oder Löschen eines Betreiber-Personalkontos (ohne Unternehmensbezug) oder eines Kontos mit einer geschützten Rolle (`REGISTRY_ADMIN`, `COMPLIANCE_OFFICER`, `SUPPORT_AGENT`, `AUDIT`) braucht den zweiten Genehmiger (`OPERATOR_USER_DISABLE`, `OPERATOR_USER_DELETE`).
 - Die Genehmigung ist **einmalig verwendbar**: Ihre `jti` wird zusammen mit dem Audit-Ereignis in einer Transaktion in `dual_control_token_use` geschrieben (eine zweite Verwendung, auf jedem Replikat, ist ein **403**). Scheitert eine Aktion, nachdem die Genehmigung verbraucht wurde, ist eine neue Genehmigung nötig
 - Die Genehmigung wird nur in einem **kurzen Zeitfenster** nach der Prägung akzeptiert (`registerwerk.auth.step-up.dual-control.window-seconds`, Standard 300 s); das eigene Step-up-Token des Initiators behält seine 10 Minuten
+
+---
+
+## Freigabe-Warteschlange der Anwendung { #in-app-approval-queue }
+
+Beide Portale stellen und entscheiden Freigaben über `/api/v1/approvals`, statt Token weiterzureichen:
+
+1. Der Auslösende stellt die genaue Anfrage (Aktion = der `@RequiresStepUp`-Grund des Endpunkts, Methode, Pfad, Query und JSON-Body). Die Anfrage wird nur angenommen, wenn diese Aktion der Grund dieser Route ist; der Body wird kanonisch gespeichert, sodass der Genehmiger sieht, was ausgeführt wird.
+2. Ein berechtigter Genehmiger, der nicht der Auslösende ist (`REGISTRY_ADMIN` oder `COMPLIANCE_OFFICER`), sieht sie im Eingang **Approvals** und genehmigt mit einem frischen TOTP-Code oder lehnt ab. Selbstgenehmigung ist unmöglich, auch auf Datenbankebene.
+3. Der Auslösende holt ein einmal verwendbares Genehmiger-Token ab, das an diesen Digest und an den Auslösenden gebunden ist (ein von einem Nutzer abgeholtes Token nützt in anderen Händen nichts), und sendet dann die eigentliche Anfrage mit seinem eigenen Step-up-Token und `X-Dual-Control-Token`.
+
+Anfragen, die niemand entscheidet oder die nicht abgeholt werden, laufen nach 15 Minuten ab (`registerwerk.auth.step-up.approval-queue.ttl`). Die Warteschlange lehnt Identitätsübernahme-Sitzungen ab. Audit-Ereignisse: `APPROVAL_REQUEST_CREATED`, `_APPROVED`, `_REJECTED`, `_CANCELLED`, `_CLAIMED`, `_EXPIRED` (der Body steht nie im Ereignis, wohl aber sein Digest).
 
 ---
 
@@ -162,14 +179,13 @@ Der `StepUpEnforcementAspect` fängt jede mit `@RequiresStepUp` annotierte Metho
 
 ## Audit-Ereignisse { #audit-events }
 
-Jedes Step-up-Authentifizierungsereignis und jeder geschützte Vorgang erzeugt ein `AuditEvent`:
+Step-up- und Vier-Augen-Aktivität wird über diese Ereignistypen festgehalten (die Liste entspricht dem, was im Code existiert; ein eigenes Ereignis „Step-up ausgestellt" gibt es nicht):
 
 | Ereignistyp | Inhalt |
 |---|---|
-| `STEP_UP_ISSUED` | Benutzer-ID, Methode, Zeitstempel |
-| `DUAL_CONTROL_INITIATED` | Initiator-ID, Vorgangstyp, Hash der Vorgangsparameter |
-| `DUAL_CONTROL_CONFIRMED` | Genehmiger-ID, Vorgangstyp, Referenz auf das bestätigte Token |
-| `PROTECTED_OPERATION_EXECUTED` | Beide Benutzer-IDs, Vorgangstyp, vollständige Vorgangsparameter |
-| `STEP_UP_FAILED` | Benutzer-ID, Fehlergrund, IP-Adresse |
+| `TOTP_ENROLMENT_STARTED`, `TOTP_ENROLLED`, `TOTP_DISENROLLED`, `TOTP_RESET` | Betroffener Nutzer; bei einem Reset zusätzlich Akteur und Genehmiger |
+| `DUAL_CONTROL_APPROVED` | Auslösender, Genehmiger, Grund, Token-ID der Genehmigung und Ziel-Digest; wird geschrieben, bevor der geschützte Vorgang fortfährt |
+| `DUAL_CONTROL_BOOTSTRAP_USED` | Die Einzelakteur-Ausnahme wurde genutzt, solange weniger als zwei TOTP-registrierte Administratoren existierten |
+| `APPROVAL_REQUEST_CREATED / _APPROVED / _REJECTED / _CANCELLED / _CLAIMED / _EXPIRED` | Übergänge der Freigabe-Warteschlange: Akteur und Rolle, Genehmiger bei Genehmigung und Abholung, Digest und Token-ID (nie der Body) |
 
-Diese Ereignisse sind Teil der manipulationssicher nachweisbaren [Audit-Kette](../platform/audit-log.md) und können nicht gelöscht oder geändert werden.
+Der geprüfte Vorgang selbst (zum Beispiel `FORCED_TRANSFER` oder `SPERRVERMERK_CREATE`) trägt sein eigenes Ereignis. Diese Ereignisse sind Teil der manipulationssicher nachweisbaren [Audit-Kette](../platform/audit-log.md).

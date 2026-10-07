@@ -28,28 +28,40 @@ Certain operations in Registerwerk are so consequential — or so clearly requir
 
 ## Protected operations
 
-The `@RequiresStepUp` annotation is placed on the following endpoints and service methods. Operations marked **4-eyes** additionally require a second approver.
+Every `@RequiresStepUp` annotation in the backend is listed, with its endpoint, reason, maximum
+age, second-approver requirement and body binding, in the generated
+[step-up matrix](step-up-matrix.md). That page is the complete list and is regenerated from the
+code (a CI check fails when it is stale); the table below is a short curated excerpt and is
+**not exhaustive**.
 
-| Operation | Step-up | 4-Eyes | Reason |
+| Operation | Step-up | 4-Eyes | Reason (`@RequiresStepUp`) |
 |---|---|---|---|
-| `forceTransfer` | ✅ | ✅ | Irreversible on-chain operation |
-| `forceBurn` | ✅ | ✅ | Permanent destruction of tokens |
-| `forceApprove` | ✅ | ✅ | Compliance override |
-| `setSupplyCap` | ✅ | ✅ | Economic parameter change |
-| ERC-3525 slot creation, slot mint, forced value transfer | ✅ | ✅ | Creates slot supply cap / mints bond value into a slot |
-| KYC override (approve despite flag) | ✅ | ✅ | AML gate bypass |
-| Sperrvermerk create | ✅ | ✅ | Legal restriction on holder |
-| Sperrvermerk lift | ✅ | ✅ | Legal restriction removal |
-| Start impersonation | ❌ ¹ | ❌ | Privileged access to customer data |
-| Screening hit accept | ✅ (high-score) | ✅ (score ≥ 80) | AML override for confirmed hit |
-| Wallet private key export (break-glass) | ✅ | ✅ | Key material access |
-| Entra: delete one authentication method | ✅ | ❌ | Removes one stale factor |
-| Entra: reset all authentication methods | ✅ | ✅ | Forces MFA re-registration for another person |
-| Entra: revoke sign-in sessions | ✅ | ❌ | Availability impact only, no privilege gain |
-| Entra: issue Temporary Access Pass | ✅ | ✅ | A bearer credential that authenticates *as* the customer |
+| Forced transfer, force burn, forced approve (operator and issuer endpoints) | yes | yes | `FORCED_TRANSFER_EWG24`, `FORCE_BURN_EWG26`, `FORCED_APPROVE_OVERRIDE`, `ISSUER_*` variants |
+| Set supply cap | yes | yes | `SUPPLY_CAP_CHANGE_MICAR46` |
+| ERC-3525 slot creation, slot mint, forced value transfer | yes | yes | `ERC3525_SLOT_CREATE`, `ERC3525_SLOT_MINT`, `ERC3525_FORCED_VALUE_TRANSFER_EWG24` |
+| KYC approve / reject (including approve with override) | yes | yes | `KYC_APPROVE`, `KYC_REJECT` |
+| Sperrvermerk create / lift | yes | yes | `SPERRVERMERK_CREATE`, `SPERRVERMERK_LIFT` |
+| Start impersonation (read-only) | yes | no | `ADMIN_IMPERSONATION` |
+| Start impersonation, act on behalf (demo mode only) | yes | yes | `ADMIN_IMPERSONATION_ACT_ON_BEHALF` |
+| Screening hit accept, PEP confirm (always, whatever the score) | yes, 15 min | yes | `SCREENING_HIT_ACCEPT`, `SCREENING_PEP_CONFIRM` |
+| Wallet key export, raw key import, keystore import | yes | yes | `WALLET_KEYSTORE_EXPORT`, `WALLET_IMPORT_RAW`, `WALLET_IMPORT_KEYSTORE` |
+| Wallet KEK rotation, one wallet | yes | no | `WALLET_KEK_ROTATION` |
+| Wallet KEK rotation, all wallets | yes | yes | `WALLET_KEK_ROTATION_ALL` |
+| Entity reinstatement after closure | yes | yes | `ENTITY_REINSTATE` |
+| Audit-chain verification acknowledgement | yes | yes | `AUDIT_CHAIN_VERIFICATION_ACK` |
+| TOTP reset for another operator | yes | yes | `TOTP_RESET` |
+| Entra: delete one authentication method | yes | no | `ENTRA_AUTH_METHOD_DELETE` |
+| Entra: reset all authentication methods | yes | yes | `ENTRA_MFA_RESET` |
+| Entra: revoke sign-in sessions | yes | no | `ENTRA_REVOKE_SIGNIN_SESSIONS` |
+| Entra: issue Temporary Access Pass | yes | yes | `ENTRA_TEMPORARY_ACCESS_PASS` |
 
-¹ `AdminImpersonationController` carries no `@RequiresStepUp`, and impersonation is refused
-outright when `ENTRA_ENABLED=true`.
+Whether the second approver is demanded can also depend on the request: operator-user changes,
+DORA incident downgrades and closures, and client-classification downgrades enforce it inside the
+service (`DualControlGate`); those reasons are in the second table of the matrix.
+
+Starting an impersonation session is covered in
+[Impersonation](../operator/customers/impersonation.md); the session is refused outright when
+`ENTRA_ENABLED=true`.
 
 ---
 
@@ -118,9 +130,11 @@ sees an Entra token lacking it.
 
 ## 4-Eyes implementation
 
-The current dual-control enforcement requires two distinct `REGISTRY_ADMIN` users. There is no
-`SECOND_APPROVER` application role, and a `COMPLIANCE_OFFICER` is not accepted as a substitute
-unless the implementation is changed and separately reviewed.
+The second approver must be a different user who is currently an enabled `REGISTRY_ADMIN` **or**
+`COMPLIANCE_OFFICER` (`StepUpTokenValidator.ELIGIBLE_APPROVER_ROLES`; the approver's roles are
+re-read from the database). There is no separate `SECOND_APPROVER` role. Initiators of KYC and
+screening decisions can themselves be a `REGISTRY_ADMIN` or `COMPLIANCE_OFFICER`, so a
+`COMPLIANCE_OFFICER` pair is possible for those actions; no one can approve their own request.
 
 **4-eyes is identical in both tracks**: a dual-control token is always minted locally after TOTP
 verification and always validated against the local HS256 decoder, so it does not depend on how
@@ -141,19 +155,43 @@ sequenceDiagram
     Backend->>Backend: Validate both, then execute + audit with both identities
 ```
 
+Instead of handing a token over by hand, the initiator can use the in-app approval queue
+(next section). Both paths end in the same check at the protected endpoint.
+
 Key invariants enforced by `StepUpEnforcementAspect` and `StepUpTokenValidator`:
 
 - Initiator and approver **must be different users** (`sub` comparison)
 - The approver's token must carry `stepup_scope` **exactly equal** to the annotation's `reason` —
   otherwise one approval would be a generic credential valid for any 4-eyes action in its window
-- The approver must still be an **enabled `REGISTRY_ADMIN` in the database**, not merely per the
-  token's claims, which reflect status only as of mint time
+- The approver must still be an **enabled `REGISTRY_ADMIN` or `COMPLIANCE_OFFICER` in the database**,
+  not merely per the token's claims, which reflect status only as of mint time
 - The approval is **bound to the request it was given for** (K3). The approver mints it with `action` *and* `target` (`"METHOD /path?query"` of the exact call; also `targetBody`, the JSON body of the request, which every reason binds). The token carries `stepup_target`, the base64url SHA-256 of the canonical request (`v1`, upper-case method, path without trailing slash, sorted query, and the hash of the canonical JSON body: sorted keys, no whitespace, exact plain decimal numbers). The backend derives the same digest from the live request; if it differs, the call is refused with **403**. Tokens without a target are no longer accepted
 - **Approver tokens are header-only.** An approval carries `use=dual_control` and the audience `registerwerk-dual-control`. It is accepted in `X-Dual-Control-Token` and nowhere else: as an `Authorization: Bearer` (or session cookie) on any endpoint, including `@RequiresStepUp` ones, it is refused with **403**, so an approval someone holds can never be replayed as another person's own session. Ordinary step-up tokens (no scope, no marker) remain the caller's own proof.
 - **The body is always bound.** Every reason binds the canonical request body (`targetBody`, omitted when the request has none). The exceptions are listed in `registerwerk.auth.step-up.dual-control.body-opt-out-reasons`: payloads that are not JSON (term-sheet upload, keystore import, CASP CSV import) and payloads that are secret key material or a keystore password (raw key import, keystore export); method, path and query stay bound for these. Numbers are exact decimals, never doubles; a body with a repeated JSON key or a request with a repeated query parameter cannot be bound and is refused. The approval token stays single-use even if `bind-target-reasons` is narrowed.
-- **Bootstrap is a one-way door.** The single-step-up exception applies only until two enabled, TOTP-enrolled `REGISTRY_ADMIN`s have existed at once. The database records that moment (`dual_control_bootstrap`, set by trigger, never cleared); from then on the exception never returns, even if an administrator is later disabled or loses their authenticator. Disabling or deleting an operator, `REGISTRY_ADMIN`, `COMPLIANCE_OFFICER` or `AUDIT` account needs the second approver (`OPERATOR_USER_DISABLE`, `OPERATOR_USER_DELETE`).
+- **Bootstrap is a one-way door.** The single-step-up exception applies only until two enabled, TOTP-enrolled `REGISTRY_ADMIN`s have existed at once. The database records that moment (`dual_control_bootstrap`, set by trigger, never cleared); from then on the exception never returns, even if an administrator is later disabled or loses their authenticator. Disabling or deleting an operator-staff account (no company scope) or an account holding a gated role (`REGISTRY_ADMIN`, `COMPLIANCE_OFFICER`, `SUPPORT_AGENT`, `AUDIT`) needs the second approver (`OPERATOR_USER_DISABLE`, `OPERATOR_USER_DELETE`).
 - The approval is **single use**: its `jti` is written to `dual_control_token_use` together with the audit event in one transaction (a second use, on any replica, is a **403**). An action that fails after the approval was consumed needs a fresh approval
 - The approval is only accepted for a **short window** after it was minted (`registerwerk.auth.step-up.dual-control.window-seconds`, default 300 s); the initiator's own step-up token keeps its 10 minutes
+
+---
+
+## In-app approval queue
+
+Both portals file and decide approvals through `/api/v1/approvals` instead of passing tokens around:
+
+1. The initiator files the exact request (action = the endpoint's `@RequiresStepUp` reason, method,
+   path, query and JSON body). The request is accepted only if that action is the reason of that
+   route; the body is stored in canonical form so the approver sees what will be executed.
+2. An eligible approver other than the initiator (`REGISTRY_ADMIN` or `COMPLIANCE_OFFICER`) sees it
+   in the **Approvals** inbox and approves with a fresh TOTP code, or rejects it. Self-approval is
+   impossible, also at database level.
+3. The initiator claims a single-use approver token bound to that digest and to the initiator
+   (a token claimed by one user is useless in anyone else's hands), then sends the real request with
+   their own step-up token and `X-Dual-Control-Token`.
+
+Requests that nobody decides, or that are not claimed, expire after 15 minutes
+(`registerwerk.auth.step-up.approval-queue.ttl`). The queue is refused for impersonation sessions.
+Audit events: `APPROVAL_REQUEST_CREATED`, `_APPROVED`, `_REJECTED`, `_CANCELLED`, `_CLAIMED`,
+`_EXPIRED` (the body is never in the event; its digest is).
 
 ---
 
@@ -191,14 +229,14 @@ The `StepUpEnforcementAspect` intercepts any method annotated with `@RequiresSte
 
 ## Audit events
 
-Every step-up authentication event and every protected operation generates an `AuditEvent`:
+Step-up and four-eyes activity is recorded through these event types (the list is the set that
+exists in code; there is no separate "step-up issued" event):
 
 | Event type | Contents |
 |---|---|
-| `STEP_UP_ISSUED` | User ID, method, timestamp |
-| `DUAL_CONTROL_INITIATED` | Initiator ID, operation type, operation parameters hash |
-| `DUAL_CONTROL_CONFIRMED` | Approver ID, operation type, confirmed_token reference |
-| `PROTECTED_OPERATION_EXECUTED` | Both user IDs, operation type, full operation parameters |
-| `STEP_UP_FAILED` | User ID, failure reason, IP address |
+| `TOTP_ENROLMENT_STARTED`, `TOTP_ENROLLED`, `TOTP_DISENROLLED`, `TOTP_RESET` | Subject user; for a reset also the actor and approver |
+| `DUAL_CONTROL_APPROVED` | Initiator, approver, reason, the approval token's id and the target digest; written before the protected action continues |
+| `DUAL_CONTROL_BOOTSTRAP_USED` | The single-actor exception was used while fewer than two TOTP-enrolled administrators existed |
+| `APPROVAL_REQUEST_CREATED / _APPROVED / _REJECTED / _CANCELLED / _CLAIMED / _EXPIRED` | Approval-queue transitions: actor and role, approver on approve and claim, digest and token id (never the body) |
 
-These events are part of the tamper-evident [audit chain](../platform/audit-log.md) and cannot be deleted or modified.
+The audited action itself (for example `FORCED_TRANSFER` or `SPERRVERMERK_CREATE`) carries its own event. These events are part of the tamper-evident [audit chain](../platform/audit-log.md).

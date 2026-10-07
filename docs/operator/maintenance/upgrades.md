@@ -143,49 +143,16 @@ Flyway migrations in this repository have no automatic down scripts. If a releas
 
 ## Kong upgrade
 
+1. Update the `kong` image tag in `docker-compose.yml` (and `gateway/docker-compose.kong.yml` if you use the standalone gateway-only stack).
+2. Pull the image and validate the declarative configuration against the new version before switching:
+
 ```bash
-docker compose stop kong
 docker compose pull kong
-docker compose up -d kong
+docker compose run --rm kong kong config parse /etc/kong/kong.yml
+docker compose up -d --force-recreate kong
 ```
 
-After upgrading Kong, re-apply the declarative configuration:
-
-```bash
-deck sync --config gateway/kong.yml
-```
-sidebar_position: 3
----
-
-# Upgrades
-
-## Backend upgrade
-
-1. Pull new image or build locally:
-   ```bash
-   docker build -t registerwerk-backend:v2.0.0 backend/
-   ```
-
-2. Update `docker-compose.yml` image tag
-
-3. Start with rolling restart (Flyway auto-migrates):
-   ```bash
-   docker compose up -d --no-deps backend
-   ```
-
-4. Verify health: `curl http://localhost:48080/actuator/health`
-
-## Smart contract upgrades
-
-Compliance modules support in-place upgrade via `UpgradeCompliance.s.sol`:
-
-```bash
-forge script script/UpgradeCompliance.s.sol \
-  --rpc-url $ETH_MAINNET_RPC \
-  --broadcast
-```
-
-Token and identity contracts are **not upgradeable by design** (immutability is a legal requirement for securities). Upgrades require deploying a new suite and migrating investors.
+Kong re-reads `gateway/kong.yml` on start: DB-less mode has no migrations to run and no configuration to re-apply. On Kubernetes the Kong subchart version is pinned in `deploy/helm/registerwerk/Chart.yaml`; upgrade it there and run `helm upgrade`.
 
 ## Subgraph upgrades
 
@@ -211,13 +178,6 @@ versions and their configuration available for non-destructive rollback until ev
 has reached the chain head and its event ranges have been reconciled independently. Do not remove
 the prior subgraph before validation; rollback means redeploying the previously approved manifest
 and source configuration under another fresh version label.
-
-## Kong upgrades
-
-1. Update the `kong` image tag in `docker-compose.yml` (and `gateway/docker-compose.kong.yml`
-   if using the standalone gateway-only stack).
-2. Restart Kong: `docker compose restart kong` — it re-reads `gateway/kong.yml` on start
-   (DB-less mode, no migrations to run).
 
 ## Dependency updates
 

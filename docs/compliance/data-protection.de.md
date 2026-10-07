@@ -111,7 +111,7 @@ Umgesetzte technische Maßnahmen:
 | Verschlüsselung im Ruhezustand | `NaturalPerson`-Feldverschlüsselung ist nicht implementiert; Datenbank-/Objektspeicherverschlüsselung auf Bereitstellungsebene muss separat konfiguriert und überprüft werden |
 | Zugriffskontrolle | Rollenbasiert (`@PreAuthorize`) + Step-up für sensible Lesevorgänge |
 | Audit-Protokollierung | Manipulationssicher nachweisbare Hash-Kette für alle Vorgänge |
-| MFA | WebAuthn / TOTP für alle Betreiberkonten |
+| MFA | TOTP-Step-up für geschützte Vorgänge (lokaler Modus) oder Entra Conditional Access (`ENTRA_ENABLED=true`); WebAuthn ist in der Anwendung nicht implementiert |
 | Pseudonymisierung | `NaturalPerson.id` (UUID) wird in modulübergreifenden Referenzen anstelle des Namens verwendet |
 | Reaktion auf Vorfälle | Es gibt manuelle Vorfallsaufzeichnungen und Fristenüberwachung; eine Automatisierung der Benachrichtigung von Behörden/betroffenen Personen ist nicht implementiert |
 

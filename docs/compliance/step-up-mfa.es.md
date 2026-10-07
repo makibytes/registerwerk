@@ -32,29 +32,32 @@ antes de que se ejecute.
 
 ## Operaciones protegidas { #protected-operations }
 
-La anotación `@RequiresStepUp` se coloca en los siguientes endpoints y métodos de servicio. Las operaciones marcadas con **doble control (4-eyes)** requieren además un segundo aprobador.
+Cada anotación `@RequiresStepUp` del backend aparece, con su endpoint, motivo, antigüedad máxima, exigencia de segundo aprobador y vinculación del cuerpo, en la [matriz de step-up](step-up-matrix.md) generada (solo en inglés). Esa página es la lista completa y se regenera a partir del código (una comprobación de CI falla si está desactualizada); la tabla siguiente es un extracto breve y seleccionado, y **no es exhaustiva**.
 
-| Operación | Step-up | Doble control (4-eyes) | Motivo |
+| Operación | Step-up | Doble control | Motivo (`@RequiresStepUp`) |
 |---|---|---|---|
-| `forceTransfer` | ✅ | ✅ | Operación on-chain irreversible |
-| `forceBurn` | ✅ | ✅ | Destrucción permanente de tokens |
-| `forceApprove` | ✅ | ✅ | Anulación de cumplimiento |
-| `setSupplyCap` | ✅ | ✅ | Cambio de parámetro económico |
-| Creación de slot ERC-3525, mint en slot, forced value transfer | ✅ | ✅ | Fija el límite del slot / emite valor de bono en un slot |
-| Anulación de KYC (aprobar pese a un indicador) | ✅ | ✅ | Elusión de la puerta AML |
-| Crear Sperrvermerk | ✅ | ✅ | Restricción legal sobre el titular |
-| Levantar Sperrvermerk | ✅ | ✅ | Eliminación de una restricción legal |
-| Iniciar modo soporte (impersonation) | ❌ ¹ | ❌ | Acceso privilegiado a los datos del cliente |
-| Aceptar hit de detección | ✅ (puntuación alta) | ✅ (puntuación ≥ 80) | Anulación de AML para un hit confirmado |
-| Exportación de clave privada del monedero (break-glass) | ✅ | ✅ | Acceso al material de la clave |
-| Entra: eliminar un método de autenticación | ✅ | ❌ | Elimina un factor obsoleto |
-| Entra: restablecer todos los métodos de autenticación | ✅ | ✅ | Fuerza un nuevo registro de MFA para otra persona |
-| Entra: revocar sesiones de inicio de sesión | ✅ | ❌ | Solo impacto en disponibilidad, sin ganancia de privilegios |
-| Entra: emitir un Temporary Access Pass | ✅ | ✅ | Una credencial portadora que autentica *como* el cliente |
+| Transferencia forzosa, destrucción forzosa, aprobación forzosa (endpoints de operador y de emisor) | sí | sí | `FORCED_TRANSFER_EWG24`, `FORCE_BURN_EWG26`, `FORCED_APPROVE_OVERRIDE`, variantes `ISSUER_*` |
+| Fijar el límite de emisión (supply cap) | sí | sí | `SUPPLY_CAP_CHANGE_MICAR46` |
+| ERC-3525: creación de slot, mint de slot, transferencia de valor forzosa | sí | sí | `ERC3525_SLOT_CREATE`, `ERC3525_SLOT_MINT`, `ERC3525_FORCED_VALUE_TRANSFER_EWG24` |
+| Aprobar / rechazar KYC (incluida la aprobación con excepción) | sí | sí | `KYC_APPROVE`, `KYC_REJECT` |
+| Inscribir / levantar un Sperrvermerk | sí | sí | `SPERRVERMERK_CREATE`, `SPERRVERMERK_LIFT` |
+| Iniciar el modo soporte (solo lectura) | sí | no | `ADMIN_IMPERSONATION` |
+| Iniciar el modo soporte, actuar en nombre del cliente (solo modo demo) | sí | sí | `ADMIN_IMPERSONATION_ACT_ON_BEHALF` |
+| Aceptar una coincidencia de filtrado, confirmar un PEP (siempre, sea cual sea la puntuación) | sí, 15 min | sí | `SCREENING_HIT_ACCEPT`, `SCREENING_PEP_CONFIRM` |
+| Exportar clave de wallet, importar clave en bruto, importar keystore | sí | sí | `WALLET_KEYSTORE_EXPORT`, `WALLET_IMPORT_RAW`, `WALLET_IMPORT_KEYSTORE` |
+| Rotación de la KEK, una wallet | sí | no | `WALLET_KEK_ROTATION` |
+| Rotación de la KEK, todas las wallets | sí | sí | `WALLET_KEK_ROTATION_ALL` |
+| Reincorporación de una entidad tras su cierre | sí | sí | `ENTITY_REINSTATE` |
+| Reconocimiento de una verificación de la cadena de auditoría | sí | sí | `AUDIT_CHAIN_VERIFICATION_ACK` |
+| Restablecimiento de TOTP de otro operador | sí | sí | `TOTP_RESET` |
+| Entra: eliminar un método de autenticación | sí | no | `ENTRA_AUTH_METHOD_DELETE` |
+| Entra: restablecer todos los métodos de autenticación | sí | sí | `ENTRA_MFA_RESET` |
+| Entra: revocar sesiones de inicio de sesión | sí | no | `ENTRA_REVOKE_SIGNIN_SESSIONS` |
+| Entra: emitir un Temporary Access Pass | sí | sí | `ENTRA_TEMPORARY_ACCESS_PASS` |
 
-¹ `AdminImpersonationController` no lleva ningún `@RequiresStepUp` hoy, y el modo soporte se rechaza
-categóricamente cuando `ENTRA_ENABLED=true`. Esta fila afirmaba antes contar con protección step-up que el
-código no implementa.
+Que se exija el segundo aprobador también puede depender de la solicitud: los cambios de usuarios de operador, las rebajas y cierres de incidentes DORA y las rebajas de clasificación de cliente lo imponen dentro del servicio (`DualControlGate`); esos motivos figuran en la segunda tabla de la matriz.
+
+El inicio de una sesión de modo soporte se describe en [Modo soporte](../operator/customers/impersonation.md); la sesión se rechaza por completo cuando `ENTRA_ENABLED=true`.
 
 ---
 
@@ -123,9 +126,7 @@ token de Entra que carece de él.
 
 ## Implementación del doble control (4-eyes) { #4-eyes-implementation }
 
-La aplicación actual del control dual exige dos usuarios `REGISTRY_ADMIN` distintos. No existe un rol de
-aplicación `SECOND_APPROVER`, y un `COMPLIANCE_OFFICER` no se acepta como sustituto salvo que la
-implementación se modifique y se revise por separado.
+El segundo aprobador debe ser otro usuario que tenga actualmente habilitado `REGISTRY_ADMIN` **o** `COMPLIANCE_OFFICER` (`StepUpTokenValidator.ELIGIBLE_APPROVER_ROLES`; los roles del aprobador se releen de la base de datos). No existe una función `SECOND_APPROVER` aparte. Quienes inician decisiones de KYC y de filtrado pueden ser ellos mismos `REGISTRY_ADMIN` o `COMPLIANCE_OFFICER`, por lo que para esas acciones es posible una pareja de `COMPLIANCE_OFFICER`; nadie puede aprobar su propia solicitud.
 
 **El doble control es idéntico en ambas vías**: un token de control dual siempre se acuña localmente tras la
 verificación TOTP y siempre se valida con el decodificador HS256 local, por lo que no depende de cómo se
@@ -146,20 +147,33 @@ sequenceDiagram
     Backend->>Backend: Validate both, then execute + audit with both identities
 ```
 
+En lugar de pasar un token a mano, quien inicia la operación puede usar la cola de aprobaciones de la aplicación (sección siguiente). Ambas vías terminan en la misma comprobación en el endpoint protegido.
+
 Invariantes clave aplicadas por `StepUpEnforcementAspect` y `StepUpTokenValidator`:
 
 - El iniciador y el aprobador **deben ser usuarios diferentes** (comparación de `sub`)
 - El token del aprobador debe contener `stepup_scope` **exactamente igual** al `reason` de la anotación —
   de lo contrario, una sola aprobación sería una credencial genérica válida para cualquier acción de doble
   control dentro de su ventana de validez
-- El aprobador debe seguir siendo un **`REGISTRY_ADMIN` habilitado en la base de datos**, no solo según las
-  claims del token, que reflejan el estado únicamente en el momento en que se acuñó
+- El aprobador debe seguir siendo un `REGISTRY_ADMIN` **o** `COMPLIANCE_OFFICER` **habilitado en la base de datos**, y no solo según las claims del token, que reflejan el estado únicamente en el momento de la emisión
 - La aprobación está **vinculada a la solicitud para la que se concedió** (K3). El aprobador la emite con `action` *y* `target` (`"METHOD /ruta?query"` de la llamada exacta; además `targetBody`, el cuerpo JSON de la solicitud, que vincula todo motivo). El token lleva `stepup_target`, el SHA-256 en base64url de la solicitud canónica (`v1`, método en mayúsculas, ruta sin barra final, query ordenada y el hash del cuerpo JSON canónico: claves ordenadas, sin espacios, números decimales exactos en forma simple). El backend calcula el mismo resumen a partir de la solicitud real; si difiere, la llamada se rechaza con **403**. Ya no se aceptan tokens sin destino
 - **Los tokens de aprobación solo valen en la cabecera.** Una aprobación lleva `use=dual_control` y la audiencia `registerwerk-dual-control`. Se acepta en `X-Dual-Control-Token` y en ningún otro sitio: como `Authorization: Bearer` (o cookie de sesión) en cualquier endpoint, también en los `@RequiresStepUp`, se rechaza con **403**; una aprobación que alguien tiene en su poder nunca puede reutilizarse como la sesión de otra persona. Los tokens de autenticación reforzada ordinarios (sin alcance ni marca) siguen siendo la prueba propia del llamante.
 - **El cuerpo siempre está vinculado.** Cada motivo vincula el cuerpo canónico de la solicitud (`targetBody`, omitido si la solicitud no tiene). Las excepciones figuran en `registerwerk.auth.step-up.dual-control.body-opt-out-reasons`: cargas que no son JSON (subida de term sheet, importación de keystore, importación CSV CASP) y cargas que son material de clave secreto o la contraseña de un keystore (importación de clave en bruto, exportación de keystore); método, ruta y query siguen vinculados. Los números son decimales exactos, nunca `double`; un cuerpo con una clave JSON repetida o una solicitud con un parámetro de query repetido no puede vincularse y se rechaza. El token de aprobación sigue siendo de un solo uso aunque se restrinja `bind-target-reasons`.
-- **El arranque (bootstrap) es una puerta de un solo sentido.** La excepción de «basta un step-up» solo rige hasta que hayan existido a la vez dos `REGISTRY_ADMIN` habilitados y con TOTP. La base de datos registra ese momento (`dual_control_bootstrap`, fijado por trigger, nunca borrado); desde entonces la excepción no vuelve, aunque después se deshabilite a un administrador o este pierda su autenticador. Deshabilitar o eliminar una cuenta de operador, `REGISTRY_ADMIN`, `COMPLIANCE_OFFICER` o `AUDIT` exige el segundo aprobador (`OPERATOR_USER_DISABLE`, `OPERATOR_USER_DELETE`).
+- **El arranque (bootstrap) es una puerta de un solo sentido.** La excepción de «basta un step-up» solo rige hasta que hayan existido a la vez dos `REGISTRY_ADMIN` habilitados y con TOTP. La base de datos registra ese momento (`dual_control_bootstrap`, fijado por trigger, nunca borrado); desde entonces la excepción no vuelve, aunque después se deshabilite a un administrador o este pierda su autenticador. Deshabilitar o eliminar una cuenta del personal del operador (sin vínculo con una empresa) o una cuenta con un rol protegido (`REGISTRY_ADMIN`, `COMPLIANCE_OFFICER`, `SUPPORT_AGENT`, `AUDIT`) exige el segundo aprobador (`OPERATOR_USER_DISABLE`, `OPERATOR_USER_DELETE`).
 - La aprobación es de **un solo uso**: su `jti` se escribe en `dual_control_token_use` junto con el evento de auditoría en una única transacción (un segundo uso, en cualquier réplica, da **403**). Una acción que falla después de consumirse la aprobación requiere una nueva aprobación
 - La aprobación solo se acepta durante una **ventana corta** tras su emisión (`registerwerk.auth.step-up.dual-control.window-seconds`, 300 s por defecto); el token de autenticación reforzada del iniciador conserva sus 10 minutos
+
+---
+
+## Cola de aprobaciones de la aplicación { #in-app-approval-queue }
+
+Ambos portales presentan y deciden las aprobaciones mediante `/api/v1/approvals` en lugar de pasarse tokens:
+
+1. Quien inicia la operación presenta la petición exacta (acción = el motivo `@RequiresStepUp` del endpoint, método, ruta, query y cuerpo JSON). La solicitud solo se acepta si esa acción es el motivo de esa ruta; el cuerpo se guarda en forma canónica para que el aprobador vea lo que se va a ejecutar.
+2. Un aprobador elegible distinto del iniciador (`REGISTRY_ADMIN` o `COMPLIANCE_OFFICER`) la ve en la bandeja **Approvals** y aprueba con un código TOTP reciente, o la rechaza. La autoaprobación es imposible, también a nivel de base de datos.
+3. Quien inicia la operación recoge un token de aprobación de un solo uso, vinculado a ese resumen (digest) y al iniciador (un token recogido por un usuario no sirve en otras manos), y luego envía la petición real con su propio token de step-up y `X-Dual-Control-Token`.
+
+Las solicitudes que nadie decide, o que no se recogen, caducan a los 15 minutos (`registerwerk.auth.step-up.approval-queue.ttl`). La cola rechaza las sesiones de modo soporte. Eventos de auditoría: `APPROVAL_REQUEST_CREATED`, `_APPROVED`, `_REJECTED`, `_CANCELLED`, `_CLAIMED`, `_EXPIRED` (el cuerpo nunca figura en el evento; su resumen sí).
 
 ---
 
@@ -197,14 +211,13 @@ El `StepUpEnforcementAspect` intercepta cualquier método anotado con `@Requires
 
 ## Eventos de auditoría { #audit-events }
 
-Cada evento de autenticación step-up y cada operación protegida genera un `AuditEvent`:
+La actividad de step-up y doble control se registra mediante estos tipos de evento (la lista es la que existe en el código; no hay un evento aparte de «step-up emitido»):
 
 | Tipo de evento | Contenido |
 |---|---|
-| `STEP_UP_ISSUED` | ID de usuario, método, marca de tiempo |
-| `DUAL_CONTROL_INITIATED` | ID del iniciador, tipo de operación, hash de parámetros de operación |
-| `DUAL_CONTROL_CONFIRMED` | ID del aprobador, tipo de operación, referencia del token_confirmado |
-| `PROTECTED_OPERATION_EXECUTED` | Ambos ID de usuario, tipo de operación, parámetros de operación completos |
-| `STEP_UP_FAILED` | ID de usuario, motivo de la falla, dirección IP |
+| `TOTP_ENROLMENT_STARTED`, `TOTP_ENROLLED`, `TOTP_DISENROLLED`, `TOTP_RESET` | Usuario afectado; en un restablecimiento, también el actor y el aprobador |
+| `DUAL_CONTROL_APPROVED` | Iniciador, aprobador, motivo, id del token de aprobación y resumen del destino; se escribe antes de que continúe la operación protegida |
+| `DUAL_CONTROL_BOOTSTRAP_USED` | Se usó la excepción de actor único mientras existían menos de dos administradores con TOTP |
+| `APPROVAL_REQUEST_CREATED / _APPROVED / _REJECTED / _CANCELLED / _CLAIMED / _EXPIRED` | Transiciones de la cola de aprobaciones: actor y rol, aprobador al aprobar y recoger, resumen e id del token (nunca el cuerpo) |
 
-Estos eventos forman parte de la [cadena de auditoría](../platform/audit-log.md) a prueba de manipulaciones y no se pueden eliminar ni modificar.
+La acción auditada en sí (por ejemplo `FORCED_TRANSFER` o `SPERRVERMERK_CREATE`) lleva su propio evento. Estos eventos forman parte de la [cadena de auditoría](../platform/audit-log.md) a prueba de manipulación.

@@ -31,7 +31,7 @@ Luxemburgo es el domicilio de fondos más grande de Europa y una jurisdicción l
 
 | Dimensión | DE (eWpG) | LU (CSSF) |
 |---|---|---|
-| Registro autorizado | DB es canónico (§16 eWpG) | DB es canónico (guía CSSF) |
+| Fuente de verdad en Registerwerk | La base de datos (operativa; el estatus jurídico del registro depende del instrumento y del operador) | La base de datos (operativa; el estatus jurídico del registro depende del instrumento y del operador) |
 | Periodo de retención | 10 años | 5 años |
 | Aplicabilidad de MiCAR | Exentos (tokens eWpG ≠ tokens de dinero electrónico) | Aplica a servicios de criptoactivos |
 | Umbral UBO | 25% (GwG §3) | 25% (Ley AML Art. 1(7)) |

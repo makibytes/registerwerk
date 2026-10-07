@@ -94,7 +94,7 @@ Il compito più comune di un revisore. Il percorso:
 6. **Leggere le operazioni societarie** — le fotografie alla data di registrazione che mostrano esattamente a chi spettava che cosa, e quando è stato regolato.
 
 !!! tip "Due registrazioni, e possono divergere"
-    Registerwerk tiene il registro (un database, giuridicamente autoritativo) e il token (on-chain, verificabile in modo indipendente) come registrazioni separate, mantenute allineate dagli indicizzatori.
+    Registerwerk tiene il registro (un database, fonte di verità per la riconciliazione di Registerwerk; il suo status giuridico dipende dall'operatore e dallo strumento) e il token (on-chain, verificabile in modo indipendente) come registrazioni separate, mantenute allineate dagli indicizzatori.
 
     Possono discostarsi — brevemente in condizioni normali, più a lungo se un indicizzatore resta indietro o una chain è congestionata. **Trovare una discrepanza non equivale automaticamente a trovare un difetto.** Stabilisci quando ciascuna registrazione è stata scritta prima di trarre conclusioni. [Detenzione e custodia](../lifecycle/holding.md) spiega il modello.
 

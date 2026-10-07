@@ -18,7 +18,7 @@ Liechtenstein was the first European country to pass comprehensive token-specifi
 
 The TVTG establishes the concept of a **Token** as a data record in a TT (Trusted Technology) system (i.e., a distributed ledger or equivalent cryptographically secured system). Rights are attached to tokens rather than to the underlying asset directly, creating a clean legal separation between the right (token) and its technical representation (blockchain).
 
-This aligns well with Registerwerk's canonical-registry model: the register entry is the legal instrument; the blockchain is a representation.
+This aligns well with Registerwerk's canonical-registry model: the register entry is the operational record and the blockchain is a representation. Whether an entry is legally the instrument depends on the TT system and the operator's status, which this repository does not establish.
 
 ---
 
@@ -113,7 +113,7 @@ module does not route or transmit `LI_TVTG` incident notifications to FMA.
 
 Liechtenstein offers the most blockchain-native legal framework in Europe:
 
-- Tokens are legally recognised regardless of the underlying technology
+- The TVTG's token-container model is technology-neutral; whether a given token is legally recognised depends on the instrument and the TT system it is issued on
 - Any right can be tokenised — financial instruments, real estate, IP rights
 - The TVTG is technology-neutral (EVM, UTXO, and DAG all qualify)
 - No separate "crypto securities" designation needed — the token itself carries the right

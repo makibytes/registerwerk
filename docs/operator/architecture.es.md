@@ -70,7 +70,7 @@ Hay exactamente una instancia de PostgreSQL que aloja una base de datos. Kong ej
 
 ### 4. El registro y la cadena son registros separados { #4-the-register-and-the-chain-are-separate-records }
 
-La base de datos tiene autoridad para la propiedad. La cadena de bloques es lo que se ejecuta y lo que cualquiera puede verificar de forma independiente. **Los indexadores** observan las cadenas y escriben lo que ven.
+La base de datos es la fuente de verdad de Registerwerk para la propiedad (a efectos operativos; que sea un registro con eficacia jurídica depende del operador y del instrumento). La cadena de bloques es lo que se ejecuta y lo que cualquiera puede verificar de forma independiente. **Los indexadores** observan las cadenas y escriben lo que ven.
 
 **Consecuencia operativa y lo más útil de esta página:** cuando un cliente dice "mi saldo es incorrecto", la primera pregunta no es *cuál es la correcta* sino *¿hay un indexador detrás?* Un indexador rezagado produce exactamente este síntoma y se resuelve solo una vez que se pone al día. [Resiliencia del indexador](indexers/resilience.md).
 

@@ -5,7 +5,7 @@ description: Quién usa Registerwerk, qué puede hacer cada cual, y a qué oblig
 
 # Funciones y permisos
 
-Registerwerk es multiinquilino: una instalación de operador sirve a muchas entidades jurídicas clientes. El acceso se gobierna mediante un conjunto de funciones definido en la enumeración `AppRole` y aplicado con `@PreAuthorize` en cada método de controlador.
+Registerwerk es multiinquilino: una instalación de operador sirve a muchas entidades jurídicas clientes. El acceso se gobierna mediante un conjunto de funciones definido en la enumeración `AppUserRole` y aplicado con `@PreAuthorize` en cada método de controlador.
 
 ---
 
@@ -15,7 +15,8 @@ Registerwerk es multiinquilino: una instalación de operador sirve a muchas enti
 |---|---|---|---|
 | `REGISTRY_ADMIN` | Operador | Personal del registro | §15 eWpG entidad responsable del registro; §10 GwG responsable de prevención del blanqueo |
 | `COMPLIANCE_OFFICER` | Operador | Equipo de cumplimiento / blanqueo | §7 GwG responsable de cumplimiento; art. 8 AMLD6 |
-| `AUDITOR` | Operador | Auditores internos/externos | §15(3) eWpG acceso a las anotaciones |
+| `AUDIT` | Operador | Auditores internos/externos | §15(3) eWpG acceso a las anotaciones |
+| `SUPPORT_AGENT` | Operador | Personal de soporte | Solo sesiones de cliente de solo lectura; sin función regulatoria |
 | `ISSUER` | Cliente | Emisores de valores | §4 eWpG obligaciones del emisor |
 | `INVESTOR` | Cliente | Titulares de tokens / inversores | |
 | `COMPANY_ADMIN` | Cliente | Administradores del emisor | |
@@ -34,25 +35,25 @@ La función con más privilegios. Un `REGISTRY_ADMIN` puede:
 - Desplegar y administrar [tokens de valores](../token-standards/index.md)
 - Inscribir un [Sperrvermerk](../compliance/sperrvermerk.md) (restricción a la negociación) — exige [autenticación reforzada](../compliance/step-up-mfa.md)
 - Transferir y destruir tokens de forma forzosa — exige autenticación reforzada + doble control
-- Suplantar a usuarios clientes con fines de asistencia — capacidad permanente, véase la salvedad más abajo
+- Iniciar sesiones de [modo soporte](#modo-soporte) de solo lectura con fines de asistencia (autenticación reforzada y motivo registrado; las sesiones de escritura solo existen en modo demo)
 - Acceder a todas las anotaciones de la [pista de auditoría](../platform/audit-log.md)
 - Lanzar las exportaciones regulatorias [MiFIR](../compliance/mifir.md) y [DAC8](../compliance/dac8.md)
 
 !!! warning "Las operaciones forzosas exigen control dual"
-    La transferencia forzosa, la destrucción forzosa y la aprobación forzosa son operaciones on-chain irreversibles. La implementación actual exige que un segundo `REGISTRY_ADMIN` distinto aporte el token de doble control; no existe una función de aplicación `SECOND_APPROVER`. Su adecuación jurídica y regulatoria requiere revisión externa.
+    La transferencia forzosa, la destrucción forzosa y la aprobación forzosa son operaciones irreversibles en la cadena. La implementación actual exige que un segundo operador distinto (un `REGISTRY_ADMIN` o un `COMPLIANCE_OFFICER`) dé la aprobación en doble control; no existe una función de aplicación `SECOND_APPROVER`. Su adecuación jurídica y de políticas requiere revisión externa.
 
 ### COMPLIANCE_OFFICER
 
 Centrada en las funciones de prevención del blanqueo y KYC:
 
 - Revisar y gestionar ejecuciones y coincidencias del [filtrado de sanciones](../compliance/sanctions-screening.md)
-- Aceptar o rechazar coincidencias (con doble control para entidades de alto riesgo)
+- Aceptar o rechazar coincidencias (siempre con autenticación reforzada y un segundo aprobador)
 - Aprobar documentos KYC de las jurisdicciones que tenga asignadas
-- Inscribir y levantar un [Sperrvermerk](../compliance/sperrvermerk.md) — exige autenticación reforzada
+- Consultar los [Sperrvermerk](../compliance/sperrvermerk.md) (inscribirlos y levantarlos es exclusivo de `REGISTRY_ADMIN`, con autenticación reforzada y un segundo aprobador)
 - Acceder a las anotaciones de incidentes [DORA](../compliance/dora.md)
 - Lanzar un nuevo filtrado de sanciones a demanda
 
-### AUDITOR
+### AUDIT
 
 Acceso de solo lectura a toda la pista de auditoría:
 
@@ -63,7 +64,11 @@ Acceso de solo lectura a toda la pista de auditoría:
 
 ### Aprobador en doble control
 
-La aprobación en doble control es hoy una capacidad de un segundo `REGISTRY_ADMIN` distinto, no una función de aplicación aparte. El aprobador debe ser distinto de quien inicia la operación y debe superar las comprobaciones de autenticación reforzada configuradas.
+La aprobación en doble control es hoy una capacidad de un segundo usuario distinto que tenga `REGISTRY_ADMIN` o `COMPLIANCE_OFFICER`, no una función de aplicación aparte. El aprobador debe ser distinto de quien inicia la operación, seguir activo en la base de datos y superar las comprobaciones de autenticación reforzada configuradas. Las solicitudes pueden presentarse y aprobarse en la cola de aprobaciones de la aplicación (véase [Autenticación reforzada y doble control](../compliance/step-up-mfa.md)).
+
+### SUPPORT_AGENT
+
+Personal del operador para la asistencia al cliente. Un `SUPPORT_AGENT` puede listar entidades cliente e iniciar sesiones de [modo soporte](#modo-soporte) de **solo lectura** (se exigen autenticación reforzada y motivo). No puede cambiar nada y no tiene función regulatoria. Concederlo o retirarlo exige autenticación reforzada y un segundo aprobador.
 
 ---
 
@@ -115,16 +120,14 @@ Un usuario, máquina o persona, autorizado a interactuar con las integraciones d
 
 ## Modo soporte
 
-Los usuarios `REGISTRY_ADMIN` pueden suplantar a un usuario cliente para investigar una incidencia o ayudar en el alta. El modo soporte:
+El modo soporte («impersonation») permite al personal del operador abrir el portal del cliente dentro de la organización de un cliente para investigar incidencias. Está protegido y es de solo lectura por defecto:
 
-- Emite un token de corta vida cuyo `sub` sigue siendo el identificador de usuario del **operador**, de modo que toda actuación se atribuye al operador y nunca al cliente
-- Queda registrado en la [pista de auditoría](../platform/audit-log.md), marcado con `imp` para que esas actuaciones sigan siendo distinguibles
+- Iniciarlo exige [autenticación reforzada](../compliance/step-up-mfa.md) y un motivo escrito obligatorio (al menos 15 caracteres, más una referencia de ticket opcional)
+- El modo por defecto es **solo lectura**; el modo de escritura (`ACT_ON_BEHALF`) exige un segundo aprobador y existe **solo en modo demo**. En modo producción toda sesión es de solo lectura
+- `REGISTRY_ADMIN` y `SUPPORT_AGENT` pueden iniciar sesiones de solo lectura; solo `REGISTRY_ADMIN` puede iniciar una sesión de escritura. `SUPPORT_AGENT` no puede hacer nada más
+- La llamada de inicio no devuelve ningún token: un código de un solo uso (60 segundos) se cambia por una cookie de sesión httpOnly. La sesión dura como máximo 30 minutos
+- El `sub` del token sigue siendo el identificador de usuario del **operador**, de modo que toda actuación se atribuye al operador y nunca al cliente; `imp` la marca en la [pista de auditoría](../platform/audit-log.md)
+- Las sesiones quedan registradas y son visibles para los administradores de la empresa del cliente
 - Es visible para todos los usuarios `REGISTRY_ADMIN` mediante la barra del front end del cliente
-- Caduca con el token; vuelva a entrar en lugar de intentar prolongarlo
 
-!!! warning "El modo soporte no está protegido por autenticación reforzada"
-    `AdminImpersonationController` no lleva ningún `@RequiresStepUp`. Cualquier `REGISTRY_ADMIN` puede entrar en el portal de cualquier cliente sin un segundo desafío de autenticación y sin una segunda persona.
-
-    Trátelo como una cuestión de control más que técnica: mantenga reducida la lista de administradores, exija un motivo registrado fuera de la plataforma y revise periódicamente los eventos. [Modo soporte](../operator/customers/impersonation.md) trata su gobierno.
-
-Además, el modo soporte no está disponible en absoluto cuando `ENTRA_ENABLED=true` — el backend se niega a emitir una sesión por cuenta de un cliente.
+El modo soporte no está disponible en absoluto cuando `ENTRA_ENABLED=true` — el backend se niega a emitir una sesión por cuenta de un cliente. [Modo soporte](../operator/customers/impersonation.md) detalla el funcionamiento y su gobierno.

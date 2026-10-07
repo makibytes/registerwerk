@@ -31,7 +31,7 @@ Le Luxembourg est le plus grand siège de fonds en Europe et une juridiction lea
 
 | Dimensions | DE (eWpG) | LU (CSSF) |
 |---|---|---|
-| Registre faisant autorité | La base de données est canonique (§16 eWpG) | La base de données est canonique (conseils CSSF) |
+| Source de vérité dans Registerwerk | La base de données (opérationnelle ; le statut juridique du registre dépend de l'instrument et de l'opérateur) | La base de données (opérationnelle ; le statut juridique du registre dépend de l'instrument et de l'opérateur) |
 | Période de conservation | 10 ans | 5 ans |
 | Applicabilité de MiCAR | Exonéré (jetons eWpG ≠ jetons de monnaie électronique) | S'applique aux services de crypto-actifs |
 | Seuil UBO | 25% (GwG §3) | 25 % (loi AML, article 1(7)) |

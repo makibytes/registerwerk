@@ -109,6 +109,41 @@ Entonces:
 
 Inicie sesión con `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` desde su `.env`.
 
+### Probar lending y repo en local
+
+Defina `SEED_DEMO_DATA=true` antes de iniciar Compose. La pila despliega dos mercados de préstamo reales en su cadena Anvil desechable, registra sus parámetros inmutables verificados y siembra un libro bilateral aparte del Repo Desk.
+
+Cuando el navegador está en otro host (por ejemplo `nibbler.local`), defina también la dirección a la que puede llegar el **navegador**:
+
+```dotenv
+SEED_DEMO_DATA=true
+ANVIL_HOST_PORT=48545
+ANVIL_PUBLIC_RPC_URL=http://nibbler.local:48545
+```
+
+`ANVIL_HOST_PORT` es solo el puerto publicado en el host/navegador. Los contenedores del backend y de despliegue siempre se conectan a `http://anvil:8545` en la red de Compose. Usar `localhost` o el puerto `48545` dentro de esos contenedores apunta al espacio de nombres de red equivocado y produce «connection refused».
+
+Añada ese RPC a una wallet de navegador desechable con el ID de cadena `11155111`. La frase mnemónica de Anvil es la frase pública estándar de desarrollo:
+
+```text
+test test test test test test test test test test test junk
+```
+
+!!! danger "Solo claves de demostración"
+    Esta frase mnemónica y todas las cuentas derivadas de ella son públicas. Use un perfil de navegador aparte y no envíe nunca activos reales a estas direcciones. Importar la frase en una wallet existente puede sustituir o mezclarse con cuentas reales.
+
+La demo asigna los usuarios de empresa a estas cuentas derivadas:
+
+| Inicio de sesión de cliente (contraseña `demo1234!`) | Empresa | Cuenta de Anvil |
+|---|---|---|
+| `maria.braun@nordbank-invest.de` | Nordbank Invest | cuenta 1 |
+| `sabine.mueller@rheinische-kapital.de` | Rheinische Kapital | cuenta 2 |
+| `lisa.hoffmann@aurora-finance.de` | Aurora Finance | cuenta 3 |
+| `sandra.richter@fd-fonds.de` | Frankfurt Digital Fonds | cuenta 4 |
+| `ute.koenig@wi-invest.de` | Württemberg Invest | cuenta 5 |
+
+Las cinco pueden usar el Repo Desk. Las tres primeras tienen garantías en Green Bond; Rheinische, Frankfurt y Württemberg tienen garantías en Infrastructure Note. La demo de préstamos en cadena la restablece/redespliega el servicio puntual `demo-onchain-deploy`, mientras que el Repo Desk arranca con tres RFQ y dos cotizaciones privadas.
+
 Kong se ejecuta sin base de datos a partir de `gateway/kong.yml`, por lo que no hay credenciales de base de datos de la puerta de enlace, ni ninguna base de datos `kong` o `konga`. Su API de administración está vinculada a loopback — acceda a ella con `docker compose exec kong kong health`, nunca la exponga.
 
 Para cualquier cosa más allá de una prueba local, vaya a [Requisitos previos](installation/prerequisites.md) y lea con atención [Entorno](configuration/environment.md).

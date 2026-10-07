@@ -145,7 +145,7 @@ Registerwerk lève le drapeau. Il ne peut pas faire exécuter une créance — c
 
 1. **Conception** — Nordwind décrit une obligation ; l'opérateur l'approuve.
 2. **Émission** — un contrat est déployé, les investisseurs admis, 50 000 titres créés.
-3. **Détention** — les investisseurs détiennent ; le registre fait foi, la chaîne est vérifiable.
+3. **Détention** — les investisseurs détiennent ; le registre est la source de vérité, la chaîne est vérifiable.
 4. **Négociation** — les titres changent de mains ; les règles de conformité tiennent à chaque transfert.
 5. **Financement** — un titulaire nantit des titres et emprunte contre eux.
 6. **Remboursement** — coupons versés, principal remboursé, jetons détruits, registre clos.

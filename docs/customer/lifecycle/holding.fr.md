@@ -22,7 +22,7 @@ Disons-le clairement, car tout le reste en découle :
 !!! abstract "Le registre"
     Une ligne dans la base de données de l'opérateur. Elle nomme le titulaire, la valeur nominale, le type d'inscription, les restrictions, les droits de tiers.
 
-    **C'est l'enregistrement doté d'une portée juridique.** Au sens du §16 eWpG, la propriété d'un titre électronique est déterminée par le registre.
+    **C'est l'enregistrement que Registerwerk traite comme source de vérité.** Selon l'eWpG, l'effet juridique se rattache à une inscription dans un registre de titres électroniques tenu par un teneur de registre autorisé ; que cette base de données soit un tel registre dépend de l'opérateur et de l'instrument, ce que ce dépôt n'établit pas.
 
 !!! abstract "Le jeton"
     Un solde dans un contrat intelligent sur une blockchain. Public, vérifiable par quiconque, et c'est lui qui se déplace réellement lors d'un transfert.
@@ -51,7 +51,7 @@ sequenceDiagram
 Entre la deuxième et la quatrième étape, les deux enregistrements divergent — en général quelques secondes, parfois davantage si un indexeur est en retard ou si une chaîne est congestionnée.
 
 !!! question "Alors lequel fait foi ?"
-    **Le registre.** Toujours. La blockchain fait foi de ce que la blockchain a fait ; elle ne fait pas foi de savoir à qui appartient un titre au regard du droit allemand.
+    **Le registre — pour le rapprochement propre à Registerwerk.** La blockchain fait foi de ce que la blockchain a fait. Elle ne décide pas à qui appartient un titre au regard du droit allemand, et cette base de données non plus, sauf si l'opérateur est un teneur de registre autorisé pour l'instrument.
 
     En pratique, cela compte dans un cas précis : quelqu'un déplace des jetons directement on-chain, de portefeuille à portefeuille, en contournant la plateforme. Pour un titre ERC-3643, les deux portefeuilles doivent déjà être admis : l'obligation ne peut donc pas se retrouver entre des mains non autorisées — mais cela *peut* produire un registre qui ne correspond plus à la réalité jusqu'à ce que l'indexeur rattrape, et un transfert sans ordre derrière lui.
 
@@ -154,7 +154,7 @@ Les titulaires institutionnels d'une inscription collective échappent à cette 
 
 ## Où vous en êtes
 
-Cinquante investisseurs détiennent une créance sur Nordwind, consignée dans un registre qui fait foi et reflétée sur une blockchain vérifiable publiquement. L'obligation restera ainsi pendant cinq ans.
+Cinquante investisseurs détiennent une créance sur Nordwind, consignée dans un registre que Registerwerk traite comme source de vérité (son effet juridique dépend de l'opérateur et de l'instrument) et reflétée sur une blockchain vérifiable publiquement. L'obligation restera ainsi pendant cinq ans.
 
 Sauf que l'un d'eux veut récupérer son argent plus tôt.
 

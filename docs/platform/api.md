@@ -5,7 +5,7 @@ description: URL structure, authentication, error responses, pagination, and API
 
 # REST API Overview
 
-All Registerwerk functionality is exposed through a REST API at `http://backend:8080`. The operator frontend connects directly; the customer frontend connects via Kong (`http://kong:8000`). The API is documented with OpenAPI 3 (Swagger UI available at `/swagger-ui.html`).
+All Registerwerk functionality is exposed through a REST API at `http://backend:8080`. The operator frontend connects directly; the customer frontend connects via Kong (`http://kong:8000`). Every mapped route is listed in the generated [API route index](api-routes.md). An OpenAPI 3 document and Swagger UI exist but are **off by default** (see [OpenAPI / Swagger UI](#openapi-swagger-ui)).
 
 ---
 
@@ -63,19 +63,19 @@ All errors follow the `ErrorResponse` record:
 
 ## Pagination
 
-List endpoints support cursor-based pagination with `page` and `size` parameters:
+List endpoints that page accept `page` (zero-based) and `size`, for example:
 
 ```
 GET /api/v1/assets?page=0&size=20&sort=createdAt,desc
 ```
 
-Responses include a `X-Total-Count` header with the total record count (before pagination). The response body is always an array (never a wrapper object).
+The response shape is **per endpoint**: some return a plain JSON array (the total is then in the `X-Total-Count` response header, which the CORS configuration exposes to browsers), others return the `PageResponse` wrapper `{ content, totalElements, totalPages, page, size }`. Check the endpoint's schema in the OpenAPI document before relying on either shape.
 
 ---
 
 ## Idempotency-Key and amounts { #idempotency-key-and-amounts }
 
-Money- and state-moving admin/issuer endpoints require an `Idempotency-Key` header: mint, burn, forced transfers/approvals, force-burn, freeze/whitelist changes, slot and vault operations, ERC-3643 agent actions, payment-rail changes, wallet import, register-transfer handover/completion and asset redemption. A `POST`, `PUT`, `PATCH` or `DELETE` without a valid key is rejected with `400` and the code `IDEMPOTENCY_KEY_REQUIRED` (or `IDEMPOTENCY_KEY_INVALID`) before anything runs. Other endpoints stay opt-in.
+Money- and state-moving admin/issuer endpoints require an `Idempotency-Key` header: mint, burn, forced transfers/approvals, force-burn, freeze/whitelist changes, Solana token administration, slot and vault operations, ERC-3643 agent actions, lending market operations and reconciliation, payment-rail changes, wallet import, register-transfer handover/completion and asset redemption. A `POST`, `PUT`, `PATCH` or `DELETE` without a valid key is rejected with `400` and the code `IDEMPOTENCY_KEY_REQUIRED` (or `IDEMPOTENCY_KEY_INVALID`) before anything runs. Other endpoints stay opt-in.
 
 - Send a unique value per user action (a UUID; 8-255 characters of `A-Za-z0-9._:-`) and **reuse the same value when you retry the same request** after a timeout or a `5xx`. A retry then returns the original result (`X-Idempotent-Replay: true`) or the same transaction instead of executing twice.
 - The key is scoped to the caller: the legal entity for customer tokens, the acting user for operator tokens. The same key with a different method, path or body is answered `422`; a request that is still running is answered `409`.
@@ -83,73 +83,34 @@ Money- and state-moving admin/issuer endpoints require an `Idempotency-Key` head
 
 **Amounts are decimal strings.** Send token amounts (`amount`, `value`, `newCap`, `navPerShare`, ...) as JSON strings such as `"1000000000000000000000"`. A JavaScript number loses precision above 2^53. For one release a JSON number is still accepted if it is exactly representable (an integer below 2^53, or a decimal of at most 15 significant digits) and a deprecation warning is logged; anything else is answered `400` with `Invalid amount: ...`.
 
-## Key API groups
+## Route groups
 
-### Assets (`/api/v1/assets`)
+The generated [API route index](api-routes.md) is the complete, code-derived list (method, path, role expression, step-up). The main base paths:
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/assets` | List all assets (paginated) |
-| `POST` | `/api/v1/assets` | Create new asset |
-| `GET` | `/api/v1/assets/{id}` | Get asset by ID |
-| `POST` | `/api/v1/assets/{id}/deploy` | Deploy token to blockchain |
-| `POST` | `/api/v1/assets/{id}/mint` | Mint tokens |
-| `POST` | `/api/v1/assets/{id}/burn` | Burn tokens (step-up + 4-eyes) |
-| `POST` | `/api/v1/assets/{id}/force-transfer` | Force-transfer (step-up + 4-eyes) |
-| `POST` | `/api/v1/assets/{id}/freeze/{address}` | Freeze address (requires HolderBlock) |
+| Area | Base path |
+|---|---|
+| Assets and deployments (issuer mint/burn under `.../deployments/{depId}/issuer/`, operator forced operations under `.../deployments/{depId}/admin/`) | `/api/v1/assets`, `/api/v1/deployments` |
+| Legal entities and KYC (`/api/v1/entities/{entityId}/kyc/...`), KYC review queue | `/api/v1/entities`, `/api/v1/kyc` |
+| Sanctions screening (`/api/v1/compliance/screening/...`, hits under `/hits/{hitId}/accept`) and other compliance functions | `/api/v1/compliance` |
+| Sperrvermerk (holder blocks) | `/api/v1/holder-blocks` |
+| Regulatory reporting (MiFIR, DAC8) | `/api/v1/regulatory-reporting` |
+| DORA incidents, providers, resilience tests | `/api/v1/dora` |
+| Trading, repo desk, lending, corporate actions | `/api/v1/trading`, `/api/v1/repo-desk`, `/api/v1/lending`, `/api/v1/corporate-actions` |
+| Four-eyes approval queue | `/api/v1/approvals` |
+| Audit log, chain verification | `/api/v1/audit` |
+| Operator administration (users, wallets, ...) | `/api/v1/admin` |
+| Customer-company self-service | `/api/v1/company`, `/api/v1/me` |
+| Public, unauthenticated (chains, platform capabilities, Travel Rule) | `/api/v1/public` |
 
-### Customers (`/api/v1/customers`)
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/customers` | List legal entities |
-| `POST` | `/api/v1/customers` | Create legal entity |
-| `GET` | `/api/v1/customers/{id}` | Get entity |
-| `POST` | `/api/v1/customers/{id}/kyc/documents` | Upload KYC document |
-| `POST` | `/api/v1/customers/{id}/kyc/approve` | Approve KYC (COMPLIANCE_OFFICER + step-up) |
-| `GET` | `/api/v1/customers/{id}/beneficial-owners` | List UBOs |
-| `POST` | `/api/v1/customers/{id}/beneficial-owners` | Add UBO |
-
-### Compliance (`/api/v1/compliance`)
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/compliance/screening/entities/{id}/screen` | Trigger manual screen |
-| `GET` | `/api/v1/compliance/screening/entities/{id}/runs` | Get screening history |
-| `POST` | `/api/v1/compliance/screening/hits/{hitId}/accept` | Accept/dismiss a hit |
-| `GET` | `/api/v1/holder-blocks` | List all HolderBlocks |
-| `POST` | `/api/v1/holder-blocks` | Create Sperrvermerk (step-up + 4-eyes) |
-| `POST` | `/api/v1/holder-blocks/{id}/lift` | Lift Sperrvermerk (step-up + 4-eyes) |
-
-### Regulatory Reporting (`/api/v1/regulatory-reporting`)
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/regulatory-reporting/mifir` | Trigger on-demand MiFIR export |
-| `POST` | `/api/v1/regulatory-reporting/dac8` | Trigger on-demand DAC8 export |
-| `GET` | `/api/v1/regulatory-reporting/submissions` | List submission history |
-
-### DORA (`/api/v1/dora`)
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/dora/incidents` | List open ICT incidents |
-| `POST` | `/api/v1/dora/incidents` | Report an ICT incident (Art. 17) |
-| `PATCH` | `/api/v1/dora/incidents/{id}/status` | Update incident status / root cause |
-| `POST` | `/api/v1/dora/incidents/{id}/report-to-authority` | Record initial/final authority report (Art. 19) |
-| `GET` | `/api/v1/dora/providers` | List ICT third-party register (Art. 28) |
-| `GET` | `/api/v1/dora/providers/expiring` | List providers with contracts expiring soon |
-| `GET` | `/api/v1/dora/resilience-tests` | List resilience test results (Art. 24/25) |
-| `GET` | `/api/v1/dora/resilience-tests/overdue` | List overdue resilience tests |
-| `POST` | `/api/v1/dora/resilience-tests` | Record a resilience test result |
+Approving KYC, for example, is `POST /api/v1/entities/{entityId}/kyc/approve`: the initiator is a `REGISTRY_ADMIN` or `COMPLIANCE_OFFICER` and the call needs step-up and a second approver (see the [step-up matrix](../compliance/step-up-matrix.md)).
 
 ---
 
-## OpenAPI / Swagger UI
+## OpenAPI / Swagger UI { #openapi-swagger-ui }
 
-The OpenAPI specification and interactive UI are served **by the backend** on port 8080, not by this documentation server.
+The OpenAPI document and Swagger UI are served **by the backend**, not by this documentation server, and are **disabled unless `SWAGGER_ENABLED=true`** (default `false`, in every profile).
 
-| URL | Description |
+| URL (when enabled) | Description |
 |---|---|
 | [`{{ backend_url }}/swagger-ui.html`]({{ backend_url }}/swagger-ui.html) | Interactive Swagger UI (browser) |
 | [`{{ backend_url }}/api-docs`]({{ backend_url }}/api-docs) | OpenAPI 3 JSON (machine-readable) |
@@ -159,5 +120,5 @@ The OpenAPI specification and interactive UI are served **by the backend** on po
 !!! info "This documentation site vs. the API"
     This site (port 48003) is a static MkDocs reference — it does not proxy the backend. Open the links above directly in a browser while the stack is running (`docker compose up -d`).
 
-!!! warning "Swagger UI in production"
-    The Swagger UI is disabled in the `prod` Spring profile. In development and staging environments it is accessible without authentication. In production it must be explicitly enabled and protected behind an IP allowlist or basic-auth.
+!!! warning "Enabling SWAGGER_ENABLED exposes the spec without authentication"
+    When enabled, `/swagger-ui.html`, `/swagger-ui/**` and `/api-docs/**` are public (`permitAll` in the security configuration): anyone who can reach the backend can read the full route and schema catalogue. Nothing refuses `SWAGGER_ENABLED=true` in production mode. Leave it off in production, or put the backend behind an allow-list that excludes these paths.

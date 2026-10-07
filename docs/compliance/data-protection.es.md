@@ -108,7 +108,7 @@ Medidas técnicas implementadas:
 | Cifrado en reposo | El cifrado del campo `NaturalPerson` no está implementado; el cifrado de base de datos/almacén de objetos a nivel de implementación se debe configurar y verificar por separado |
 | Control de acceso | Basado en roles (`@PreAuthorize`) + autenticación reforzada (step-up) para lecturas confidenciales |
 | Registro de auditoría | Cadena hash a prueba de manipulaciones para todas las operaciones |
-| MFA | WebAuthn / TOTP para todas las cuentas de operador |
+| MFA | Step-up TOTP para operaciones protegidas (modo local) o acceso condicional de Entra (`ENTRA_ENABLED=true`); WebAuthn no está implementado en la aplicación |
 | Seudonimización | `NaturalPerson.id` (UUID) utilizado en referencias entre módulos en lugar del nombre |
 | Respuesta a incidentes | Existen registros manuales de incidentes y monitoreo de plazos; no se implementa la automatización de notificaciones a autoridades/interesados |
 

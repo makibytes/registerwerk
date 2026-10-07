@@ -122,7 +122,7 @@ Chaque méthode de contrôleur nécessitant une autorisation est annotée avec `
 
 ```java
 @GetMapping("/assets")
-@PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDITOR', 'ISSUER')")
+@PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT', 'ISSUER')")
 public List<AssetResponse> listAssets() { ... }
 
 @PostMapping("/assets/{id}/deploy")

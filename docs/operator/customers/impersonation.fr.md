@@ -9,7 +9,7 @@ Un client dit que le Trading Desk refuse de lui laisser publier une offre. Vous 
 
 **Le mode support met fin à cette boucle.** Il ouvre le portail client avec l'organisation du client sélectionnée, de sorte que vous voyez précisément ce qu'il voit.
 
-C'est aussi la chose la plus puissante que vous puissiez faire sans l'accord d'une seconde personne, et elle mérite d'être employée avec discernement.
+Il donne accès à la vue qu'un client a de ses propres données ; il est donc encadré : le démarrage exige une preuve d'authentification renforcée récente et un motif écrit, la session par défaut est en **lecture seule**, et une session pouvant écrire exige un deuxième approbateur et n'existe qu'en mode démo.
 
 ---
 
@@ -17,7 +17,9 @@ C'est aussi la chose la plus puissante que vous puissiez faire sans l'accord d'u
 
 Pas une réinitialisation de mot de passe. Pas une connexion en tant que lui. Vous n'obtenez jamais ses identifiants et il n'est jamais déconnecté.
 
-Le backend émet un **jeton de courte durée** portant :
+L'appel de démarrage (`POST /api/v1/impersonation`, motif d'authentification renforcée `ADMIN_IMPERSONATION`) porte le client, un **motif obligatoire** (au moins 15 caractères) et, en option, une référence de ticket. Il ne renvoie **aucun jeton**, mais une URL de transfert contenant un **code à usage unique**, valable 60 secondes. Le portail client échange ce code contre un cookie de session httpOnly ; rejouer le code met fin à la session. Le jeton ne passe donc jamais entre les mains de l'opérateur ni dans l'historique de son navigateur.
+
+Le jeton de session derrière le cookie porte :
 
 | Revendication | Valeur |
 |---|---|
@@ -25,29 +27,48 @@ Le backend émet un **jeton de courte durée** portant :
 | `entityId` | L'organisation cliente à l'intérieur de laquelle vous agissez |
 | `roles` | `COMPANY_ADMIN`, `ISSUER`, `INVESTOR`, `TRADER` |
 | `imp` | `true` |
-| `exp` | Court — la durée de vie standard d'un jeton |
+| `imp_mode` | `READ_ONLY` (par défaut) ou `ACT_ON_BEHALF` |
+| `jti` | L'identifiant de l'enregistrement `impersonation_session` |
+| `exp` | 30 minutes (`registerwerk.auth.impersonation-ttl-seconds`, 1800 par défaut) |
 
 !!! success "Le sujet reste vous, et c'est toute la conception"
-    Parce que `sub` demeure votre identifiant, **chaque action que vous accomplissez vous est imputée** dans la [piste d'audit](../../platform/audit-log.md) — pas au client, ni à un acteur « système » partagé.
+    Parce que `sub` reste votre identifiant utilisateur, **chaque action que vous accomplissez vous est attribuée** dans le [journal d'audit](../../platform/audit-log.md) — pas au client, ni à un acteur « système » partagé.
 
     Un client ne peut jamais être tenu pour responsable de ce qu'un opérateur a fait en mode support, et un opérateur ne peut jamais se dissimuler derrière l'identité d'un client. Sans cette propriété, le mode support serait inutilisable dans un contexte réglementé.
 
     Le drapeau `imp: true` marque la session comme étant en mode support, de sorte que ces actions se distinguent des actions ordinaires dans le journal.
 
+### Modes
+
+| | `READ_ONLY` (par défaut) | `ACT_ON_BEHALF` |
+|---|---|---|
+| Point d'entrée de démarrage | `POST /api/v1/impersonation` | `POST /api/v1/impersonation/act-on-behalf` |
+| Qui peut démarrer | `REGISTRY_ADMIN` ou `SUPPORT_AGENT` | `REGISTRY_ADMIN` uniquement |
+| Authentification renforcée | Oui (`ADMIN_IMPERSONATION`) | Oui, plus un **deuxième approbateur** (`ADMIN_IMPERSONATION_ACT_ON_BEHALF`) |
+| Ce que la session peut faire | Lecture seule : `POST`, `PUT`, `PATCH` et `DELETE` sont refusés avec `403 IMPERSONATION_READ_ONLY` | Écriture, sauf la liste d'interdictions ci-dessous |
+| Mode production | Disponible | **Refusé.** En mode production, toute session active est appliquée en lecture seule, même une session d'écriture résiduelle |
+
+La liste d'interdictions de `ACT_ON_BEHALF` (`registerwerk.auth.impersonation-deny-patterns`) renvoie `403 IMPERSONATION_ACTION_DENIED` pour les attestations du client et l'administration des comptes : confirmation de paiement, contestation et règlement des trades, déclarations de défaut du repo desk, gestion des utilisateurs de l'entreprise, paramètres du fournisseur d'identité de l'entreprise, webhooks, identité d'organisation et suppression de documents KYC.
+
+!!! note "SUPPORT_AGENT"
+    `SUPPORT_AGENT` est un rôle de personnel opérateur dédié au support : il peut démarrer des sessions en lecture seule et lister les entités clientes pour en choisir une, rien d'autre. L'attribuer ou le retirer exige une authentification renforcée et un deuxième approbateur ; il est inclus dans les revues d'accès.
+
+Seules les entités juridiques **actives** peuvent être utilisées en mode support. La session est enregistrée dans `impersonation_session` (acteur, entité, mode, motif, ticket, approbateur, expiration), et **les administrateurs de l'entreprise du client voient chaque session sur leur entité** à `GET /api/v1/company/impersonation-sessions`.
+
 ---
 
 ## L'utiliser
 
-1. Dans le portail opérateur, ouvrez la fiche du client et choisissez **Impersonate**.
-2. Vous êtes transmis au portail client sur `/admin/handoff`, qui consomme le jeton depuis le fragment d'URL et vous dépose sur le tableau de bord.
-3. Une **barre persistante** figure en haut de chaque page : *Acting as **Nordwind Energie GmbH***, avec **Switch company** et **Exit impersonation**.
-4. Travaillez. Tout ce que vous faites est journalisé à votre nom.
-5. Choisissez **Exit impersonation** une fois terminé.
+1. Dans le portail opérateur, ouvrez la fiche du client et choisissez **Impersonate**. Saisissez le motif (et une référence de ticket si vous en avez une). La boîte de dialogue propose la lecture seule ; le mode écriture n'apparaît qu'en mode démo.
+2. Vous êtes transféré au portail client à `/admin/handoff`. Le fragment d'URL porte le `code` à usage unique, `entityId` et `entityName` ; le portail échange le code contre son cookie de session et vous dépose sur le tableau de bord.
+3. Une **barre permanente** se trouve en haut de chaque page : *Acting as **Nordwind Energie GmbH*** (dans une session en lecture seule : *Viewing … (read-only support session - changes are blocked)*), avec **Switch company** et **Exit impersonation**.
+4. Regardez et diagnostiquez. Tout ce que vous faites est journalisé à votre nom.
+5. Choisissez **Exit impersonation** une fois terminé. La session prend fin et est journalisée ; sans cela, elle expire après 30 minutes.
 
-Vous pouvez aussi entrer sans choisir de client au préalable — la barre indique alors *Admin mode — no company selected* et propose **Select company**, avec une liste consultable.
+Vous pouvez aussi entrer sans avoir choisi de client — la barre indique alors *Admin mode — no company selected* et propose **Select company**, avec une liste de recherche. Un `SUPPORT_AGENT` arrive sur ce sélecteur d'entreprise après la connexion.
 
 !!! tip "La barre est toujours visible, et ce n'est pas un hasard"
-    Tout `REGISTRY_ADMIN` voit la barre du mode support dans le portail client en permanence, qu'une société soit sélectionnée ou non. C'est un rappel constant que vous n'êtes pas un utilisateur ordinaire de cette interface, et cela rend bien plus difficile de travailler par inadvertance dans le mauvais contexte.
+    Tout `REGISTRY_ADMIN` voit la barre d'usurpation dans le portail client en permanence, qu'une société soit sélectionnée ou non. C'est un rappel constant que vous n'êtes pas un utilisateur ordinaire de cette interface, et elle rend bien plus difficile de travailler par erreur dans le mauvais contexte.
 
 ---
 
@@ -91,41 +112,45 @@ C'est une contrainte réelle, pas une lacune à contourner. Dans les installatio
 
 ### Autres limites
 
-- **Le jeton est de courte durée.** Les longues sessions expirent ; rentrez à nouveau plutôt que de chercher à prolonger.
-- **Vous obtenez un jeu de rôles fixe**, et non les rôles propres à un utilisateur donné. Vous ne pouvez pas reproduire un problème dépendant des permissions plus étroites d'un utilisateur.
-- **L'authentification renforcée et la double validation s'appliquent toujours.** Le mode support ne les contourne pas.
-- **Vous ne pouvez pas prendre la place d'un autre opérateur.** Il ne vise que les entités juridiques clientes.
+- **La session est de courte durée.** Elle expire après 30 minutes ; rentrez à nouveau (avec un nouveau motif) plutôt que d'essayer de la prolonger.
+- **Le code de transfert est à usage unique et vaut 60 secondes.** Si le portail ne le récupère pas à temps, ou s'il est rejoué, la session prend fin ; recommencez.
+- **Vous obtenez un ensemble de rôles fixe**, et non les rôles propres à un utilisateur donné. Vous ne pouvez pas reproduire un problème qui dépend des permissions plus restreintes d'un utilisateur.
+- **L'authentification renforcée et les quatre yeux ne sont pas contournés.** Le démarrage exige votre propre preuve d'authentification renforcée ; une session d'écriture exige en plus un deuxième approbateur. Dans une session, les opérations protégées du client restent protégées, et la file d'approbation refuse les sessions en mode support.
+- **Vous ne pouvez pas usurper un autre opérateur.** Il ne vise que les entités juridiques clientes.
 
 ---
 
 ## L'encadrer
 
-Le mode support est une capacité permanente de tout `REGISTRY_ADMIN`. Cela en fait une question de contrôle plutôt qu'une question technique, et les auditeurs poseront la question.
+Le mode support est ouvert à tout `REGISTRY_ADMIN` et à tout `SUPPORT_AGENT`. C'est donc une question de contrôle autant que de technique, et les auditeurs poseront la question.
 
 !!! tip "Pratiques à adopter"
 
-    **Exigez un motif, consigné hors de la plateforme.** Une référence de ticket, avant la session. La piste d'audit consigne que vous avez utilisé le mode support ; elle ne peut pas consigner *pourquoi*.
+    **Rendez le motif utile.** La plateforme refuse un démarrage sans motif d'au moins 15 caractères et l'enregistre, avec la référence de ticket facultative, dans `impersonation_session` et dans l'événement d'audit. Mettez le numéro de ticket dans le champ ticket et écrivez dans le motif ce que vous devez voir.
 
-    **Passez en revue les événements de mode support périodiquement.** Ils sont interrogeables. Un coup d'œil mensuel sur qui a assisté qui, rapproché des tickets, transforme un pouvoir illimité en pouvoir supervisé.
+    **Passez régulièrement en revue les événements de mode support.** Ils sont interrogeables (noms d'événements ci-dessous). Un examen mensuel de qui a ouvert quoi, rapproché des tickets, transforme un pouvoir étendu en pouvoir supervisé. Les administrateurs de l'entreprise du client peuvent faire le même contrôle de leur côté.
 
-    **Gardez `REGISTRY_ADMIN` restreint.** Chaque détenteur peut entrer chez chaque client. C'est le meilleur argument en faveur d'une liste d'administrateurs réduite.
+    **Privilégiez `SUPPORT_AGENT` pour le personnel du support.** Ce rôle démarre des sessions en lecture seule et rien d'autre ; le support n'a alors pas besoin d'un compte `REGISTRY_ADMIN`.
 
-    **Dites aux clients que cela existe.** Découvrir après coup que le personnel de l'opérateur peut entrer dans leur portail abîme la confiance bien plus que la capacité elle-même. Bien présentée — *nous pouvons voir ce que vous voyez, chaque action est consignée à notre nom* — elle rassure.
+    **Gardez `REGISTRY_ADMIN` restreint.** Chaque titulaire peut démarrer des sessions pour chaque client actif.
 
-    **Ne laissez jamais une session ouverte.** Sortez une fois terminé. Un navigateur laissé sans surveillance en mode support est un navigateur laissé sans surveillance dans le compte d'un client.
+    **Dites aux clients que cela existe.** Découvrir après coup que le personnel de l'opérateur peut entrer dans leur portail nuit bien plus à la confiance que la capacité elle-même. Bien présenté — *nous pouvons voir ce que vous voyez, chaque action est enregistrée à notre nom, et vos administrateurs peuvent consulter chaque session* — cela rassure.
+
+    **Ne laissez jamais une session ouverte.** Quittez une fois terminé. Un navigateur laissé sans surveillance dans une session en mode support est un navigateur sans surveillance dans le compte d'un client (elle expire toutefois après 30 minutes).
 
 ---
 
 ## Ce qu'un auditeur demandera
 
-Ayez les réponses prêtes :
+Ayez des réponses prêtes :
 
-- Qui détient `REGISTRY_ADMIN`, et cela représente combien de personnes ?
-- Comment reliez-vous un événement de mode support à un motif d'assistance ?
-- Comment détecteriez-vous un usage du mode support *sans* ticket correspondant ?
-- Pouvez-vous démontrer que ces actions sont imputées à l'opérateur et non au client ?
+- Qui détient `REGISTRY_ADMIN` ou `SUPPORT_AGENT`, et combien de personnes cela représente-t-il ?
+- Comment relier un événement de mode support à un motif d'assistance ? (Le motif et le ticket figurent dans `impersonation_session` et dans l'événement `ADMIN_IMPERSONATION_STARTED`.)
+- Comment détecteriez-vous un mode support *sans* ticket correspondant ?
+- Pouvez-vous démontrer que les actions effectuées en mode support sont attribuées à l'opérateur, et non au client ?
+- Le mode support en écriture est-il désactivé en production ? (Oui : le mode production refuse `ACT_ON_BEHALF` et rabaisse toute session active en lecture seule.)
 
-La dernière est une démonstration en direct, qu'il vaut la peine de répéter : entrez chez une entité de test, accomplissez une action anodine, montrez l'entrée d'audit nommant votre utilisateur avec `imp` positionné.
+La piste d'audit contient les événements `ADMIN_IMPERSONATION_STARTED`, `ADMIN_IMPERSONATION_HANDOFF_EXCHANGED` et `ADMIN_IMPERSONATION_ENDED` ; les requêtes d'une session portent la marque `imp`. La question de l'attribution est une démonstration en direct qui mérite d'être répétée : ouvrez une entité de test, regardez une page, montrez les entrées d'audit qui nomment votre utilisateur avec `imp` positionné, et montrez la session dans la vue des administrateurs de l'entreprise du client.
 
 ---
 

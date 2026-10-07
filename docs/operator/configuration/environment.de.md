@@ -12,7 +12,9 @@ Alle Konfiguration erfolgt über Umgebungsvariablen. Kopieren Sie `.env.example`
 |---|---|---|
 | `DB_URL` | `jdbc:postgresql://postgres:5432/registerwerk` | JDBC-Verbindungs-URL |
 | `DB_USER` | `registerwerk` | Datenbankbenutzer |
-| `DB_PASSWORD` | — | **Erforderlich** |
+| `DB_PASSWORD` | — | **Erforderlich** (Passwort der Migrations-/Eigentümer-Anmeldung) |
+| `DB_APP_USER` / `DB_APP_PASSWORD` | `DB_USER` / `DB_PASSWORD` | Laufzeit-Anmeldung, mit der sich die Anwendung verbindet (`registerwerk_app` in den mitgelieferten Compose- und Helm-Setups). Sie muss im Produktionsmodus von der Eigentümer-Anmeldung abweichen, weil die Anwendung die Audit-Tabellen nicht besitzen darf |
+| `SPRING_FLYWAY_USER` / `SPRING_FLYWAY_PASSWORD` | — | Migrations-/Eigentümer-Anmeldung, nur von Flyway genutzt (in Compose und Helm auf `DB_USER`/`DB_PASSWORD` gesetzt) |
 
 ## Authentifizierung
 
@@ -30,9 +32,8 @@ Alle Konfiguration erfolgt über Umgebungsvariablen. Kopieren Sie `.env.example`
 | Variable | Beschreibung |
 |---|---|
 | `JWT_ISSUER_URI` | OIDC-Aussteller-URL – leer lassen für HS256-Entwicklungsmodus; für die Produktion setzen (z. B. `https://login.microsoftonline.com/<tenant>/v2.0`) |
-| `ENTRA_CLIENT_ID` | OIDC-Client-ID, die vom Kong-Plugin verwendet wird |
-| `ENTRA_CLIENT_SECRET` | OIDC-Client-Geheimnis, das vom Kong-Plugin verwendet wird |
-| `ENTRA_ISSUER` | OIDC-Aussteller, der im Kong-Plugin konfiguriert ist |
+| `ENTRA_CLIENT_ID` | Client-ID der API-App-Registrierung; zusammen mit dem Secret für app-only-Zugriff auf Microsoft Graph (Zwei-Faktor-Status, Support-Konsole). Wird nicht von Kong genutzt, das kein OIDC macht |
+| `ENTRA_CLIENT_SECRET` | Client-Secret der API-App-Registrierung (app-only-Graph-Zugangsdaten; erforderlich bei `ENTRA_SUPPORT_ENABLED=true`) |
 
 ## Blockchain-RPCs
 
@@ -76,3 +77,11 @@ Dokumente kleiner als 5 MB werden inline als BYTEA in PostgreSQL gespeichert. Do
 |---|---|
 | `CUSTOMER_FRONTEND_URL` | Basis-URL des Kunden-Frontends (für E-Mail-Links) |
 | `FRONTEND_BUILD_ENV` | Frontend-Build-Ziel: `production` oder `testnet` |
+
+## Produktionsmodus und Freigabe-Gates
+
+Setzen Sie `REGISTERWERK_PRODUCTION_MODE=true` in jeder Produktionsinstallation. Es macht aus den Bereitschaftsprüfungen Startverweigerungen und aktiviert die nur für die Produktion geltenden Kontrollen. [Produktionsmodus und Freigabe-Gates](../security/production-mode.md) (nur Englisch) listet jedes Gate, die steuernde Variable und was verweigert wird. Die Seite dokumentiert auch die Freigabe- und Bestätigungsvariablen (`REGISTERWERK_LENDING_RELEASE_APPROVED`, `REGISTERWERK_REPO_DESK_RELEASE_APPROVED`, `REGISTERWERK_TRADING_LEGAL_OPINION_REF`, `REGISTERWERK_AUDIT_ALLOW_OWNER_RUNTIME_ROLE`, `REGISTERWERK_AUDIT_SIGNING_PROVIDER`, `REGISTERWERK_WEBHOOK_ALLOW_INSECURE_URLS`, `REGISTERWERK_WALLET_MASTER_KEY`, `LINK_BY_EMAIL_WITHOUT_VERIFICATION`, `SWAGGER_ENABLED` und weitere).
+
+## Weitere Einstellungen
+
+Registerkalender, Bestätigungstiefen, Anmelde-Drosselung, Handel, Travel Rule, Reporting, Audit-Anker und Signatur-Verwahrung samt Standardwerten und den Erwartungen des Produktionsmodus stehen in der [Referenz der Betriebseinstellungen](environment-settings.md) (nur auf Englisch).

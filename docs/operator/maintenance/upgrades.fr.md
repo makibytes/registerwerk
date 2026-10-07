@@ -135,49 +135,16 @@ Les migrations Flyway de ce dépôt ne disposent pas de scripts de retour arriè
 
 ## Mise à niveau de Kong
 
+1. Mettez à jour la balise d'image `kong` dans `docker-compose.yml` (et dans `gateway/docker-compose.kong.yml` si vous utilisez la pile passerelle autonome).
+2. Récupérez l'image et validez la configuration déclarative avec la nouvelle version avant de basculer :
+
 ```bash
-docker compose stop kong
 docker compose pull kong
-docker compose up -d kong
+docker compose run --rm kong kong config parse /etc/kong/kong.yml
+docker compose up -d --force-recreate kong
 ```
 
-Après la mise à niveau de Kong, réappliquez la configuration déclarative :
-
-```bash
-deck sync --config gateway/kong.yml
-```
-sidebar_position: 3
----
-
-# Mises à niveau
-
-## Mise à niveau du backend
-
-1. Extrayez une nouvelle image ou créez localement :
-   ```bash
-   docker build -t registerwerk-backend:v2.0.0 backend/
-   ```
-
-2. Mettez à jour la balise d'image dans `docker-compose.yml`
-
-3. Commencez par un redémarrage progressif (Flyway migre automatiquement) :
-   ```bash
-   docker compose up -d --no-deps backend
-   ```
-
-4. Vérifiez l'état : `curl http://localhost:48080/actuator/health`
-
-## Mises à niveau des contrats intelligents
-
-Les modules de conformité prennent en charge la mise à niveau sur place via `UpgradeCompliance.s.sol` :
-
-```bash
-forge script script/UpgradeCompliance.s.sol \
-  --rpc-url $ETH_MAINNET_RPC \
-  --broadcast
-```
-
-Les jetons et les contrats d'identité ne sont **pas évolutifs de par leur conception** (l'immuabilité est une exigence légale pour les titres). Les mises à jour nécessitent le déploiement d'une nouvelle suite et la migration des investisseurs.
+Kong relit `gateway/kong.yml` au démarrage : en mode sans base de données, il n'y a aucune migration à exécuter ni configuration à réappliquer. Sur Kubernetes, la version du sous-chart Kong est figée dans `deploy/helm/registerwerk/Chart.yaml` ; mettez-la à jour à cet endroit et exécutez `helm upgrade`.
 
 ## Mises à niveau du sous-graphe
 
@@ -199,13 +166,6 @@ graph-node réindexe chaque source rendue à partir du bloc configuré de cette 
 ait atteint la tête de chaîne et que ses plages d'événements aient été rapprochées indépendamment. Ne supprimez pas
 le sous-graphe précédent avant validation ; la restauration signifie redéployer le manifeste
 et la configuration source précédemment approuvés sous une autre nouvelle étiquette de version.
-
-## Mises à niveau de Kong
-
-1. Mettez à jour la balise d'image `kong` dans `docker-compose.yml` (et `gateway/docker-compose.kong.yml`
-si vous utilisez la pile de passerelle autonome uniquement).
-2. Redémarrez Kong : `docker compose restart kong` — il relit `gateway/kong.yml` au démarrage
-(mode sans base de données, aucune migration à exécuter).
 
 ## Mises à jour des dépendances
 

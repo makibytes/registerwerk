@@ -145,7 +145,7 @@ Registerwerk hebt die Hand. Es kann keinen Anspruch durchsetzen — das ist Sach
 
 1. **Konzeption** — Nordwind beschreibt eine Anleihe; der Betreiber genehmigt sie.
 2. **Emission** — ein Contract wird ausgebracht, Anleger zugelassen, 50.000 Stück gemintet.
-3. **Bestand** — Anleger halten; das Register ist maßgeblich, die Chain überprüfbar.
+3. **Bestand** — Anleger halten; das Register ist die maßgebliche Quelle, die Chain überprüfbar.
 4. **Handel** — Stücke wechseln den Besitzer; Compliance-Regeln halten bei jeder Übertragung.
 5. **Beleihung** — ein Inhaber verpfändet Stücke und leiht sich dagegen.
 6. **Rückzahlung** — Kupons gezahlt, Kapital zurückgezahlt, Token vernichtet, Register geschlossen.

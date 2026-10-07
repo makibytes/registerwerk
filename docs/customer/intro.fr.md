@@ -32,7 +32,7 @@ C'est la seule idée structurelle qui mérite d'être comprise, car la plupart d
 !!! abstract "Le registre"
     Une base de données, tenue par l'opérateur. Elle nomme le titulaire, le montant, les restrictions.
 
-    **L'enregistrement qui a une portée juridique.**
+    **L'enregistrement que Registerwerk traite comme source de vérité.** Qu'il constitue un registre ayant un effet juridique dépend de l'opérateur et de l'instrument.
 
 !!! abstract "Le jeton"
     Un solde dans un contrat intelligent sur une blockchain. Public et vérifiable indépendamment.
@@ -41,7 +41,7 @@ C'est la seule idée structurelle qui mérite d'être comprise, car la plupart d
 
 </div>
 
-Un logiciel surveille la chaîne et maintient le registre en phase. La plupart du temps, ils concordent. Quand ce n'est pas le cas, le registre fait foi et l'écart est traité par un humain.
+Un logiciel surveille la chaîne et maintient le registre en phase. La plupart du temps, ils concordent. Quand ce n'est pas le cas, le registre est la source de vérité pour le rapprochement propre à Registerwerk, et l'écart est traité par un humain.
 
 [:octicons-arrow-right-24: Détention et conservation](lifecycle/holding.md) approfondit la question.
 

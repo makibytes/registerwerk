@@ -105,7 +105,7 @@ Misure tecniche implementate:
 | Crittografia a riposo | La crittografia del campo `NaturalPerson` non è implementata; la crittografia del database/archivio oggetti a livello di distribuzione deve essere configurata e verificata separatamente |
 | Controllo accessi | Basato su ruoli (`@PreAuthorize`) + step-up per letture sensibili |
 | Registrazione di controllo | Catena hash a prova di manomissione per tutte le operazioni |
-| MFA | WebAuthn / TOTP per tutti gli account operatore |
+| MFA | Step-up TOTP per le operazioni protette (modalità locale) o accesso condizionale Entra (`ENTRA_ENABLED=true`); WebAuthn non è implementato nell'applicazione |
 | Pseudonimizzazione | `NaturalPerson.id` (UUID) utilizzato nei riferimenti tra moduli al posto del nome |
 | Risposta all'incidente | Esistono registrazioni manuali degli incidenti e monitoraggio delle scadenze; non è implementata l'automazione della notifica alle autorità/interessati |
 

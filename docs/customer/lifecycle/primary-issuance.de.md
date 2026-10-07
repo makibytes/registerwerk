@@ -63,7 +63,7 @@ Erst dann kann er die Anleihe halten.
 
 ### Was ein Registereintrag enthält
 
-Jeder zugelassene Anleger wird zum **Inhaber** — einer Zeile im Register. Nach §16 eWpG ist das die maßgebliche Aufzeichnung, und das deutsche Recht kennt zwei Formen:
+Jeder zugelassene Anleger wird zum **Inhaber** — einer Zeile im Register. Im Modell des eWpG ist das die maßgebliche Aufzeichnung, sofern der Betreiber eine zugelassene registerführende Stelle ist (was dieses Repository nicht begründet), und das deutsche Recht kennt zwei Formen:
 
 === "Sammeleintragung"
 
@@ -159,7 +159,7 @@ Der dritte verdient Aufmerksamkeit. **Lieferung gegen Zahlung** beseitigt das ä
 
 Der letzte Übergang: `APPROVED` → `ISSUED`.
 
-Die Anleihe ist live. Das Register ist maßgeblich. Anleger sehen ihre Bestände, erhalten Auszüge und können — ab hier — handeln.
+Die Anleihe ist live. Das Register ist Registerwerks maßgebliche Quelle. Anleger sehen ihre Bestände, erhalten Auszüge und können — ab hier — handeln.
 
 ```mermaid
 stateDiagram-v2

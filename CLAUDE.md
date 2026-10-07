@@ -7,7 +7,7 @@ Reference implementation for an electronic-securities registry that models issua
 ## Monorepo Structure
 
 ```
-backend/              Spring Boot 4.1 / Java 25 — single API monolith (Spring Modulith 2.1)
+backend/              Spring Boot 4.1 / JDK 25 — single API monolith (Spring Modulith 2.1)
 contracts/            Foundry smart contracts (EVM + confidential)
 frontend-operator/    Angular 22 — operator admin portal (:44200)
 frontend-customer/    Angular 22 — customer portal (:44201)
@@ -25,13 +25,18 @@ docker-compose.yml    / .env.example
 - **Backend is a pure resource server** — stateless JWT validation; does not issue OIDC tokens.
 - **Auth toggle:** `ENTRA_ENABLED=false` → HS256 dev mode with `JWT_DEV_SECRET`; `=true` → Entra sign-in for customers, validated by the backend. `DelegatingJwtDecoder` routes on the JWS `alg` header (HS256 → local, else JWKS), so the operator portal keeps built-in login and local TOTP step-up in both modes. Both branches are issuer-pinned; the OIDC branch is also audience-pinned via `JWT_AUDIENCE`.
 - **Two-factor auth** is Entra's, not ours: Graph cannot create an Authenticator/TOTP method, so enrolment happens on Microsoft's security-info page and `/security` guides users there. Conditional Access enforces it at sign-in — no app-side gate. Step-up is dual-track: local TOTP (403) in HS256 mode, `acrs` + a 401 claims challenge in Entra mode. Runbook: `docs/platform/entra-setup.md`.
+- **Dual control (four eyes)** — a second, different, enabled `REGISTRY_ADMIN` or `COMPLIANCE_OFFICER` approves sharp operations (`@RequiresStepUp(requireSecondApprover = true)` plus the `DualControlGate` reasons; generated list: `docs/compliance/step-up-matrix.md`). The approver's token is `use=dual_control` (audience `registerwerk-dual-control`), valid only in the `X-Dual-Control-Token` header — it is refused as a Bearer on every endpoint — and is bound to the action (reason) and a digest of the exact target (method, path, query and canonical JSON body), single use, with a 300 s window (`registerwerk.auth.step-up.dual-control.window-seconds`). The body is bound for every reason except the five in `body-opt-out-reasons` (secret-bearing or non-JSON payloads; their method/path/query stay bound). The initiator sends the real request with their *own* step-up token as Bearer. Until two enabled, TOTP-enrolled admins exist a write-once bootstrap latch lets one step-up suffice. Duplicate JSON keys, repeated query parameters and numbers that are not exact decimals are refused when the digest is built.
+- **In-app approval queue** (`/api/v1/approvals`, `stepup` module, both portals): the initiator files `{action, method, path, query, body}`, an eligible approver sees it in the inbox and approves with their own fresh TOTP, the initiator *claims* the single-use token (the claimed token also carries the initiator id, so it is useless to anyone else) and retries the original request. Self-approval is impossible (DB constraint); requests expire after 15 min (`registerwerk.auth.step-up.approval-queue.*`). The copy-the-block flow (`POST /api/v1/auth/step-up` with `action`/`target`/`targetBody`) still works.
+- **Production mode has one switch**: `shared.ProductionMode` (`REGISTERWERK_PRODUCTION_MODE` / `registerwerk.production-mode`, resolved from the Spring `Environment`). Never read the variable with `System.getenv` or `@Value` — inject `ProductionMode`. It turns the readiness checks into start-up refusals (`docs/operator/security/production-mode.md`) and enables the production-only behaviour: impersonation is read-only only, lenders need an eligible entity, peer listings are refused while the venue is `DEMO_ONLY`, forward-priced vaults need a dealing cut-off.
+- **Impersonation**: operator starts it with step-up + a mandatory reason; `READ_ONLY` by default, `ACT_ON_BEHALF` exists in demo mode only (second approver + deny-list). The `SUPPORT_AGENT` role may start read-only sessions and nothing else.
+- **Shared money/time/unit helpers** (use them, do not add local copies): `shared.Money` (ISO 4217 minor units, `HALF_UP`, unknown currency refused), `shared.RegisterClock` (the register's calendar day in `registerwerk.register.time-zone`, default `Europe/Berlin`), `deployment.api.RegisterUnits` (the register counts **whole units**: ERC-20/3643/721/1155/3525, SPL and Daml bond tokens deploy with `decimals = 0`, and coupon, redemption, subscription and trading flows refuse — 409 — an asset whose live deployment does not report 0 decimals, e.g. Starknet ERC-20 (fixed 18) and Stellar assets (7)).
 - **Single PostgreSQL instance** — always hosts the `registerwerk` database, plus a `chaincache` database (created by `postgres-init/01-create-chaincache-db.sql`) when the optional `chaincache-true` profile is enabled — chaincache does not get its own dedicated Postgres container, mirroring how a managed instance (Cloud SQL on GKE) hosts multiple databases in production. Kong runs DB-less (`gateway/kong.yml` loaded via `KONG_DECLARATIVE_CONFIG`), so it has no database of its own — there is no `kong` or `konga` database/service in this stack.
 
 ---
 
 ## Backend
 
-**Stack:** Java 25, Spring Boot 4.1, Spring Security 7, Spring Modulith 2.1, JPA/Hibernate, Flyway, Caffeine (30s TTL; only the `assets` cache is wired to a read path — see `CacheConfig`'s javadoc for why `deployments`/`entities` deliberately aren't yet), Jackson 3 (tools.jackson), Web3j (EVM), Solanaj (Solana), Daml Java bindings (Canton), plus native Starknet (Cairo/STARK ECDSA) and Stellar (Horizon/Ed25519) client code — see `blockchain/internal/deploy/`.
+**Stack:** JDK 25 (required; `java.version` is 25 — set `JAVA_HOME` to a 25 JDK before `./mvnw`), Spring Boot 4.1, Spring Security 7, Spring Modulith 2.1, JPA/Hibernate, Flyway, Caffeine (30s TTL; only the `assets` cache is wired to a read path — see `CacheConfig`'s javadoc for why `deployments`/`entities` deliberately aren't yet), Jackson 3 (tools.jackson), Web3j (EVM), Solanaj (Solana), Daml Java bindings (Canton), plus native Starknet (Cairo/STARK ECDSA) and Stellar (Horizon/Ed25519) client code — see `blockchain/internal/deploy/`.
 Build: `./mvnw verify` — runs unit + integration tests + JaCoCo. Coverage gate: bundle LINE ≥ 0.36 / BRANCH ≥ 0.23, plus stricter per-package floors (e.g. `customer/internal` 0.60/0.40, `registertransfer/internal` 0.85/0.70) — check `pom.xml` before adding code to those packages.
 **Lazy datasource:** `spring.datasource.connection-fetch=lazy` — defers physical DB connection until first SQL statement.
 
@@ -44,7 +49,7 @@ Build: `./mvnw verify` — runs unit + integration tests + JaCoCo. Coverage gate
 | `web/` + `web/dto/` | REST controllers + request/response records |
 | `events/` | Domain events (`@NamedInterface`; implement `audit.api.AuditableEvent` for zero-wiring audit) |
 
-Modules: `asset`, `audit`, `auth`, `blockchain`, `chain`, `customer`, `deployment`, `erc3643`, `kyc`, `marketplace`, `notification`, `onboarding`, `orgidentity`, `screening`, `stepup`, `trading`, `wallet`, … (see `platform/modules.md`). Cross-module checks use fail-closed ports (`screening.ScreeningGate`, `orgidentity.PermissionGate`).
+Modules (39, every top-level package carries `@ApplicationModule`): `accessreview`, `admin`, `asset`, `audit`, `auth`, `blockchain`, `bootstrap`, `chain`, `corporateactions`, `customer`, `deployment`, `dora`, `endpoint`, `entra`, `erc3643`, `externalref`, `finality`, `idempotency`, `indexer`, `infrastructure`, `kyc`, `lending`, `marketplace`, `notification`, `onboarding`, `orgidentity`, `payment`, `registerstatement`, `registertransfer`, `regreporting`, `repo`, `screening`, `shared`, `stepup`, `support`, `trading`, `travelrule`, `wallet`, `webhook` (one line each in `docs/platform/modules.md`). Cross-module checks use fail-closed ports (`screening.ScreeningGate`, `orgidentity.PermissionGate`).
 
 **URL auth:**
 
@@ -66,8 +71,12 @@ Modules: `asset`, `audit`, `auth`, `blockchain`, `chain`, `customer`, `deploymen
 - DTOs are Java `record` types with Bean Validation annotations
 - `@Transactional` at service method level, not on repositories
 - `@PreAuthorize("hasRole('REGISTRY_ADMIN')")` on controllers/methods
-- Flyway uses a single clean-install baseline, `V1__initial_schema.sql`. Add later changes as `V{n}__description.sql`; do not edit migrations after release. CI (`scripts/check-destructive-migrations.sh`, wired into `backend.yml`) rejects unguarded `DROP TABLE`, `DROP COLUMN`, and `TRUNCATE` statements; acknowledge an intentional destructive change with `-- migration-safety: ack (<why>)` directly above it.
+- Flyway: baseline `V1__initial_schema.sql` plus later `V{n}__description.sql` files (the directory is the list; the baseline is re-squashed from time to time, so do not hard-code migration numbers in docs or code). Do not edit migrations after release. CI (`scripts/check-destructive-migrations.sh`, wired into `backend.yml`) rejects unguarded `DROP TABLE`, `DROP COLUMN`, and `TRUNCATE` statements; acknowledge an intentional destructive change with `-- migration-safety: ack (<why>)` directly above it.
 - Emit audit events in every state-changing service method
+- Amounts and dates: `Money` for rounding/minor units, `RegisterClock` for "today", `RegisterUnits` before any flow that turns register units into money or a mint
+- Roles (`auth.api.AppUserRole`): `REGISTRY_ADMIN`, `AUDIT`, `COMPLIANCE_OFFICER`, `RELATIONSHIP_MANAGER` (read-only, assigned entities), `SUPPORT_AGENT` (read-only impersonation), `ISSUER`, `INVESTOR`, `COMPANY_ADMIN`, `TRADER`, `DAPP_PUBLISHER`. There is no second-approver role: it is a capability of `REGISTRY_ADMIN`/`COMPLIANCE_OFFICER`. Roles live in the `app_user` row, never in the IdP
+- DB logins: Flyway runs as the schema owner, the application runs as the DML-only `registerwerk_app` role (see the env table)
+- Signing custody: software keystores (KEK-wrapped DEKs; `rotate-kek`/`rotate-kek-all`), a PKCS#11 HSM, or a cloud-KMS signer (`registerwerk.wallet.signer=kms`, GCP only; attach with `POST /api/v1/admin/wallets/attach-kms`)
 
 ---
 
@@ -94,7 +103,7 @@ by default, so neither Zone.js nor an explicit `provideZonelessChangeDetection()
 | Both | Font: **Manrope**; Angular Material M3 (operator: indigo palette, customer: teal palette) |
 
 **Operator structure:** sidebar + topbar layout; `ShellComponent` wraps all guarded routes.
-**Customer structure:** sticky top nav; impersonation bar shown for all `REGISTRY_ADMIN` users (always, not only when actively impersonating).
+**Customer structure:** sticky top nav; impersonation bar shown for `REGISTRY_ADMIN` and `SUPPORT_AGENT` users (always, not only when actively impersonating; read-only sessions show a banner).
 
 ---
 
@@ -102,6 +111,7 @@ by default, so neither Zone.js nor an explicit `provideZonelessChangeDetection()
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `REGISTERWERK_PRODUCTION_MODE` | `false` | The single production switch (`shared.ProductionMode`): readiness checks refuse start-up instead of warning; read-only impersonation only; see `docs/operator/security/production-mode.md` |
 | `ENTRA_ENABLED` | `false` | `false` → built-in login everywhere; `true` → Entra sign-in for customers (operators keep built-in login) |
 | `DEFAULT_ADMIN_EMAIL` / `_PASSWORD` | — | Seeds built-in admin `app_user` row |
 | `JWT_DEV_SECRET` | `registerwerk-dev-jwt-secret-…` | HS256 signing key — must never be empty |
@@ -196,4 +206,4 @@ Marketplace = metadata-only listings: signed manifests (EIP-191 `personal_sign` 
 
 **Indexers:** EVM (Graph Node / RPC) and Solana write to `token_transfer` / `indexer_state` tables. `IndexerMonitorService` checks liveness.
 
-**Kong 3.8** (`gateway/`): declarative `kong.yml`, DB-less. Plugins: `rate-limiting`, `proxy-cache` on public routes, `request-transformer` (strips client-supplied identity headers), `cors`, `bot-detection`, `ip-restriction` on `/api/v1/admin`, `response-transformer` (security headers). It does **not** validate JWTs — `openid-connect` is Enterprise/Konnect-only. Operator bypasses Kong entirely.
+**Kong 3.9** (`gateway/`, image `kong:3.9.3` in `docker-compose.yml`): declarative `kong.yml`, DB-less. Plugins: `rate-limiting`, `proxy-cache` on public routes, `request-transformer` (strips client-supplied identity headers), `cors`, `bot-detection`, `ip-restriction` on `/api/v1/admin`, `response-transformer` (security headers). It does **not** validate JWTs — `openid-connect` is Enterprise/Konnect-only. Operator bypasses Kong entirely.

@@ -9,7 +9,7 @@ A customer says the Trading Desk will not let them list a holding. You look at t
 
 **Impersonation ends that loop.** It opens the customer portal with the customer's organisation selected, so you see precisely what they see.
 
-It is also the most powerful thing you can do without a second person's approval, and it deserves to be used deliberately.
+It gives access to a customer's view of their own data, so it is gated: starting a session needs a fresh step-up proof and a written reason, the default is a **read-only** session, and a session that can write needs a second approver and is available only in demo mode.
 
 ---
 
@@ -17,7 +17,9 @@ It is also the most powerful thing you can do without a second person's approval
 
 Not a password reset. Not logging in as them. You never obtain their credentials and they are never signed out.
 
-The backend mints a **short-lived token** that carries:
+The start call (`POST /api/v1/impersonation`, step-up reason `ADMIN_IMPERSONATION`) carries the customer, a **mandatory reason** (at least 15 characters) and an optional ticket reference. It returns **no token**. It returns a hand-off URL that holds a **one-time code**, valid for 60 seconds. The customer portal exchanges that code for an httpOnly session cookie; using the code a second time ends the session. The token therefore never passes through the operator's hands or browser history.
+
+The session token behind the cookie carries:
 
 | Claim | Value |
 |---|---|
@@ -25,7 +27,9 @@ The backend mints a **short-lived token** that carries:
 | `entityId` | The customer organisation you are acting within |
 | `roles` | `COMPANY_ADMIN`, `ISSUER`, `INVESTOR`, `TRADER` |
 | `imp` | `true` |
-| `exp` | Short — the standard token lifetime |
+| `imp_mode` | `READ_ONLY` (default) or `ACT_ON_BEHALF` |
+| `jti` | The id of the `impersonation_session` record |
+| `exp` | 30 minutes (`registerwerk.auth.impersonation-ttl-seconds`, default 1800) |
 
 !!! success "The subject stays you, and this is the whole design"
     Because `sub` remains your user id, **every action you take is attributed to you** in the [audit log](../../platform/audit-log.md) — not to the customer, and not to some shared "system" actor.
@@ -34,17 +38,34 @@ The backend mints a **short-lived token** that carries:
 
     The `imp: true` flag marks the session as impersonated, so impersonated actions are distinguishable from ordinary ones in the log.
 
+### Modes
+
+| | `READ_ONLY` (default) | `ACT_ON_BEHALF` |
+|---|---|---|
+| Start endpoint | `POST /api/v1/impersonation` | `POST /api/v1/impersonation/act-on-behalf` |
+| Who may start it | `REGISTRY_ADMIN` or `SUPPORT_AGENT` | `REGISTRY_ADMIN` only |
+| Step-up | Yes (`ADMIN_IMPERSONATION`) | Yes, plus a **second approver** (`ADMIN_IMPERSONATION_ACT_ON_BEHALF`) |
+| What the session can do | Reads only: `POST`, `PUT`, `PATCH` and `DELETE` are refused with `403 IMPERSONATION_READ_ONLY` | Writes, except the deny-list below |
+| Production mode | Available | **Refused.** In production mode every live session is enforced as read-only, even a leftover write session |
+
+The deny-list for `ACT_ON_BEHALF` (`registerwerk.auth.impersonation-deny-patterns`) returns `403 IMPERSONATION_ACTION_DENIED` for customer attestations and account administration: trade payment confirmation, dispute and settlement, repo-desk default declarations, company user management, company identity-provider settings, webhooks, organisation identity, and deletion of KYC documents.
+
+!!! note "SUPPORT_AGENT"
+    `SUPPORT_AGENT` is an operator-staff role for support work: it can start read-only sessions and list customer entities to pick one, and nothing else. Granting or removing it needs step-up and a second approver, and it is included in access reviews.
+
+Only **active** legal entities can be impersonated, the session is recorded in `impersonation_session` (actor, entity, mode, reason, ticket, approver, expiry), and **the customer's company administrators can see every session on their entity** at `GET /api/v1/company/impersonation-sessions`.
+
 ---
 
 ## Using it
 
-1. In the operator portal, open the customer's record and choose **Impersonate**.
-2. You are handed off to the customer portal at `/admin/handoff`, which consumes the token from the URL fragment and drops you into the dashboard.
-3. A **persistent bar** sits at the top of every page: *Acting as **Nordwind Energie GmbH***, with **Switch company** and **Exit impersonation**.
-4. Work. Everything you do is logged as you.
-5. **Exit impersonation** when finished.
+1. In the operator portal, open the customer's record and choose **Impersonate**. Enter the reason (and a ticket reference if you have one). The dialog offers read-only; the write mode appears only in demo mode.
+2. You are handed off to the customer portal at `/admin/handoff`. The URL fragment carries the one-time `code`, the `entityId` and the `entityName`; the portal exchanges the code for its session cookie and drops you into the dashboard.
+3. A **persistent bar** sits at the top of every page: *Acting as **Nordwind Energie GmbH*** (in a read-only session: *Viewing … (read-only support session - changes are blocked)*), with **Switch company** and **Exit impersonation**.
+4. Look and diagnose. Everything you do is logged as you.
+5. **Exit impersonation** when finished. The session ends and is audited; if you do not, it expires after 30 minutes.
 
-You can also enter without choosing a customer first — the bar reads *Admin mode — no company selected* and offers **Select company**, with a searchable list.
+You can also enter without choosing a customer first — the bar reads *Admin mode — no company selected* and offers **Select company**, with a searchable list. A `SUPPORT_AGENT` lands on this company picker after sign-in.
 
 !!! tip "The bar is always visible for a reason"
     Any `REGISTRY_ADMIN` sees the impersonation bar in the customer portal at all times, whether or not a company is selected. It is a standing reminder that you are not an ordinary user of this interface, and it makes accidental work-in-the-wrong-context much harder.
@@ -91,28 +112,31 @@ This is a real constraint, not a gap to be worked around. In Entra deployments y
 
 ### Other limits
 
-- **The token is short-lived.** Long sessions expire; re-enter rather than trying to extend.
+- **The session is short-lived.** It expires after 30 minutes; re-enter (with a fresh reason) rather than trying to extend.
+- **The hand-off code is single use and lives 60 seconds.** If the portal does not pick it up in time, or the code is replayed, the session ends; start again.
 - **You get a fixed role set**, not the specific roles of any individual user. You cannot reproduce a problem that depends on one user's narrower permissions.
-- **Step-up and four-eyes still apply.** Impersonation does not bypass them.
+- **Step-up and four-eyes are not bypassed.** Starting a session needs your own step-up proof; a write session also needs a second approver. Inside a session, the customer's own protected operations remain protected, and the approval queue refuses impersonation sessions.
 - **You cannot impersonate another operator.** It targets customer legal entities only.
 
 ---
 
 ## Governing it
 
-Impersonation is a standing capability of every `REGISTRY_ADMIN`. That makes it a control question rather than a technical one, and auditors will ask.
+Impersonation is available to every `REGISTRY_ADMIN` and every `SUPPORT_AGENT`. That makes it a control question as well as a technical one, and auditors will ask.
 
 !!! tip "Practices worth adopting"
 
-    **Require a reason, recorded outside the platform.** A ticket reference, before the session. The audit log records that you impersonated; it cannot record *why*.
+    **Make the reason meaningful.** The platform refuses a start without a reason of at least 15 characters and records it, with the optional ticket reference, in `impersonation_session` and in the audit event. Put the ticket number in the ticket field, and write what you need to see in the reason.
 
-    **Review impersonation events periodically.** They are queryable. A monthly look at who impersonated whom, and matching it to tickets, turns an unbounded power into a supervised one.
+    **Review impersonation events periodically.** They are queryable (see the event names below). A monthly look at who impersonated whom, matched to tickets, turns a wide capability into a supervised one. The customer's company administrators can run the same check from their side.
 
-    **Keep `REGISTRY_ADMIN` small.** Every holder can impersonate every customer. This is the single strongest argument for a tight admin roster.
+    **Prefer `SUPPORT_AGENT` for support staff.** It can start read-only sessions and nothing else, so support work does not need a `REGISTRY_ADMIN` account.
 
-    **Tell customers it exists.** Discovering after the fact that operator staff can enter their portal damages trust far more than the capability itself. Framed properly — *we can see what you see, every action is recorded against our name* — it reassures.
+    **Keep `REGISTRY_ADMIN` small.** Every holder can start sessions for every active customer.
 
-    **Never leave a session open.** Exit when finished. An unattended browser in an impersonated session is an unattended browser inside a customer's account.
+    **Tell customers it exists.** Discovering after the fact that operator staff can enter their portal damages trust far more than the capability itself. Framed properly — *we can see what you see, every action is recorded against our name, and your administrators can list every session* — it reassures.
+
+    **Never leave a session open.** Exit when finished. An unattended browser in an impersonated session is an unattended browser inside a customer's account (it does expire after 30 minutes).
 
 ---
 
@@ -120,12 +144,13 @@ Impersonation is a standing capability of every `REGISTRY_ADMIN`. That makes it 
 
 Have answers ready:
 
-- Who holds `REGISTRY_ADMIN`, and how many people is that?
-- How do you tie an impersonation event to a support reason?
+- Who holds `REGISTRY_ADMIN` or `SUPPORT_AGENT`, and how many people is that?
+- How do you tie an impersonation event to a support reason? (The reason and ticket are recorded in `impersonation_session` and the `ADMIN_IMPERSONATION_STARTED` event.)
 - How would you detect impersonation *without* a corresponding ticket?
 - Can you demonstrate that impersonated actions are attributed to the operator, not the customer?
+- Is write impersonation disabled in production? (Yes: production mode refuses `ACT_ON_BEHALF` and downgrades any live session to read-only.)
 
-The last one is a live demonstration and worth rehearsing: impersonate a test entity, perform a benign action, show the audit entry naming your user with `imp` set.
+The audit trail has the events `ADMIN_IMPERSONATION_STARTED`, `ADMIN_IMPERSONATION_HANDOFF_EXCHANGED` and `ADMIN_IMPERSONATION_ENDED`; requests made inside a session carry the `imp` marker. The attribution question is a live demonstration and worth rehearsing: impersonate a test entity, look at a page, show the audit entries naming your user with `imp` set, and show the session in the customer's company-administrator view.
 
 ---
 

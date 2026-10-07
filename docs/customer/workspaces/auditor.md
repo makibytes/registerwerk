@@ -94,7 +94,7 @@ The most common auditor task. The path:
 6. **Read corporate actions** — record-date snapshots showing exactly who was entitled to what, and when it settled.
 
 !!! tip "Two records, and they can disagree"
-    Registerwerk keeps the register (a database, legally authoritative) and the token (on-chain, independently verifiable) as separate records kept in step by indexers.
+    Registerwerk keeps the register (a database, the source of truth for Registerwerk's reconciliation; its legal status depends on the operator and the instrument) and the token (on-chain, independently verifiable) as separate records kept in step by indexers.
 
     They can drift — briefly during normal operation, longer if an indexer lags or a chain is congested. **Finding a discrepancy is not automatically finding a defect.** Establish when each record was written before drawing a conclusion. [Holding and custody](../lifecycle/holding.md) explains the model.
 

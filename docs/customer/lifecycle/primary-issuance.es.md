@@ -63,7 +63,7 @@ Solo entonces puede tener el bono.
 
 ### Qué contiene una inscripción registral
 
-Cada inversor admitido pasa a ser **titular** — una fila del registro. Conforme al §16 eWpG, ese es el asiento que cuenta, y el Derecho alemán conoce dos formas:
+Cada inversor admitido pasa a ser **titular** — una fila del registro. En el modelo de la eWpG, ese es el asiento que cuenta, siempre que el operador sea una entidad registral autorizada (lo que este repositorio no establece), y el Derecho alemán conoce dos formas:
 
 === "Inscripción colectiva (Sammeleintragung)"
 
@@ -159,7 +159,7 @@ La tercera merece atención. La **entrega contra pago** elimina el riesgo más a
 
 La transición final: `APPROVED` → `ISSUED`.
 
-El bono está vivo. El registro hace fe. Los inversores ven sus posiciones, reciben sus extractos y pueden — a partir de aquí — negociar.
+El bono está vivo. El registro es la fuente de verdad de Registerwerk. Los inversores ven sus posiciones, reciben sus extractos y pueden — a partir de aquí — negociar.
 
 ```mermaid
 stateDiagram-v2

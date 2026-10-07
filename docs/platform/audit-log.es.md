@@ -84,11 +84,11 @@ El ancla permite a los auditores externos verificar que la cadena de auditoría 
 |---|---|
 | `ASSET_CREATED` / `ASSET_DEPLOYED` / `ASSET_STATUS_CHANGED` | Ciclo de vida del activo |
 | `KYC_SUBMITTED` / `KYC_APPROVED` / `KYC_REJECTED` / `KYC_EXPIRED` | Flujo de trabajo KYC |
-| `HOLDER_BLOCK_CREATED` / `HOLDER_BLOCK_LIFTED` / `HOLDER_BLOCK_EXPIRED` | Sperrvermerk |
+| `HOLDER_BLOCK_CREATED` / `HOLDER_BLOCK_LIFTED` / `HOLDER_BLOCK_EXPIRY_REVIEW` | Sperrvermerk |
 | `SCREENING_RUN_COMPLETED` / `SCREENING_HIT_ACCEPTED` | Filtrado de sanciones |
 | `FORCE_TRANSFER` / `FORCE_BURN` / `FORCE_APPROVE` | Operaciones privilegiadas sobre tokens |
-| `STEP_UP_ISSUED` / `DUAL_CONTROL_CONFIRMED` / `PROTECTED_OPERATION_EXECUTED` | Autenticación reforzada (step-up) |
-| `IMPERSONATION_STARTED` / `IMPERSONATION_ENDED` | Suplantación de administrador |
+| `TOTP_ENROLLED` / `TOTP_RESET` / `DUAL_CONTROL_APPROVED` / `DUAL_CONTROL_BOOTSTRAP_USED` / `APPROVAL_REQUEST_CREATED` / `_APPROVED` / `_CLAIMED` | Autenticación reforzada (step-up) |
+| `ADMIN_IMPERSONATION_STARTED` / `ADMIN_IMPERSONATION_HANDOFF_EXCHANGED` / `ADMIN_IMPERSONATION_ENDED` | Suplantación de administrador |
 | `ICT_INCIDENT_CREATED` / `ICT_INCIDENT_RESOLVED` | Incidentes DORA |
 | `REGREPORT_SUBMITTED` | Archivo MiFIR / DAC8 |
 | `NATURAL_PERSON_REDACTED` | Borrado de GDPR |
@@ -112,22 +112,35 @@ El ancla permite a los auditores externos verificar que la cadena de auditoría 
 ## Verificando la cadena de auditoría { #verifying-the-audit-chain }
 
 ```
-GET /api/v1/admin/audit/verify
+GET  /api/v1/audit/chain/status    # último resultado registrado (tarea nocturna o ejecución previa)
+POST /api/v1/audit/chain/verify    # ejecutar ahora una verificación completa
 ```
 
-Devuelve:
+Ambos exigen `REGISTRY_ADMIN` o `AUDIT`. La respuesta:
 
 ```json
 {
-  "status": "OK",
-  "lastVerifiedAt": "2026-05-22T03:00:00Z",
-  "lastSequenceNo": 1847293,
-  "lastEntryHash": "a3f7...",
-  "brokenAt": null
+  "valid": true,
+  "rowsChecked": 1847293,
+  "firstBrokenSequenceNo": null,
+  "checkedAt": "2026-05-22T03:00:00Z",
+  "reason": null,
+  "status": "VALID",
+  "verificationId": "6d1f..."
 }
 ```
 
-Si `brokenAt` no es nulo, contiene el `sequence_no` de la primera entrada donde se rompe la cadena hash. Esto activa un `IctIncident` automático de gravedad `MAJOR` y categoría `INTEGRITY`.
+Si `valid` es `false` (`status` `BROKEN`), `firstBrokenSequenceNo` es el `sequence_no` de la primera entrada donde se rompe la cadena y `reason` indica el motivo. El veredicto se persiste y alimenta el indicador de salud, el indicador `registerwerk_audit_chain_valid` (`1` válida, `0` rota, `-1` ninguna ejecución registrada) y las alertas `AuditChainBroken`, `AuditChainUnverified` y `AuditChainVerificationStale`.
+
+### Reconocer un veredicto BROKEN
+
+Un veredicto roto mantiene `/actuator/health` en **DOWN** (la readiness no se ve afectada) hasta que se cumplan **ambas** condiciones: una ejecución **posterior** es válida, **y** la ejecución rota ha sido reconocida:
+
+```
+POST /api/v1/audit/verification/{verificationId}/ack?note=<texto libre>
+```
+
+El reconocimiento es exclusivo de `REGISTRY_ADMIN` y exige autenticación reforzada **y un segundo aprobador** (motivo `AUDIT_CHAIN_VERIFICATION_ACK`); la página del registro de auditoría del portal del operador tiene un botón para ello. Solo se puede reconocer una verificación rota, y una sola vez. Tras una restauración desde una copia de seguridad, ejecute `POST /api/v1/audit/chain/verify`, investigue cualquier resultado BROKEN y reconózcalo para que el indicador de salud pueda volver a UP.
 
 ---
 
@@ -138,5 +151,6 @@ Si `brokenAt` no es nulo, contiene el `sequence_no` de la primera entrada donde 
 - **La verificación** detecta: una primera fila que no es el origen de la cadena (cabecera truncada, partición eliminada), una última fila distinta de `audit_chain_tip`, filas eliminadas tras un ancla diaria firmada (`audit_chain_anchor`, publicada opcionalmente mediante un `AuditAnchorSink` externo) y una `entry_sig` ausente a partir del umbral de firma (primer número de secuencia firmado, de escritura única). Activar la firma más tarde no firma retroactivamente las filas anteriores.
 - **Exportación probatoria.** `/audit/events/export[/signed]` se ordena por `sequence_no` y comienza con un bloque `# key=value` (`firstSeq`, `lastSeq`, `rowCount`, `truncated`, `nextAfterSeq`, `tipSeq`, `tipEntryHash`); las filas incluyen `prevHash` y `entryHash`. La firma cubre cabecera y filas. `afterSeq` permite continuar una exportación truncada.
 - **Las escrituras fallidas** se reintentan cada minuto (publicaciones de más de dos minutos) y, tras `registerwerk.audit.max-attempts` (20) intentos, se mueven a `audit_event_dead_letter`. Configure alertas sobre `registerwerk_audit_oldest_incomplete_seconds` y `registerwerk_audit_dead_letter_count`.
-- **Propiedad de la tabla.** `REVOKE UPDATE, DELETE, TRUNCATE` y los disparadores WORM no vinculan al propietario de la tabla. Si el usuario de ejecución también lanza las migraciones, posee `audit_event`; en modo producción la comprobación de arranque falla entonces, salvo que `registerwerk.audit.allow-owner-runtime-role=true` reconozca el riesgo provisional. Remedio: usuarios separados para migración y ejecución (decisión abierta T6-17). El modo producción exige además un proveedor de clave de firma.
+- **Propiedad de la tabla.** `REVOKE UPDATE, DELETE, TRUNCATE` y los disparadores WORM no vinculan al propietario de la tabla, por lo que el login de ejecución no debe ser propietario de `audit_event`. Use logins separados: el migrador/propietario (`DB_USER`, pasado a Flyway como `SPRING_FLYWAY_USER`) y el login de ejecución `registerwerk_app` (`DB_APP_USER`), que no tiene UPDATE, DELETE ni TRUNCATE sobre las tablas de auditoría ni CREATE sobre el esquema. En modo producción la comprobación de arranque falla cuando el login de ejecución es propietario de la tabla o aún tiene esos privilegios, o cuando ambos logins coinciden; `registerwerk.audit.allow-owner-runtime-role=true` es un reconocimiento explícito del riesgo transitorio solo para el caso del propietario. El modo producción también exige un proveedor de clave de firma.
+- **Ancla externa.** Las anclas diarias pueden publicarse en un bucket S3 con Object Lock (`registerwerk.audit.anchor-sink=s3`, `none` por defecto), de modo que un atacante con acceso a la base de datos no pueda reescribir el historial de anclas; las publicaciones fallidas se reintentan cada hora y se cuentan (`registerwerk_audit_anchor_sink_failures_total`).
 - **Transición.** `registerwerk.audit.legacy-listener=true` (por defecto) procesa las publicaciones creadas antes de la actualización; desactívelo cuando `event_publication` ya no contenga filas de auditoría incompletas.

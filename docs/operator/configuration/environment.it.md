@@ -13,6 +13,8 @@ Tutta la configurazione viene eseguita tramite variabili d'ambiente. Copia `.env
 | `DB_URL` | `jdbc:postgresql://postgres:5432/registerwerk` | URL di connessione JDBC |
 | `DB_USER` | `registerwerk` | Utente database |
 | `DB_PASSWORD` | — | **Obbligatorio** |
+| `DB_APP_USER` / `DB_APP_PASSWORD` | `DB_USER` / `DB_PASSWORD` | Login di runtime con cui si connette l'applicazione (`registerwerk_app` nelle configurazioni Compose e Helm fornite). In modalità produzione deve essere diverso dal login proprietario, perché l'applicazione non deve possedere le tabelle di audit |
+| `SPRING_FLYWAY_USER` / `SPRING_FLYWAY_PASSWORD` | — | Login di migrazione/proprietario usato solo da Flyway (uguale a `DB_USER`/`DB_PASSWORD` in Compose e Helm) |
 
 ## Autenticazione { #authentication }
 
@@ -30,9 +32,8 @@ Tutta la configurazione viene eseguita tramite variabili d'ambiente. Copia `.env
 | Variabile | Descrizione |
 |---|---|
 | `JWT_ISSUER_URI` | URL dell'emittente OIDC: lasciare vuoto per la modalità dev HS256; impostare per la produzione (ad es. `https://login.microsoftonline.com/<tenant>/v2.0`) |
-| `ENTRA_CLIENT_ID` | OIDC ID client utilizzato dal plugin Kong |
-| `ENTRA_CLIENT_SECRET` | OIDC segreto client utilizzato dal plugin Kong |
-| `ENTRA_ISSUER` | Emittente OIDC configurato nel plugin Kong |
+| `ENTRA_CLIENT_ID` | ID client della registrazione dell'app API; usato con il secret per l'accesso a Microsoft Graph solo-applicazione (stato a due fattori, console di supporto). Non usato da Kong, che non fa OIDC |
+| `ENTRA_CLIENT_SECRET` | Secret client della registrazione dell'app API (credenziale Graph solo-applicazione; obbligatorio con `ENTRA_SUPPORT_ENABLED=true`) |
 
 ## RPC Blockchain { #blockchain-rpcs }
 
@@ -76,3 +77,11 @@ I documenti inferiori a 5 MB vengono archiviati in linea come BYTEA in PostgreSQ
 |---|---|
 | `CUSTOMER_FRONTEND_URL` | Base URL del frontend cliente (per collegamenti email) |
 | `FRONTEND_BUILD_ENV` | Destinazione build frontend: `production` o `testnet` |
+
+## Modalità produzione e gate di rilascio
+
+Imposta `REGISTERWERK_PRODUCTION_MODE=true` su ogni deployment di produzione. Trasforma i controlli di prontezza da avvisi in rifiuti all'avvio e abilita i controlli solo-produzione. [Modalità produzione e gate di rilascio](../security/production-mode.md) (solo in inglese) elenca ogni gate, la variabile che lo controlla e che cosa viene rifiutato. Quella pagina documenta anche le variabili di approvazione del rilascio e di riconoscimento (`REGISTERWERK_LENDING_RELEASE_APPROVED`, `REGISTERWERK_REPO_DESK_RELEASE_APPROVED`, `REGISTERWERK_TRADING_LEGAL_OPINION_REF`, `REGISTERWERK_AUDIT_ALLOW_OWNER_RUNTIME_ROLE`, `REGISTERWERK_AUDIT_SIGNING_PROVIDER`, `REGISTERWERK_WEBHOOK_ALLOW_INSECURE_URLS`, `REGISTERWERK_WALLET_MASTER_KEY`, `LINK_BY_EMAIL_WITHOUT_VERIFICATION`, `SWAGGER_ENABLED` e altre).
+
+## Altre impostazioni
+
+Calendario del registro, conferme di catena, limitazione degli accessi, negoziazione, Travel Rule, reporting, ancoraggio dell'audit e custodia delle chiavi di firma, con i valori predefiniti e le attese della modalità di produzione, sono nel [riferimento delle impostazioni operative](environment-settings.md) (solo in inglese).

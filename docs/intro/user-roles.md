@@ -5,7 +5,7 @@ description: Who uses Registerwerk, what they can do, and which regulatory oblig
 
 # User Roles & Permissions
 
-Registerwerk is multi-tenant: one operator deployment serves many customer legal entities. Access is controlled by a role set defined in the `AppRole` enum and enforced via `@PreAuthorize` on every controller method.
+Registerwerk is multi-tenant: one operator deployment serves many customer legal entities. Access is controlled by a role set defined in the `AppUserRole` enum and enforced via `@PreAuthorize` on every controller method.
 
 ---
 
@@ -15,7 +15,8 @@ Registerwerk is multi-tenant: one operator deployment serves many customer legal
 |---|---|---|---|
 | `REGISTRY_ADMIN` | Operator | Registry staff | eWpG §15 registry keeper; GwG §10 AML officer |
 | `COMPLIANCE_OFFICER` | Operator | Compliance / AML team | GwG §7 compliance officer; AMLD6 Art. 8 |
-| `AUDITOR` | Operator | Internal/external auditors | eWpG §15(3) record access |
+| `AUDIT` | Operator | Internal/external auditors | eWpG §15(3) record access |
+| `SUPPORT_AGENT` | Operator | Support staff | Read-only customer sessions only; no regulatory function |
 | `ISSUER` | Customer | Securities issuers | eWpG §4 issuer obligations |
 | `INVESTOR` | Customer | Token holders / investors | |
 | `COMPANY_ADMIN` | Customer | Issuer's admin users | |
@@ -34,25 +35,25 @@ The highest-privilege role. A `REGISTRY_ADMIN` can:
 - Deploy and manage [security tokens](../token-standards/index.md)
 - Issue [Sperrvermerk](../compliance/sperrvermerk.md) (trading restrictions) — requires [step-up authentication](../compliance/step-up-mfa.md)
 - Force-transfer and force-burn tokens — requires step-up + 4-eyes
-- Impersonate customer users for support purposes — a standing capability, see the caveat below
+- Start read-only impersonation sessions for support purposes (step-up and a recorded reason; write sessions exist in demo mode only), see [Impersonation](#impersonation)
 - Access all [audit log](../platform/audit-log.md) records
 - Trigger [MiFIR](../compliance/mifir.md) and [DAC8](../compliance/dac8.md) regulatory exports
 
 !!! warning "Force operations require dual control"
-    Force-transfer, force-burn, and force-approve are irreversible on-chain operations. The current implementation requires a second, distinct `REGISTRY_ADMIN` to provide the dual-control token; there is no `SECOND_APPROVER` application role. Its legal and policy adequacy requires external review.
+    Force-transfer, force-burn, and force-approve are irreversible on-chain operations. The current implementation requires a second, distinct operator (a `REGISTRY_ADMIN` or `COMPLIANCE_OFFICER`) to provide the dual-control approval; there is no `SECOND_APPROVER` application role. Its legal and policy adequacy requires external review.
 
 ### COMPLIANCE_OFFICER
 
 Focused on AML/KYC functions:
 
 - Review and manage [sanctions screening](../compliance/sanctions-screening.md) runs and hits
-- Accept or reject screening hits (with dual-control for high-risk entities)
+- Accept or reject screening hits (always with step-up and a second approver)
 - Approve KYC documents for their assigned jurisdictions
-- Issue and lift [Sperrvermerk](../compliance/sperrvermerk.md) — requires step-up
+- View [Sperrvermerk](../compliance/sperrvermerk.md) records (creating and lifting them is `REGISTRY_ADMIN` only, with step-up and a second approver)
 - Access [DORA](../compliance/dora.md) incident records
 - Trigger on-demand sanctions re-screening
 
-### AUDITOR
+### AUDIT
 
 Read-only access to the full audit trail:
 
@@ -63,7 +64,11 @@ Read-only access to the full audit trail:
 
 ### Dual-control approver
 
-Dual-control approval is currently a capability of a second, distinct `REGISTRY_ADMIN`, not a separate application role. The approver must be different from the initiator and must satisfy the configured step-up checks.
+Dual-control approval is currently a capability of a second, distinct user who holds `REGISTRY_ADMIN` or `COMPLIANCE_OFFICER`, not a separate application role. The approver must be different from the initiator, must still be enabled in the database, and must satisfy the configured step-up checks. Requests can be filed and approved in the in-app approval queue (see [Step-up MFA and 4-eyes](../compliance/step-up-mfa.md)).
+
+### SUPPORT_AGENT
+
+Operator staff for customer support. A `SUPPORT_AGENT` can list customer entities and start **read-only** [impersonation](#impersonation) sessions (step-up and a reason required). It cannot change anything and has no regulatory function. Granting or removing the role needs step-up and a second approver.
 
 ---
 
@@ -115,16 +120,14 @@ A machine or human user authorised to interact with trading venue integrations:
 
 ## Impersonation
 
-`REGISTRY_ADMIN` users can impersonate a customer user to investigate issues or assist with onboarding. Impersonation:
+Impersonation lets operator staff open the customer portal inside a customer's organisation to investigate issues. It is gated and read-only by default:
 
-- Mints a short-lived token whose `sub` remains the **operator's** user id, so every action is attributed to the operator and never to the customer
-- Is recorded in the [audit log](../platform/audit-log.md), flagged with `imp` so impersonated actions are distinguishable
-- Is visible to all `REGISTRY_ADMIN` users via the impersonation bar in the customer frontend
-- Expires with the token; re-enter rather than extending
+- Starting a session needs [step-up authentication](../compliance/step-up-mfa.md) and a mandatory written reason (at least 15 characters, plus an optional ticket reference)
+- The default mode is **read-only**; the write mode (`ACT_ON_BEHALF`) needs a second approver and is available **only in demo mode**. In production mode every session is read-only
+- `REGISTRY_ADMIN` and `SUPPORT_AGENT` can start read-only sessions; only `REGISTRY_ADMIN` can start a write session. `SUPPORT_AGENT` can do nothing else
+- The start call returns no token: a one-time code (60 seconds) is exchanged for an httpOnly session cookie. The session lasts at most 30 minutes
+- The token's `sub` remains the **operator's** user id, so every action is attributed to the operator and never to the customer; `imp` marks it in the [audit log](../platform/audit-log.md)
+- Sessions are recorded and visible to the customer's company administrators
+- It is visible to all `REGISTRY_ADMIN` users via the impersonation bar in the customer frontend
 
-!!! warning "Impersonation is not step-up protected"
-    `AdminImpersonationController` carries no `@RequiresStepUp`. Any `REGISTRY_ADMIN` can enter any customer's portal without a second authentication challenge and without a second person.
-
-    Treat this as a control question rather than a technical one: keep the admin roster small, require a recorded reason outside the platform, and review impersonation events periodically. [Impersonation](../operator/customers/impersonation.md) covers governing it.
-
-Impersonation is also unavailable entirely when `ENTRA_ENABLED=true` — the backend refuses to mint a session on a customer's behalf.
+Impersonation is unavailable entirely when `ENTRA_ENABLED=true` — the backend refuses to mint a session on a customer's behalf. [Impersonation](../operator/customers/impersonation.md) covers the details and how to govern it.

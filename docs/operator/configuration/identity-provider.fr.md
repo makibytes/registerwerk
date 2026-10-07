@@ -43,7 +43,6 @@ Le backend est un serveur de ressources OAuth2. Il accepte les JWT de tout fourn
 4. Définissez les variables d'environnement :
    ```dotenv
    JWT_ISSUER_URI=https://login.microsoftonline.com/<tenant-id>/v2.0
-   ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
    ENTRA_CLIENT_ID=<app-id>
    ENTRA_CLIENT_SECRET=<client-secret>
    ```
@@ -59,7 +58,6 @@ en utilisant `gateway/plugins/oidc-entra.yml` — le backend valide lui-même le
 4. Définissez les variables d'environnement :
    ```dotenv
    JWT_ISSUER_URI=https://keycloak.yourhost.com/realms/ewpg
-   ENTRA_ISSUER=https://keycloak.yourhost.com/realms/ewpg
    ENTRA_CLIENT_ID=<client-id>
    ENTRA_CLIENT_SECRET=<client-secret>
    ```

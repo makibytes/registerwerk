@@ -31,7 +31,7 @@ L'histoire est celle d'une obligation. Nous la suivons depuis le moment où quel
     | Échéance | 5 ans |
     | Remboursement | valeur nominale intégrale à l'échéance |
 
-    Voilà tout le produit financier. Tout le reste est la machinerie qui rend cette promesse effective, négociable et opposable — et qui démontre à un régulateur que tout s'est fait dans les règles.
+    Voilà tout le produit financier. Tout le reste est la machinerie qui rend cette promesse effective, négociable et opposable — et qui laisse des traces qu'un superviseur, un auditeur ou une contrepartie peut examiner ensuite.
 
 ??? note "Pour les lecteurs non financiers : ce qu'est vraiment une obligation"
 

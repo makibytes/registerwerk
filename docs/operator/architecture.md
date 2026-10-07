@@ -70,7 +70,7 @@ There is exactly one PostgreSQL instance, hosting one database. Kong runs DB-les
 
 ### 4. The register and the chain are separate records
 
-The database is authoritative for ownership. The blockchain is what executes and what anyone can independently verify. **Indexers** watch the chains and write what they see back.
+The database is Registerwerk's source of truth for ownership (operationally; whether it is a register with legal effect depends on the operator and the instrument). The blockchain is what executes and what anyone can independently verify. **Indexers** watch the chains and write what they see back.
 
 **Operational consequence, and the single most useful thing on this page:** when a customer says "my balance is wrong", the first question is not *which is right* but *is an indexer behind?* A lagging indexer produces exactly this symptom and resolves itself once it catches up. [Indexer resilience](indexers/resilience.md).
 

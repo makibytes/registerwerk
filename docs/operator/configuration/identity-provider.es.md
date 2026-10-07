@@ -44,7 +44,6 @@ El backend es un servidor de recursos OAuth2. Acepta JWT de cualquier proveedor 
 4. Establecer variables de entorno:
    ```dotenv
    JWT_ISSUER_URI=https://login.microsoftonline.com/<tenant-id>/v2.0
-   ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
    ENTRA_CLIENT_ID=<app-id>
    ENTRA_CLIENT_SECRET=<client-secret>
    ```
@@ -61,7 +60,6 @@ por lo que esto es una defensa en profundidad, no un requisito.
 4. Establecer variables de entorno:
    ```dotenv
    JWT_ISSUER_URI=https://keycloak.yourhost.com/realms/ewpg
-   ENTRA_ISSUER=https://keycloak.yourhost.com/realms/ewpg
    ENTRA_CLIENT_ID=<client-id>
    ENTRA_CLIENT_SECRET=<client-secret>
    ```

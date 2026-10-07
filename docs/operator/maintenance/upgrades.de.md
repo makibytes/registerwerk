@@ -134,49 +134,16 @@ Die Flyway-Migrationen in diesem Repository haben keine automatischen Down-Skrip
 
 ## Kong-Upgrade
 
+1. Aktualisieren Sie das `kong`-Image-Tag in `docker-compose.yml` (und in `gateway/docker-compose.kong.yml`, falls Sie den eigenständigen Gateway-Stack nutzen).
+2. Ziehen Sie das Image und validieren Sie die deklarative Konfiguration vor dem Umschalten gegen die neue Version:
+
 ```bash
-docker compose stop kong
 docker compose pull kong
-docker compose up -d kong
+docker compose run --rm kong kong config parse /etc/kong/kong.yml
+docker compose up -d --force-recreate kong
 ```
 
-Wenden Sie nach dem Upgrade von Kong die deklarative Konfiguration erneut an:
-
-```bash
-deck sync --config gateway/kong.yml
-```
-sidebar_position: 3
----
-
-# Upgrades
-
-## Backend-Upgrade
-
-1. Neues Image abrufen oder lokal bauen:
-   ```bash
-   docker build -t registerwerk-backend:v2.0.0 backend/
-   ```
-
-2. Das Image-Tag in `docker-compose.yml` aktualisieren
-
-3. Mit fortlaufendem Neustart starten (Flyway migriert automatisch):
-   ```bash
-   docker compose up -d --no-deps backend
-   ```
-
-4. Zustand prüfen: `curl http://localhost:48080/actuator/health`
-
-## Smart-Contract-Upgrades
-
-Compliance-Module unterstützen Inplace-Upgrades über `UpgradeCompliance.s.sol`:
-
-```bash
-forge script script/UpgradeCompliance.s.sol \
-  --rpc-url $ETH_MAINNET_RPC \
-  --broadcast
-```
-
-Token- und Identitätsverträge sind **von Design her nicht aktualisierbar** (Unveränderlichkeit ist eine gesetzliche Anforderung für Wertpapiere). Upgrades erfordern die Bereitstellung einer neuen Suite und die Migration der Anleger.
+Kong liest `gateway/kong.yml` beim Start neu ein: Im DB-losen Modus sind keine Migrationen auszuführen und keine Konfiguration erneut anzuwenden. Unter Kubernetes ist die Version des Kong-Subcharts in `deploy/helm/registerwerk/Chart.yaml` festgelegt; aktualisieren Sie sie dort und führen Sie `helm upgrade` aus.
 
 ## Subgraph-Upgrades
 
@@ -202,13 +169,6 @@ Versionen und deren Konfiguration für ein zerstörungsfreies Rollback verfügba
 den Chain-Head erreicht hat und seine Ereignisbereiche unabhängig abgeglichen wurden. Entfernen Sie nicht
 den vorherigen Subgraph vor der Validierung; Rollback bedeutet, das zuvor genehmigte Manifest
 und die Quellkonfiguration unter einer weiteren neuen Versionsbezeichnung erneut bereitzustellen.
-
-## Kong-Upgrades
-
-1. Aktualisieren Sie das `kong`-Image-Tag in `docker-compose.yml` (und in `gateway/docker-compose.kong.yml`,
-   falls Sie den eigenständigen Nur-Gateway-Stack verwenden).
-2. Starten Sie Kong neu: `docker compose restart kong` – es liest `gateway/kong.yml` beim Start erneut ein
-   (DB-loser Modus, keine auszuführenden Migrationen).
 
 ## Abhängigkeits-Updates
 

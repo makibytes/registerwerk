@@ -4,6 +4,9 @@ title: Monitoraggio
 
 # Monitoraggio { #monitoring }
 
+!!! warning "Traduzione in parte obsoleta"
+    Questa pagina non è del tutto allineata con l'originale inglese: mancano le sezioni sull'esecuzione dei job pianificati, sull'arretrato operativo, sulla latenza di conferma delle transazioni e sui test di carico, e i nomi di allarmi e metriche possono essere obsoleti. Fa fede la pagina in inglese.
+
 Il registro viene fornito con uno stack di monitoraggio Prometheus + Grafana. Questa pagina descrive cosa
 monitorare, quali parametri contano e come configurare gli avvisi.
 

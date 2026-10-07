@@ -7,8 +7,7 @@ description: URL-Struktur, Authentifizierung, Fehlerantworten, Paginierung und A
 
 Alle Funktionen von Registerwerk werden über eine REST-API unter `http://backend:8080`
 bereitgestellt. Das Operator-Frontend verbindet sich direkt; das Kunden-Frontend verbindet sich über
-Kong (`http://kong:8000`). Die API ist mit OpenAPI 3 dokumentiert (Swagger-UI verfügbar unter
-`/swagger-ui.html`).
+Kong (`http://kong:8000`). Jede gemappte Route steht im generierten [API-Routenindex](api-routes.md) (nur Englisch). Ein OpenAPI-3-Dokument und eine Swagger UI existieren, sind aber **standardmäßig ausgeschaltet** (siehe [OpenAPI / Swagger UI](#openapi-swagger-ui)).
 
 ---
 
@@ -74,20 +73,19 @@ Alle Fehler folgen dem `ErrorResponse`-Datensatz:
 
 ## Paginierung { #pagination }
 
-Listen-Endpunkte unterstützen cursorbasierte Paginierung mit den Parametern `page` und `size`:
+Listen-Endpunkte mit Paginierung akzeptieren `page` (nullbasiert) und `size`, zum Beispiel:
 
 ```
 GET /api/v1/assets?page=0&size=20&sort=createdAt,desc
 ```
 
-Antworten enthalten einen `X-Total-Count`-Header mit der Gesamtzahl der Datensätze (vor der
-Paginierung). Der Antwortkörper ist immer ein Array (nie ein Wrapper-Objekt).
+Die Antwortform ist **je Endpunkt** verschieden: Manche liefern ein einfaches JSON-Array (die Gesamtzahl steht dann im Response-Header `X-Total-Count`, den die CORS-Konfiguration für Browser freigibt), andere den `PageResponse`-Wrapper `{ content, totalElements, totalPages, page, size }`. Prüfen Sie das Schema des Endpunkts im OpenAPI-Dokument, bevor Sie sich auf eine der beiden Formen verlassen.
 
 ---
 
 ## Idempotency-Key und Beträge { #idempotency-key-and-amounts }
 
-Geld- und zustandsverändernde Admin-/Emittenten-Endpunkte verlangen den Header `Idempotency-Key`: Mint, Burn, erzwungene Übertragungen/Freigaben, Force-Burn, Sperr- und Whitelist-Änderungen, Slot- und Vault-Operationen, ERC-3643-Agentenaktionen, Änderungen an Zahlungswegen, Wallet-Import, Übergabe/Abschluss von Registerübertragungen und Tilgung eines Assets. Ein `POST`, `PUT`, `PATCH` oder `DELETE` ohne gültigen Schlüssel wird mit `400` und dem Code `IDEMPOTENCY_KEY_REQUIRED` (bzw. `IDEMPOTENCY_KEY_INVALID`) abgewiesen, bevor etwas ausgeführt wird. Andere Endpunkte bleiben optional.
+Geld- und zustandsverändernde Admin-/Emittenten-Endpunkte verlangen den Header `Idempotency-Key`: Mint, Burn, erzwungene Übertragungen/Freigaben, Force-Burn, Sperr- und Whitelist-Änderungen, Solana-Token-Administration, Slot- und Vault-Operationen, ERC-3643-Agentenaktionen, Lending-Markt-Operationen und -Abgleich, Änderungen an Zahlungswegen, Wallet-Import, Übergabe/Abschluss von Registerübertragungen und Tilgung eines Assets. Ein `POST`, `PUT`, `PATCH` oder `DELETE` ohne gültigen Schlüssel wird mit `400` und dem Code `IDEMPOTENCY_KEY_REQUIRED` (bzw. `IDEMPOTENCY_KEY_INVALID`) abgewiesen, bevor etwas ausgeführt wird. Andere Endpunkte bleiben optional.
 
 - Senden Sie pro Benutzeraktion einen eindeutigen Wert (UUID; 8-255 Zeichen aus `A-Za-z0-9._:-`) und **verwenden Sie denselben Wert erneut, wenn Sie dieselbe Anfrage wiederholen** (nach Timeout oder `5xx`). Die Wiederholung liefert dann das ursprüngliche Ergebnis (`X-Idempotent-Replay: true`) bzw. dieselbe Transaktion statt einer doppelten Ausführung.
 - Der Schlüssel gilt je Aufrufer: Rechtsträger bei Kundentokens, handelnder Benutzer bei Operator-Tokens. Derselbe Schlüssel mit anderer Methode, anderem Pfad oder Body wird mit `422` beantwortet; eine noch laufende Anfrage mit `409`.
@@ -95,74 +93,34 @@ Geld- und zustandsverändernde Admin-/Emittenten-Endpunkte verlangen den Header 
 
 **Beträge sind Dezimalzeichenketten.** Senden Sie Token-Beträge (`amount`, `value`, `newCap`, `navPerShare`, ...) als JSON-Strings wie `"1000000000000000000000"`. Eine JavaScript-Zahl verliert oberhalb von 2^53 an Genauigkeit. Für ein Release wird eine JSON-Zahl noch akzeptiert, wenn sie exakt darstellbar ist (Ganzzahl unter 2^53 oder Dezimalzahl mit höchstens 15 signifikanten Stellen); es wird eine Deprecation-Warnung protokolliert. Alles andere wird mit `400` und `Invalid amount: ...` beantwortet.
 
-## Wichtige API-Gruppen { #key-api-groups }
+## Routengruppen { #route-groups }
 
-### Assets (`/api/v1/assets`) { #assets-apiv1assets }
+Der generierte [API-Routenindex](api-routes.md) ist die vollständige, aus dem Code abgeleitete Liste (Methode, Pfad, Rollenausdruck, Step-up). Die wichtigsten Basispfade:
 
-| Methode | Pfad | Beschreibung |
-|---|---|---|
-| `GET` | `/api/v1/assets` | Alle Assets auflisten (paginiert) |
-| `POST` | `/api/v1/assets` | Neues Asset anlegen |
-| `GET` | `/api/v1/assets/{id}` | Asset per ID abrufen |
-| `POST` | `/api/v1/assets/{id}/deploy` | Token auf der Blockchain bereitstellen |
-| `POST` | `/api/v1/assets/{id}/mint` | Token minten |
-| `POST` | `/api/v1/assets/{id}/burn` | Token vernichten (Step-up + Vier-Augen) |
-| `POST` | `/api/v1/assets/{id}/force-transfer` | Zwangsübertragung (Step-up + Vier-Augen) |
-| `POST` | `/api/v1/assets/{id}/freeze/{address}` | Adresse einfrieren (erfordert HolderBlock) |
+| Bereich | Basispfad |
+|---|---|
+| Assets und Deployments (Emittenten-Mint/Burn unter `.../deployments/{depId}/issuer/`, erzwungene Betreibervorgänge unter `.../deployments/{depId}/admin/`) | `/api/v1/assets`, `/api/v1/deployments` |
+| Rechtsträger und KYC (`/api/v1/entities/{entityId}/kyc/...`), KYC-Prüfwarteschlange | `/api/v1/entities`, `/api/v1/kyc` |
+| Sanktionsprüfung (`/api/v1/compliance/screening/...`, Treffer unter `/hits/{hitId}/accept`) und weitere Compliance-Funktionen | `/api/v1/compliance` |
+| Sperrvermerk (Holder-Blocks) | `/api/v1/holder-blocks` |
+| Regulatorisches Reporting (MiFIR, DAC8) | `/api/v1/regulatory-reporting` |
+| DORA-Vorfälle, Dienstleister, Resilienztests | `/api/v1/dora` |
+| Handel, Repo Desk, Lending, Kapitalmaßnahmen | `/api/v1/trading`, `/api/v1/repo-desk`, `/api/v1/lending`, `/api/v1/corporate-actions` |
+| Freigabe-Warteschlange (Vier-Augen-Prinzip) | `/api/v1/approvals` |
+| Audit-Log, Kettenprüfung | `/api/v1/audit` |
+| Betreiberverwaltung (Nutzer, Wallets, ...) | `/api/v1/admin` |
+| Selbstbedienung der Kundenunternehmen | `/api/v1/company`, `/api/v1/me` |
+| Öffentlich, ohne Authentifizierung (Chains, Plattformfähigkeiten, Travel Rule) | `/api/v1/public` |
 
-### Kunden (`/api/v1/customers`) { #customers-apiv1customers }
-
-| Methode | Pfad | Beschreibung |
-|---|---|---|
-| `GET` | `/api/v1/customers` | Juristische Personen auflisten |
-| `POST` | `/api/v1/customers` | Juristische Person anlegen |
-| `GET` | `/api/v1/customers/{id}` | Rechtsträger abrufen |
-| `POST` | `/api/v1/customers/{id}/kyc/documents` | KYC-Dokument hochladen |
-| `POST` | `/api/v1/customers/{id}/kyc/approve` | KYC genehmigen (COMPLIANCE_OFFICER + Step-up) |
-| `GET` | `/api/v1/customers/{id}/beneficial-owners` | Wirtschaftlich Berechtigte auflisten |
-| `POST` | `/api/v1/customers/{id}/beneficial-owners` | Wirtschaftlich Berechtigten hinzufügen |
-
-### Compliance (`/api/v1/compliance`) { #compliance-apiv1compliance }
-
-| Methode | Pfad | Beschreibung |
-|---|---|---|
-| `POST` | `/api/v1/compliance/screening/entities/{id}/screen` | Manuelle Prüfung auslösen |
-| `GET` | `/api/v1/compliance/screening/entities/{id}/runs` | Screening-Verlauf abrufen |
-| `POST` | `/api/v1/compliance/screening/hits/{hitId}/accept` | Treffer akzeptieren/verwerfen |
-| `GET` | `/api/v1/holder-blocks` | Alle HolderBlocks auflisten |
-| `POST` | `/api/v1/holder-blocks` | Sperrvermerk anlegen (Step-up + Vier-Augen) |
-| `POST` | `/api/v1/holder-blocks/{id}/lift` | Sperrvermerk aufheben (Step-up + Vier-Augen) |
-
-### Regulatory Reporting (`/api/v1/regulatory-reporting`) { #regulatory-reporting-apiv1regulatory-reporting }
-
-| Methode | Pfad | Beschreibung |
-|---|---|---|
-| `POST` | `/api/v1/regulatory-reporting/mifir` | On-Demand-MiFIR-Export auslösen |
-| `POST` | `/api/v1/regulatory-reporting/dac8` | On-Demand-DAC8-Export auslösen |
-| `GET` | `/api/v1/regulatory-reporting/submissions` | Übermittlungsverlauf auflisten |
-
-### DORA (`/api/v1/dora`) { #dora-apiv1dora }
-
-| Methode | Pfad | Beschreibung |
-|---|---|---|
-| `GET` | `/api/v1/dora/incidents` | Offene IKT-Vorfälle auflisten |
-| `POST` | `/api/v1/dora/incidents` | IKT-Vorfall melden (Art. 17) |
-| `PATCH` | `/api/v1/dora/incidents/{id}/status` | Vorfallstatus/Ursache aktualisieren |
-| `POST` | `/api/v1/dora/incidents/{id}/report-to-authority` | Ersten/abschließenden Behördenbericht erfassen (Art. 19) |
-| `GET` | `/api/v1/dora/providers` | IKT-Drittanbieterregister auflisten (Art. 28) |
-| `GET` | `/api/v1/dora/providers/expiring` | Anbieter mit bald auslaufenden Verträgen auflisten |
-| `GET` | `/api/v1/dora/resilience-tests` | Resilienztest-Ergebnisse auflisten (Art. 24/25) |
-| `GET` | `/api/v1/dora/resilience-tests/overdue` | Überfällige Resilienztests auflisten |
-| `POST` | `/api/v1/dora/resilience-tests` | Resilienztest-Ergebnis erfassen |
+Das Genehmigen von KYC ist zum Beispiel `POST /api/v1/entities/{entityId}/kyc/approve`: Auslösender ist ein `REGISTRY_ADMIN` oder `COMPLIANCE_OFFICER`, und der Aufruf braucht Step-up und einen zweiten Genehmiger (siehe [Step-up-Matrix](../compliance/step-up-matrix.md)).
 
 ---
 
 ## OpenAPI / Swagger UI { #openapi-swagger-ui }
 
-Die OpenAPI-Spezifikation und die interaktive UI werden **vom Backend** auf Port 8080 bereitgestellt,
-nicht von diesem Dokumentationsserver.
+Das OpenAPI-Dokument und die Swagger UI werden **vom Backend** bereitgestellt, nicht von diesem Dokumentationsserver, und sind **ausgeschaltet, solange `SWAGGER_ENABLED=true` nicht gesetzt ist** (Standard `false`, in jedem Profil).
 
-| URL | Beschreibung |
+| URL (wenn aktiviert) | Beschreibung |
 |---|---|
 | [`{{ backend_url }}/swagger-ui.html`]({{ backend_url }}/swagger-ui.html) | Interaktive Swagger UI (Browser) |
 | [`{{ backend_url }}/api-docs`]({{ backend_url }}/api-docs) | OpenAPI 3 JSON (maschinenlesbar) |
@@ -170,10 +128,7 @@ nicht von diesem Dokumentationsserver.
 | [`{{ backend_url }}/actuator/info`]({{ backend_url }}/actuator/info) | Build-Info |
 
 !!! info "Diese Dokumentationsseite vs. die API"
-    Diese Site (port 48003) ist eine statische MkDocs-Referenz – sie proxyt das Backend nicht. Öffnen
-    Sie die obigen Links direkt im Browser, während der Stack läuft (`docker compose up -d`).
+    Diese Site (Port 48003) ist eine statische MkDocs-Referenz – sie proxyt das Backend nicht. Öffnen Sie die obigen Links direkt im Browser, während der Stack läuft (`docker compose up -d`).
 
-!!! warning "Swagger UI in der Produktion"
-    Die Swagger UI ist im Spring-Profil `prod` deaktiviert. In Entwicklungs- und Staging-Umgebungen
-    ist sie ohne Authentifizierung zugänglich. In der Produktion muss sie explizit aktiviert und
-    hinter einer IP-Allowlist oder Basic-Auth geschützt werden.
+!!! warning "SWAGGER_ENABLED=true macht die Spezifikation ohne Authentifizierung zugänglich"
+    Ist es aktiviert, sind `/swagger-ui.html`, `/swagger-ui/**` und `/api-docs/**` öffentlich (`permitAll` in der Sicherheitskonfiguration): Jeder, der das Backend erreicht, kann den gesamten Routen- und Schemakatalog lesen. Nichts verweigert `SWAGGER_ENABLED=true` im Produktionsmodus. Lassen Sie es in der Produktion aus oder stellen Sie das Backend hinter eine Allowlist, die diese Pfade ausschließt.

@@ -17,6 +17,6 @@ exception is both isolated and enforced by CI.
   the affected `decompress` release and therefore does not remove the root cause.
 - **Compensating controls:** exact package pins, patched overrides for every other reported Graph
   CLI transitive dependency, production-only audit enforcement, and an executable full-audit
-  allowlist in `scripts/verify-audit-exceptions.mjs` that fails when the advisory graph changes.
+  allowlist in `indexer/evm/subgraph/scripts/verify-audit-exceptions.mjs` (run by `npm run audit:build-tools` in `.github/workflows/indexers.yml`) that fails when the advisory graph changes.
 - **Exit condition:** remove this exception as soon as Graph CLI releases without the affected
   `decompress` dependency.

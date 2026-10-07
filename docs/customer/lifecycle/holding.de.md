@@ -22,7 +22,7 @@ Sagen wir es deutlich, denn alles Weitere folgt daraus:
 !!! abstract "Das Register"
     Eine Zeile in der Datenbank des Betreibers. Nennt Inhaber, Nennbetrag, Eintragungsart, Beschränkungen, Rechte Dritter.
 
-    **Das ist die rechtlich maßgebliche Aufzeichnung.** Nach §16 eWpG bestimmt sich die Inhaberschaft an einem elektronischen Wertpapier nach dem Register.
+    **Das ist die Aufzeichnung, die Registerwerk als maßgebliche Quelle behandelt.** Nach dem eWpG knüpft die Rechtswirkung an einen Eintrag in einem von einer zugelassenen registerführenden Stelle geführten elektronischen Wertpapierregister an; ob diese Datenbank ein solches Register ist, hängt vom Betreiber und vom Instrument ab, was dieses Repository nicht begründet.
 
 !!! abstract "Der Token"
     Ein Bestand in einem Smart Contract auf einer Blockchain. Öffentlich, von jedermann überprüfbar, und das, was sich bei einer Übertragung tatsächlich bewegt.
@@ -51,7 +51,7 @@ sequenceDiagram
 Zwischen dem zweiten und dem vierten Schritt weichen die beiden Aufzeichnungen voneinander ab — meist für Sekunden, gelegentlich länger, wenn ein Indexer zurückliegt oder eine Chain überlastet ist.
 
 !!! question "Welche gilt denn nun?"
-    **Das Register.** Immer. Die Blockchain ist maßgeblich dafür, was die Blockchain getan hat; sie ist nicht maßgeblich dafür, wem ein Wertpapier nach deutschem Recht gehört.
+    **Das Register — für Registerwerks eigenen Abgleich.** Die Blockchain ist maßgeblich dafür, was die Blockchain getan hat. Sie entscheidet nicht darüber, wem ein Wertpapier nach deutschem Recht gehört, und diese Datenbank ebenso wenig, es sei denn, der Betreiber ist für das Instrument eine zugelassene registerführende Stelle.
 
     Praktisch relevant wird das in einer bestimmten Lage: jemand bewegt Token unmittelbar on-chain, von Wallet zu Wallet, an der Plattform vorbei. Bei einem ERC-3643-Wertpapier müssen beide Wallets bereits zugelassen sein, das Papier kann also nicht in unbefugte Hände geraten — aber es *kann* ein Register entstehen, das bis zum Nachziehen des Indexers nicht der Wirklichkeit entspricht, und eine Übertragung ohne dahinterstehende Order.
 
@@ -154,7 +154,7 @@ Institutionelle Inhaber in einer Sammeleintragung fallen nicht unter diese Pflic
 
 ## Wo Sie stehen
 
-Fünfzig Anleger halten einen Anspruch gegen Nordwind, festgehalten in einem Register, das rechtlich maßgeblich ist, und gespiegelt auf einer Blockchain, die öffentlich überprüfbar ist. Fünf Jahre lang wird die Anleihe so daliegen.
+Fünfzig Anleger halten einen Anspruch gegen Nordwind, festgehalten in einem Register, das Registerwerk als maßgebliche Quelle behandelt (seine Rechtswirkung hängt vom Betreiber und vom Instrument ab), und gespiegelt auf einer Blockchain, die öffentlich überprüfbar ist. Fünf Jahre lang wird die Anleihe so daliegen.
 
 Nur will einer von ihnen sein Geld früher zurück.
 

@@ -121,6 +121,14 @@ When an organisation stops using the registry:
 
     Either redeem it, or transfer it to a successor registrar, before offboarding the issuer. Otherwise you have obligations running through a registry nobody is administering.
 
+### Reinstating a closed or dissolved customer
+
+A `CLOSED` or `DISSOLVED` customer never becomes `ACTIVE` again directly. A `REGISTRY_ADMIN` starts a reinstatement with `POST /api/v1/entities/{id}/reinstate`; a reason and a legal reference are mandatory, and the call needs step-up and a second approver (`ENTITY_REINSTATE`).
+
+- The customer moves to `PENDING_REACTIVATION`: KYC is reset to "not started", screening runs again, and two [entity tasks](entity-tasks.md) are raised (`REINSTATEMENT_KYC_REQUIRED`, `REINSTATEMENT_USERS_REVIEW`). While pending, nobody from the customer can sign in, trade or be impersonated, and its users stay disabled.
+- Approving KYC again (every normal KYC gate applies) makes the customer `ACTIVE` and raises `CHAIN_REINSTATEMENT_REQUIRED`. On-chain identity claims and the organisation binding are **not** re-issued automatically; re-establishing them is an explicit four-eyes operator step. The earlier closure and chain-propagation records stay in force until KYC is approved.
+- A pending reinstatement can be abandoned by terminating the customer again. There is no Sperrvermerk check at completion; the party gates enforce blocks on every transaction.
+
 ---
 
 ## What must be retained

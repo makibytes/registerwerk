@@ -66,7 +66,7 @@ app — both are always reached directly at their own port.
 ### Prerequisites
 
 - Docker & Docker Compose
-- Java 25+ (for local backend development)
+- JDK 25 (for local backend development; the build targets Java 25 and fails on older JDKs)
 - Node 24 / npm (for frontend development)
 - Foundry (`curl -L https://foundry.paradigm.xyz | bash`)
 
@@ -171,30 +171,47 @@ cd daml && dpm build
 
 ```
 registerwerk/
-├── backend/                  Spring Boot 4.1 / Java 25 — Spring Modulith 2.1 bounded-context architecture
-│   └── src/main/java/de/makibytes/registerwerk/
+├── backend/                  Spring Boot 4.1 / JDK 25 — Spring Modulith 2.1 bounded-context architecture
+│   └── src/main/java/de/makibytes/registerwerk/   (39 Spring Modulith modules)
+│       ├── accessreview/     Periodic access recertification (reviews, write-once decisions, SoD warnings)
 │       ├── admin/            Operator user management + impersonation
 │       ├── asset/            Securities (assets, deployments, term sheets, holders)
-│       ├── audit/            Append-only audit log (event-driven via @ApplicationModuleListener)
-│       ├── auth/             JWT minting, user auth, onboarding tokens
-│       ├── blockchain/       RPC registry, EVM/Solana/Starknet/Stellar deployment, token admin
+│       ├── audit/            Append-only, hash-chained, signed audit log (event-driven via @ApplicationModuleListener)
+│       ├── auth/             JWT minting, user auth, login throttle, sessions
+│       ├── blockchain/       RPC registry, EVM/Solana/Starknet/Stellar deployment, outbox, token admin
+│       ├── bootstrap/        Demo-data seeders (never active in production mode)
 │       ├── chain/            Chain/network config, RPC node health
-│       ├── customer/         Legal entities, KYB, company users
-│       ├── deployment/       On-chain state: deployments, bond terms, holders, vault, mint
+│       ├── corporateactions/ Coupons, redemptions, record-date snapshots, income statements
+│       ├── customer/         Legal entities, KYB, company users, entity tasks, reinstatement
+│       ├── deployment/       On-chain state: deployments, bond terms, holders, vault, mint, register units
+│       ├── dora/             DORA incidents, ICT providers, resilience tests
+│       ├── endpoint/         Risk-scored counterparty wallet address register
+│       ├── entra/            Microsoft Graph two-factor status for Entra users
 │       ├── erc3643/          ERC-3643 (T-REX) compliance suite
 │       ├── externalref/      External system ID mapping
+│       ├── finality/         Block finality, chain-effect journal, compensation
+│       ├── idempotency/      Idempotency-Key handling
 │       ├── indexer/          Off-chain event sync (EVM/Solana/Canton)
+│       ├── infrastructure/   Cross-cutting configuration, scheduled maintenance, retention sweeps
 │       ├── kyc/              KYC document management + jurisdiction approvals
+│       ├── lending/          Isolated lending markets (release-gated)
 │       ├── marketplace/      dApp marketplace: manifests, review, onchain anchoring
 │       ├── notification/     Email notification listeners (event-driven)
 │       ├── onboarding/       Customer onboarding flow
 │       ├── orgidentity/      Onchain org identity, wallet binding, permissions
 │       ├── payment/          Operator-curated payment rail catalog (DvP cash leg)
+│       ├── registerstatement/Annual and on-demand register statements
+│       ├── registertransfer/ Register handover to a successor registrar
+│       ├── regreporting/     MiFIR / DAC8 regulatory reporting (prototype)
+│       ├── repo/             Repo desk (GMRA records, margin, default workflow; release-gated)
 │       ├── screening/        Sanctions/PEP screening (pluggable port)
-│       ├── shared/           Cross-cutting exceptions, utilities
-│       ├── stepup/           Step-up MFA, 4-eyes enforcement
+│       ├── shared/           Cross-cutting exceptions and helpers (ProductionMode, Money, RegisterClock)
+│       ├── stepup/           Step-up MFA, dual control, in-app approval queue
+│       ├── support/          Customer support tickets
 │       ├── trading/          Trade listings + executions
-│       └── wallet/           Operator wallet management
+│       ├── travelrule/       Travel Rule messaging + CASP authorization register
+│       ├── wallet/           Operator wallets: keystores, HSM, cloud-KMS signer, KEK rotation
+│       ├── webhook/          Outbound webhook delivery
 ├── contracts/                Foundry smart contracts
 │   └── src/
 │       ├── tokens/           EwpgERC20, ERC721, ERC1155, ERC3643 (T-REX)
@@ -208,7 +225,7 @@ registerwerk/
 └── frontend-customer/        Angular 22 — issuer / investor UI
 ```
 
-Each backend module follows the pattern `<module>/api/` (public surface), `<module>/internal/` (private), `<module>/events/` (typed domain events), `<module>/web/` (REST layer). See `CLAUDE.md` for the current full module list — it changes faster than this README.
+Each backend module follows the pattern `<module>/api/` (public surface), `<module>/internal/` (private), `<module>/events/` (typed domain events), `<module>/web/` (REST layer). See `docs/platform/modules.md` for the module reference and `CLAUDE.md` for the working conventions.
 
 ## Key Concepts
 
@@ -253,10 +270,11 @@ Each backend module follows the pattern `<module>/api/` (public surface), `<modu
 
 | Role | Permissions |
 |---|---|
-| `REGISTRY_ADMIN` | Full access |
+| `REGISTRY_ADMIN` | Full operator access; sharp operations also need a second approver (`REGISTRY_ADMIN` or `COMPLIANCE_OFFICER`) |
 | `AUDIT` | Read all |
 | `COMPLIANCE_OFFICER` | KYC approvals, screening reviews, holder blocks |
 | `RELATIONSHIP_MANAGER` | Read and support assigned customer entities |
+| `SUPPORT_AGENT` | Start read-only customer impersonation sessions (step-up and a recorded reason); nothing else |
 | `ISSUER` | Own issuances (read + write) |
 | `INVESTOR` | Own investments |
 | `TRADER` | Secondary-market listings and executions |
@@ -265,7 +283,7 @@ Each backend module follows the pattern `<module>/api/` (public surface), `<modu
 
 ## Onboarding Flow
 
-1. Operator creates legal entity via `POST /api/v1/customers`
+1. Operator creates legal entity via `POST /api/v1/entities`
 2. Operator generates token via `POST /api/v1/onboarding/tokens`
 3. Token sent to entity's admin via email
 4. Entity admin redeems token at `/onboarding/redeem/:token` in the customer frontend
@@ -274,7 +292,7 @@ Each backend module follows the pattern `<module>/api/` (public surface), `<modu
 
 ## API Documentation
 
-Once the backend is running: http://localhost:48080/swagger-ui.html
+The OpenAPI document and Swagger UI are off by default. Start the backend with `SWAGGER_ENABLED=true` to serve http://localhost:48080/swagger-ui.html (and `/api-docs`); they are unauthenticated while enabled, so keep them off on internet-facing deployments. Every route is also listed in the generated [API route index](docs/platform/api-routes.md).
 
 ## Product Documentation
 
@@ -292,11 +310,12 @@ canonical documentation version should appear in Registerwerk.
 
 ## Database Migrations
 
-Flyway migrations run automatically on startup. Scripts in `backend/src/main/resources/db/migration/`:
+Flyway migrations run automatically on startup. The scripts live in `backend/src/main/resources/db/migration/`; the directory is the list (this README deliberately carries no per-version table, because the baseline is re-squashed from time to time).
 
-| Version | Description |
-|---|---|
-| V1 | Initial schema — legal entities, KYC, onboarding tokens, assets and deployments, holders, mint control, partitioned audit log, entity merges, chain registry (incl. Fhenix/Inco), token transfer history, indexer state, ONCHAINID, ERC-3643 (T-REX) suites and identity registry mirror |
+- A single clean-install baseline, `V1__initial_schema.sql`; later changes are added as `V{n}__description.sql`.
+- Do not edit a migration after release.
+- `scripts/check-destructive-migrations.sh` (wired into the backend CI workflow) rejects unguarded `DROP TABLE`, `DROP COLUMN` and `TRUNCATE`; acknowledge an intentional one with `-- migration-safety: ack (<why>)` directly above it.
+- The runtime database login (`registerwerk_app`) is different from the migration/owner login; see the environment reference for `DB_APP_USER` and `SPRING_FLYWAY_USER`.
 
 ## Smart Contract Deployment
 
@@ -324,7 +343,8 @@ The `AssetTokenFactory` uses `CREATE2` with a deterministic salt so contract add
 - Dev/demo mode (`ENTRA_ENABLED=false`): backend mints HS256 JWTs via `POST /api/v1/public/auth/login`.
 - Onboarding tokens are stored as SHA-256 hashes; the cleartext is sent once via email
 - KYC documents ≤ 5 MB are stored as PostgreSQL `BYTEA` (in a separate `kyc_document_content` table); larger files are stored in S3
-- The registry backend wallet private key should be stored in a hardware security module (HSM) in production
+- In production the registry signing keys belong in a PKCS#11 HSM or a cloud-KMS signer (`REGISTERWERK_WALLET_SIGNER=kms`, GCP Cloud KMS); production mode refuses a software-only setup.
+- Set `REGISTERWERK_PRODUCTION_MODE=true` on every production deployment: the readiness checks then refuse an unsafe configuration at start-up (see `docs/operator/security/production-mode.md`). Sharp operations require step-up and, for the listed ones, a second approver through the in-app approval queue. The application connects as a DML-only database role, separate from the migration/owner login.
 
 ## License
 

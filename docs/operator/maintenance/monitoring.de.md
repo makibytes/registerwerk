@@ -4,6 +4,9 @@ title: Überwachung
 
 # Überwachung
 
+!!! warning "Übersetzung teilweise veraltet"
+    Diese Seite ist nicht vollständig mit dem englischen Original abgeglichen: Es fehlen die Abschnitte zur Ausführung geplanter Jobs, zum operativen Rückstau, zur Latenz der Transaktionsbestätigung und zu Lasttests, und Alarm- und Metriknamen können veraltet sein. Maßgeblich ist die englische Seite.
+
 Das Register wird mit einem Prometheus-+-Grafana-Monitoring-Stack ausgeliefert. Diese Seite beschreibt, was zu überwachen ist, welche Metriken zählen und wie Alerting konfiguriert wird.
 
 ## Den Monitoring-Stack starten

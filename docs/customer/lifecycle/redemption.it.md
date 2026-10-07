@@ -145,7 +145,7 @@ Registerwerk alza la mano. Non può far valere un credito — quello spetta al r
 
 1. **Progettazione** — Nordwind descrive un'obbligazione; l'operatore la approva.
 2. **Emissione** — viene distribuito un contratto, ammessi gli investitori, coniati 50.000 titoli.
-3. **Detenzione** — gli investitori detengono; il registro fa fede, la chain è verificabile.
+3. **Detenzione** — gli investitori detengono; il registro è la fonte di verità, la chain è verificabile.
 4. **Negoziazione** — i titoli cambiano di mano; le regole di conformità tengono a ogni trasferimento.
 5. **Finanziamento** — un titolare dà in garanzia titoli e ci prende a prestito sopra.
 6. **Rimborso** — cedole pagate, capitale rimborsato, token distrutti, registro chiuso.

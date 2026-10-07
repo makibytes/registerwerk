@@ -121,6 +121,14 @@ Cuando una organización deja de utilizar el registro:
 
     Amortícelo o transfiéralo a un registrador sucesor antes de dar de baja al emisor. De lo contrario, tendrá obligaciones que se ejecutan a través de un registro que nadie está administrando.
 
+### Reincorporar a un cliente cerrado o disuelto { #reinstating-a-closed-or-dissolved-customer }
+
+Un cliente `CLOSED` o `DISSOLVED` nunca vuelve a `ACTIVE` directamente. Un `REGISTRY_ADMIN` inicia la reincorporación con `POST /api/v1/entities/{id}/reinstate`; son obligatorios un motivo y una referencia legal, y la llamada exige autenticación reforzada y un segundo aprobador (`ENTITY_REINSTATE`).
+
+- El cliente pasa a `PENDING_REACTIVATION`: el KYC se restablece a «no iniciado», el filtrado se ejecuta de nuevo y se crean dos [tareas de entidad](entity-tasks.md) (`REINSTATEMENT_KYC_REQUIRED`, `REINSTATEMENT_USERS_REVIEW`). Mientras está pendiente, nadie del cliente puede iniciar sesión, negociar ni ser suplantado, y sus usuarios siguen deshabilitados.
+- Volver a aprobar el KYC (se aplican todas las puertas habituales de KYC) deja al cliente `ACTIVE` y crea `CHAIN_REINSTATEMENT_REQUIRED`. Los claims de identidad en cadena y el vínculo de organización **no** se reemiten automáticamente; restablecerlos es un paso explícito de doble control del operador. Los registros previos de cierre y de propagación en cadena siguen vigentes hasta que se apruebe el KYC.
+- Una reincorporación pendiente puede abandonarse dando de baja de nuevo al cliente. No hay comprobación de Sperrvermerk al completarla; las puertas de las partes aplican los bloqueos en cada transacción.
+
 ---
 
 ## Lo que debe conservarse { #what-must-be-retained }

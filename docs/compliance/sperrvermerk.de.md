@@ -29,6 +29,7 @@ Obwohl das Konzept seinen Ursprung im deutschen Recht hat, erkennen alle vier [u
 | `VERFUGUNGSVERBOT` | Verfügungsverbot | Verfügungsverbot — gerichtlich oder behördlich angeordnet |
 | `TOD` | Tod des Inhabers | Tod des Inhabers — ausstehende Nachlassregelung |
 | `INSOLVENZ` | Insolvenz | Insolvenzverfahren — Insolvenzverwalter benachrichtigt |
+| `REGULATORISCH` | Regulatorische Sperre | Regulatorische Sperre — von einer Aufsichtsbehörde angeordnet |
 
 ---
 
@@ -38,20 +39,25 @@ Die `HolderBlock`-Entität im `kyc`-Modul speichert alle aktiven und historische
 
 | Feld | Beschreibung |
 |---|---|
-| `entityId` | FK zu `LegalEntity` |
-| `assetId` | FK zu `Asset` |
-| `walletAddress` | Bestimmte zu blockierende Wallet (optional — wenn null, alle Wallets der Entität) |
-| `blockType` | Einer der oben genannten Typen |
-| `legalBasis` | Rechtsgrundlage im Freitext (z. B. Gerichtsaktenzeichen) |
-| `courtRef` | Gerichtsreferenznummer |
-| `documentId` | FK zu `KycDocument`, der den Sperrbefehl enthält |
-| `startsAt` | Wann der Block aktiv wird |
-| `expiresAt` | Automatisches Ablaufdatum (nullbar — unbegrenzte Blöcke zulässig) |
-| `liftedAt` | Wann die Sperre manuell aufgehoben wurde |
-| `liftedBy` | UUID des Betreibers, der die Sperre aufgehoben hat |
-| `twoManRuleApprover` | UUID des zweiten Genehmigers |
-| `twoManRuleApprovedAt` | Wann der zweite Genehmiger bestätigt hat |
-| `onChainFreezeTxHash` | Hash der ersten bestätigten On-Chain-Freeze-Transaktion dieses Blocks. Ein Block kann mehrere Deployments betreffen; das Ergebnis je Deployment und Wallet steht in `holder_block_freeze` (siehe [On-Chain-Wirkung](#on-chain-reach)) |
+| `id` | Primärschlüssel |
+| `entityId` | FK auf `LegalEntity`. Gesetzt bei einem rechtsträgerbezogenen Block, der alle Inhaber-Wallets des Rechtsträgers erfasst (aus dem Inhaber-Eintrag der Wallet aufgelöst, wenn genau ein Rechtsträger die Wallet hält) |
+| `assetId` | FK auf `Asset`; null bedeutet jeder Vermögenswert, den die Wallet hält |
+| `walletAddress` | Die gesperrte Wallet — Pflichtfeld, in normalisierter Form gespeichert |
+| `blockType` | Einer der obigen Typen |
+| `status` | `ACTIVE`, `EXPIRY_REVIEW`, `LIFTED`, `EXPIRED` oder `SUPERSEDED` (siehe [Lifecycle](#lifecycle)) |
+| `legalBasis` | Rechtsgrundlage im Freitext (z. B. Aktenzeichen) |
+| `courtRef` | Gerichtliches Aktenzeichen |
+| `documentId` | FK auf `KycDocument` mit der Sperranordnung |
+| `startsAt` | Wann der Block wirksam wird |
+| `expiresAt` | Ablaufdatum (nullable — unbefristete Blocks sind erlaubt) |
+| `expiryConfirmedByApprover` | Ob der zweite Genehmiger das Ablaufdatum gegen die Anordnung bestätigt hat |
+| `expiryReviewAt` | Wann der Block in `EXPIRY_REVIEW` überging |
+| `liftedAt` / `liftedBy` / `liftReason` | Wann, durch wen und warum der Block aufgehoben wurde |
+| `createdBy` | Der Betreiber, der den Block angelegt hat |
+| `dualControlApproverId` | Der zweite Genehmiger (vom Step-up-Aspekt validiert) |
+| `dualControlApprovedAt` | Wann die Genehmigung des zweiten Genehmigers erfasst wurde |
+| `createdAt` / `updatedAt` | Zeitstempel des Datensatzes |
+| `onChainFreezeTxHash` | Hash der ersten bestätigten On-Chain-Freeze-Transaktion dieses Blocks. Ein Block kann mehrere Deployments erreichen; das Ergebnis je Deployment und Wallet steht in `holder_block_freeze` (siehe [On-Chain-Wirkung](#on-chain-reach)) |
 
 ---
 
@@ -68,10 +74,12 @@ stateDiagram-v2
     EXPIRED --> [*]
 ```
 
+`SUPERSEDED` ist im Status-Enum definiert, wird aber von keinem aktuellen Codepfad gesetzt. `EXPIRED` wird nur für Blocktypen erreicht, die in `registerwerk.sperrvermerk.auto-expire-types` stehen (Standard leer); andernfalls führt ein abgelaufenes Datum zu `EXPIRY_REVIEW`.
+
 **Erstellen eines Blocks:**
 1. `REGISTRY_ADMIN` übermittelt `POST /api/v1/holder-blocks` mit Blocktyp, Rechtsgrundlage und optionalem Ablaufdatum
-2. Der Aspekt `@RequiresStepUp` erzwingt ein frisches Step-up-Token (TOTP oder WebAuthn)
-3. `SperrvermerkService` prüft, ob ein zweiter Genehmiger bestätigt hat (`dualControlPending`-Token)
+2. `@RequiresStepUp` erzwingt ein frisches Step-up-Token (lokales TOTP oder der Entra-Authentifizierungskontext) und einen zweiten Genehmiger: Das Token des Genehmigers wird in `X-Dual-Control-Token` gesendet und vom Step-up-Aspekt validiert, und der Dienst erhält die ID des Genehmigers
+3. `SperrvermerkService` hält den Block mit `dualControlApproverId` und `dualControlApprovedAt` fest
 4. Sobald der Block committet ist, friert `SperrvermerkOnchainSyncListener` die Wallet über den dauerhaften Transaktions-Outbox auf jedem aktiven Token-Deployment der gehaltenen Assets ein (bei einem Asset-bezogenen Block nur auf dem des `assetId`). Welche Standards sich einfrieren lassen, steht [unten](#on-chain-reach); ein Deployment, das sich nicht einfrieren lässt, wird erfasst und eskaliert, nicht übersprungen
 5. Das Ergebnis je Block, Deployment und Wallet wird in `holder_block_freeze` festgehalten und folgt dem Transaktionsstatus: `SUBMITTED` wird zu `CONFIRMED` (dann wird `onChainFreezeTxHash` gespeichert) oder zu `FAILED`
 6. Ein `AuditEvent` mit den vollständigen Blockdetails wird ausgegeben
@@ -93,16 +101,17 @@ Ein `@Scheduled`-Job läuft nächtlich und findet alle ACTIVE-Blöcke mit `expir
 
 | Vorgang | Durchsetzungspunkt |
 |---|---|
-| `forceTransfer` | `TokenAdminController` — wird vor jedem Übertragungsaufruf geprüft |
-| `forceApprove` | `TokenAdminController` — wird vor der Genehmigung geprüft |
-| `AssetHolder`-Erstellung (neuer Investor) | `AssetService` — bestehende Blöcke können neue Positionen verhindern |
-| On-Chain-Übertragung | Der Token-Vertrag verweigert Bewegungen von, an oder durch eine eingefrorene Adresse (`freezeAddress` / `setAddressFrozen`), siehe [On-Chain-Wirkung](#on-chain-reach) |
+| EVM-Token-Administration (`TokenAdminService`, `Erc3525AdminService`, `Erc7540AdminService`, `Erc3643LifecycleService`) | Ein privilegierter Vorgang, an dem eine gesperrte Wallet beteiligt ist, wird abgelehnt (fail closed) |
+| ERC-3643-Claim-Ausstellung (`ClaimIssuanceService`) | Für einen gesperrten Rechtsträger wird kein On-Chain-Identitäts-Claim ausgestellt |
+| Registerseitige Portfoliomigration (`PortfolioMigrationService`) | Die Position eines gesperrten Inhabers wird nicht migriert |
+| Ausgehende Ziele und Beteiligten-Eignung (`OutboundDestinationGateImpl`, `PartyEligibilityGateImpl`) | Genutzt von Handel, Repo, Lending und Auszahlungen bei Kapitalmaßnahmen: Eine gesperrte Partei oder ein gesperrtes Ziel wird abgelehnt; schützende Repo-Aktionen des Kreditgebers werden stattdessen für den Betreiber markiert |
+| On-Chain-Transfer | Der Token-Vertrag lehnt Bewegungen von, zu oder durch eine eingefrorene Adresse ab (`freezeAddress` / `setAddressFrozen`), siehe [On-Chain-Wirkung](#on-chain-reach) |
 
 ---
 
 ## On-Chain-Wirkung { #on-chain-reach }
 
-Der Block auf Registerebene (Datenbank) ist maßgeblich und gilt für jeden Token-Standard. Der On-Chain-Freeze bildet ihn dort nach, wo ein Vertrag das ausdrücken kann, sodass auch Wege geschlossen sind, die das Backend nicht vermittelt (direkte Übertragungen, `repay`/`liquidate` im Repo, Vault-Einzahlungen und -Rücknahmen). Er ist eine technische Maßnahme, keine Rechtswirkung (siehe die Prüfwarnung am Seitenanfang).
+Der Block der Registerebene (Datenbank) ist die maßgebliche Quelle für Registerwerks eigene Prüfungen und gilt für jeden Token-Standard. Das On-Chain-Einfrieren spiegelt ihn dort, wo ein Vertrag ihn ausdrücken kann, sodass auch Pfade, die das Backend nicht vermittelt (direkte Transfers, Repo-`repay`/`liquidate`, Vault-Einzahlungen und -Rücknahmen), für die Wallet geschlossen sind. Es ist eine technische Maßnahme, keine Rechtswirkung (siehe den Prüfhinweis oben).
 
 | Standard / Chain | Automatischer On-Chain-Freeze | Wie |
 |---|---|---|
@@ -135,11 +144,11 @@ Zwei Jobs halten die Chain mit dem Register im Einklang (beide durch ShedLock ab
 
 ## Audit-Trail { #audit-trail }
 
-Jede Erstellung, Änderung und Aufhebung eines Blocks erzeugt ein `AuditEvent` vom Typ `HOLDER_BLOCK_CREATED`, `HOLDER_BLOCK_LIFTED` oder `HOLDER_BLOCK_EXPIRED`; die On-Chain-Folgeschritte fügen `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_NOT_PROPAGATED` und `HOLDER_BLOCK_RELEASE_FAILED` hinzu. Diese Ereignisse enthalten:
+Jede Anlage, Änderung und Aufhebung eines Blocks erzeugt ein `AuditEvent` vom Typ `HOLDER_BLOCK_CREATED` oder `HOLDER_BLOCK_LIFTED` (eine automatische Aufhebung trägt den Grund `AUTO_EXPIRED`); das Erreichen des Ablaufdatums löst `HOLDER_BLOCK_EXPIRY_REVIEW` aus. Die On-Chain-Folgeschritte fügen `HOLDER_BLOCK_FREEZE_CONFIRMED`, `HOLDER_BLOCK_FREEZE_RESYNC_REQUESTED`, `HOLDER_BLOCK_NOT_PROPAGATED` und `HOLDER_BLOCK_RELEASE_FAILED` hinzu. Diese Ereignisse enthalten:
 
 - Die Identität des initiierenden Betreibers
 - Die Identität des zweiten Genehmigers (bei Erstellung/Aufhebung)
 - Den vollständigen `HolderBlock`-Snapshot zum Zeitpunkt des Ereignisses
-- Die Step-up-Token-Referenz (TOTP-Zeitstempel oder WebAuthn-Assertion-ID)
+- Das Ereignis `DUAL_CONTROL_APPROVED`, das die Genehmigung des zweiten Genehmigers festgehalten hat (Token-ID und Request-Digest), bei Anlage/Aufhebung
 
 Dieser Audit-Trail soll die Dokumentation des Registereintrags unterstützen und ist durch die [Audit-Hash-Kette](../platform/audit-log.md) manipulationssicher nachweisbar; seine Vollständigkeit und die Behandlung nach eWpG §15 bedürfen einer externen Prüfung.

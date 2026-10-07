@@ -4,155 +4,109 @@ title: Resilienza e ripresa
 
 # Resilienza dell'indicizzatore
 
-Questa pagina descrive come il registro rileva le lacune dell'indicizzatore, si riprende dalle interruzioni e confronta
-intervalli di eventi provvisori. Queste procedure non stabiliscono la definitività della catena né la correttezza legale.
+Questa pagina descrive come il registro rileva le lacune dell'indicizzatore, rileva e corregge le riorganizzazioni della chain (reorg) e si riprende dalle interruzioni. Queste procedure non stabiliscono correttezza giuridica — vedi `docs/operator/indexers/the-graph.md` per ciò che `synced: true` di un subgraph significa e non significa. Per ciò che accade *a valle* di un reorg rilevato — il giornale degli effetti, la compensazione automatica e il gate di policy che può congelare un asset in attesa di revisione — vedi [Policy di finalità e compensazione dei reorg](finality-and-compensation.md).
+
+!!! note "Corretto rispetto all'implementazione reale"
+    Una versione precedente di questa pagina descriveva uno schema `chain_head_block`/`latest_indexed_block`, una scala di livelli di salute `DEGRADED`/`CRITICAL` e un endpoint `POST /backfill` — nulla di tutto ciò esiste in questa codebase. Questa pagina descrive ora ciò che è effettivamente implementato.
+
+!!! note "Da due a tre livelli"
+    Questa pagina descriveva in origine un `token_transfer.finality_status` a due livelli: `PROVISIONAL`/`FINAL`/`ORPHANED`. Quella colonna è stata estesa al `finality.api.FinalityLevel` a tre livelli (`PROVISIONAL`/`SAFE`/`FINALIZED`/`ORPHANED`) condiviso con i prodotti fratelli chaincache e chaincheck — `FINAL` è diventato `FINALIZED`, e un nuovo livello `SAFE` si colloca tra PROVISIONAL e FINALIZED per le chain che espongono un checkpoint intermedio (ad es. il tag di blocco `safe` di Ethereum, `ACCEPTED_ON_L2` di Starknet). Ogni esempio di questa pagina è stato aggiornato alla colonna e all'enumerazione attuali.
 
 ## Tracciamento dello stato dell'indicizzatore
 
-Il backend mantiene una tabella `indexer_state` che registra l'ultimo blocco indicizzato correttamente per ciascuna catena:
+Il backend mantiene una tabella `indexer_state`, una riga per `(chain_config_id, indexer_type)`:
 
 ```sql
-SELECT chain_id, network_name, latest_indexed_block,
-       chain_head_block,
-       (chain_head_block - latest_indexed_block) AS lag_blocks,
-       last_updated_at
+SELECT chain_config_id, indexer_type, status,
+       last_synced_block, last_final_block, last_synced_at,
+       consecutive_errors, last_error
 FROM indexer_state
-ORDER BY lag_blocks DESC;
+ORDER BY last_synced_at ASC NULLS FIRST;
 ```
 
-Il backend interroga l'API di stato di indicizzazione di graph-node ogni 30 secondi e aggiorna questa tabella.
+- `last_synced_block` — il cursore di testa/provvisorio: il blocco più alto da cui l'indicizzatore ha letto trasferimenti, che quelle righe siano state o meno finalizzate nel frattempo.
+- `last_final_block` — il cursore confermato: il blocco più alto le cui righe `token_transfer` hanno tutte superato la profondità di conferma configurata e sono state verificate rispetto a un hash/stato canonico appena riletto (EVM, Starknet). Sempre `<= last_synced_block`. Null per le chain finali alla scrittura (Solana/Stellar/Canton — vedi sotto), che non hanno mai una finestra non regolata da tracciare.
+- `status` — `ACTIVE`, `PAUSED` oppure `ERROR`. Un indicizzatore in `ERROR` con `consecutive_errors >= 10` (5 per Canton) smette di funzionare finché non viene reimpostato manualmente (vedi [Ripristino manuale](#manual-recovery)) — oltre quel punto non esiste autoguarigione automatica.
 
-## Rilevamento gap
+## Rilevamento e ripristino dei reorg di chain
 
-Un gap si verifica quando l'indicizzatore resta indietro rispetto alla testa della catena. Il backend classifica il ritardo come segue:
+Ogni chain EVM (tramite graph-node) e ogni chain Starknet riverifica la propria finestra ancora non regolata (PROVISIONAL o SAFE) a ogni ciclo di sincronizzazione, tramite `ReorgGuard`:
 
-| Ritardo (blocchi) | Stato | Azione |
-|-----|--------|--------|
-| 0–5 | OK | Funzionamento normale |
-| 6–20 | WARN | Avviso registrato, si attiva l'allarme Prometheus |
-| 21–100 | DEGRADED | Il dashboard mostra un avviso, viene inviata un'e-mail all'operatore |
-| 100+ | CRITICAL | `/actuator/health` restituisce `DOWN`, si attiva l'allarme PagerDuty |
+- **EVM** — `token_transfer.block_hash` viene registrato per le righe entro la profondità di conferma configurata (`registerwerk.blockchain.tx.confirmations-by-chain`); `ReorgGuard` rilegge l'hash canonico di ciascun blocco tramite `_meta(block: {number})` di graph-node e lo confronta. Un blocco che continua a corrispondere viene promosso di un gradino (PROVISIONAL → SAFE → FINALIZED, con una profondità di conferma con tag `safe` distinta da quella `finalized`); una discrepanza marca come `ORPHANED` ogni riga dal punto di biforcazione (mai eliminata — è un registro regolamentato con obbligo di audit trail) e riavvolge `last_synced_block`/`last_final_block` a `fork_block - 1`, così il ciclo successivo reindicizza l'intervallo interessato. Una chain il cui `ChainConfig.finalitySource` è `CHAINCACHE` (vedi [Integrazione con chaincache](../blockchain/chaincache-integration.md)) ottiene questa riverifica da `ChaincacheFinalityProbe` — una chiamata al `GET /{chain}/api/blocks/{number}/finality` del workload chaincache di quella chain — invece della lettura RPC sopra; qualsiasi errore della sonda (irraggiungibile, 401, 404, 5xx) ripiega sul percorso RPC invece di fabbricare un falso reorg, così una breve indisponibilità di chaincache degrada il tracciamento della finalità al comportamento RPC semplice invece di romperlo. Indipendentemente da quale sonda risponda a questa interrogazione, la chain riceve anche il flusso di eventi durevole in push di chaincache (`ChaincacheDurableStreamManager`) come fonte *aggiuntiva* e senza lacune di osservazioni `BLOCK`/`RETRACTION` che alimentano lo stesso libro `block_finality` descritto sotto — le due sono complementari, non esclusive: il flusso durevole può osservare una ritrattazione prima che questa riverifica basata su polling l'avrebbe rilevata, e il percorso basato su polling continua a funzionare anche se la connessione al flusso durevole è brevemente interrotta.
+- **Starknet** — non si usa alcuna primitiva di hash di blocco; la finalità di ogni riga non regolata viene invece ricontrollata tramite il campo `status` di `starknet_getBlockWithTxHashes`: `ACCEPTED_ON_L2` promuove a SAFE, `ACCEPTED_ON_L1` promuove a FINALIZED; un blocco `REJECTED`/`REVERTED` attiva lo stesso percorso di orfanizzazione e riavvolgimento di EVM.
+- **Solana** — la finalità è stabilita alla scrittura: i trasferimenti sono indicizzati solo con `commitment: "finalized"`, e il campo `err` della firma viene controllato perché una transazione fallita non venga mai indicizzata come trasferimento riuscito. Non c'è una finestra non regolata separata da riverificare.
+- **Stellar / Canton** — la chiusura del ledger (Stellar/Horizon) e il commit del synchronizer (Canton) sono finali una volta osservati; stesso ragionamento di Solana.
 
-## Procedure di ripristino
+Ogni blocco che la finestra non regolata di una chain tocca — quelli effettivamente riverificati sopra — è registrato anche in `block_finality` (una riga per `(chain_config_id, block_number)`, di proprietà del modulo `finality`, alimentata da `ReorgGuard`). È un libro separato da `token_transfer` stesso: è la fonte di verità che `FinalityGate` e il meccanismo di compensazione degli effetti consultano (vedi [Policy di finalità e compensazione dei reorg](finality-and-compensation.md)), così non devono mai scorrere `token_transfer` né importare il modulo indicizzatore. `token_transfer.finality_status` resta una cache denormalizzata dello stesso fatto, comoda per interrogare direttamente i trasferimenti.
 
-### Ripristino di graph-node (EVM)
+`token_transfer.finality_status ∈ {PROVISIONAL, SAFE, FINALIZED, ORPHANED}` può essere interrogato direttamente:
 
-Se graph-node resta indietro a causa di un'interruzione (downtime) dell'RPC:
+```sql
+SELECT chain_config_id, finality_status, count(*)
+FROM token_transfer
+WHERE finality_status <> 'FINALIZED'
+GROUP BY chain_config_id, finality_status;
+```
 
-1. Controlla la presenza di errori nei log di graph-node:
+Un conteggio `ORPHANED` diverso da zero è atteso in modo transitorio subito dopo un vero reorg; un conteggio che non diminuisce nei cicli successivi significa che l'intervallo interessato non si reindicizza con successo — controlla `indexer_state.last_error` per quella chain. Un conteggio `SAFE` prolungato (righe che non progrediscono a `FINALIZED`) significa di solito che il modello di finalità della chain si aspetta una profondità di conferma o un tag di blocco che il nodo RPC configurato non riporta — vedi la sezione sul modello di finalità di `docs/operator/blockchain/adding-chains.md`.
 
-   ```bash
-   docker compose logs --tail=100 graph-node | grep -i "error\|panic"
-   ```
+**Limite noto:** non esiste una policy di RPC fidato/quorum — la risposta `_meta`/stato di un singolo endpoint RPC configurato è considerata attendibile così com'è per il rilevamento dei reorg. Un nodo RPC difettoso o in ritardo può produrre da sé un falso segnale di reorg; confronta con la configurazione RPC di `docs/operator/blockchain/adding-chains.md` prima di trattare un allarme di reorg come un evento di chain confermato.
 
-2. Verifica che l'endpoint RPC sia raggiungibile:
+## Monitoraggio del ritardo dell'indicizzatore
 
-   ```bash
-   curl -X POST $ETH_MAINNET_RPC \
-     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-   ```
+`IndexerMonitorService` gira ogni 5 minuti e pubblica due gauge Prometheus:
 
-3. Se l'RPC non è raggiungibile, aggiorna `.env` con un RPC di fallback e riavvia:
+- `registerwerk_indexer_last_sync_timestamp_seconds{chain_config_id, indexer_type}` — secondi epoch Unix dell'ultima sincronizzazione riuscita. Genera allarmi come `time() - <metric> > threshold`.
+- `registerwerk_indexer_lag_blocks{chain_config_id, indexer_type}` — blocchi tra `last_synced_block` e il più alto `latest_block_number` riportato da un `rpc_node` abilitato e sano di quella chain (riutilizzando i dati di testa già in cache di `RpcNodeHealthService`, non una nuova chiamata RPC). Assente — non zero — per una chain senza nodo sano o senza ancora un blocco sincronizzato, così una serie mancante significa «nessun dato», non «nessun ritardo».
 
-   ```bash
-   docker compose restart graph-node
-   ```
+Pubblica inoltre un evento di audit `INDEXER_STALE` ogni volta che un indicizzatore è in `ERROR` o non sincronizza da oltre 2 ore. Le vere regole Prometheus sono in `monitoring/alerts/registerwerk.yml`, gruppo `registerwerk.critical` (`IndexerStaleCritical`/`IndexerStaleWarning`) e gruppo `registerwerk.observability` (`IndexerLagBlocksHigh`, allarme oltre 1000 blocchi per 10 minuti o più) — entrambe sono regole reali e valutate in questo repository, non esempi illustrativi.
 
-4. Monitora l'avanzamento del ripristino su `http://localhost:8030`.
+## Ripristino manuale { #manual-recovery }
 
-### Reindicizzazione del subgraph
-
-Se un subgraph presenta errori fatali e non può ripristinarsi automaticamente, non rimuovere il deployment attivo.
-Genera (render) e distribuisci una nuova versione con il nome del grafo mainnet configurato:
+Un indicizzatore che ha raggiunto `consecutive_errors >= 10` (5 per Canton) smette di sincronizzare finché non viene reimpostato.
 
 ```bash
-# Configura ogni singleton e ogni elenco multi-istanza *_MAINNET con il proprio blocco di deployment,
-# poi genera (render), valida e distribuisci una nuova versione con un'etichetta univoca. Graph Node conserva
-# la versione precedente mentre ewpg/ethereum-mainnet indicizza quella sostitutiva.
-SUBGRAPH_VERSION_LABEL=recovery-YYYYMMDDHHMM ./indexer/evm/deploy-subgraph.sh mainnet
+# List every indexer's current state
+curl -H "Authorization: Bearer $OPERATOR_JWT" http://localhost:48080/api/v1/indexers
+
+# Clear the error state — the next scheduled tick resumes from the existing cursor, no restart required
+curl -X POST -H "Authorization: Bearer $OPERATOR_JWT" \
+  "http://localhost:48080/api/v1/indexers/<indexer-state-id>/reset"
+
+# Force a full re-sync from genesis instead (only if the existing cursor itself is untrustworthy —
+# e.g. after a manual chain-state correction; this re-processes the chain's entire history)
+curl -X POST -H "Authorization: Bearer $OPERATOR_JWT" \
+  "http://localhost:48080/api/v1/indexers/<indexer-state-id>/reset?fullResync=true"
 ```
 
-Attendi che la nuova versione raggiunga la testa della catena, quindi confronta il suo intervallo di eventi in modo indipendente
-prima di consentirne l'affidamento a valle. Conserva la configurazione e gli artefatti precedenti. Se è necessario un rollback,
-ridistribuisci la configurazione precedentemente approvata con una nuova etichetta di versione; questo crea
-una nuova versione invece di eliminare in modo distruttivo l'una o l'altra cronologia.
+Entrambe le azioni richiedono `REGISTRY_ADMIN` e sono sottoposte ad audit (`INDEXER_RESET`). L'SQL diretto equivalente (ad es. per un percorso scriptato/di emergenza senza l'API) resta:
 
-### Ripristino dell'indicizzatore Solana
+```sql
+SELECT id, chain_config_id, indexer_type, last_synced_block, last_synced_at, status, consecutive_errors, last_error
+FROM indexer_state;
 
-Se l'indicizzatore Solana ha mancato eventi durante un'interruzione gRPC:
-
-1. Controlla l'ultimo slot elaborato correttamente nella tabella dello stato dell'indicizzatore
-2. Il fallback di polling dell'indicizzatore rielabora automaticamente gli slot alla riconnessione
-3. Se il gap è troppo ampio (oltre 10.000 slot), avvia un backfill manuale:
-
-   ```bash
-   curl -X POST http://localhost:3001/backfill \
-     -H "Content-Type: application/json" \
-     -d '{"fromSlot": 285600000, "toSlot": 285614923}'
-   ```
-
-## Avvisi di monitoraggio
-
-Configura le regole di allarme di Prometheus in `monitoring/alerts.yml`:
-
-```yaml
-groups:
-  - name: indexer
-    rules:
-      - alert: IndexerLagHigh
-        expr: indexer_lag_blocks > 20
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Indexer lag > 20 blocks on {{ $labels.chain }}"
-
-      - alert: IndexerLagCritical
-        expr: indexer_lag_blocks > 100
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Indexer lag CRITICAL on {{ $labels.chain }}"
-
-      - alert: GraphNodeDown
-        expr: up{job="graph-node"} == 0
-        for: 1m
-        labels:
-          severity: critical
+UPDATE indexer_state SET status = 'ACTIVE', consecutive_errors = 0, last_error = NULL WHERE id = '<uuid>';
 ```
 
-# Resilienza e ripristino
+## Deduplicazione
+
+`token_transfer` ha vincoli `UNIQUE NULLS NOT DISTINCT` compatibili con il partizionamento su `(chain_config_id, tx_hash, log_index, occurred_at)` per EVM/Starknet e su `(chain_config_id, tx_hash, slot, occurred_at)` per Solana. Risincronizzare da un blocco precedente è sicuro perché ogni servizio di sincronizzazione controlla anche l'identità della transazione prima di inserire, così un intervallo rielaborato viene saltato invece di essere duplicato.
 
 ## Modalità di guasto e ripristino
 
 | Componente | Guasto | Ripristino |
 |---|---|---|
-| graph-node | Interrompe l'indicizzazione | Al riavvio, riprende da `last_indexed_block` |
-| Nodo RPC EVM | Connessione persa | `GRAPH_ETHEREUM_REQUEST_RETRIES=10`; RPC di fallback configurabili |
-| Backend ↔ graph-node | GraphQL non raggiungibile | `consecutive_errors` si incrementa; riprende dal cursore alla riconnessione |
-| Yellowstone gRPC | Interruzione dello stream | Il backend si riconnette; il job di polling colma le lacune |
-| Solana RPC | Il polling fallisce | `indexer_state.status = ERROR`; l'allarme scatta dopo 2 ore |
+| graph-node | Smette di indicizzare / riporta `hasIndexingErrors` | Il backend degrada quel ciclo a «scrivere tutto come PROVISIONAL, saltare la riverifica dei reorg» invece di far fallire la sincronizzazione; indaga direttamente su graph-node |
+| RPC EVM/Starknet/Stellar | Connessione persa | `consecutive_errors` aumenta; riprende dal cursore alla riconnessione; stato `ERROR` dopo 10 errori consecutivi |
+| Solana Yellowstone gRPC | Il flusso cade | Il polling di fallback (`SolanaTransferSyncService`) colma le lacune con un proprio cron di 10 minuti, indipendentemente dallo stato del flusso |
+| Flusso del ledger Canton | Il flusso cade | Stato `ERROR` dopo 5 errori consecutivi (soglia più bassa delle altre chain — vedi `CantonTransferSyncService`) |
 
-## Monitor dell'indicizzatore
+## Reindicizzazione del subgraph (solo EVM)
 
-`IndexerMonitorService` controlla ogni 5 minuti se `indexer_state.last_synced_at` è più vecchio di 2 ore. In tal caso, pubblica un evento di audit `INDEXER_STALE`.
-
-## Ripristino manuale
-
-Se un indicizzatore resta notevolmente indietro:
+Se un subgraph ha errori fatali e non può riprendersi automaticamente, non rimuovere il deployment attivo. Renderizza e distribuisci una nuova versione sotto il nome di grafo mainnet configurato:
 
 ```bash
-# Controlla il cursore corrente
-SELECT chain_config_id, indexer_type, last_synced_block, last_synced_at, status
-FROM indexer_state;
-
-# Reimposta il cursore per forzare una risincronizzazione completa (usare con cautela)
-UPDATE indexer_state SET last_synced_block = 0 WHERE chain_config_id = '<uuid>';
+SUBGRAPH_VERSION_LABEL=recovery-YYYYMMDDHHMM ./indexer/evm/deploy-subgraph.sh mainnet
 ```
 
-Quindi riavvia il servizio di sincronizzazione interessato oppure il backend.
-
-## Deduplicazione
-
-Tutti gli eventi vengono archiviati con un vincolo UNIQUE su `(chain_config_id, tx_hash, log_index)`. Risincronizzare da un blocco precedente è sicuro: i duplicati vengono ignorati silenziosamente (`ON CONFLICT DO NOTHING`).
+Attendi che la nuova versione raggiunga la testa della chain, poi confronta in modo indipendente il suo intervallo di eventi prima di consentire che ci si affidi a essa a valle. Conserva la configurazione e gli artefatti precedenti; se serve un rollback, ridistribuisci la configurazione approvata in precedenza sotto una nuova etichetta di versione invece di cancellare in modo distruttivo la cronologia di una delle due versioni.

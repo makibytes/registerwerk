@@ -39,7 +39,7 @@ title: Voraussetzungen
 | Operator-Frontend | 44200 | Öffentlich – direkt geöffnet, niemals über Kong |
 | Kunden-Frontend | 44201 | Öffentlich – direkt geöffnet; nur seine eigenen API-Aufrufe werden über Kong weitergeleitet |
 | Kong-Proxy | 48000 / 48443 | Öffentlich – nur Kunden-API-Verkehr (HTTP/HTTPS), DB-los, keine Admin-GUI |
-| Kong-Admin-API | 48001 | Nur Loopback – `docker exec`/SSH-Tunnel, nie öffentlich zugänglich machen |
+| Kong-Admin-API | — (nicht veröffentlicht) | Lauscht nur auf `127.0.0.1:8001` innerhalb des Containers; nutzen Sie `docker compose exec kong kong health`, niemals offenlegen |
 | Dokumentation (optionales Profil `docs`) | 48003 | Konfigurierbare Bind-Adresse |
 | Chaincache Sepolia/Base (optional) | 48090 / 48091 | Nur Loopback |
 | Temporäres Anvil | 48545 | Konfigurierbare Bind-Adresse; intern bleibt `anvil:8545` |

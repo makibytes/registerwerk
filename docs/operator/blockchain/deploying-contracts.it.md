@@ -99,3 +99,53 @@ forge script script/UpgradeCompliance.s.sol \
   --rpc-url $ETH_MAINNET_RPC \
   --broadcast
 ```
+
+## Da una singola chiave di deployment a multisig/timelock
+
+!!! warning "Nessuno script di questo repository lo fa per te"
+    Ogni file `script/Deploy*.s.sol` firma con l'unico EOA dietro
+    `REGISTRY_WALLET_PRIVATE_KEY` e concede a quello stesso indirizzo `DEFAULT_ADMIN_ROLE` +
+    `OPERATOR_ROLE` su `OrgRegistry`, `PermissionRegistry`, `EcosystemTrustedIssuersRegistry`,
+    `PermissionOracle` e `DappRegistry`, oltre alla proprietà `Ownable` di ogni token generato da
+    `AssetTokenFactory` — in modo permanente, **senza alcun passaggio di trasferimento**.
+    `UpgradeCompliance.s.sol` di `EwpgBondDesk` è l'unica eccezione: una variabile d'ambiente facoltativa
+    `NEW_REGISTRY_WALLET` che sposta la proprietà di un `WhitelistRegistry` appena distribuito, e nient'altro.
+    Andare su mainnet con una chiave grezza che non migra mai significa che un solo portatile compromesso
+    può congelare, trasferire coattivamente o riassegnare i permessi dell'intero registro.
+
+Questo è un runbook operativo, non una modifica dei contratti — il modello `AccessControl`/`Ownable` già presente nei contratti è esattamente ciò che serve a un multisig; nulla di tutto ciò richiede una modifica in Solidity o un nuovo deployment.
+
+### 1. Allestisci il multisig prima di distribuire
+
+Distribuisci prima un [Gnosis Safe](https://safe.global/) (o equivalente) sulla chain di destinazione, con firmatari che siano persone identificate su hardware wallet separati — mai una seconda chiave sulla stessa macchina che ha eseguito `forge script`. Una soglia 3 su 5 è un punto di partenza ragionevole per un operatore di registro; adattala alla tua politica di separazione dei compiti.
+
+### 2. Distribuisci con l'EOA, poi sposta i diritti di amministrazione nella stessa sessione
+
+Esegui lo script di deployment esattamente come documentato sopra — l'EOA deve firmare di persona le transazioni di deployment, con questi script non esiste modo di evitarlo. Subito dopo, nella stessa finestra operativa, per ogni contratto dell'ecosistema:
+
+```solidity
+// One transaction pair per AccessControl contract (OrgRegistry, PermissionRegistry,
+// EcosystemTrustedIssuersRegistry, PermissionOracle, DappRegistry):
+grantRole(DEFAULT_ADMIN_ROLE, safeAddress);
+grantRole(OPERATOR_ROLE, safeAddress);
+// Only after confirming the Safe can exercise both roles (see step 4):
+renounceRole(OPERATOR_ROLE, deployerEoa);
+renounceRole(DEFAULT_ADMIN_ROLE, deployerEoa);
+
+// For Ownable contracts (AssetTokenFactory-spawned tokens, EwpgBondDesk-style deployments):
+transferOwnership(safeAddress);
+```
+
+`AssetTokenFactory.registryWallet` è `immutable` — non può essere ripuntato al Safe dopo il deployment. Se la factory stessa richiede il controllo multisig, il Safe deve essere il deployer della factory (cioè detenere fin dall'inizio il ruolo di `REGISTRY_WALLET_PRIVATE_KEY`, tramite un batch di transazioni Safe anziché un'esecuzione di `forge script` da un EOA), non qualcosa a cui migrare a posteriori.
+
+### 3. Metti un timelock davanti al Safe per le azioni ad alto impatto
+
+Un multisig da solo ferma una singola chiave compromessa; non dà alle parti interessate (emittenti, investitori, altri operatori) un preavviso di una modifica. Per le azioni con un reale raggio d'impatto — revocare la fiducia in `EcosystemTrustedIssuersRegistry`, modificare i permessi di `PermissionRegistry` a livello di piattaforma, ripuntare `PermissionOracle` — fai passare le transazioni del Safe attraverso un [TimelockController](https://docs.openzeppelin.com/contracts/5.x/api/governance#TimelockController) (proponi → ritardo obbligatorio → esegui) invece di eseguirle direttamente. Assegna al timelock `DEFAULT_ADMIN_ROLE` e al Safe `PROPOSER_ROLE`/`EXECUTOR_ROLE` sul timelock, non `DEFAULT_ADMIN_ROLE` direttamente sui contratti di destinazione.
+
+### 4. Verifica prima di rinunciare a qualsiasi cosa
+
+Prima delle chiamate `renounceRole`/`renounceOwnership` del passo 2, esegui una transazione Safe reale e reversibile su ciascun contratto (per esempio un ciclo di concessione/revoca di un permesso senza effetto) e conferma che arrivi on-chain con la soglia di firmatari attesa. `renounceRole` è irreversibile — perdere contemporaneamente l'accesso all'EOA e a un quorum Safe funzionante blocca per sempre le funzioni di amministrazione del contratto.
+
+### 5. Ritira la chiave dell'EOA
+
+Una volta confermato che ruoli/proprietà di ogni contratto sono stati spostati, la chiave privata dell'EOA di deployment non ha più alcun uso legittimo. Distruggila — non archiviarla «per sicurezza»; una chiave di deployment archiviata è esattamente il rischio permanente che l'intero processo esiste per eliminare.

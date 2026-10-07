@@ -32,7 +32,7 @@ This is the one structural idea worth understanding, because most surprises foll
 !!! abstract "The register"
     A database, held by the operator. Names the holder, the amount, restrictions.
 
-    **The record with legal significance.**
+    **The record Registerwerk treats as the source of truth.** Whether it is a register with legal effect depends on the operator and the instrument.
 
 !!! abstract "The token"
     A balance in a smart contract on a blockchain. Public and independently verifiable.
@@ -41,7 +41,7 @@ This is the one structural idea worth understanding, because most surprises foll
 
 </div>
 
-Software watches the chain and keeps the register in step. Mostly they agree. When they do not, the register is authoritative and the difference is something a human resolves.
+Software watches the chain and keeps the register in step. Mostly they agree. When they do not, the register is the source of truth for Registerwerk's own reconciliation, and the difference is something a human resolves.
 
 [:octicons-arrow-right-24: Holding and custody](lifecycle/holding.md) goes into this properly.
 

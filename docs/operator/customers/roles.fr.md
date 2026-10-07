@@ -22,6 +22,8 @@ Les trois sont appliqués dans le **backend**, à chaque requête. La navigation
 | `REGISTRY_ADMIN` | Personnel opérateur | Tout, pour tous les clients. Inclut le [mode support](impersonation.md). |
 | `COMPLIANCE_OFFICER` | Personnel opérateur | Approbations et rejets de flux de travail KYC/KYB. |
 | `AUDIT` | Auditeurs, inspecteurs | Lire l'ensemble du registre. Aucune écriture. |
+| `RELATIONSHIP_MANAGER` | Personnel de l'opérateur | Lecture seule, limitée aux entités clientes qui leur sont attribuées. Ne peut ni approuver ni modifier. |
+| `SUPPORT_AGENT` | Personnel de l'opérateur | Lister les clients et démarrer des sessions d'[usurpation](impersonation.md) en **lecture seule** (step-up et motif consigné). Rien d'autre ; aucun accès en écriture. L'attribution ou le retrait du rôle exige un step-up et un second approbateur. |
 | `COMPANY_ADMIN` | Client | Gérer les utilisateurs de leur propre organisation, les paramètres IdP et l'identité on-chain. |
 | `ISSUER` | Client | Créer et administrer leurs propres émissions. |
 | `INVESTOR` | Client | Détenir et visualiser leurs propres titres. |

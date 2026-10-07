@@ -145,7 +145,7 @@ Registerwerk levanta la bandera. No puede exigir un crédito — eso corresponde
 
 1. **Diseño** — Nordwind describe un bono; el operador lo aprueba.
 2. **Emisión** — se despliega un contrato, se admite a los inversores, se acuñan 50.000 títulos.
-3. **Tenencia** — los inversores mantienen; el registro hace fe, la cadena es verificable.
+3. **Tenencia** — los inversores mantienen; el registro es la fuente de verdad, la cadena es verificable.
 4. **Negociación** — los títulos cambian de manos; las reglas de cumplimiento aguantan en cada transmisión.
 5. **Financiación** — un titular pignora títulos y pide prestado contra ellos.
 6. **Amortización** — cupones pagados, principal devuelto, tokens destruidos, registro cerrado.

@@ -39,7 +39,7 @@ title: Conditions préalables
 | Frontend opérateur | 44200 | Public — ouvert directement, jamais via Kong |
 | Frontend client | 44201 | Public — ouvert directement ; seuls ses propres appels API transitent par Kong |
 | proxy Kong | 48000 / 48443 | Public — trafic API client HTTP/HTTPS uniquement, sans base de données, sans interface graphique d'administration |
-| API d'administration de Kong | 48001 | Loopback uniquement — tunnel `docker exec`/SSH, ne jamais exposer publiquement |
+| API d'administration de Kong | — (non publiée) | N'écoute que sur `127.0.0.1:8001` à l'intérieur du conteneur ; utilisez `docker compose exec kong kong health`, ne jamais l'exposer |
 | Documentation (profil `docs` optionnel) | 48003 | Adresse d'écoute configurable |
 | Chaincache Sepolia/Base (optionnel) | 48090 / 48091 | Loopback uniquement |
 | Anvil jetable | 48545 | Adresse d'écoute configurable ; reste `anvil:8545` en interne |

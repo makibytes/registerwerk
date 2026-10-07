@@ -1,11 +1,11 @@
 ---
 title: Architettura del modulo
-description: Architettura del contesto limitato Spring Modulith: 34 moduli, vincoli di dipendenza e modelli di progettazione.
+description: Architettura del contesto limitato Spring Modulith: 39 moduli, vincoli di dipendenza e modelli di progettazione.
 ---
 
 # Architettura del modulo { #module-architecture }
 
-Il backend Registerwerk è un **modulith**: un singolo JAR distribuibile strutturato internamente come 34 moduli Spring Modulith: ogni pacchetto di livello superiore sotto `de.makibytes.registerwerk` trasporta `@ApplicationModule`. Ciascuno possiede le proprie tabelle di database, le proprie entità di dominio e la propria logica aziendale. La comunicazione tra moduli avviene esclusivamente tramite **eventi di dominio** (tramite l'outbox transazionale di Spring Modulith).
+Il backend Registerwerk è un **modulith**: un singolo JAR distribuibile strutturato internamente come 39 moduli Spring Modulith: ogni pacchetto di livello superiore sotto `de.makibytes.registerwerk` trasporta `@ApplicationModule`. Ciascuno possiede le proprie tabelle di database, le proprie entità di dominio e la propria logica aziendale. La comunicazione tra moduli avviene esclusivamente tramite **eventi di dominio** (tramite l'outbox transazionale di Spring Modulith).
 
 La maggior parte sono contesti delimitati nel senso del dominio. Tre non lo sono e sono comunque annotati in modo che anche Modulith rafforzi i propri limiti: `shared` (tipi trasversali), `bootstrap` (seminatrici di dati demo) e `infrastructure` (`@Configuration` trasversali).
 
@@ -42,7 +42,18 @@ graph TD
         externalref
     end
 
+    subgraph Operations
+        accessreview
+        support
+        webhook
+        idempotency
+        entra
+        finality
+    end
+
     subgraph Securities
+        lending
+        repo
         asset
         deployment
         erc3643
@@ -87,17 +98,17 @@ graph TD
 |---|---|---|---|
 | `shared` | `shared` | Eccezioni, utilità | — |
 | `audit` | `audit` | `AuditEvent` | `AuditEventRecorder`, `AuditChainVerificationService` |
-| `auth` | `auth` | `AppUser`, `UserActionToken` | `JwtMintingService`, `SecurityConfig` |
-| `notification` | `notification` | — | `EmailNotificationService` (guidato da eventi) |
+| `auth` | `auth` | `AppUser`, `AppUserActionToken`, `ImpersonationSession`, `SessionRevocation` | `JwtMintingService`, `AuthService`, `SecurityConfig` |
+| `notification` | `notification` | — | `EmailService` e i servizi e-mail guidati da eventi |
 | `chain` | `chain` | `ChainConfig`, `RpcNode` | `ChainConfigService` |
 | `blockchain` | `blockchain` | `BlockchainTransaction` | `BlockchainClientRegistry`, servizi di distribuzione, `RpcNodeHealthService` |
 | `wallet` | `wallet` | `OperatorWallet` | `WalletService`, `WalletBalanceService` |
 | `kyc` | `kyc` | `KycDocument`, `NaturalPerson`, `BeneficialOwner`, `HolderBlock` | `KycService`, `KycMonitoringJob` |
 | `screening` | `screening` | `ScreeningRun`, `ScreeningHit` | `ScreeningService`, adattatori |
-| `stepup` | `stepup` | `StepUpToken`, `DualControlToken` | `StepUpService`, `StepUpEnforcementAspect` |
-| `travelrule` | `travelrule` | `TravelRuleMessage` | `TravelRuleService`, adattatori |
+| `stepup` | `stepup` | — (le richieste di approvazione sono archiviate tramite `ApprovalRequestRecord`) | `StepUpTokenIssuer`, `StepUpTokenValidator`, `StepUpEnforcementAspect`, `DualControlService`, `ApprovalRequestService` |
+| `travelrule` | `travelrule` | `CaspAuthorization` | `TravelRuleService`, `CaspRegistryService`, adattatori |
 | `endpoint` | `endpoint` | `AddressEndpoint` | `EndpointService` — registro degli indirizzi del portafoglio della controparte con punteggio di rischio (`RiskLevel`) utilizzato dai controlli travel-rule/AML |
-| `customer` | `customer` | `LegalEntity`, `CompanyUser` | `LegalEntityService`, `CompanyUserService` |
+| `customer` | `customer` | `LegalEntity`, `EntityTask`, `EntityMergeRecord`, `EntityNameHistory`, `ErasureRequest` | `LegalEntityService`, `CompanyUserService`, `EntityTaskService` |
 | `onboarding` | `onboarding` | `OnboardingToken` | `OnboardingService` |
 | `externalref` | `externalref` | `CompanyExternalReference` | `RegistryOverviewService` |
 | `asset` | `asset` | `Asset`, `AssetDocument` | `AssetService`, `MintControlService` |
@@ -108,12 +119,22 @@ graph TD
 | `corporateactions` | `corporateactions` | `CorporateAction` | `CorporateActionService` (approvazione della transazione a doppio controllo, transizioni del ciclo di vita giornaliero), `CouponPaymentJob`, `CorporateActionSettlementListener` (regolamento delle rotte tramite token standard - Canton bond automatizzato, ERC-3525/4626/7540 trattenuto per la revisione dell'operatore); UI dell'operatore: scheda Azioni aziendali nella pagina dei dettagli della risorsa |
 | `registerstatement` | `registerstatement` | `RegisterStatement` | `RegisterStatementService`, `AnnualRegisterStatementJob`, `RegisterStatementPdfRenderer` — estratti conto annuali/su richiesta eWpG per gli investitori |
 | `registertransfer` | `registertransfer` | `RegisterTransfer`, `RegisterInspectionRequest` | `RegisterTransferService`, `RegisterInspectionService`, `RegisterExtractRenderer` — registra le esportazioni di estratti e le richieste di ispezione di terze parti |
-| `regreporting` | `regreporting` | `RegreportSubmission` | `MifirReportingService`, `Dac8ExportService` (entrambi i prototipi bozza/non convalidati) |
+| `regreporting` | `regreporting` | — | `MifirReportingService`, `Dac8ExportService` (entrambi i prototipi bozza/non convalidati) |
 | `dora` | `dora` | `IctIncident`, `ThirdPartyProvider`, `ResilienceTest` | `DoraService` — Art. 17 incidenti, art. 28 registro dei terzi, art. 24/25 test di resilienza (scansioni di vulnerabilità, TLPT) |
-| `admin` | `admin` | `OperatorUser` | `AdminImpersonationService` |
+| `admin` | `admin` | — (gli utenti operatore sono `auth.AppUser`) | `OperatorUserService`, `AdminImpersonationService`, `EntraSupportService` |
 | `orgidentity` | `orgidentity` | `OrgRegistration`, `OrgMemberWallet`, `PermissionDefinition`, `PermissionGrant`, `EcosystemTrustedIssuer` | `OrgRegistrationService`, `MemberWalletService`, `PermissionAdminService`; espone la porta `PermissionGate` |
 | `marketplace` | `marketplace` | `DappListing`, `DappVersion`, `DappRequiredPermission`, `DappPaymentMethod`, `DappReviewEvent` | `ListingLifecycleService`, `ManifestValidationService`, `ManifestSigningService`, `MarketplaceOnchainAnchorService` |
 | `payment` | `payment` | `PaymentRail`, `PaymentRailChainAddress` | `PaymentRailAdminService` — canali di pagamento curati dall'operatore (stablecoin MiCAR, API Pontes, DvP ERC-7573, SEPA), a cui i manifest delle dApp fanno riferimento tramite codice |
+| `accessreview` | `accessreview` | `AccessReviewCampaign`, `AccessReviewItem` | `AccessReviewService` — campagne periodiche di ricertificazione degli accessi |
+| `entra` | `entra` | — | `TwoFactorStatusService` — stato dell'autenticazione a due fattori tramite Microsoft Graph (solo api) |
+| `finality` | `finality` | `BlockFinality`, `ChainEffect`, `FinalityPolicyAssignment`, `FinalityPolicyOverride` | `BlockFinalityServiceImpl`, `ChainEffectRecorderImpl`, `FinalityPolicyAdminService`, `FinalityJournalAdminService` — libro della finalità, giornale degli effetti, compensazione |
+| `idempotency` | `idempotency` | `IdempotencyRecord` | `IdempotencyService` — gestione di `Idempotency-Key` (solo api) |
+| `infrastructure` | `infrastructure` | — | `@Configuration` trasversali (nessuna interfaccia con nome) |
+| `bootstrap` | `bootstrap` | — | Generatori di dati demo (nessuna interfaccia con nome) |
+| `lending` | `lending` | `LendingMarket`, `LendingPosition`, `LendingSupplyPosition`, `LendingReconciliationTask` | `LendingMarketService`, `LendingPositionService`, `LenderEligibilityService`, `LendingReconciliationService` |
+| `repo` | `repo` | `RepoRfq`, `RepoQuote`, `RepoTrade`, `RepoLifecycleEvent`, `RepoSubstitutionRequest`, `RepoDeskParticipant` | `RepoDeskService`, `RepoTradeService` (solo events e api) |
+| `support` | `support` | `SupportTicket`, `SupportTicketMessage` | `SupportTicketService` |
+| `webhook` | `webhook` | `WebhookSubscription`, `WebhookDelivery` | `WebhookSubscriptionService`, `WebhookDispatchService` (solo events e api) |
 
 ---
 

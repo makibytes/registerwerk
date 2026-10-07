@@ -31,7 +31,7 @@ Il Lussemburgo è il più grande domicilio di fondi in Europa e una giurisdizion
 
 | Dimensione | DE (eWpG) | LU (CSSF) |
 |---|---|---|
-| Registro autorevole | Il DB è canonico (§16 eWpG) | Il DB è canonico (linee guida CSSF) |
+| Fonte di verità in Registerwerk | Il database (operativo; lo status giuridico del registro dipende dallo strumento e dall'operatore) | Il database (operativo; lo status giuridico del registro dipende dallo strumento e dall'operatore) |
 | Periodo di conservazione | 10 anni | 5 anni |
 | Applicabilità MiCAR | Esente (i token eWpG non sono token di moneta elettronica) | Si applica ai servizi su cripto-attività |
 | Soglia UBO | 25% (GwG §3) | 25% (AML Law Art. 1(7)) |

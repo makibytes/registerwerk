@@ -70,7 +70,7 @@ Il existe exactement une instance PostgreSQL, hébergeant une base de données. 
 
 ### 4. Le registre et la chaîne sont des enregistrements distincts
 
-La base de données fait autorité en matière de propriété. La blockchain est ce qui s'exécute et ce que chacun peut vérifier de manière indépendante. Les **indexeurs** surveillent les chaînes et écrivent ce qu'ils voient en retour.
+La base de données est la source de vérité de Registerwerk en matière de propriété (sur le plan opérationnel ; qu'elle constitue un registre ayant un effet juridique dépend de l'opérateur et de l'instrument). La blockchain est ce qui s'exécute et ce que chacun peut vérifier de manière indépendante. Les **indexeurs** surveillent les chaînes et écrivent ce qu'ils voient en retour.
 
 **Conséquence opérationnelle, et la chose la plus utile sur cette page :** lorsqu'un client dit "mon solde est erroné", la première question n'est pas *qu'est-ce qui est juste* mais *un indexeur est-il derrière ?* Un indexeur en retard produit exactement ce symptôme et se résout une fois qu'il rattrape son retard. [Résilience de l'indexeur](indexers/resilience.md).
 

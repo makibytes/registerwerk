@@ -134,49 +134,16 @@ Las migraciones de Flyway de este repositorio no tienen scripts automáticos de 
 
 ## Actualización de Kong { #kong-upgrade }
 
+1. Actualice la etiqueta de la imagen `kong` en `docker-compose.yml` (y en `gateway/docker-compose.kong.yml` si usa la pila independiente solo del gateway).
+2. Descargue la imagen y valide la configuración declarativa contra la nueva versión antes de cambiar:
+
 ```bash
-docker compose stop kong
 docker compose pull kong
-docker compose up -d kong
+docker compose run --rm kong kong config parse /etc/kong/kong.yml
+docker compose up -d --force-recreate kong
 ```
 
-Después de actualizar Kong, vuelva a aplicar la configuración declarativa:
-
-```bash
-deck sync --config gateway/kong.yml
-```
-sidebar_position: 3
----
-
-# Actualizaciones { #upgrades }
-
-## Actualización del backend { #backend-upgrade_1 }
-
-1. Extraiga la nueva imagen o constrúyala localmente:
-   ```bash
-   docker build -t registerwerk-backend:v2.0.0 backend/
-   ```
-
-2. Actualice la etiqueta de imagen en `docker-compose.yml`
-
-3. Inicie con un reinicio continuo (Flyway migra automáticamente):
-   ```bash
-   docker compose up -d --no-deps backend
-   ```
-
-4. Verifique el estado: `curl http://localhost:48080/actuator/health`
-
-## Actualizaciones de contratos inteligentes { #smart-contract-upgrades_1 }
-
-Los módulos de cumplimiento admiten la actualización in situ mediante `UpgradeCompliance.s.sol`:
-
-```bash
-forge script script/UpgradeCompliance.s.sol \
-  --rpc-url $ETH_MAINNET_RPC \
-  --broadcast
-```
-
-Los contratos de token e identidad **no son actualizables por diseño** (la inmutabilidad es un requisito legal para los valores). Las actualizaciones requieren implementar una nueva suite y migrar a los inversores.
+Kong vuelve a leer `gateway/kong.yml` al arrancar: en el modo sin base de datos no hay migraciones que ejecutar ni configuración que volver a aplicar. En Kubernetes, la versión del subchart de Kong está fijada en `deploy/helm/registerwerk/Chart.yaml`; actualícela allí y ejecute `helm upgrade`.
 
 ## Actualizaciones de subgrafos { #subgraph-upgrades }
 
@@ -202,13 +169,6 @@ anteriores y su configuración para una reversión no destructiva, hasta que cad
 haya alcanzado la cabeza de la cadena y sus rangos de eventos se hayan reconciliado de forma independiente. No elimine
 el subgrafo anterior antes de la validación; revertir significa volver a implementar el manifiesto previamente aprobado
 y la configuración de origen bajo otra etiqueta de versión nueva.
-
-## Actualizaciones de Kong { #kong-upgrades }
-
-1. Actualice la etiqueta de la imagen `kong` en `docker-compose.yml` (y en `gateway/docker-compose.kong.yml`
-   si usa la pila independiente solo de puerta de enlace).
-2. Reinicie Kong: `docker compose restart kong` — vuelve a leer `gateway/kong.yml` al iniciar
-   (modo sin base de datos, sin migraciones que ejecutar).
 
 ## Actualizaciones de dependencias { #dependency-updates }
 

@@ -31,7 +31,7 @@ La historia es la de un bono. Lo seguimos desde el momento en que alguien quiere
     | Vencimiento | 5 años |
     | Amortización | valor nominal íntegro en la fecha de vencimiento |
 
-    Ese es todo el producto financiero. Todo lo demás es la maquinaria que hace esa promesa efectiva, negociable y exigible — y que demuestra a un supervisor que todo se hizo correctamente.
+    Ese es todo el producto financiero. Todo lo demás es la maquinaria que hace esa promesa efectiva, negociable y exigible — y que deja registros que un supervisor, un auditor o una contraparte pueden examinar después.
 
 ??? note "Para lectores sin formación financiera: qué es realmente un bono"
 

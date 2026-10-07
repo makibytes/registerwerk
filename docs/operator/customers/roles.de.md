@@ -22,6 +22,8 @@ Alle drei werden im **Backend** bei jeder Anfrage durchgesetzt. Die Navigation k
 | `REGISTRY_ADMIN` | Bedienpersonal | Alles, kundenübergreifend. Einschließlich [Identitätsübernahme](impersonation.md). |
 | `COMPLIANCE_OFFICER` | Bedienpersonal | KYC-/KYB-Workflow-Genehmigungen und -Ablehnungen. |
 | `AUDIT` | Prüfer, Aufsichtspersonen | Lesezugriff auf das gesamte Register. Keine Schreibrechte. |
+| `RELATIONSHIP_MANAGER` | Operator-Mitarbeitende | Nur Lesezugriff auf die ihnen zugewiesenen Kundenentitäten. Keine Freigaben, keine Änderungen. |
+| `SUPPORT_AGENT` | Operator-Mitarbeitende | Kunden auflisten und **schreibgeschützte** [Impersonation](impersonation.md)-Sitzungen starten (Step-up und dokumentierter Grund). Sonst nichts; kein Schreibzugriff. Vergabe und Entzug der Rolle erfordern Step-up und eine zweite Freigabe. |
 | `COMPANY_ADMIN` | Kunde | Verwaltet die Nutzer, IdP-Einstellungen und On-Chain-Identität der eigenen Organisation. |
 | `ISSUER` | Kunde | Legt eigene Emissionen an und verwaltet sie. |
 | `INVESTOR` | Kunde | Hält und betrachtet die eigenen Wertpapiere. |

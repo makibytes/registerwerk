@@ -173,7 +173,7 @@ Definiciones sencillas. Cuando un término tiene un sentido técnico preciso dis
 : Una dirección de monedero que usted ha registrado ante el registro, con una etiqueta.
 
 **Registro**
-: La base de datos del operador que anota quién mantiene qué. **La anotación jurídicamente relevante**, distinta del token.
+: La base de datos del operador que anota quién mantiene qué. **La anotación que Registerwerk trata como fuente de verdad** (la eficacia jurídica depende del operador y del instrumento), distinta del token.
 
 **Sperrvermerk**
 : Una restricción anotada sobre una inscripción conforme al §16 eWpG. Mientras subsiste, la posición no puede transmitirse. Sigue siendo suya.

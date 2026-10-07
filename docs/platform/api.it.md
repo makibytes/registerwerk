@@ -5,7 +5,7 @@ description: Struttura URL, autenticazione, risposte agli errori, impaginazione 
 
 # REST API Panoramica { #rest-api-overview }
 
-Tutte le funzionalità di Registerwerk sono esposte tramite REST API in `http://backend:8080`. Il frontend dell'operatore si connette direttamente; il frontend del cliente si connette tramite Kong (`http://kong:8000`). L'API è documentata con OpenAPI 3 (interfaccia utente Swagger disponibile su `/swagger-ui.html`).
+Tutte le funzionalità di Registerwerk sono esposte tramite REST API in `http://backend:8080`. Il frontend dell'operatore si connette direttamente; il frontend del cliente si connette tramite Kong (`http://kong:8000`). Ogni route mappata è elencata nell'[indice delle route API](api-routes.md) generato (solo in inglese). Esistono un documento OpenAPI 3 e una Swagger UI, ma sono **disattivati per impostazione predefinita** (vedi [OpenAPI / Swagger UI](#openapi-swagger-ui)).
 
 ---
 
@@ -63,19 +63,19 @@ Tutti gli errori seguono il record `ErrorResponse`:
 
 ## Impaginazione { #pagination }
 
-Gli endpoint dell'elenco supportano l'impaginazione basata su cursore con i parametri `page` e `size`:
+Gli endpoint di elenco che paginano accettano `page` (base zero) e `size`, ad esempio:
 
 ```
 GET /api/v1/assets?page=0&size=20&sort=createdAt,desc
 ```
 
-Le risposte includono un'intestazione `X-Total-Count` con il conteggio totale dei record (prima dell'impaginazione). Il corpo della risposta è sempre un array (mai un oggetto wrapper).
+La forma della risposta dipende **dal singolo endpoint**: alcuni restituiscono un semplice array JSON (il totale è allora nell'header di risposta `X-Total-Count`, che la configurazione CORS espone ai browser), altri il wrapper `PageResponse` `{ content, totalElements, totalPages, page, size }`. Controlla lo schema dell'endpoint nel documento OpenAPI prima di fare affidamento su una delle due forme.
 
 ---
 
 ## Idempotency-Key e importi { #idempotency-key-and-amounts }
 
-Gli endpoint di amministrazione/emittente che muovono fondi o modificano lo stato richiedono l'header `Idempotency-Key`: mint, burn, trasferimenti/approvazioni forzati, force-burn, modifiche di blocco e whitelist, operazioni su slot e vault, azioni agente ERC-3643, modifiche ai mezzi di pagamento, importazione di wallet, consegna/completamento dei trasferimenti di registro e rimborso di un asset. Un `POST`, `PUT`, `PATCH` o `DELETE` senza una chiave valida viene rifiutato con `400` e il codice `IDEMPOTENCY_KEY_REQUIRED` (o `IDEMPOTENCY_KEY_INVALID`) prima che venga eseguito qualcosa. Gli altri endpoint restano facoltativi.
+Gli endpoint di amministrazione/emittente che muovono fondi o modificano lo stato richiedono l'header `Idempotency-Key`: mint, burn, trasferimenti/approvazioni forzati, force-burn, modifiche di blocco e whitelist, amministrazione dei token Solana, operazioni su slot e vault, azioni agente ERC-3643, operazioni e riconciliazione dei mercati di prestito, modifiche ai mezzi di pagamento, importazione di wallet, consegna/completamento dei trasferimenti di registro e rimborso di un asset. Un `POST`, `PUT`, `PATCH` o `DELETE` senza una chiave valida viene rifiutato con `400` e il codice `IDEMPOTENCY_KEY_REQUIRED` (o `IDEMPOTENCY_KEY_INVALID`) prima che venga eseguito qualcosa. Gli altri endpoint restano facoltativi.
 
 - Invii un valore univoco per ogni azione dell'utente (UUID; da 8 a 255 caratteri tra `A-Za-z0-9._:-`) e **riutilizzi lo stesso valore quando ripete la stessa richiesta** dopo un timeout o un `5xx`. La ripetizione restituisce allora il risultato originale (`X-Idempotent-Replay: true`) o la stessa transazione invece di eseguirsi due volte.
 - La chiave è riferita al chiamante: l'entità giuridica per i token cliente, l'utente che agisce per i token operatore. La stessa chiave con un altro metodo, percorso o corpo riceve `422`; una richiesta ancora in corso riceve `409`.
@@ -83,81 +83,42 @@ Gli endpoint di amministrazione/emittente che muovono fondi o modificano lo stat
 
 **Gli importi sono stringhe decimali.** Invii gli importi dei token (`amount`, `value`, `newCap`, `navPerShare`, ...) come stringhe JSON, ad esempio `"1000000000000000000000"`. Un numero JavaScript perde precisione oltre 2^53. Per una release un numero JSON è ancora accettato se è rappresentabile esattamente (intero inferiore a 2^53 o decimale con al massimo 15 cifre significative) e viene registrato un avviso di deprecazione; tutto il resto riceve `400` con `Invalid amount: ...`.
 
-## Gruppi API principali { #key-api-groups }
+## Gruppi di route { #route-groups }
 
-### Asset (`/api/v1/assets`) { #assets-apiv1assets }
+L'[indice delle route API](api-routes.md) generato è l'elenco completo, derivato dal codice (metodo, percorso, espressione di ruolo, step-up). I principali percorsi di base:
 
-| Metodo | Percorso | Descrizione |
-|---|---|---|
-| `GET` | `/api/v1/assets` | Elenca tutte le risorse (impaginate) |
-| `POST` | `/api/v1/assets` | Crea una nuova risorsa |
-| `GET` | `/api/v1/assets/{id}` | Ottieni risorsa per ID |
-| `POST` | `/api/v1/assets/{id}/deploy` | Distribuisci il token sulla blockchain |
-| `POST` | `/api/v1/assets/{id}/mint` | Conia token (minting) |
-| `POST` | `/api/v1/assets/{id}/burn` | Distruggi token (burning) (step-up + 4 occhi) |
-| `POST` | `/api/v1/assets/{id}/force-transfer` | Trasferimento coattivo (step-up + 4 occhi) |
-| `POST` | `/api/v1/assets/{id}/freeze/{address}` | Blocca indirizzo (richiede HolderBlock) |
+| Area | Percorso di base |
+|---|---|
+| Asset e deployment (mint/burn dell'emittente sotto `.../deployments/{depId}/issuer/`, operazioni coattive dell'operatore sotto `.../deployments/{depId}/admin/`) | `/api/v1/assets`, `/api/v1/deployments` |
+| Soggetti giuridici e KYC (`/api/v1/entities/{entityId}/kyc/...`), coda di revisione KYC | `/api/v1/entities`, `/api/v1/kyc` |
+| Screening sanzioni (`/api/v1/compliance/screening/...`, corrispondenze sotto `/hits/{hitId}/accept`) e altre funzioni di conformità | `/api/v1/compliance` |
+| Sperrvermerk (blocchi del detentore) | `/api/v1/holder-blocks` |
+| Segnalazioni regolamentari (MiFIR, DAC8) | `/api/v1/regulatory-reporting` |
+| Incidenti, fornitori e test di resilienza DORA | `/api/v1/dora` |
+| Trading, repo desk, lending, operazioni societarie | `/api/v1/trading`, `/api/v1/repo-desk`, `/api/v1/lending`, `/api/v1/corporate-actions` |
+| Coda di approvazione a quattro occhi | `/api/v1/approvals` |
+| Registro di audit, verifica della catena | `/api/v1/audit` |
+| Amministrazione dell'operatore (utenti, wallet, ...) | `/api/v1/admin` |
+| Self-service delle società clienti | `/api/v1/company`, `/api/v1/me` |
+| Pubblico, senza autenticazione (chain, capacità della piattaforma, Travel Rule) | `/api/v1/public` |
 
-### Clienti (`/api/v1/customers`) { #customers-apiv1customers }
-
-| Metodo | Percorso | Descrizione |
-|---|---|---|
-| `GET` | `/api/v1/customers` | Elenca soggetti giuridici |
-| `POST` | `/api/v1/customers` | Crea soggetto giuridico |
-| `GET` | `/api/v1/customers/{id}` | Ottieni entità |
-| `POST` | `/api/v1/customers/{id}/kyc/documents` | Carica il documento KYC |
-| `POST` | `/api/v1/customers/{id}/kyc/approve` | Approva KYC (COMPLIANCE_OFFICER + step-up) |
-| `GET` | `/api/v1/customers/{id}/beneficial-owners` | Elenca UBO |
-| `POST` | `/api/v1/customers/{id}/beneficial-owners` | Aggiungi UBO |
-
-### Conformità (`/api/v1/compliance`) { #compliance-apiv1compliance }
-
-| Metodo | Percorso | Descrizione |
-|---|---|---|
-| `POST` | `/api/v1/compliance/screening/entities/{id}/screen` | Avvia uno screening manuale |
-| `GET` | `/api/v1/compliance/screening/entities/{id}/runs` | Ottieni la cronologia degli screening |
-| `POST` | `/api/v1/compliance/screening/hits/{hitId}/accept` | Accetta/respingi un riscontro |
-| `GET` | `/api/v1/holder-blocks` | Elenca tutti gli HolderBlock |
-| `POST` | `/api/v1/holder-blocks` | Crea uno Sperrvermerk (blocco del titolare) (step-up + 4 occhi) |
-| `POST` | `/api/v1/holder-blocks/{id}/lift` | Rimuovi lo Sperrvermerk (step-up + 4 occhi) |
-
-### Rapporti normativi (`/api/v1/regulatory-reporting`) { #regulatory-reporting-apiv1regulatory-reporting }
-
-| Metodo | Percorso | Descrizione |
-|---|---|---|
-| `POST` | `/api/v1/regulatory-reporting/mifir` | Attiva l'esportazione MiFIR su richiesta |
-| `POST` | `/api/v1/regulatory-reporting/dac8` | Attiva l'esportazione DAC8 su richiesta |
-| `GET` | `/api/v1/regulatory-reporting/submissions` | Elenco cronologia invii |
-
-### DORA (`/api/v1/dora`) { #dora-apiv1dora }
-
-| Metodo | Percorso | Descrizione |
-|---|---|---|
-| `GET` | `/api/v1/dora/incidents` | Elenco incidenti ICT aperti |
-| `POST` | `/api/v1/dora/incidents` | Segnala un incidente ICT (Art. 17) |
-| `PATCH` | `/api/v1/dora/incidents/{id}/status` | Aggiorna lo stato dell'incidente/causa principale |
-| `POST` | `/api/v1/dora/incidents/{id}/report-to-authority` | Registra la relazione iniziale/finale all'autorità (Art. 19) |
-| `GET` | `/api/v1/dora/providers` | Elenca il registro dei fornitori ICT terzi (Art. 28) |
-| `GET` | `/api/v1/dora/providers/expiring` | Elenco fornitori con contratti in scadenza |
-| `GET` | `/api/v1/dora/resilience-tests` | Elenco risultati test di resilienza (Art. 24/25) |
-| `GET` | `/api/v1/dora/resilience-tests/overdue` | Elenca i test di resilienza scaduti |
-| `POST` | `/api/v1/dora/resilience-tests` | Registra il risultato di un test di resilienza |
+Approvare un KYC, per esempio, è `POST /api/v1/entities/{entityId}/kyc/approve`: chi avvia l'operazione è un `REGISTRY_ADMIN` o un `COMPLIANCE_OFFICER`, e la chiamata richiede autenticazione rafforzata e un secondo approvatore (vedi la [matrice step-up](../compliance/step-up-matrix.md)).
 
 ---
 
 ## OpenAPI / Swagger UI { #openapi-swagger-ui }
 
-La specifica OpenAPI e l'interfaccia utente interattiva sono fornite **dal backend** sulla porta 8080, non da questo server di documentazione.
+Il documento OpenAPI e la Swagger UI sono serviti **dal backend**, non da questo server di documentazione, e sono **disattivati salvo `SWAGGER_ENABLED=true`** (predefinito `false`, in ogni profilo).
 
-| URL | Descrizione |
+| URL (se attivato) | Descrizione |
 |---|---|
-| [`{{ backend_url }}/swagger-ui.html`]({{ backend_url }}/swagger-ui.html) | Interfaccia utente interattiva di Swagger (browser) |
-| [`{{ backend_url }}/api-docs`]({{ backend_url }}/api-docs) | OpenAPI 3 JSON (leggibile dalla macchina) |
-| [`{{ backend_url }}/actuator/health`]({{ backend_url }}/actuator/health) | Controllo dello stato |
+| [`{{ backend_url }}/swagger-ui.html`]({{ backend_url }}/swagger-ui.html) | Swagger UI interattiva (browser) |
+| [`{{ backend_url }}/api-docs`]({{ backend_url }}/api-docs) | JSON OpenAPI 3 (leggibile da macchina) |
+| [`{{ backend_url }}/actuator/health`]({{ backend_url }}/actuator/health) | Controllo di salute |
 | [`{{ backend_url }}/actuator/info`]({{ backend_url }}/actuator/info) | Informazioni di build |
 
-!!! info "Questo sito di documentazione rispetto all'API"
-    Questo sito (porta 48003) è un riferimento MkDocs statico: non esegue il proxy del backend. Apri i collegamenti sopra direttamente in un browser mentre lo stack è in esecuzione (`docker compose up -d`).
+!!! info "Questo sito di documentazione e l'API"
+    Questo sito (porta 48003) è un riferimento MkDocs statico — non fa da proxy al backend. Apri i link sopra direttamente in un browser mentre lo stack è in esecuzione (`docker compose up -d`).
 
-!!! warning "Interfaccia utente Swagger in produzione"
-    L'interfaccia utente Swagger è disabilitata nel profilo `prod` Spring. Negli ambienti di sviluppo e staging è accessibile senza autenticazione. In produzione deve essere esplicitamente abilitata e protetta da un elenco di IP consentiti (allowlist) o da un'autenticazione di base.
+!!! warning "Attivare SWAGGER_ENABLED espone la specifica senza autenticazione"
+    Quando è attivo, `/swagger-ui.html`, `/swagger-ui/**` e `/api-docs/**` sono pubblici (`permitAll` nella configurazione di sicurezza): chiunque raggiunga il backend può leggere l'intero catalogo di route e schemi. Nulla rifiuta `SWAGGER_ENABLED=true` in modalità produzione. Lascialo disattivato in produzione, oppure metti il backend dietro una allowlist che escluda questi percorsi.

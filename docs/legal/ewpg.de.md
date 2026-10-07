@@ -55,7 +55,7 @@ Für Token auf öffentlichen Blockchains verlangt §16 ein gesondertes "Kryptowe
 
 - Die Tabelle `asset_holder` in PostgreSQL ist der aktuelle Anwendungs-Inhaberdatensatz; ob sie das gesetzliche Register darstellt, erfordert eine genehmigte, instrumentenspezifische Festlegung der Beweiswirkung
 - Der `ChainDriftDetectionJob` läuft alle 15 Minuten und prüft, ob die On-Chain-Bestände mit der Datenbank übereinstimmen. Erkannte Abweichungen werden als `chain_drift_event`-Datensätze gespeichert und lösen `ChainDriftDetectedEvent`-Benachrichtigungen aus.
-- Die Tabelle `holder_block` implementiert den Sperrvermerk mit den Blockarten: `PFANDRECHT`, `PFAENDUNG`, `GERICHTSBESCHLUSS`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `INSOLVENZ`
+- Die Tabelle `holder_block` implementiert den Sperrvermerk mit den Blockarten: `PFANDRECHT`, `PFAENDUNG`, `GERICHTSBESCHLUSS`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `INSOLVENZ`, `REGULATORISCH`
 
 Siehe [Sperrvermerk](../compliance/sperrvermerk.md) für die vollständige Implementierung.
 
@@ -92,7 +92,7 @@ Die **Kryptowertpapier-Festlegungsverordnung** (KryptoFAV) legt technische Anfor
 | Emittent identifiziert über LEI oder Registrierungsnummer | `LegalEntity.lei`, `LegalEntity.registrationNumber` |
 | Hash der Emissionsbedingungen | `Asset.termsHash`, bei Emission gespeichert |
 | Kryptografischer Nachweis des Registereintrags | Audit-Hash-Kette (`audit_event.entry_hash`) |
-| Zugänglichkeit für die BaFin-Prüfung | Rolle `AUDITOR` mit vollem Lesezugriff; Audit-Export-Endpunkt |
+| Zugänglichkeit für die BaFin-Prüfung | Rolle `AUDIT` mit vollem Lesezugriff; Audit-Export-Endpunkt |
 
 ---
 

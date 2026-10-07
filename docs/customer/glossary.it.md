@@ -170,7 +170,7 @@ Definizioni semplici. Dove un termine ha un significato tecnico preciso diverso 
 : Richiedere due persone diverse. Applicato alle operazioni più taglienti.
 
 **Registro**
-: Il database dell'operatore che annota chi detiene che cosa. **La registrazione giuridicamente rilevante**, distinta dal token.
+: Il database dell'operatore che annota chi detiene che cosa. **La registrazione che Registerwerk tratta come fonte di verità** (gli effetti giuridici dipendono dall'operatore e dallo strumento), distinta dal token.
 
 **Rifiuto in caso di errore** (*fail closed*)
 : Quando un controllo non può essere eseguito, rifiutare anziché consentire. Lo screening sanzioni funziona così — un'interruzione significa trasferimenti rifiutati, non lasciati passare senza controllo.

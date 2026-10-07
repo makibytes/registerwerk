@@ -104,7 +104,7 @@ Mesures techniques mises en œuvre :
 | Chiffrement au repos | Le chiffrement des champs `NaturalPerson` n'est pas implémenté ; le chiffrement de la base de données/du magasin d'objets au niveau du déploiement doit être configuré et vérifié séparément |
 | Contrôle d'accès | Basé sur les rôles (`@PreAuthorize`) + authentification renforcée (step-up) pour les lectures sensibles |
 | Journalisation d'audit | Chaîne de hachage inviolable pour toutes les opérations |
-| MFA | WebAuthn / TOTP pour tous les comptes d'opérateur |
+| MFA | Step-up TOTP pour les opérations protégées (mode local) ou accès conditionnel Entra (`ENTRA_ENABLED=true`) ; WebAuthn n'est pas implémenté dans l'application |
 | Pseudonymisation | `NaturalPerson.id` (UUID) utilisé dans les références inter-modules au lieu du nom |
 | Réponse aux incidents | Des enregistrements manuels des incidents et un suivi des délais existent ; l'automatisation de la notification aux autorités/personnes concernées n'est pas mise en œuvre |
 

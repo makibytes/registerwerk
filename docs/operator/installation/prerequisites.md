@@ -39,7 +39,7 @@ title: Prerequisites
 | Operator frontend | 44200 | Public — opened directly, never through Kong |
 | Customer frontend | 44201 | Public — opened directly; only its own API calls route through Kong |
 | Kong proxy | 48000 / 48443 | Public — customer-API HTTP/HTTPS traffic only, DB-less, no admin GUI |
-| Kong admin API | 48001 | Loopback only — `docker exec`/SSH tunnel, never expose publicly |
+| Kong admin API | — (not published) | Listens on `127.0.0.1:8001` inside the container only; use `docker compose exec kong kong health`, never expose it |
 | Documentation (opt-in, `docs` profile) | 48003 | Configurable bind address |
 | Chaincache Sepolia/Base (opt-in) | 48090 / 48091 | Loopback only |
 | Disposable Anvil | 48545 | Configurable bind address; container-only RPC remains `anvil:8545` |

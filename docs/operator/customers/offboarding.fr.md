@@ -121,6 +121,14 @@ Lorsqu'une organisation cesse d'utiliser le registre :
 
     Soit vous le remboursez, soit vous le transférez à un registraire successeur, avant de résilier l'émetteur. Sinon, vous avez des obligations qui courent au sein d'un registre que personne n'administre.
 
+### Réintégrer un client clôturé ou dissous { #reinstating-a-closed-or-dissolved-customer }
+
+Un client `CLOSED` ou `DISSOLVED` ne redevient jamais directement `ACTIVE`. Un `REGISTRY_ADMIN` lance la réintégration avec `POST /api/v1/entities/{id}/reinstate` ; un motif et une référence juridique sont obligatoires, et l'appel exige une authentification renforcée et un deuxième approbateur (`ENTITY_REINSTATE`).
+
+- Le client passe à `PENDING_REACTIVATION` : le KYC est remis à « non commencé », le filtrage est relancé et deux [tâches d'entité](entity-tasks.md) sont créées (`REINSTATEMENT_KYC_REQUIRED`, `REINSTATEMENT_USERS_REVIEW`). Tant que la réintégration est en attente, personne du client ne peut se connecter, négocier ni être utilisé en mode support, et ses utilisateurs restent désactivés.
+- Une nouvelle approbation du KYC (toutes les portes KYC habituelles s'appliquent) rend le client `ACTIVE` et crée `CHAIN_REINSTATEMENT_REQUIRED`. Les claims d'identité en chaîne et le lien d'organisation ne sont **pas** réémis automatiquement ; les rétablir est une étape explicite à quatre yeux de l'opérateur. Les enregistrements antérieurs de clôture et de propagation en chaîne restent en vigueur jusqu'à l'approbation du KYC.
+- Une réintégration en attente peut être abandonnée en résiliant à nouveau le client. Il n'y a pas de contrôle de Sperrvermerk à l'achèvement ; les portes de partie appliquent les blocages à chaque transaction.
+
 ---
 
 ## Ce qui doit être conservé

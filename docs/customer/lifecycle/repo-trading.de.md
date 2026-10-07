@@ -25,6 +25,9 @@ Der Repo Desk bildet diesen bilateralen Ablauf ab. Er ist bewusst von der [wertp
 5. Bei Eröffnung und Schließung bestätigt jeweils der Empfänger den erhaltenen Geld- bzw. Wertpapier-Leg mit Referenz.
 6. Margin Calls und Sicherheitensubstitutionen werden im gemeinsamen, unveränderlichen Lebenszyklus protokolliert.
 
+!!! warning "Broadcast ist nicht anonym"
+    Zugelassene Unternehmen sehen den Auftraggeber und die angefragten Konditionen. Quotes sind privat, die RFQ ist es nicht. Verwenden Sie für sensible Finanzierungsbedarfe die gezielte Verteilung.
+
 ## Kontrollen des Desks
 
 - **Quoten sind versioniert.** Eine ersetzte Quote wird `SUPERSEDED` und kann nicht mehr angenommen werden. Die Annahme enthält den vom Server gelieferten `termsHash`; bei Abweichung (409) sind die aktuellen Konditionen zu prüfen. Die angenommenen Konditionen werden am Trade gespeichert und ändern sich nicht. Beträge und Zinsen werden auf die Nebeneinheit der Währung gerundet (ACT/360, für GBP u. a. ACT/365).
@@ -38,3 +41,6 @@ Der Repo Desk bildet diesen bilateralen Ablauf ab. Er ist bewusst von der [wertp
 
 !!! warning "Recht und Abwicklung bleiben außerhalb der Software verbindlich"
     Der Ablauf ersetzt weder Rahmenvertrag, Sicherheitenkatalog, Bewertungsstelle, Verwahrung, Streitprozess noch Netting-Gutachten. FoP ist eine bewusste operative Ausnahme; DvP bleibt vorzuziehen.
+
+!!! info "Was die Demo belegt"
+    Die Demo belegt RFQ-Vertraulichkeit, Laufzeitberechnung, Statusübergänge und einen gemeinsamen operativen Nachweis. Sie behauptet keine rechtliche Durchsetzbarkeit, keine Abwicklungsendgültigkeit über externe Schienen, keine bilanzielle Behandlung, keine aufsichtsrechtliche Eigenkapitalanerkennung und kein durchsetzbares Close-out-Netting.

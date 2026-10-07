@@ -68,13 +68,13 @@ Drei Dinge stehen außerhalb der Arbeitsbereiche, weil sie unabhängig davon gel
 
 Registerwerk führt **zwei Aufzeichnungen derselben Sache** — und behauptet bewusst nichts anderes.
 
-Da ist das **Register** — eine Datenbank beim Betreiber, die rechtlich maßgebliche Aufzeichnung. Und da ist der **Token** — ein Eintrag auf einer Blockchain, das, was sich bei einer Übertragung tatsächlich bewegt.
+Da ist das **Register** — eine Datenbank beim Betreiber, die Registerwerk als maßgebliche Quelle behandelt (ob sie ein Register mit Rechtswirkung ist, hängt vom Betreiber und vom Instrument ab). Und da ist der **Token** — ein Eintrag auf einer Blockchain, das, was sich bei einer Übertragung tatsächlich bewegt.
 
-Software beobachtet die Chain und schreibt das Gesehene ins Register zurück. Meistens stimmen beide überein. Wenn nicht, ist das Register maßgeblich, und die Differenz muss ein Mensch auflösen.
+Software beobachtet die Chain und schreibt das Gesehene ins Register zurück. Meistens stimmen beide überein. Wenn nicht, ist das Register die maßgebliche Quelle für den Abgleich, und die Differenz muss ein Mensch auflösen.
 
 ```mermaid
 graph LR
-    R[("Register<br/><small>die rechtliche Aufzeichnung</small>")]
+    R[("Register<br/><small>die maßgebliche Quelle</small>")]
     T["Token auf der Chain<br/><small>das, was sich bewegt</small>"]
     R -.->|"weist an"| T
     T -.->|"von Indexern beobachtet"| R

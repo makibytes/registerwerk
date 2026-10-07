@@ -176,7 +176,7 @@ Plain definitions. Where a term has a precise technical meaning that differs fro
 : A supported means of moving the cash leg — stablecoin, instant-payment API, DvP settlement, or bank transfer.
 
 **Register**
-: The operator's database record of who holds what. **The legally significant record**, distinct from the token.
+: The operator's database record of who holds what. **The record Registerwerk treats as the source of truth** (legal effect depends on the operator and the instrument), distinct from the token.
 
 **Register statement** (*Registerauszug*)
 : A statement of register content concerning one holder. Under §19(2) eWpG, owed to individual-entry consumer holders. A retained register record, not a notification.

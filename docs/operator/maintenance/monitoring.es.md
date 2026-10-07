@@ -4,6 +4,9 @@ title: Monitoreo
 
 # Monitoreo { #monitoring }
 
+!!! warning "Traducción parcialmente desactualizada"
+    Esta página no está totalmente sincronizada con el original en inglés: faltan las secciones sobre la ejecución de tareas programadas, la cola operativa pendiente, la latencia de confirmación de transacciones y las pruebas de carga, y los nombres de alertas y métricas pueden estar desactualizados. La página en inglés es la de referencia.
+
 El registro se envía con una pila de monitoreo de Prometheus + Grafana. Esta página describe qué monitorear
 , qué métricas son importantes y cómo configurar las alertas.
 

@@ -54,7 +54,7 @@ For tokens on public blockchains, §16 requires a separate "crypto securities re
 
 - The `asset_holder` table in PostgreSQL is the current application holder record; whether it is the legal register requires an approved instrument-specific authority policy
 - The `ChainDriftDetectionJob` runs every 15 minutes to verify on-chain balances match the DB. Detected discrepancies are stored as `chain_drift_event` records and trigger `ChainDriftDetectedEvent` notifications.
-- The `holder_block` table implements the Sperrvermerk with block types: `PFANDRECHT`, `PFAENDUNG`, `GERICHTSBESCHLUSS`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `INSOLVENZ`
+- The `holder_block` table implements the Sperrvermerk with block types: `PFANDRECHT`, `PFAENDUNG`, `GERICHTSBESCHLUSS`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `INSOLVENZ`, `REGULATORISCH`
 
 See [Sperrvermerk](../compliance/sperrvermerk.md) for the full implementation.
 
@@ -91,7 +91,7 @@ The **Kryptowertpapier-Festlegungs-Verordnung** (KryptoFAV) specifies technical 
 | Issuer identified by LEI or registration number | `LegalEntity.lei`, `LegalEntity.registrationNumber` |
 | Hash of the terms and conditions | `Asset.termsHash` stored at issuance |
 | Cryptographic proof of registry entry | Audit hash chain (`audit_event.entry_hash`) |
-| Accessibility for BaFin inspection | `AUDITOR` role with full read access; audit export endpoint |
+| Accessibility for BaFin inspection | `AUDIT` role with full read access; audit export endpoint |
 
 ---
 

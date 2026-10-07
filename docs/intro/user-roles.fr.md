@@ -5,7 +5,7 @@ description: Qui utilise Registerwerk, ce que chacun peut faire, et à quelle ob
 
 # Rôles et permissions
 
-Registerwerk est multi-locataire : une installation d'opérateur dessert de nombreuses entités juridiques clientes. L'accès est régi par un jeu de rôles défini dans l'énumération `AppRole` et appliqué par `@PreAuthorize` sur chaque méthode de contrôleur.
+Registerwerk est multi-locataire : une installation d'opérateur dessert de nombreuses entités juridiques clientes. L'accès est régi par un jeu de rôles défini dans l'énumération `AppUserRole` et appliqué par `@PreAuthorize` sur chaque méthode de contrôleur.
 
 ---
 
@@ -15,7 +15,8 @@ Registerwerk est multi-locataire : une installation d'opérateur dessert de nomb
 |---|---|---|---|
 | `REGISTRY_ADMIN` | Opérateur | Personnel du registre | §15 eWpG teneur de registre ; §10 GwG responsable LCB-FT |
 | `COMPLIANCE_OFFICER` | Opérateur | Équipe conformité / LCB-FT | §7 GwG responsable conformité ; art. 8 AMLD6 |
-| `AUDITOR` | Opérateur | Auditeurs internes/externes | §15(3) eWpG accès aux enregistrements |
+| `AUDIT` | Opérateur | Auditeurs internes/externes | §15(3) eWpG accès aux enregistrements |
+| `SUPPORT_AGENT` | Opérateur | Personnel du support | Sessions client en lecture seule uniquement ; aucune fonction réglementaire |
 | `ISSUER` | Client | Émetteurs de titres | §4 eWpG obligations de l'émetteur |
 | `INVESTOR` | Client | Titulaires de jetons / investisseurs | |
 | `COMPANY_ADMIN` | Client | Administrateurs chez l'émetteur | |
@@ -34,25 +35,25 @@ Le rôle aux privilèges les plus étendus. Un `REGISTRY_ADMIN` peut :
 - Déployer et administrer des [jetons de titres](../token-standards/index.md)
 - Inscrire un [Sperrvermerk](../compliance/sperrvermerk.md) (restriction de négociation) — exige une [authentification renforcée](../compliance/step-up-mfa.md)
 - Transférer et détruire des jetons de force — exige authentification renforcée + double validation
-- Prendre la place d'utilisateurs clients à des fins d'assistance — capacité permanente, voir la réserve ci-dessous
+- Démarrer des sessions de [mode support](#mode-support) en lecture seule à des fins d'assistance (authentification renforcée et motif consigné ; les sessions d'écriture n'existent qu'en mode démo)
 - Accéder à tous les enregistrements de la [piste d'audit](../platform/audit-log.md)
 - Déclencher les exports réglementaires [MiFIR](../compliance/mifir.md) et [DAC8](../compliance/dac8.md)
 
 !!! warning "Les opérations forcées exigent un double contrôle"
-    Le transfert forcé, la destruction forcée et l'approbation forcée sont des opérations on-chain irréversibles. L'implémentation actuelle exige qu'un second `REGISTRY_ADMIN`, distinct, fournisse le jeton de double contrôle ; il n'existe pas de rôle applicatif `SECOND_APPROVER`. Son adéquation juridique et réglementaire requiert un examen externe.
+    Le transfert forcé, la destruction forcée et l'approbation forcée sont des opérations irréversibles sur la chaîne. L'implémentation actuelle exige qu'un second opérateur distinct (un `REGISTRY_ADMIN` ou un `COMPLIANCE_OFFICER`) donne l'approbation en double validation ; il n'existe pas de rôle applicatif `SECOND_APPROVER`. Son adéquation juridique et de politique interne doit faire l'objet d'une revue externe.
 
 ### COMPLIANCE_OFFICER
 
 Centré sur les fonctions LCB-FT/KYC :
 
 - Examiner et gérer les campagnes et correspondances de [filtrage des sanctions](../compliance/sanctions-screening.md)
-- Accepter ou rejeter les correspondances (en double validation pour les entités à haut risque)
+- Accepter ou rejeter les correspondances (toujours avec authentification renforcée et un deuxième approbateur)
 - Approuver les documents KYC pour les juridictions qui lui sont assignées
-- Inscrire et lever un [Sperrvermerk](../compliance/sperrvermerk.md) — exige une authentification renforcée
+- Consulter les [Sperrvermerk](../compliance/sperrvermerk.md) (leur inscription et leur levée sont réservées à `REGISTRY_ADMIN`, avec authentification renforcée et un deuxième approbateur)
 - Accéder aux enregistrements d'incidents [DORA](../compliance/dora.md)
 - Déclencher un nouveau filtrage des sanctions à la demande
 
-### AUDITOR
+### AUDIT
 
 Accès en lecture seule à la totalité de la piste d'audit :
 
@@ -63,7 +64,11 @@ Accès en lecture seule à la totalité de la piste d'audit :
 
 ### Approbateur en double validation
 
-L'approbation en double validation est aujourd'hui une capacité d'un second `REGISTRY_ADMIN` distinct, non un rôle applicatif séparé. L'approbateur doit différer de l'initiateur et satisfaire les contrôles d'authentification renforcée configurés.
+L'approbation en double validation est aujourd'hui une capacité d'un second utilisateur distinct qui détient `REGISTRY_ADMIN` ou `COMPLIANCE_OFFICER`, non un rôle applicatif séparé. L'approbateur doit différer de l'initiateur, être toujours actif dans la base de données et satisfaire les contrôles d'authentification renforcée configurés. Les demandes peuvent être déposées et approuvées dans la file d'approbation de l'application (voir [Authentification renforcée et quatre yeux](../compliance/step-up-mfa.md)).
+
+### SUPPORT_AGENT
+
+Personnel de l'opérateur pour l'assistance client. Un `SUPPORT_AGENT` peut lister les entités clientes et démarrer des sessions de [mode support](#mode-support) en **lecture seule** (authentification renforcée et motif requis). Il ne peut rien modifier et n'a aucune fonction réglementaire. L'attribution ou le retrait du rôle exige une authentification renforcée et un deuxième approbateur.
 
 ---
 
@@ -115,16 +120,14 @@ Un utilisateur, machine ou humain, habilité à interagir avec les intégrations
 
 ## Mode support
 
-Les utilisateurs `REGISTRY_ADMIN` peuvent prendre la place d'un utilisateur client pour investiguer un problème ou aider à l'intégration. Le mode support :
+Le mode support (« impersonation ») permet au personnel de l'opérateur d'ouvrir le portail client à l'intérieur de l'organisation d'un client pour examiner des problèmes. Il est encadré et en lecture seule par défaut :
 
-- Émet un jeton de courte durée dont le `sub` reste l'identifiant utilisateur de l'**opérateur**, de sorte que chaque action est imputée à l'opérateur et jamais au client
-- Est consigné dans la [piste d'audit](../platform/audit-log.md), marqué par `imp` afin que ces actions restent distinguables
-- Est visible par tous les utilisateurs `REGISTRY_ADMIN` grâce à la barre affichée dans l'interface client
-- Expire avec le jeton ; rentrez à nouveau plutôt que de chercher à prolonger
+- Le démarrage exige une [authentification renforcée](../compliance/step-up-mfa.md) et un motif écrit obligatoire (au moins 15 caractères, plus une référence de ticket facultative)
+- Le mode par défaut est la **lecture seule** ; le mode écriture (`ACT_ON_BEHALF`) exige un deuxième approbateur et n'existe **qu'en mode démo**. En mode production, toute session est en lecture seule
+- `REGISTRY_ADMIN` et `SUPPORT_AGENT` peuvent démarrer des sessions en lecture seule ; seul `REGISTRY_ADMIN` peut démarrer une session d'écriture. `SUPPORT_AGENT` ne peut rien faire d'autre
+- L'appel de démarrage ne renvoie aucun jeton : un code à usage unique (60 secondes) est échangé contre un cookie de session httpOnly. La session dure 30 minutes au plus
+- Le `sub` du jeton reste l'identifiant utilisateur de l'**opérateur**, de sorte que chaque action est imputée à l'opérateur et jamais au client ; `imp` la marque dans la [piste d'audit](../platform/audit-log.md)
+- Les sessions sont consignées et visibles des administrateurs de l'entreprise du client
+- Il est visible par tous les utilisateurs `REGISTRY_ADMIN` grâce à la barre affichée dans l'interface client
 
-!!! warning "Le mode support n'est pas protégé par une authentification renforcée"
-    `AdminImpersonationController` ne porte aucun `@RequiresStepUp`. Tout `REGISTRY_ADMIN` peut entrer dans le portail de n'importe quel client sans second défi d'authentification et sans seconde personne.
-
-    Traitez cela comme une question de contrôle plutôt que technique : gardez la liste d'administrateurs réduite, exigez un motif consigné hors de la plateforme, et passez en revue périodiquement les événements. [Mode support](../operator/customers/impersonation.md) traite de son encadrement.
-
-Le mode support est par ailleurs totalement indisponible lorsque `ENTRA_ENABLED=true` — le backend refuse d'émettre une session pour le compte d'un client.
+Le mode support est totalement indisponible lorsque `ENTRA_ENABLED=true` — le backend refuse d'émettre une session pour le compte d'un client. [Mode support](../operator/customers/impersonation.md) détaille le fonctionnement et l'encadrement.

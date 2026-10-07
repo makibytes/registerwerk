@@ -18,7 +18,7 @@ Liechtenstein fue el primer país europeo en aprobar una legislación integral e
 
 El TVTG establece el concepto de **Token** como un registro de datos en un sistema TT (Trusted Technology) (es decir, un libro mayor distribuido o un sistema criptográficamente seguro equivalente). Los derechos se vinculan a los tokens en lugar de directamente al activo subyacente, lo que crea una separación legal nítida entre el derecho (el token) y su representación técnica (la blockchain).
 
-Esto se alinea bien con el modelo de registro canónico de Registerwerk: la entrada del registro es el instrumento legal; la cadena de bloques es una representación.
+Esto se alinea bien con el modelo de registro canónico de Registerwerk: la entrada del registro es el registro operativo y la cadena de bloques es una representación. Que una entrada sea jurídicamente el instrumento depende del sistema TT y del estatus del operador, lo que este repositorio no establece.
 
 ---
 
@@ -114,7 +114,7 @@ actual. El módulo `dora` no enruta ni transmite a la FMA las notificaciones de 
 
 Liechtenstein ofrece el marco legal más nativo de blockchain en Europa:
 
-- Los tokens se reconocen legalmente independientemente de la tecnología subyacente
+- El modelo de contenedor de tokens de la TVTG es neutral desde el punto de vista tecnológico; que un token concreto esté reconocido legalmente depende del instrumento y del sistema TT en el que se emite
 - Cualquier derecho puede ser tokenizado: instrumentos financieros, bienes raíces, derechos de propiedad intelectual
 - El TVTG es tecnológicamente neutral (EVM, UTXO y DAG todos califican)
 - No se necesita una designación separada de "valores criptográficos": el token en sí lleva el derecho

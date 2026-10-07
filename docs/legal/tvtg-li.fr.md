@@ -133,7 +133,7 @@ module `dora` n'achemine ni ne transmet les notifications d'incidents `LI_TVTG` 
 
 Le Liechtenstein propose le cadre juridique le plus natif de la blockchain en Europe :
 
-- les jetons sont légalement reconnus quelle que soit la technologie sous-jacente ;
+- le modèle de conteneur de jetons du TVTG est neutre sur le plan technologique ; la reconnaissance juridique d'un jeton donné dépend de l'instrument et du système TT sur lequel il est émis ;
 - tout droit peut être tokenisé — instruments financiers, immobilier, droits de propriété intellectuelle ;
 - le TVTG est technologiquement neutre (EVM, UTXO et DAG sont tous admissibles) ;
 - aucune désignation distincte de « titre cryptographique » n'est nécessaire — le jeton lui-même porte le droit.

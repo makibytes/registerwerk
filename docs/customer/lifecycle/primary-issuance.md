@@ -63,7 +63,7 @@ Only then can they hold the bond.
 
 ### What a register entry contains
 
-Each admitted investor becomes a **holder** — a row in the register. Under §16 eWpG this is the record that matters, and German law recognises two ways of keeping it:
+Each admitted investor becomes a **holder** — a row in the register. In the eWpG's model this is the record that matters, provided the operator is an authorised register keeper (this repository does not establish that), and German law recognises two ways of keeping it:
 
 === "Collective entry (Sammeleintragung)"
 
@@ -163,7 +163,7 @@ The third one deserves attention. **Delivery versus Payment** is the mechanism t
 
 The final transition: `APPROVED` → `ISSUED`.
 
-The bond is live. The register is authoritative. Investors can see their holdings, receive statements, and — from here — trade.
+The bond is live. The register is Registerwerk's source of truth. Investors can see their holdings, receive statements, and — from here — trade.
 
 ```mermaid
 stateDiagram-v2

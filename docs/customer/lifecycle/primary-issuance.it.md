@@ -63,7 +63,7 @@ Solo allora può detenere l'obbligazione.
 
 ### Che cosa contiene un'iscrizione a registro
 
-Ogni investitore ammesso diventa un **titolare** — una riga del registro. Ai sensi del §16 eWpG questa è la registrazione che conta, e il diritto tedesco ne conosce due forme:
+Ogni investitore ammesso diventa un **titolare** — una riga del registro. Nel modello dell'eWpG questa è la registrazione che conta, purché l'operatore sia un responsabile del registro autorizzato (cosa che questo repository non stabilisce), e il diritto tedesco ne conosce due forme:
 
 === "Iscrizione collettiva (Sammeleintragung)"
 
@@ -159,7 +159,7 @@ Il terzo merita attenzione. La **consegna contro pagamento** elimina il rischio 
 
 Il passaggio finale: `APPROVED` → `ISSUED`.
 
-L'obbligazione è attiva. Il registro fa fede. Gli investitori vedono le proprie posizioni, ricevono gli estratti e possono — da qui in poi — negoziare.
+L'obbligazione è attiva. Il registro è la fonte di verità di Registerwerk. Gli investitori vedono le proprie posizioni, ricevono gli estratti e possono — da qui in poi — negoziare.
 
 ```mermaid
 stateDiagram-v2

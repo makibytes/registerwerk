@@ -31,7 +31,7 @@ Die Geschichte ist eine Anleihe. Wir begleiten sie von dem Moment, in dem jemand
     | Laufzeit | 5 Jahre |
     | Rückzahlung | voller Nennbetrag am Fälligkeitstag |
 
-    Das ist das gesamte Finanzprodukt. Alles Weitere ist die Maschinerie, die dieses Versprechen wirksam, handelbar und durchsetzbar macht — und die einer Aufsicht zeigt, dass alles ordentlich zugegangen ist.
+    Das ist das gesamte Finanzprodukt. Alles Weitere ist die Maschinerie, die dieses Versprechen wirksam, handelbar und durchsetzbar macht — und die Aufzeichnungen hinterlässt, die eine Aufsicht, ein Prüfer oder eine Gegenpartei später nachvollziehen kann.
 
 ??? note "Für Leser ohne Finanzhintergrund: was eine Anleihe wirklich ist"
 

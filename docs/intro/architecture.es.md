@@ -21,7 +21,7 @@ graph TB
     end
 
     subgraph Gateway
-        K["Kong 3.8 OSS, DB-less<br/>Rate-limiting · Caching<br/>Security headers · :8000"]
+        K["Kong 3.9 OSS, DB-less<br/>Rate-limiting · Caching<br/>Security headers · :8000"]
     end
 
     subgraph Backend

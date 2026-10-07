@@ -39,7 +39,7 @@ title: Requisitos previos
 | Interfaz del operador | 44200 | Público: abierto directamente, nunca a través de Kong |
 | Interfaz del cliente | 44201 | Público: abierto directamente; solo sus propias llamadas a la API se enrutan a través de Kong |
 | Proxy de Kong | 48000 / 48443 | Público: tráfico HTTP/HTTPS de la API del cliente, sin base de datos, sin GUI de administración |
-| API de administración de Kong | 48001 | Solo loopback: túnel `docker exec`/SSH, nunca exponer públicamente |
+| API de administración de Kong | — (no publicada) | Escucha solo en `127.0.0.1:8001` dentro del contenedor; use `docker compose exec kong kong health`, nunca la exponga |
 | Documentación (perfil opcional `docs`) | 48003 | Dirección de enlace configurable |
 | Chaincache Sepolia/Base (opcional) | 48090 / 48091 | Solo loopback |
 | Anvil desechable | 48545 | Dirección de enlace configurable; internamente sigue siendo `anvil:8545` |

@@ -12,7 +12,9 @@ Toute la configuration se fait via des variables d'environnement. Copiez `.env.e
 |---|---|---|
 | `DB_URL` | `jdbc:postgresql://postgres:5432/registerwerk` | URL de connexion JDBC |
 | `DB_USER` | `registerwerk` | Utilisateur de la base de données |
-| `DB_PASSWORD` | — | **Obligatoire** |
+| `DB_PASSWORD` | — | **Obligatoire** (mot de passe du compte de migration/propriétaire) |
+| `DB_APP_USER` / `DB_APP_PASSWORD` | `DB_USER` / `DB_PASSWORD` | Compte d'exécution avec lequel l'application se connecte (`registerwerk_app` dans les configurations Compose et Helm fournies). Il doit différer du compte propriétaire en mode production, car l'application ne doit pas posséder les tables d'audit |
+| `SPRING_FLYWAY_USER` / `SPRING_FLYWAY_PASSWORD` | — | Compte de migration/propriétaire utilisé uniquement par Flyway (défini sur `DB_USER`/`DB_PASSWORD` dans Compose et Helm) |
 
 ## Authentification
 
@@ -30,9 +32,8 @@ Toute la configuration se fait via des variables d'environnement. Copiez `.env.e
 | Variables | Description |
 |---|---|
 | `JWT_ISSUER_URI` | URL de l'émetteur OIDC — laisser vide pour le mode développement HS256 ; définir pour la production (par exemple `https://login.microsoftonline.com/<tenant>/v2.0`) |
-| `ENTRA_CLIENT_ID` | ID client OIDC utilisé par le plugin Kong |
-| `ENTRA_CLIENT_SECRET` | Secret client OIDC utilisé par le plugin Kong |
-| `ENTRA_ISSUER` | Émetteur OIDC configuré dans le plugin Kong |
+| `ENTRA_CLIENT_ID` | ID client de l'enregistrement d'application de l'API ; utilisé avec le secret pour l'accès Microsoft Graph en mode application seule (statut à deux facteurs, console de support). Non utilisé par Kong, qui ne fait pas d'OIDC |
+| `ENTRA_CLIENT_SECRET` | Secret client de l'enregistrement d'application de l'API (identifiant Graph en mode application seule ; obligatoire si `ENTRA_SUPPORT_ENABLED=true`) |
 
 ## Blockchain RPCs
 
@@ -76,3 +77,11 @@ Les documents de taille inférieure à 5 Mo sont stockés directement en tant qu
 |---|---|
 | `CUSTOMER_FRONTEND_URL` | URL de base du frontend client (pour les liens e-mail) |
 | `FRONTEND_BUILD_ENV` | Cible de build frontend : `production` ou `testnet` |
+
+## Mode production et portes de mise en production
+
+Définissez `REGISTERWERK_PRODUCTION_MODE=true` sur chaque déploiement de production. Cela transforme les contrôles de disponibilité de simples avertissements en refus de démarrage et active les contrôles propres à la production. [Mode production et portes de mise en production](../security/production-mode.md) (en anglais uniquement) liste chaque porte, la variable qui la commande et ce qui est refusé. Cette page documente aussi les variables de validation et de reconnaissance (`REGISTERWERK_LENDING_RELEASE_APPROVED`, `REGISTERWERK_REPO_DESK_RELEASE_APPROVED`, `REGISTERWERK_TRADING_LEGAL_OPINION_REF`, `REGISTERWERK_AUDIT_ALLOW_OWNER_RUNTIME_ROLE`, `REGISTERWERK_AUDIT_SIGNING_PROVIDER`, `REGISTERWERK_WEBHOOK_ALLOW_INSECURE_URLS`, `REGISTERWERK_WALLET_MASTER_KEY`, `LINK_BY_EMAIL_WITHOUT_VERIFICATION`, `SWAGGER_ENABLED` et d'autres).
+
+## Autres paramètres
+
+Le calendrier du registre, les confirmations de chaîne, la limitation des connexions, le trading, la Travel Rule, le reporting, l'ancrage d'audit et la garde des clés de signature, avec leurs valeurs par défaut et ce que le mode production attend, figurent dans la [référence des paramètres d'exploitation](environment-settings.md) (en anglais uniquement).

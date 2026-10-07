@@ -4,7 +4,7 @@ title: API Gateway (Kong)
 
 # API Gateway (Kong) { #api-gateway-kong }
 
-Kong 3.8 (OSS, senza DB) si trova di fronte **solo al traffico API del frontend del cliente**. Gestisce la limitazione della velocità,
+Kong 3.9 (OSS, senza DB) si trova di fronte **solo al traffico API del frontend del cliente**. Gestisce la limitazione della velocità,
 la memorizzazione nella cache delle risposte e le intestazioni di sicurezza. **Non** fronteggia l'interfaccia utente di nessuno dei due
 frontend — entrambe le app vengono sempre aperte direttamente dal browser sulla propria porta (`:44200`, `:44201`) — e
 il **frontend dell'operatore ignora completamente Kong**, anche per le proprie chiamate API (il suo nginx inoltra
@@ -23,11 +23,14 @@ Kong funziona in modalità DB-less (dichiarativa): legge `gateway/kong.yml` dire
 
 ## Configurazione dichiarativa { #declarative-configuration }
 
-Kong è configurato tramite `gateway/kong.yml` in formato deck. Per applicare le modifiche:
+`gateway/kong.yml` è l'unica fonte di verità. È montato in sola lettura su `/etc/kong/kong.yml` e caricato all'avvio tramite `KONG_DECLARATIVE_CONFIG`. Kong funziona senza database, quindi non c'è alcun database né `deck sync` (deck scrive su un'Admin API basata su database, e questo stack non ne pubblica alcuna). Per modificare routing o plugin, modifica il file, convalidalo e ricrea il container:
 
 ```bash
-deck sync --config gateway/kong.yml
+docker compose run --rm kong kong config parse /etc/kong/kong.yml   # deve stampare «parse successful»
+docker compose up -d --force-recreate kong
 ```
+
+Su Kubernetes, modifica `deploy/helm/registerwerk/files/kong.yml` (renderizzato nella ConfigMap `registerwerk-kong-config`) ed esegui `helm upgrade`; riavvia il deployment di Kong se i pod non recepiscono la ConfigMap modificata.
 
 ## Plugin chiave { #key-plugins }
 
@@ -63,14 +66,10 @@ Il rate limiting, l'`ip-restriction` di amministrazione e la limitazione dei log
 
 ## Kong admin API { #kong-admin-api }
 
-Kong viene eseguito senza DB e in questo stack **non fornisce alcuna GUI di amministrazione** (nessun Konga, nessun Kong Manager: entrambi sono stati
-rimossi/mai collegati). L'accesso all'API di amministrazione è intenzionalmente limitato al loopback:
+Kong funziona senza database e **non include alcuna interfaccia di amministrazione** in questo stack (né Konga né Kong Manager). L'Admin API ascolta solo su `127.0.0.1:8001` **all'interno del container** (`KONG_ADMIN_LISTEN`) e non è pubblicata sull'host; non è autenticata e non deve mai essere esposta. L'immagine di Kong non contiene `curl`, quindi usa la CLI inclusa:
 
 ```bash
-# Bound to 127.0.0.1:48001 on the host — never expose this publicly, it's unauthenticated
 docker compose exec kong kong health
-curl http://127.0.0.1:48001/status
 ```
 
-Per modificare routing/plugin, modifica `gateway/kong.yml` e riavvia il servizio `kong`: è l'unica fonte di verità
-in modalità senza DB.
+Per modificare routing o plugin, modifica `gateway/kong.yml` e ricrea il servizio `kong` come descritto sopra — è l'unica fonte di verità nella modalità senza database.

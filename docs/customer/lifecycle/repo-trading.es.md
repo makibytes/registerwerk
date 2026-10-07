@@ -25,6 +25,9 @@ Repo Desk modela este flujo bilateral. Está separado del [préstamo garantizado
 5. En apertura y cierre cada receptor confirma la pata de efectivo o valores recibida con una referencia.
 6. Llamadas de margen y sustituciones quedan en el historial compartido e inmutable.
 
+!!! warning "La difusión general no es anónima"
+    Las empresas elegibles ven al solicitante y las condiciones solicitadas. Las cotizaciones son privadas, pero la RFQ no lo es. Use la distribución dirigida para necesidades de financiación sensibles.
+
 ## Controles del desk
 
 - **Las cotizaciones están versionadas.** Una cotización sustituida pasa a `SUPERSEDED` y ya no puede aceptarse. La aceptación incluye el `termsHash` del servidor; si difiere (409), revise las condiciones actuales. Las condiciones aceptadas se fijan en la operación. Importes e intereses se redondean a la subunidad de la divisa (ACT/360, ACT/365 para GBP, entre otras).
@@ -38,3 +41,6 @@ Repo Desk modela este flujo bilateral. Está separado del [préstamo garantizado
 
 !!! warning "El contrato marco sigue siendo esencial"
     El flujo no sustituye contrato marco, lista de garantías elegibles, agente de valoración, custodia, disputas ni dictamen de netting. DvP sigue siendo preferible a FoP.
+
+!!! info "Qué demuestra la demo"
+    La demo demuestra la privacidad de las RFQ, el cálculo del plazo, las transiciones de estado y un registro operativo compartido. No afirma exigibilidad jurídica, firmeza de la liquidación en cauces externos, tratamiento contable, reconocimiento de capital regulatorio ni compensación de cierre exigible.

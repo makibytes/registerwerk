@@ -42,7 +42,10 @@ const highRiskPatterns = [
   ["automatic-filing", /\b(?:automatically|automatic)[^\n.]{0,80}\b(?:filed|submitted)\b/gi],
   ["compliance-guarantee", /\b(?:guarantees?|ensures?) compliance\b/gi],
   ["regulatory-obligation", /\b(?:satisf(?:y|ies|ied)|meets?|fulfils?|fulfills?)[^\n.]{0,100}\b(?:statutory |regulatory )?(?:obligations?|requirements?)\b/gi],
-  ["atomic-settlement", /\b(?:atomic (?:settlement|DvP)|settle[sd]? atomically|atomically settle[sd]?)\b/gi]
+  ["atomic-settlement", /\b(?:atomic (?:settlement|DvP)|settle[sd]? atomically|atomically settle[sd]?)\b/gi],
+  // The operational database is Registerwerk's source of truth; whether it is a register with legal effect depends on
+  // the operator, the instrument and the jurisdiction (docs/legal/ewpg.md). English and the four translations.
+  ["register-legal-authority", /\b(?:record with legal significance|legally significant record|legally authoritative (?:register|record)|register that is legally authoritative|database, legally authoritative|satisfying a regulator|legally recogni[sz]ed regardless|rechtlich maßgebliche[rn]? (?:Aufzeichnung|Nachweis)|Register, das rechtlich maßgeblich ist|Datenbank, rechtlich maßgeblich|rechtsmaßgebliche\w*|enregistrement (?:doté d'une|qui a une) portée juridique|enregistrement juridiquement significatif|juridiquement faisant foi|(?:asiento|anotación) (?:con|de) relevancia jurídica|anotación jurídicamente relevante|jurídicamente determinante|registrazione (?:con rilie(?:vo|vanza) giuridic[oa]|giuridicamente rilevante)|giuridicamente autoritativo)/gi]
 ];
 
 const scanExtensions = new Set([

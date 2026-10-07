@@ -68,13 +68,13 @@ Tres cosas quedan fuera de los espacios de trabajo, porque le afectan haga lo qu
 
 Registerwerk mantiene **dos registros de la misma cosa**, y deliberadamente no finge lo contrario.
 
-Está el **registro** — una base de datos, en poder del operador, que es el asiento con relevancia jurídica. Y está el **token** — una anotación en una blockchain, lo que realmente se mueve cuando hay una transmisión.
+Está el **registro** — una base de datos, en poder del operador, que Registerwerk trata como fuente de verdad (que sea un registro con eficacia jurídica depende del operador y del instrumento). Y está el **token** — una anotación en una blockchain, lo que realmente se mueve cuando hay una transmisión.
 
-Un software observa la cadena y reescribe en el registro lo que ve. La mayor parte del tiempo coinciden. Cuando no, prevalece el registro y la diferencia la resuelve una persona.
+Un software observa la cadena y reescribe en el registro lo que ve. La mayor parte del tiempo coinciden. Cuando no, el registro es la fuente de verdad para la conciliación y la diferencia la resuelve una persona.
 
 ```mermaid
 graph LR
-    R[("Registro<br/><small>el asiento jurídico</small>")]
+    R[("Registro<br/><small>la fuente de verdad</small>")]
     T["Token en la cadena<br/><small>lo que se mueve</small>"]
     R -.->|"instruye"| T
     T -.->|"observado por los indexadores"| R

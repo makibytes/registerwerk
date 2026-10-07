@@ -121,6 +121,14 @@ Wenn eine Organisation das Register nicht mehr nutzt:
 
     Zahlen Sie es zurück, oder übertragen Sie es an einen Nachfolge-Registerführer, bevor Sie den Emittenten offboarden. Andernfalls laufen Verpflichtungen über ein Register, das niemand mehr verwaltet.
 
+### Wiedereinsetzung eines geschlossenen oder aufgelösten Kunden { #reinstating-a-closed-or-dissolved-customer }
+
+Ein `CLOSED` oder `DISSOLVED` gesetzter Kunde wird nie direkt wieder `ACTIVE`. Ein `REGISTRY_ADMIN` startet die Wiedereinsetzung mit `POST /api/v1/entities/{id}/reinstate`; Begründung und Rechtsgrundlage sind Pflicht, und der Aufruf braucht Step-up und einen zweiten Genehmiger (`ENTITY_REINSTATE`).
+
+- Der Kunde wechselt zu `PENDING_REACTIVATION`: KYC wird auf „nicht begonnen" zurückgesetzt, das Screening läuft erneut, und zwei [Rechtsträger-Aufgaben](entity-tasks.md) werden angelegt (`REINSTATEMENT_KYC_REQUIRED`, `REINSTATEMENT_USERS_REVIEW`). Solange die Wiedereinsetzung aussteht, kann sich niemand des Kunden anmelden, handeln oder übernommen werden, und seine Nutzer bleiben deaktiviert.
+- Die erneute KYC-Genehmigung (jede übliche KYC-Prüfung gilt) macht den Kunden `ACTIVE` und löst `CHAIN_REINSTATEMENT_REQUIRED` aus. On-Chain-Identitäts-Claims und die Organisationsbindung werden **nicht** automatisch neu ausgestellt; ihre Wiederherstellung ist ein ausdrücklicher Vier-Augen-Schritt des Betreibers. Die früheren Schließungs- und Chain-Propagationsdatensätze bleiben bis zur KYC-Genehmigung in Kraft.
+- Eine ausstehende Wiedereinsetzung kann durch erneutes Beenden des Kunden verworfen werden. Beim Abschluss gibt es keine Sperrvermerk-Prüfung; die Beteiligten-Gates erzwingen Sperren bei jeder Transaktion.
+
 ---
 
 ## Was aufbewahrt werden muss

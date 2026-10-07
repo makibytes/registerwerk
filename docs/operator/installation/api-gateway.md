@@ -4,7 +4,7 @@ title: API Gateway (Kong)
 
 # API Gateway (Kong)
 
-Kong 3.8 (OSS, DB-less) sits in front of the **customer frontend's API traffic only**. It handles
+Kong 3.9 (OSS, DB-less) sits in front of the **customer frontend's API traffic only**. It handles
 rate limiting, response caching, and security headers. It does **not** front either frontend's UI
 — both apps are always opened directly by the browser at their own port (`:44200`, `:44201`) — and
 the **operator frontend bypasses Kong entirely**, even for its own API calls (its nginx forwards
@@ -23,11 +23,14 @@ Kong runs in DB-less (declarative) mode — it reads `gateway/kong.yml` directly
 
 ## Declarative configuration
 
-Kong is configured via `gateway/kong.yml` in deck format. To apply changes:
+`gateway/kong.yml` is the single source of truth. It is mounted read-only at `/etc/kong/kong.yml` and loaded at start through `KONG_DECLARATIVE_CONFIG`. Kong is DB-less, so there is no database and no `deck sync` (deck pushes to an Admin API backed by a database, and this stack publishes none). To change routing or plugins, edit the file, validate it, and recreate the container:
 
 ```bash
-deck sync --config gateway/kong.yml
+docker compose run --rm kong kong config parse /etc/kong/kong.yml   # must print "parse successful"
+docker compose up -d --force-recreate kong
 ```
+
+On Kubernetes, edit `deploy/helm/registerwerk/files/kong.yml` (rendered into the ConfigMap `registerwerk-kong-config`) and run `helm upgrade`; restart the Kong deployment if the pods do not pick up the changed ConfigMap.
 
 ## Key plugins
 
@@ -75,14 +78,10 @@ answers 404 for `/actuator/*` other than health.
 
 ## Kong admin API
 
-Kong runs DB-less and ships **no admin GUI** in this stack (no Konga, no Kong Manager — both were
-removed/never wired up). Admin API access is intentionally loopback-only:
+Kong runs DB-less and ships **no admin GUI** in this stack (no Konga, no Kong Manager). The Admin API listens only on `127.0.0.1:8001` **inside the container** (`KONG_ADMIN_LISTEN`) and is not published to the host; it is unauthenticated and must never be exposed. The Kong image has no `curl`, so use the bundled CLI:
 
 ```bash
-# Bound to 127.0.0.1:48001 on the host — never expose this publicly, it's unauthenticated
 docker compose exec kong kong health
-curl http://127.0.0.1:48001/status
 ```
 
-To change routing/plugins, edit `gateway/kong.yml` and restart the `kong` service — it's the
-single source of truth in DB-less mode.
+To change routing or plugins, edit `gateway/kong.yml` and recreate the `kong` service as described above — it is the single source of truth in DB-less mode.

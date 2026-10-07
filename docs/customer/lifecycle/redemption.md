@@ -146,7 +146,7 @@ Registerwerk raises the flag. It cannot enforce a claim — that is a matter for
 
 1. **Design** — Nordwind describes a bond; the operator approves it.
 2. **Issuance** — a contract is deployed, investors admitted, 50,000 units minted.
-3. **Holding** — investors hold; the register is authoritative, the chain is verifiable.
+3. **Holding** — investors hold; the register is the source of truth, the chain is verifiable.
 4. **Trading** — units change hands; compliance rules hold on every transfer.
 5. **Lending** — a holder pledges units and borrows against them.
 6. **Redemption** — coupons paid, principal repaid, tokens burned, register closed.

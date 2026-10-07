@@ -72,7 +72,7 @@ données et un état on-chain sélectionné :
   correspondent à la base de données. Les écarts détectés sont stockés sous forme d'enregistrements
   `chain_drift_event` et déclenchent des notifications `ChainDriftDetectedEvent` ;
 - la table `holder_block` met en œuvre le Sperrvermerk avec les types de blocage suivants : `PFANDRECHT`,
-  `PFAENDUNG`, `GERICHTSBESCHLUSS`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `INSOLVENZ`.
+  `PFAENDUNG`, `GERICHTSBESCHLUSS`, `NACHLASSSPERRE`, `VERFUGUNGSVERBOT`, `TOD`, `INSOLVENZ`, `REGULATORISCH`.
 
 Voir [Sperrvermerk](../compliance/sperrvermerk.md) pour la mise en œuvre complète.
 
@@ -114,7 +114,7 @@ registres de titres cryptographiques. Principales exigences et mises en œuvre :
 | Émetteur identifié par LEI ou numéro d'enregistrement | `LegalEntity.lei`, `LegalEntity.registrationNumber` |
 | Hachage des conditions générales | `Asset.termsHash` stocké lors de l'émission |
 | Preuve cryptographique de l'inscription au registre | Chaîne de hachage d'audit (`audit_event.entry_hash`) |
-| Accessibilité pour inspection par la BaFin | Rôle `AUDITOR` avec accès complet en lecture ; point de terminaison d'export d'audit |
+| Accessibilité pour inspection par la BaFin | Rôle `AUDIT` avec accès complet en lecture ; point de terminaison d'export d'audit |
 
 ---
 

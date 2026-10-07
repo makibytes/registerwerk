@@ -94,7 +94,7 @@ La tâche d'auditeur la plus courante. Le chemin :
 6. **Lire les opérations sur titres** — les photographies à la date d'enregistrement montrant exactement qui avait droit à quoi, et quand cela a été réglé.
 
 !!! tip "Deux enregistrements, et ils peuvent diverger"
-    Registerwerk tient le registre (une base de données, juridiquement faisant foi) et le jeton (on-chain, vérifiable indépendamment) comme deux enregistrements distincts, maintenus en phase par des indexeurs.
+    Registerwerk tient le registre (une base de données, source de vérité pour le rapprochement de Registerwerk ; son statut juridique dépend de l'opérateur et de l'instrument) et le jeton (on-chain, vérifiable indépendamment) comme deux enregistrements distincts, maintenus en phase par des indexeurs.
 
     Ils peuvent dériver — brièvement en fonctionnement normal, plus longtemps si un indexeur prend du retard ou si une chaîne est congestionnée. **Trouver un écart n'équivaut pas automatiquement à trouver un défaut.** Établissez quand chaque enregistrement a été écrit avant de conclure. [Détention et conservation](../lifecycle/holding.md) explique le modèle.
 

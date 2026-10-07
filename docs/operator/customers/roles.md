@@ -22,6 +22,8 @@ All three are enforced in the **backend**, on every request. Neither portal's na
 | `REGISTRY_ADMIN` | Operator staff | Everything, across all customers. Includes [impersonation](impersonation.md). |
 | `COMPLIANCE_OFFICER` | Operator staff | KYC/KYB workflow approvals and rejections. |
 | `AUDIT` | Auditors, inspectors | Read across the registry. No writes. |
+| `RELATIONSHIP_MANAGER` | Operator staff | Read-only, limited to the customer entities assigned to them. Cannot approve or change anything. |
+| `SUPPORT_AGENT` | Operator staff | List customers and start **read-only** [impersonation](impersonation.md) sessions (step-up and a recorded reason). Nothing else; no write access. Granting or removing the role needs step-up and a second approver. |
 | `COMPANY_ADMIN` | Customer | Manage their own organisation's users, IdP settings, on-chain identity. |
 | `ISSUER` | Customer | Create and administer their own issuances. |
 | `INVESTOR` | Customer | Hold and view their own securities. |

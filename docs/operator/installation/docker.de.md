@@ -60,6 +60,34 @@ zum Migrieren oder Bootstrap. Beim ersten Start von Postgres erstellt `POSTGRES_
 erstellt zusätzlich die Datenbank + Rolle `chaincache` für die optionalen Chaincache-Workloads oben –
 unabhängig davon, ob `CHAINCACHE_ENABLED=true` gesetzt ist; andernfalls bleibt sie einfach ungenutzt.
 
+!!! warning "Bestehende Installation auf das Volume pg18data umstellen"
+    PostgreSQL 18 hat PGDATA nach `/var/lib/postgresql/<major>/docker` verschoben und deklariert
+    `VOLUME /var/lib/postgresql` (nicht `.../data` wie bis Version 17). Der Dienst `postgres` in
+    `docker-compose.yml` bindet deshalb ein Volume namens `pg18data` ein, nicht das alte `pgdata` — eine
+    bewusste Umbenennung, kein Tippfehler: Ein Volume aus der Zeit vor Version 18 am neuen Pfad des Images
+    einzuhängen würde stillschweigend einen frischen, leeren Cluster starten, statt laut zu scheitern.
+    Eine Installation, die von einem älteren `pgdata`-Volume aus umgestellt wird, muss als eigenen,
+    ausdrücklichen Migrationsschritt per `pg_dump` aus dem alten Volume sichern und in das neue
+    zurückspielen, bevor `docker compose up -d` gegen diese Compose-Datei läuft — nehmen Sie nie an, dass
+    die Umbenennung allein die Daten mitnimmt. Der Dienst `graph-db` in `indexer/evm/docker-compose.yml`
+    braucht dieselbe Behandlung (`graphdata` → `graph_pg18`).
+
+!!! warning "Umstellung von einem separaten chaincache-postgres-Container"
+    Frühere Stände dieses Stacks betrieben die Chaincache-Datenbank in einem eigenen Container
+    `chaincache-postgres` (Volume `chaincache_pg18`) statt als zweite Datenbank im gemeinsamen Dienst
+    `postgres`. `postgres-init/01-create-chaincache-db.sql` läuft nur gegen ein wirklich frisches, leeres
+    `pg18data`-Volume — genau wie bei der pg18data-Umbenennung oben —, daher erhält eine bestehende
+    Installation, die auf diese Compose-Datei umstellt, die Datenbank `chaincache` **nicht** automatisch.
+    Bevor Sie den alten Container `chaincache-postgres` entfernen: Sichern Sie ihn per `pg_dump`
+    (`docker compose exec chaincache-postgres pg_dump -U chaincache chaincache | gzip > chaincache.sql.gz`).
+    Legen Sie nach der Umstellung die Datenbank auf dem bestehenden `postgres`-Volume von Hand an und
+    spielen Sie die Sicherung ein:
+    ```bash
+    docker compose exec postgres psql -U ${DB_USER:-registerwerk} -d registerwerk -c \
+      "CREATE USER chaincache WITH PASSWORD 'chaincache'; CREATE DATABASE chaincache OWNER chaincache;"
+    gunzip -c chaincache.sql.gz | docker compose exec -T postgres psql -U chaincache chaincache
+    ```
+
 ### Logs { #logs }
 
 ```bash

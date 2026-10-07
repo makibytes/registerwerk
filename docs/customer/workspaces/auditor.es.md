@@ -94,7 +94,7 @@ La tarea más habitual de un auditor. El camino:
 6. **Leer las operaciones societarias** — las fotografías a fecha de registro que muestran exactamente a quién le correspondía qué, y cuándo se liquidó.
 
 !!! tip "Dos registros, y pueden discrepar"
-    Registerwerk mantiene el registro (una base de datos, jurídicamente determinante) y el token (on-chain, verificable de forma independiente) como registros separados, mantenidos acompasados por indexadores.
+    Registerwerk mantiene el registro (una base de datos, fuente de verdad para la conciliación de Registerwerk; su estatus jurídico depende del operador y del instrumento) y el token (on-chain, verificable de forma independiente) como registros separados, mantenidos acompasados por indexadores.
 
     Pueden desviarse — brevemente en operación normal, más tiempo si un indexador se retrasa o una cadena está congestionada. **Encontrar una discrepancia no equivale automáticamente a encontrar un defecto.** Determine cuándo se escribió cada registro antes de concluir. [Tenencia y custodia](../lifecycle/holding.md) explica el modelo.
 

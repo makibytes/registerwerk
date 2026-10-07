@@ -25,6 +25,9 @@ Le Repo Desk modélise ce processus bilatéral. Il est distinct du [prêt garant
 5. À l'ouverture et à la clôture, chaque destinataire confirme la jambe espèces ou titres réellement reçue avec une référence.
 6. Appels de marge et substitutions de garantie restent dans l'historique partagé et immuable.
 
+!!! warning "La diffusion générale n'est pas anonyme"
+    Les entreprises éligibles voient le demandeur et les conditions demandées. Les cotations sont privées, mais la RFQ ne l'est pas. Utilisez la diffusion ciblée pour les besoins de financement sensibles.
+
 ## Contrôles du desk
 
 - **Les cotations sont versionnées.** Une cotation remplacée devient `SUPERSEDED` et ne peut plus être acceptée. L'acceptation porte le `termsHash` fourni par le serveur ; en cas d'écart (409), examinez les conditions actuelles. Les conditions acceptées sont figées sur la transaction. Montants et intérêts sont arrondis à la sous-unité de la devise (ACT/360, ACT/365 pour GBP notamment).
@@ -38,3 +41,6 @@ Le Repo Desk modélise ce processus bilatéral. Il est distinct du [prêt garant
 
 !!! warning "Le contrat-cadre reste indispensable"
     Le flux ne remplace ni contrat-cadre, barème d'éligibilité, agent de valorisation, conservation, procédure de litige ni avis de compensation. Le DvP reste préférable au FoP.
+
+!!! info "Ce que prouve la démo"
+    La démo prouve la confidentialité des RFQ, le calcul de la durée, les transitions d'état et une trace opérationnelle partagée. Elle ne revendique ni force exécutoire juridique, ni caractère définitif du règlement sur des rails externes, ni traitement comptable, ni reconnaissance en fonds propres réglementaires, ni compensation de clôture opposable.
