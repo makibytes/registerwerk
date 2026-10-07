@@ -45,6 +45,10 @@ public class JwtMintingService {
     public static final String DUAL_CONTROL_AUDIENCE = "registerwerk-dual-control";
     /** Scope claim of an approver token ({@code @RequiresStepUp(reason)} it approves). */
     public static final String CLAIM_STEPUP_SCOPE = "stepup_scope";
+    /** The one user who may present an approver token minted from the approval queue (T8-02). */
+    public static final String CLAIM_STEPUP_INITIATOR = "stepup_initiator";
+    /** The approval-queue request an approver token was minted for (T8-02); informational. */
+    public static final String CLAIM_STEPUP_REQUEST = "stepup_request";
 
     /**
      * True for a dual-control approver token - by marker, by audience, or (tokens minted before the marker

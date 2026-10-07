@@ -90,6 +90,7 @@ public class SubscriptionOrderService {
     private final FinalityGate finalityGate;
     private final TokenAdminPort tokenAdminPort;
     private final Erc3643MintPort erc3643MintPort;
+    private final de.makibytes.registerwerk.blockchain.api.Erc7540AdminPort vaultAdminPort;
 
     public SubscriptionOrderService(
             SubscriptionOrderRepository repository,
@@ -107,7 +108,9 @@ public class SubscriptionOrderService {
             OrgMemberWalletRepository memberWallets,
             FinalityGate finalityGate,
             TokenAdminPort tokenAdminPort,
-            Erc3643MintPort erc3643MintPort) {
+            Erc3643MintPort erc3643MintPort,
+            de.makibytes.registerwerk.blockchain.api.Erc7540AdminPort vaultAdminPort) {
+        this.vaultAdminPort = vaultAdminPort;
         this.repository = repository;
         this.assetRepository = assetRepository;
         this.holderService = holderService;
@@ -142,6 +145,8 @@ public class SubscriptionOrderService {
         if (requestedAmount == null || requestedAmount.signum() <= 0) {
             throw new IllegalArgumentException("requestedAmount must be positive");
         }
+        // T1-07: in production a vault without a dealing cut-off (forward pricing) takes no new subscriptions.
+        vaultAdminPort.requireDealingCutoffConfigured(assetId, "subscription");
         // 6-33: the same party gate as trade settlement, and a wallet the investor has proven (bound) or
         // already holds on — checked at submit so a bad order fails early and again at settle.
         partyGate.require(investorEntityId, AddressNormalizer.normalize(walletAddress), "subscription");

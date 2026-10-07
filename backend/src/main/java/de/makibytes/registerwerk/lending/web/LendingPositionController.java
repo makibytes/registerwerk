@@ -1,5 +1,6 @@
 package de.makibytes.registerwerk.lending.web;
 
+import de.makibytes.registerwerk.lending.internal.LenderEligibilityService;
 import de.makibytes.registerwerk.lending.internal.LendingPositionService;
 import de.makibytes.registerwerk.lending.web.dto.LendingPositionResponse;
 import de.makibytes.registerwerk.lending.web.dto.LendingSupplyPositionResponse;
@@ -25,8 +26,20 @@ public class LendingPositionController {
 
     private final LendingPositionService positionService;
 
-    public LendingPositionController(LendingPositionService positionService) {
+    private final LenderEligibilityService lenderEligibility;
+
+    public LendingPositionController(LendingPositionService positionService, LenderEligibilityService lenderEligibility) {
         this.positionService = positionService;
+        this.lenderEligibility = lenderEligibility;
+    }
+
+    /**
+     * Preflight for the Supply &amp; Earn page (T2-20): whether the caller's entity may use the lender side.
+     * {@code productionMode=false} means the gate is not enforced (demo); the page keeps its demo wording.
+     */
+    @GetMapping("/lender-eligibility")
+    public ResponseEntity<LenderEligibilityService.Status> lenderEligibility(Authentication authentication) {
+        return ResponseEntity.ok(lenderEligibility.status(SecurityUtils.extractEntityId(authentication)));
     }
 
     @GetMapping("/my-positions")
@@ -46,6 +59,8 @@ public class LendingPositionController {
     @GetMapping("/supply-positions")
     public ResponseEntity<List<LendingSupplyPositionResponse>> supplyPositions(Authentication authentication) {
         UUID legalEntityId = SecurityUtils.extractEntityId(authentication);
+        // T2-20: in production mode the lender side needs the borrower gates (approved, screened, professional/ECP).
+        lenderEligibility.requireLender(legalEntityId, "viewing and managing supply positions");
         List<LendingSupplyPositionResponse> positions = positionService.refreshAndListMySupplyPositions(legalEntityId)
                 .stream()
                 .map(p -> new LendingSupplyPositionResponse(

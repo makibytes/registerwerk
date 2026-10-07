@@ -4,6 +4,7 @@ import { Observable, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { LendingMarket, LendingPosition, LendingQuote, LendingSupplyPosition } from '../models';
 import { parseJsonPreservingBigInts } from './json-bigint.util';
+import { LenderEligibility } from '../lending/lender-copy.util';
 
 @Injectable({ providedIn: 'root' })
 export class LendingService {
@@ -27,6 +28,11 @@ export class LendingService {
 
   myPositions(): Observable<LendingPosition[]> {
     return this.getPreservingBigInts<LendingPosition[]>(`${this.base}/my-positions`);
+  }
+
+  /** Preflight for the lender side: is the gate enforced (production) and does this entity pass it. */
+  lenderEligibility(): Observable<LenderEligibility> {
+    return this.http.get<LenderEligibility>(`${this.base}/lender-eligibility`);
   }
 
   supplyPositions(): Observable<LendingSupplyPosition[]> {

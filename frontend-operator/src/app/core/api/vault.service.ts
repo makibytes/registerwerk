@@ -3,6 +3,7 @@ import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { VaultNavStrike, VaultRequest, VaultStateSummary } from '../models';
+import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 
 @Injectable({ providedIn: 'root' })
 export class VaultService {
@@ -63,6 +64,19 @@ export class VaultService {
       `${this.base}/deployments/${deploymentId}/vault-requests/${requestId}/cancel`,
       {}
     );
+  }
+
+  /**
+   * Sets the vault's dealing cut-off (T1-07 forward pricing; step-up + second approver bound to this body:
+   * VAULT_DEALING_CUTOFF). Only requests placed after it confirms are affected.
+   */
+  setDealingCutoff(
+    deploymentId: string,
+    body: { cutoffSecondsOfDay: number; periodSeconds: number },
+    tokens: DualControlTokens,
+  ): Observable<{ txId: string }> {
+    return this.http.post<{ txId: string }>(
+      `${this.base}/deployments/${deploymentId}/dealing-cutoff`, body, { headers: dualControlHeaders(tokens) });
   }
 
   setDepositCap(deploymentId: string, cap: string): Observable<{ txId: string }> {

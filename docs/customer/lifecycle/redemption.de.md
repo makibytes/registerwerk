@@ -1,6 +1,6 @@
 ---
 title: 6. Kapitalmaßnahmen und Rückzahlung
-description: Kupons, Nachweisstichtage, Ertragsaufstellungen — und wie ein Wertpapier schließlich zurückgezahlt und vernichtet wird.
+description: Kupons, Nachweisstichtage, Ertragsübersichten — und wie ein Wertpapier schließlich zurückgezahlt und vernichtet wird.
 ---
 
 # Station 6 — Kapitalmaßnahmen und Rückzahlung
@@ -95,9 +95,9 @@ Nur eine Teilmenge lässt sich heute tatsächlich anlegen — der Rest ist model
 
 ---
 
-## Ertragsaufstellung (keine Steuerbescheinigung) { #tax-certificates }
+## Ertragsübersicht (keine Steuerbescheinigung) { #tax-certificates }
 
-Für deutsche Inhaber sind Erträge aus einem Wertpapier steuerpflichtig. Registerwerk stellt jährlich eine **Ertragsaufstellung** bereit, die ausweist, was dem Inhaber in einem Jahr gezahlt wurde — sie ist aber **keine Steuerbescheinigung** im Sinne des § 45a EStG.
+Für deutsche Inhaber sind Erträge aus einem Wertpapier steuerpflichtig. Registerwerk stellt jährlich eine **Ertragsübersicht** bereit, die ausweist, was dem Inhaber in einem Jahr gezahlt wurde — sie ist aber **keine Steuerbescheinigung** im Sinne des § 45a EStG.
 
 Sie wird aus den abgerechneten Einträgen der Kapitalmaßnahmen erzeugt: für jeden Anleger die Kupon-, Zins- und Dividendenansprüche des Kalenderjahres, **je Währung** gruppiert (Beträge in verschiedenen Währungen werden nie addiert). Kapitalrückzahlungen (Rückzahlung, Kündigung, Teilrückzahlung) und Einzahlungsaufforderungen sind **kein Ertrag** und ausgeschlossen; Veräußerungs- oder Einlösungsgewinne werden nicht ermittelt, weil das Register keine Anschaffungskosten führt.
 

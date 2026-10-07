@@ -44,7 +44,10 @@ class RegistryMutatingMethodsCoverageTest {
             "isAgent", "isClaimRevoked", "isCountryBlocked", "isFrozen", "isMarket", "isModuleBound",
             "isNomineePool", "isOrgActive", "isRoleRestricted", "isValidSignature", "keyHasPurpose", "name",
             "orgGranted", "orgOf", "owner", "positions", "predictAddress", "price", "roleGranted", "surplusOf",
-            "trexFactory");
+            "trexFactory",
+            // T1-07 forward pricing: the vault's dealing cut-off views
+            "dealingCutoffConfigured", "dealingCutoffSecondsOfDay", "dealingPeriodSecs", "dealingPointOf",
+            "navStruckAt", "nextDealingPoint");
 
     /** State-changing calls the backend issues that deliberately do not touch the register. */
     private static final Set<String> NOT_REGISTRY_MUTATING = Set.of("setBorrowPaused", "reconcileCollateral");
@@ -154,6 +157,14 @@ class RegistryMutatingMethodsCoverageTest {
         DYNAMIC_MUTATING_NAMES.values().forEach(names -> used.addAll(lowerAll(names)));
 
         assertThat(used).containsAll(RegistryMutatingMethods.MUTATING);
+    }
+
+    @Test
+    @DisplayName("T1-07: setDealingCutoff is explicitly classified as registry-mutating (it changes which NAV a request settles at)")
+    void setDealingCutoffIsExplicitlyRegistryMutating() {
+        assertThat(RegistryMutatingMethods.MUTATING).contains("setdealingcutoff");
+        assertThat(RegistryMutatingMethods.isClassified("setDealingCutoff")).isTrue();
+        assertThat(props.requiresSecondSource("setDealingCutoff")).isTrue();
     }
 
     @Test

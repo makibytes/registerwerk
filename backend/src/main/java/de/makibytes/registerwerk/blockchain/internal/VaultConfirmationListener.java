@@ -62,6 +62,7 @@ class VaultConfirmationListener {
     private final ChainEffectRecorder chainEffectRecorder;
     private final IsolatedTransactionExecutor isolatedTransactions;
     private final EvmContractService evmContractService;
+    private final VaultDealingReader dealingReader;
 
     VaultConfirmationListener(
             VaultNavStrikeRepository navStrikeRepository,
@@ -70,7 +71,9 @@ class VaultConfirmationListener {
             BlockchainTransactionService blockchainTransactionService,
             ChainEffectRecorder chainEffectRecorder,
             IsolatedTransactionExecutor isolatedTransactions,
-            EvmContractService evmContractService) {
+            EvmContractService evmContractService,
+            VaultDealingReader dealingReader) {
+        this.dealingReader = dealingReader;
         this.navStrikeRepository = navStrikeRepository;
         this.vaultRequestRepository = vaultRequestRepository;
         this.vaultStateRepository = vaultStateRepository;
@@ -176,8 +179,18 @@ class VaultConfirmationListener {
     private void resolveFulfillment(VaultRequest request) throws IOException {
         String txHash = request.getFulfilledTx();
         if (blockchainTransactionService.isConfirmedFailure(txHash)) {
-            log.warn("VaultRequest={} fulfil tx={} failed on-chain; clearing so it can be resubmitted.",
-                    request.getId(), txHash);
+            // Forward pricing (T1-07): a fulfilment that reverted because no NAV was struck after the request's
+            // dealing point is not a failure — it waits for the next strike. Same retry (the tx is cleared),
+            // but no WARN, so it cannot turn into an alert storm while the NAV is pending.
+            if (dealingReader.isAwaitingNavStrike(request.getAssetId(), request.getChainConfigId(),
+                    request.getRequestId()).orElse(false)) {
+                log.info("VaultRequest={} fulfil tx={} reverted: waiting for the next NAV strike after the "
+                        + "request's dealing point; cleared so it can be resubmitted once a NAV is struck.",
+                        request.getId(), txHash);
+            } else {
+                log.warn("VaultRequest={} fulfil tx={} failed on-chain; clearing so it can be resubmitted.",
+                        request.getId(), txHash);
+            }
             request.setFulfilledTx(null);
             request.setNavAtFulfill(null);
             vaultRequestRepository.save(request);

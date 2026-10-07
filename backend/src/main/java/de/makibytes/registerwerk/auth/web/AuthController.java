@@ -202,14 +202,14 @@ public class AuthController {
         );
     }
 
-    /** Only a locally authenticated, non-impersonating registry administrator can be restored. */
+    /** Only a locally authenticated, non-impersonating registry administrator or support agent can be restored. */
     private boolean isRestorableAdminSession(String token) {
         try {
             Jwt session = jwtDecoder.decode(token);
             List<String> roles = session.getClaimAsStringList("roles");
             return !Boolean.TRUE.equals(session.getClaimAsBoolean("imp"))
                     && roles != null
-                    && roles.contains("REGISTRY_ADMIN");
+                    && (roles.contains("REGISTRY_ADMIN") || roles.contains("SUPPORT_AGENT"));
         } catch (JwtException e) {
             return false;
         }

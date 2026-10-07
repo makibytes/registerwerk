@@ -37,7 +37,7 @@ import java.util.List;
  * baseline profile) to registry-generated PDFs, via PDFBox's external-signing API and
  * BouncyCastle's CMS signed-data generator.
  *
- * <p>Several documents (Registerauszug, Depotauszug, Steuerbescheinigung, Registereinsicht)
+ * <p>Several documents (Registerauszug, Depotauszug, Ertragsübersicht, Registereinsicht)
  * render a "PAdES-B-LT Signatur vorhanden" footer only when actually signed — this service
  * applies the genuine signature when a signing keystore is configured
  * ({@code registerwerk.docsig.keystore-path} etc.); {@link #isConfigured()} tells callers
@@ -106,7 +106,7 @@ public class DocumentSigningService {
     private void loadKeystore() {
         if (keystorePath == null || keystorePath.isBlank()) {
             log.info("registerwerk.docsig.keystore-path not set — registry-generated PDFs "
-                    + "(Registerauszug/Depotauszug/Steuerbescheinigung/Registereinsicht) will be "
+                    + "(Registerauszug/Depotauszug/Ertragsübersicht/Registereinsicht) will be "
                     + "rendered UNSIGNED. This is expected in dev/demo; configure a signing "
                     + "keystore before relying on these documents' authenticity in production.");
             return;

@@ -33,7 +33,7 @@ The `AUDIT` role gives read access across the registry. It grants no ability to 
 | KYC status and documents | As configured by the operator |
 | Beneficial ownership | |
 | Corporate actions | Including record-date snapshots and entitlements |
-| Income statements (Ertragsaufstellung) and position statements | |
+| Income statements (Ertragsübersicht) and position statements | |
 | The audit log | Every recorded event |
 
 ---

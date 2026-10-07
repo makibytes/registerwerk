@@ -1,4 +1,5 @@
 import { ChangeDetectorRef, Component, ElementRef, OnInit, inject, Input, ViewChild } from '@angular/core';
+import { switchMap } from 'rxjs/operators';
 import { downloadBlob } from '../../../core/utils/download.util';
 import { showActionError } from '../../../shared/utils/action-error';
 import { Router, RouterLink } from '@angular/router';
@@ -33,7 +34,7 @@ import { GasSponsorshipService, GasSponsorshipPolicy, GasSponsor } from '../../.
 import { DualControlTokens } from '../../../core/api/dual-control-headers';
 import { ImpersonateDialogComponent, ImpersonateDialogResult } from './impersonate-dialog.component';
 import { openStepUp } from '../../../shared/components/step-up/open-step-up';
-import { StepUpDialogComponent, StepUpDialogResult } from '../../../shared/components/step-up/step-up-dialog.component';
+import { withDualControl } from '../../../shared/components/step-up/with-dual-control';
 import { KycRejectDialogComponent, KycRejectDialogResult } from './kyc-reject-dialog.component';
 import { AsyncSectionStatus } from '../../../core/async/async-section';
 import {
@@ -215,6 +216,15 @@ interface OnchainIdentityView {
           }
           @if (entity.status === 'SUSPENDED') {
             <button type="button" mat-stroked-button color="primary" (click)="reactivate()">Reactivate</button>
+          }
+          @if (entity.status === 'CLOSED' || entity.status === 'DISSOLVED') {
+            <button type="button" mat-stroked-button color="primary" (click)="reinstate()"
+                    matTooltip="Start reinstatement: moves to PENDING_REACTIVATION (never straight to ACTIVE). Needs a legal reference, step-up and a second approver; re-screening and a fresh KYC approval are required before the customer is active again.">
+              Reinstate
+            </button>
+          }
+          @if (entity.status === 'PENDING_REACTIVATION') {
+            <span class="entity-number" matTooltip="Reinstatement pending: approve KYC afresh to reactivate. Trading, settlement and issuance stay blocked.">Reinstatement pending - fresh KYC approval required</span>
           }
           @if (entity.status !== 'CLOSED' && entity.status !== 'DISSOLVED') {
             <button type="button" mat-stroked-button color="warn" (click)="terminate()" matTooltip="End the customer relationship: disables users, cancels open listings, revokes admin grants, moves to CLOSED. Requires step-up + a second approver.">
@@ -916,11 +926,11 @@ interface OnchainIdentityView {
 
               <mat-card>
                 <mat-card-header>
-                  <mat-card-title style="font-size:14px">Income statement (Ertragsaufstellung)</mat-card-title>
+                  <mat-card-title style="font-size:14px">Income statement (Ertragsübersicht)</mat-card-title>
                 </mat-card-header>
                 <mat-card-content style="padding-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                   <p style="font-size:12px;color:var(--rw-text-secondary);margin:0;flex-basis:100%">
-                    Annual statement of settled coupon, interest and dividend income, per currency. Informational only - not a tax certificate (§ 45a EStG): no tax is withheld here, principal repayments are excluded.
+                    Annual statement of settled coupon, interest and dividend income, per currency. Informational only. This document is not a tax certificate; Registerwerk does not withhold or compute taxes. Principal repayments are excluded.
                   </p>
                   <mat-form-field appearance="outline" subscriptSizing="dynamic" style="width:100px">
                     <mat-label>Tax year</mat-label>
@@ -1314,7 +1324,7 @@ export class CustomerDetailComponent implements OnInit {
 
   downloadTaxCert(): void {
     this.corporateActionsService.downloadTaxCertificate(this.id, this.taxCertYear).subscribe({
-      next: (blob) => triggerBlobDownload(blob, `Ertragsaufstellung-${this.taxCertYear}.pdf`),
+      next: (blob) => triggerBlobDownload(blob, `Ertragsuebersicht-${this.taxCertYear}.pdf`),
       error: (err) => this.showActionError('Failed to generate income statement.', err),
     });
   }
@@ -1356,21 +1366,10 @@ export class CustomerDetailComponent implements OnInit {
     return labels[jur] ?? jur;
   }
 
-  /** Step-up plus second approver for a KYC decision; calls back with the tokens or not at all when cancelled. */
-  /**
-   * `targetBody` is the JSON body of the request that follows (undefined when it sends none): an approval
-   * is bound to the canonical body, so the approver must be shown, and bind, exactly what is then sent.
-   */
+  /** Step-up plus second approver for a KYC decision (shared with the compliance officer's KYC review). */
   private withDualControl(action: string, reason: string, target: string, targetBody: unknown,
                           then: (tokens: DualControlTokens) => void): void {
-    this.dialog.open(StepUpDialogComponent, {
-      data: { requireDualControl: true, reason, action, target, targetBody },
-      width: '500px',
-      disableClose: true,
-    }).afterClosed().subscribe((result: StepUpDialogResult | undefined) => {
-      if (!result?.stepUpToken || !result.dualControlToken) return;
-      then({ stepUpToken: result.stepUpToken, dualControlToken: result.dualControlToken });
-    });
+    withDualControl(this.dialog, { action, reason, target, targetBody }, then);
   }
 
   approveJurisdiction(jur: Jurisdiction): void {
@@ -1567,6 +1566,28 @@ export class CustomerDetailComponent implements OnInit {
 
   reactivate(): void { this.lifecycleChange('reactivate', 'ENTITY_REACTIVATE', 'Reactivate customer', 'Failed to reactivate customer.'); }
 
+  /**
+   * Reinstatement of a CLOSED/DISSOLVED customer (T6-12): legal reference + reason, step-up and a second
+   * approver bound to the request body. Result is PENDING_REACTIVATION; KYC must be approved afresh.
+   */
+  reinstate(): void {
+    const legalReference = prompt('Legal reference for the reinstatement (court decision, registry entry, ticket id; required):');
+    if (!legalReference || !legalReference.trim()) return;
+    const reason = prompt('Reason for the reinstatement (required, written to the audit trail):');
+    if (!reason || !reason.trim()) return;
+    const body = { reason: reason.trim(), legalReference: legalReference.trim() };
+    this.withDualControl('ENTITY_REINSTATE', `Reinstate ${this.entity?.currentName ?? 'customer'}`.trim(),
+      `POST /api/v1/entities/${this.id}/reinstate`, body, tokens => {
+      this.entityService.reinstateEntity(this.id, body.reason, body.legalReference, tokens).subscribe({
+        next: () => {
+          this.snackBar.open('Reinstatement requested: PENDING_REACTIVATION. Re-screening started; approve KYC afresh to reactivate.', 'Dismiss', { duration: 8000 });
+          this.loadEntity();
+        },
+        error: (err) => this.showActionError('Failed to request reinstatement.', err),
+      });
+    });
+  }
+
   /** Suspend/reactivate: a reason, step-up and a second approver; reactivation can be refused by compliance gates (409 message shown). */
   private lifecycleChange(path: 'suspend' | 'reactivate', action: string, label: string, failure: string): void {
     const reason = prompt(`Reason for this action (required, written to the audit trail):`);
@@ -1669,9 +1690,11 @@ export class CustomerDetailComponent implements OnInit {
   openAsCompany(): void {
     if (!this.entity) return;
     const entity = this.entity;
-    this.dialog.open(ImpersonateDialogComponent, {
-      width: '520px', maxWidth: '95vw', data: { entityName: entity.currentName },
-    }).afterClosed().subscribe((choice: ImpersonateDialogResult | undefined) => {
+    this.adminUserService.isProductionMode().pipe(
+      switchMap(productionMode => this.dialog.open(ImpersonateDialogComponent, {
+        width: '520px', maxWidth: '95vw', data: { entityName: entity.currentName, productionMode },
+      }).afterClosed()),
+    ).subscribe((choice: ImpersonateDialogResult | undefined) => {
       if (!choice) return;
       const onBehalf = choice.mode === 'ACT_ON_BEHALF';
       openStepUp(this.dialog, {

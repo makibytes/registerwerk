@@ -101,7 +101,8 @@ public class SecurityConfig {
             @Qualifier("jwtDecoder") JwtDecoder jwtDecoder,
             SessionStateService sessionState,
             io.micrometer.core.instrument.MeterRegistry meterRegistry,
-            RegisterwerkAuthProperties authProps) throws Exception {
+            RegisterwerkAuthProperties authProps,
+            Environment environment) throws Exception {
         http
             // The session token moved from the login response body into an httpOnly
             // `rw_session` cookie (SessionCookieService) — an ambient credential the browser
@@ -164,7 +165,8 @@ public class SecurityConfig {
             // as plain servlet filters outside this chain.
             .addFilterAfter(new UserSessionGuardFilter(sessionState, meterRegistry, authProps.isRejectUnknownUsers()),
                             EntraPrincipalNormalizationFilter.class)
-            .addFilterAfter(new ImpersonationGuardFilter(sessionState, authProps.getImpersonationDenyPatterns()),
+            .addFilterAfter(new ImpersonationGuardFilter(sessionState, authProps.getImpersonationDenyPatterns(),
+                    de.makibytes.registerwerk.shared.ProductionMode.resolve(environment)),
                             UserSessionGuardFilter.class)
             // SessionManagementFilter invokes CsrfAuthenticationStrategy after a cookie-backed
             // bearer token is authenticated. That strategy deliberately expires the pre-login

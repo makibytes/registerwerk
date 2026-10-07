@@ -34,6 +34,16 @@ describe('EntityService lifecycle calls', () => {
         r.flush({});
     });
 
+    it('reinstate sends reason + legalReference with the step-up bearer and the approver token (T6-12)', () => {
+        service.reinstateEntity('e1', 'court decision overturned', 'AG Berlin 12 HRB 123/26', tokens).subscribe();
+        const req = httpMock.expectOne(`${base}/e1/reinstate`);
+        expect(req.request.method).toBe('POST');
+        expect(req.request.body).toEqual({ reason: 'court decision overturned', legalReference: 'AG Berlin 12 HRB 123/26' });
+        expect(req.request.headers.get('Authorization')).toBe('Bearer su');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('dc');
+        req.flush(null);
+    });
+
     it('terminate carries the acknowledged obligations', () => {
         service.terminateEntity('e1', 'exit', [{ obligationId: 'ASSET:1', reason: 'exit' }], tokens).subscribe();
         const req = httpMock.expectOne(`${base}/e1/terminate`);

@@ -62,7 +62,7 @@ public class OperatorUserService {
 
     private static final int TOKEN_BYTES = 36;
     private static final Set<AppUserRole> FORBIDDEN_FOR_COMPANY_USERS = Set.of(
-        AppUserRole.REGISTRY_ADMIN, AppUserRole.AUDIT, AppUserRole.COMPLIANCE_OFFICER
+        AppUserRole.REGISTRY_ADMIN, AppUserRole.AUDIT, AppUserRole.COMPLIANCE_OFFICER, AppUserRole.SUPPORT_AGENT
     );
 
     private final AppUserRepository appUserRepository;
@@ -299,11 +299,11 @@ public class OperatorUserService {
     // ── Privileged-role administration (6-06) ────────────────────────────────
 
     private static final Set<AppUserRole> GATED_ROLES = Set.of(
-        AppUserRole.REGISTRY_ADMIN, AppUserRole.COMPLIANCE_OFFICER, AppUserRole.AUDIT);
+        AppUserRole.REGISTRY_ADMIN, AppUserRole.COMPLIANCE_OFFICER, AppUserRole.AUDIT, AppUserRole.SUPPORT_AGENT);
     private static final Set<AppUserRole> ANNOUNCED_ROLES = Set.of(
-        AppUserRole.REGISTRY_ADMIN, AppUserRole.COMPLIANCE_OFFICER);
+        AppUserRole.REGISTRY_ADMIN, AppUserRole.COMPLIANCE_OFFICER, AppUserRole.SUPPORT_AGENT);
 
-    private static boolean touchesGatedRole(Set<AppUserRole> before, Set<AppUserRole> after) {
+    static boolean touchesGatedRole(Set<AppUserRole> before, Set<AppUserRole> after) {
         for (AppUserRole r : GATED_ROLES) {
             if (before.contains(r) != after.contains(r)) return true;
         }
@@ -408,7 +408,7 @@ public class OperatorUserService {
         };
     }
 
-    private void validateRolesForContext(UUID legalEntityId, Set<AppUserRole> roles) {
+    static void validateRolesForContext(UUID legalEntityId, Set<AppUserRole> roles) {
         if (roles == null || roles.isEmpty()) {
             throw new IllegalArgumentException("At least one role is required");
         }

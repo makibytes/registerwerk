@@ -56,6 +56,7 @@ class VaultConfirmationListenerTest {
     @Mock private ChainEffectRecorder chainEffectRecorder;
     @Mock private de.makibytes.registerwerk.shared.IsolatedTransactionExecutor isolatedTransactions;
     @Mock private EvmContractService evmContractService;
+    @Mock private VaultDealingReader dealingReader;
 
     private VaultConfirmationListener listener;
     private final UUID chainConfigId = UUID.randomUUID();
@@ -65,7 +66,7 @@ class VaultConfirmationListenerTest {
     void setUp() {
         listener = new VaultConfirmationListener(
                 navStrikeRepository, vaultRequestRepository, vaultStateRepository,
-                blockchainTransactionService, chainEffectRecorder, isolatedTransactions, evmContractService);
+                blockchainTransactionService, chainEffectRecorder, isolatedTransactions, evmContractService, dealingReader);
         org.mockito.Mockito.doAnswer(invocation -> {
             invocation.getArgument(0, de.makibytes.registerwerk.shared.IsolatedTransactionExecutor.Work.class).run();
             return null;
@@ -312,6 +313,38 @@ class VaultConfirmationListenerTest {
         assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
         verify(vaultRequestRepository).save(request);
         verify(chainEffectRecorder, never()).recordFinalized(any());
+    }
+
+    @Test
+    @DisplayName("T1-07: a fulfilment that failed only because no NAV was struck after the dealing point is retried "
+            + "quietly — 'waiting for the next NAV strike' at INFO, no WARN")
+    void failedFulfillmentAwaitingNavStrike_isRetriedWithoutAWarning() {
+        VaultRequest request = request(UUID.randomUUID());
+        request.setFulfilledTx("0xearly");
+        request.setChainConfigId(chainConfigId);
+        when(vaultRequestRepository.findByFulfilledTxIsNotNullAndConfirmedFalse()).thenReturn(List.of(request));
+        when(blockchainTransactionService.isConfirmedFailure("0xearly")).thenReturn(true);
+        when(dealingReader.isAwaitingNavStrike(assetId, chainConfigId, request.getRequestId()))
+                .thenReturn(Optional.of(true));
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(VaultConfirmationListener.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            listener.resolvePending();
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(request.getFulfilledTx()).isNull();   // eligible for resubmission once a NAV is struck
+        assertThat(request.getRequestStatus()).isEqualTo(VaultRequestStatus.PENDING);
+        verify(vaultRequestRepository).save(request);
+        assertThat(appender.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .anyMatch(m -> m.contains("waiting for the next NAV strike"));
+        assertThat(appender.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getLevel)
+                .doesNotContain(ch.qos.logback.classic.Level.WARN, ch.qos.logback.classic.Level.ERROR);
     }
 
     @Test

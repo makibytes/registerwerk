@@ -21,10 +21,11 @@ import org.springframework.web.bind.annotation.RestController;
 // (see gateway/kong.yml) for genuinely operator-network-only endpoints. Impersonation, unlike
 // those, is legitimately invoked by the CUSTOMER portal (the operator's "view as this customer"
 // handoff goes through Kong), so it must live on a path Kong routes without the IP allowlist.
-// Authorization is unchanged: still REGISTRY_ADMIN-only, enforced by the JWT role check below.
+// Authorization: READ_ONLY sessions are open to REGISTRY_ADMIN and SUPPORT_AGENT (T6-05); act-on-behalf is
+// REGISTRY_ADMIN-only and is refused outright in production mode (AdminImpersonationService).
 @RestController
 @RequestMapping("/api/v1/impersonation")
-@PreAuthorize("hasRole('REGISTRY_ADMIN')")
+@PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'SUPPORT_AGENT')")
 @de.makibytes.registerwerk.idempotency.api.NoIdempotencyReplay
 public class AdminImpersonationController {
 
@@ -46,6 +47,7 @@ public class AdminImpersonationController {
 
     /** Write-capable session (minus the attestation deny-list): step-up plus a second approver. */
     @PostMapping("/act-on-behalf")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
     @RequiresStepUp(reason = "ADMIN_IMPERSONATION_ACT_ON_BEHALF", requireSecondApprover = true)
     public ResponseEntity<ImpersonateResponse> actOnBehalf(
             Authentication authentication,

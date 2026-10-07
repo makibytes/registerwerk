@@ -22,7 +22,8 @@ class CustomerEntityActivityPort implements EntityActivityPort {
             return false;
         }
         return legalEntityRepository.findById(entityId)
-                .map(e -> e.getStatus() == EntityStatus.CLOSED || e.getStatus() == EntityStatus.DISSOLVED)
+                .map(e -> e.getStatus() == EntityStatus.CLOSED || e.getStatus() == EntityStatus.DISSOLVED
+                        || e.getStatus() == EntityStatus.PENDING_REACTIVATION)
                 .orElse(false);
     }
 

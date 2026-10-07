@@ -196,6 +196,76 @@ class LegalEntityServiceTest {
     }
 
     @Test
+    @DisplayName("T6-12: CLOSED/DISSOLVED -> PENDING_REACTIVATION resets KYC, re-screens, raises tasks and audits; never ACTIVE")
+    void requestReinstatement_fromTerminalStates() {
+        for (EntityStatus from : new EntityStatus[]{EntityStatus.CLOSED, EntityStatus.DISSOLVED}) {
+            org.mockito.Mockito.clearInvocations(eventPublisher, taskPort);
+            LegalEntity entity = buildEntity();
+            entity.setStatus(from);
+            entity.setKycStatus(de.makibytes.registerwerk.customer.api.KycStatus.APPROVED);
+            entity.setKycExpiryDate(LocalDate.now().plusMonths(6));
+            when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
+            when(legalEntityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            UUID actor = UUID.randomUUID();
+
+            legalEntityService.requestReinstatement(entity.getId(), actor, "court decision overturned", "AG Berlin 12 HRB 123/26");
+
+            assertThat(entity.getStatus()).isEqualTo(EntityStatus.PENDING_REACTIVATION);
+            assertThat(entity.getKycStatus()).isEqualTo(de.makibytes.registerwerk.customer.api.KycStatus.NOT_STARTED);
+            assertThat(entity.getKycExpiryDate()).isNull();
+            ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
+            verify(eventPublisher, org.mockito.Mockito.times(2)).publishEvent(events.capture());
+            de.makibytes.registerwerk.customer.events.EntityReinstatementRequestedEvent audited =
+                    (de.makibytes.registerwerk.customer.events.EntityReinstatementRequestedEvent) events.getAllValues().get(0);
+            assertThat(audited.eventType()).isEqualTo("ENTITY_REINSTATEMENT_REQUESTED");
+            assertThat(audited.payload()).containsEntry("legalReference", "AG Berlin 12 HRB 123/26")
+                    .containsEntry("reason", "court decision overturned").containsEntry("from", from.name())
+                    .containsEntry("to", "PENDING_REACTIVATION").containsEntry("previousKycStatus", "APPROVED");
+            // mandatory re-screening goes through the existing risk-data event (screening module listens)
+            assertThat(events.getAllValues().get(1)).isInstanceOf(de.makibytes.registerwerk.customer.events.EntityRiskDataChangedEvent.class);
+            verify(taskPort).open(eq(entity.getId()), eq("REINSTATEMENT_KYC_REQUIRED"), eq(""), anyString(), eq(actor));
+            verify(taskPort).open(eq(entity.getId()), eq("REINSTATEMENT_USERS_REVIEW"), eq(""), anyString(), eq(actor));
+        }
+    }
+
+    @Test
+    @DisplayName("T6-12: reinstatement needs a terminal entity, a reason and a legal reference")
+    void requestReinstatement_refusals() {
+        for (EntityStatus s : new EntityStatus[]{EntityStatus.ACTIVE, EntityStatus.SUSPENDED,
+                EntityStatus.PENDING_ONBOARDING, EntityStatus.PENDING_REACTIVATION}) {
+            LegalEntity entity = buildEntity();
+            entity.setStatus(s);
+            when(legalEntityRepository.findById(entity.getId())).thenReturn(Optional.of(entity));
+            assertThatThrownBy(() -> legalEntityService.requestReinstatement(entity.getId(), UUID.randomUUID(), "why", "ref"))
+                    .isInstanceOf(de.makibytes.registerwerk.shared.InvalidStateTransitionException.class);
+            assertThat(entity.getStatus()).isEqualTo(s);
+        }
+        LegalEntity closed = buildEntity();
+        closed.setStatus(EntityStatus.CLOSED);
+        assertThatThrownBy(() -> legalEntityService.requestReinstatement(closed.getId(), UUID.randomUUID(), "why", " "))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("legal reference");
+        assertThatThrownBy(() -> legalEntityService.requestReinstatement(closed.getId(), UUID.randomUUID(), "", "ref"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(closed.getStatus()).isEqualTo(EntityStatus.CLOSED);
+    }
+
+    @Test
+    @DisplayName("T6-12 state table: terminal -> PENDING_REACTIVATION only; PENDING_REACTIVATION -> ACTIVE or CLOSED; never terminal -> ACTIVE")
+    void reinstatementStateTable() {
+        for (EntityStatus t : new EntityStatus[]{EntityStatus.CLOSED, EntityStatus.DISSOLVED}) {
+            assertThat(t.canTransitionTo(EntityStatus.PENDING_REACTIVATION)).isTrue();
+            assertThat(t.canTransitionTo(EntityStatus.ACTIVE)).isFalse();
+            assertThat(t.canTransitionTo(EntityStatus.SUSPENDED)).isFalse();
+        }
+        assertThat(EntityStatus.PENDING_REACTIVATION.canTransitionTo(EntityStatus.ACTIVE)).isTrue();
+        assertThat(EntityStatus.PENDING_REACTIVATION.canTransitionTo(EntityStatus.CLOSED)).isTrue();
+        assertThat(EntityStatus.PENDING_REACTIVATION.canTransitionTo(EntityStatus.SUSPENDED)).isFalse();
+        assertThat(EntityStatus.PENDING_REACTIVATION.canTransitionTo(EntityStatus.DISSOLVED)).isFalse();
+        assertThat(EntityStatus.ACTIVE.canTransitionTo(EntityStatus.PENDING_REACTIVATION)).isFalse();
+        assertThat(EntityStatus.SUSPENDED.canTransitionTo(EntityStatus.PENDING_REACTIVATION)).isFalse();
+    }
+
+    @Test
     @DisplayName("updateEntity of an APPROVED entity audits old/new LEI, triggers re-screening and a KYC_REVIEW_REQUIRED task")
     void updateEntity_riskChange_triggersRescreenAndTask() {
         LegalEntity entity = buildEntity();

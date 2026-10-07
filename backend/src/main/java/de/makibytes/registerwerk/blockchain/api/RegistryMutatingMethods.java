@@ -49,6 +49,8 @@ public final class RegistryMutatingMethods {
             // vault request lifecycle
             "fulfillDepositRequest", "fulfillRedeemRequest", "cancelDepositRequest", "cancelRedeemRequest",
             "forceCancelDepositRequest", "forceCancelRedeemRequest",
+            // forward pricing: the dealing cut-off decides which NAV a vault request settles at (T1-07)
+            "setDealingCutoff",
             // ownership and instrument / identity deployments
             "acceptOwnership", "deployEwpgSuite", "deployIdentityProxy", "deployConfidentialErc20",
             "deployConfidentialErc3643", "deployToken", "deployVault",

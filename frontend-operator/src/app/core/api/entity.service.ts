@@ -87,6 +87,14 @@ export class EntityService {
     return this.http.post<LegalEntity>(`${this.base}/${id}/reactivate`, { reason }, { headers: dualControlHeaders(tokens) });
   }
 
+  /**
+   * Step-up + second approver (`ENTITY_REINSTATE`), body-bound: CLOSED/DISSOLVED -> PENDING_REACTIVATION
+   * (never straight to ACTIVE). `reason` and `legalReference` are mandatory; a fresh KYC approval completes it.
+   */
+  reinstateEntity(id: string, reason: string, legalReference: string, tokens: DualControlTokens): Observable<void> {
+    return this.http.post<void>(`${this.base}/${id}/reinstate`, { reason, legalReference }, { headers: dualControlHeaders(tokens) });
+  }
+
   getEntityHistory(id: string): Observable<{ nameHistory: LegalEntityNameHistory[]; mergeRecords: EntityMergeRecordView[] }> {
     return this.http.get<{ nameHistory: LegalEntityNameHistory[]; mergeRecords: EntityMergeRecordView[] }>(`${this.base}/${id}/history`);
   }

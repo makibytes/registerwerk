@@ -85,13 +85,13 @@ description: Bozza di registro delle attività di trattamento ai sensi dell'Art.
 | **Conservazione** | Durata del rapporto di lavoro + 2 anni |
 | **Misure di sicurezza** | Hashing della password BCrypt; JWT (di breve durata, 8 ore); MFA per operazioni sensibili |
 
-## 7. Rapporti normativi (MiFIR, DAC8, Ertragsaufstellung) { #7-regulatory-reporting-mifir-dac8-steuerbescheinigung }
+## 7. Rapporti normativi (MiFIR, DAC8, Ertragsübersicht) { #7-regulatory-reporting-mifir-dac8-steuerbescheinigung }
 
 | Campo | Valore |
 |---|---|
 | **Scopo** | Obbligo di segnalazione delle transazioni alle autorità competenti |
 | **Base giuridica** | Obbligo legale (Art. 6(1)(c)) — MiFIR Art. 26, DAC8, EStG §43 |
-| **Categorie di dati** | Nome dell'investitore, codice fiscale, partecipazioni, transazioni, IBAN (per l'Ertragsaufstellung) |
+| **Categorie di dati** | Nome dell'investitore, codice fiscale, partecipazioni, transazioni, IBAN (per l'Ertragsübersicht) |
 | **Destinatari** | BaFin (DE), AMF (FR), CSSF (LU), FMA (LI), BZSt (DAC8/CARF), DGFiP (FR), ACD (LU) |
 | **Conservazione** | 7 anni (MiFIR); 10 anni (eWpG) |
 | **Misure di sicurezza** | PDF firmati PAdES-B-LT; SFTP ai portali delle autorità; ricevute di invio |

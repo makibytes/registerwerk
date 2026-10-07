@@ -222,6 +222,17 @@ class KycChainPropagationListenerTest {
     }
 
     @Test
+    @DisplayName("T6-12: a closure lapse keeps applying while the entity is PENDING_REACTIVATION (on-chain state untouched until KYC is approved again)")
+    void closureStillAppliesWhileReinstatementIsPending() {
+        entity.setStatus(de.makibytes.registerwerk.customer.api.EntityStatus.PENDING_REACTIVATION);
+        when(erc3643Api.revokeComplianceClaims(any(), any(), any(), any(), anyMap())).thenReturn(0);
+        listener.on(new de.makibytes.registerwerk.customer.events.CustomerOffboardedEvent(entityId, null, null, "exit"));
+        verify(registrationService).suspend(eq(registrationId), anyString(), eq(null), eq("SYSTEM"));
+        verify(erc3643Api).revokeComplianceClaims(eq(entityId), eq(chainId), eq(null), eq("SYSTEM"), anyMap());
+        assertThat(onlyRow().getStatus()).isNotEqualTo(KycChainPropagation.Status.SUPERSEDED);
+    }
+
+    @Test
     @DisplayName("reactivation never reinstates on chain: it raises CHAIN_REINSTATEMENT_REQUIRED for a suspended org")
     void reactivation_raisesTask() {
         registration.setStatus(OrgRegistrationStatus.SUSPENDED);

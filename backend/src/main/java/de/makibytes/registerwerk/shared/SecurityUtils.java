@@ -32,7 +32,8 @@ public final class SecurityUtils {
                 .anyMatch(a -> a.getAuthority().equals("ROLE_REGISTRY_ADMIN")
                         || a.getAuthority().equals("ROLE_AUDIT")
                         || a.getAuthority().equals("ROLE_COMPLIANCE_OFFICER")
-                        || a.getAuthority().equals("ROLE_RELATIONSHIP_MANAGER"));
+                        || a.getAuthority().equals("ROLE_RELATIONSHIP_MANAGER")
+                        || a.getAuthority().equals("ROLE_SUPPORT_AGENT"));
     }
 
     /** Returns true when the token was minted by the impersonation flow ({@code imp: true}). */

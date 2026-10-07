@@ -97,7 +97,7 @@ Only a subset can actually be created today — the rest are modelled (they have
 
 ## Income statement (not a tax certificate) { #tax-certificates }
 
-For German holders, income from a security is taxable. Registerwerk provides an annual **Ertragsaufstellung** (income statement) listing what was paid to the holder in a given year — but it is **not a Steuerbescheinigung** within the meaning of § 45a EStG.
+For German holders, income from a security is taxable. Registerwerk provides an annual **Ertragsübersicht** (income statement) listing what was paid to the holder in a given year — but it is **not a Steuerbescheinigung** within the meaning of § 45a EStG.
 
 It is produced from the settled corporate-action entries: for each investor, the coupon, interest and dividend entitlements of the calendar year, grouped **per currency** (amounts in different currencies are never added up). Repayments of principal (redemption, call, partial redemption) and capital calls are **not income** and are excluded; gains on disposal or redemption are not determined, because acquisition costs are not held in the register.
 

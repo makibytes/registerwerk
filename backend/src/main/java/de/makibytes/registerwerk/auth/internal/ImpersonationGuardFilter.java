@@ -20,7 +20,7 @@ import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Enforces the impersonation mode (6-31). READ_ONLY sessions may only read (GET/HEAD/OPTIONS) and
+ * Enforces the impersonation mode (6-31). In production mode every session is enforced as READ_ONLY (T6-05). READ_ONLY sessions may only read (GET/HEAD/OPTIONS) and
  * end themselves; ACT_ON_BEHALF sessions additionally lose a configurable deny-list of customer
  * attestation and account/identity-administration endpoints. Runs after
  * {@link UserSessionGuardFilter}, so the session row is known to be live.
@@ -34,10 +34,16 @@ class ImpersonationGuardFilter extends OncePerRequestFilter {
             List.of("/api/v1/auth/exit-impersonation", "/api/v1/public/auth/logout");
 
     private final SessionStateService state;
+    private final boolean productionMode;
     private final List<String> denyPatterns;
     private final AntPathMatcher matcher = new AntPathMatcher();
 
     ImpersonationGuardFilter(SessionStateService state, List<String> denyPatterns) {
+        this(state, denyPatterns, false);
+    }
+
+    ImpersonationGuardFilter(SessionStateService state, List<String> denyPatterns, boolean productionMode) {
+        this.productionMode = productionMode;
         this.state = state;
         this.denyPatterns = denyPatterns == null ? List.of() : List.copyOf(denyPatterns);
     }
@@ -60,7 +66,9 @@ class ImpersonationGuardFilter extends OncePerRequestFilter {
         Jwt jwt = jwtAuth.getToken();
         Optional<ImpersonationState> imp = parse(jwt.getId()).flatMap(state::impersonation);
         ImpersonationMode mode = imp.map(ImpersonationState::mode).orElse(ImpersonationMode.READ_ONLY);
-        if (mode == ImpersonationMode.READ_ONLY) {
+        // T6-05: production mode is read-only only; a leftover ACT_ON_BEHALF session (started before the switch to
+        // production, or by a mis-set flag) is enforced as READ_ONLY rather than trusted.
+        if (mode == ImpersonationMode.READ_ONLY || productionMode) {
             reject(response, CODE_READ_ONLY, "This is a read-only support session; changes are not permitted.");
             return;
         }

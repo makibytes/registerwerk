@@ -29,6 +29,9 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
     uint256 private _depositCap;      // 0 = unlimited
     bool internal _inForceOp;
     uint256 private _strikeCounter;
+    /// @dev block.timestamp of the latest setNavPerShare (0 = never struck). Forward-pricing
+    ///      vaults compare it with a request's dealing point; see EwpgERC7540.
+    uint256 private _navStruckAt;
 
     // ── Events ────────────────────────────────────────────────────────────────
 
@@ -70,12 +73,19 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
     {
         require(newNav > 0, "EwpgERC4626: NAV must be positive");
         _navPerShare = newNav;
+        _navStruckAt = block.timestamp;
         ++_strikeCounter;
         emit NavStruck(_strikeCounter, newNav, effectiveAt, reportHash);
     }
 
     function currentNavPerShare() public view returns (uint256) {
         return _navPerShare;
+    }
+
+    /// @notice Block timestamp at which the current NAV was struck (0 before the first strike).
+    ///         This is the chain's own clock, unlike the operator-supplied `effectiveAt` in NavStruck.
+    function navStruckAt() public view returns (uint256) {
+        return _navStruckAt;
     }
 
     // ── Deposit cap ───────────────────────────────────────────────────────────

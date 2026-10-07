@@ -80,11 +80,14 @@ interface PositionRow {
           }
         </mat-select>
         <button type="button" mat-stroked-button [disabled]="downloadingTaxCertificate" (click)="downloadTaxCertificate()"
-                matTooltip="Annual statement of settled coupon, interest and dividend income per currency. Informational only - not a tax certificate (§ 45a EStG); no tax is withheld and principal repayments are excluded.">
+                matTooltip="Annual statement of settled coupon, interest and dividend income per currency. This document is not a tax certificate; Registerwerk does not withhold or compute taxes. Principal repayments are excluded.">
           <mat-icon>receipt_long</mat-icon>
           @if (downloadingTaxCertificate) { Preparing… } @else { Download income statement }
         </button>
       </app-page-header>
+      <p class="income-notice">
+        The income statement (Ertragsübersicht) is informational. This document is not a tax certificate; Registerwerk does not withhold or compute taxes.
+      </p>
 
       @if (state === 'ready') {
       <div class="summary-row">
@@ -191,6 +194,11 @@ interface PositionRow {
   styles: [`
     .transferred-note { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--rw-text-secondary); }
     .transferred-note mat-icon { font-size: 16px; width: 16px; height: 16px; }
+    .income-notice {
+      margin: 0 0 12px;
+      font-size: 12px;
+      color: var(--rw-text-secondary);
+    }
     .tax-year-select {
       width: 90px;
       margin: 0 4px;
@@ -413,7 +421,7 @@ export class PositionsComponent implements OnInit {
     this.downloadingTaxCertificate = true;
     this.taxService.downloadMyTaxCertificate(this.taxCertificateYear).subscribe({
       next: (pdf) => {
-        downloadBlob(pdf, `Ertragsaufstellung-${this.taxCertificateYear}.pdf`);
+        downloadBlob(pdf, `Ertragsuebersicht-${this.taxCertificateYear}.pdf`);
         this.downloadingTaxCertificate = false;
         this.cdr.markForCheck();
       },

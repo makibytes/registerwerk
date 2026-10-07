@@ -33,7 +33,7 @@ Die Rolle `AUDIT` gewährt lesenden Zugriff über das gesamte Register. Sie gew�
 | KYC-Status und Dokumente | Wie vom Betreiber konfiguriert |
 | Wirtschaftlich Berechtigte | |
 | Kapitalmaßnahmen | Einschließlich Stichtagsaufnahmen und Ansprüche |
-| Ertragsaufstellungen und Depotauszüge | |
+| Ertragsübersichten und Depotauszüge | |
 | Das Audit-Log | Jedes aufgezeichnete Ereignis |
 
 ---

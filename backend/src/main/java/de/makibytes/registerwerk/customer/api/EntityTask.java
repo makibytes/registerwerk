@@ -17,6 +17,10 @@ public class EntityTask {
 
     public static final String KYC_REVIEW_REQUIRED = "KYC_REVIEW_REQUIRED";
     public static final String CHAIN_REINSTATEMENT_REQUIRED = "CHAIN_REINSTATEMENT_REQUIRED";
+    /** Reinstatement of a CLOSED/DISSOLVED entity: a fresh KYC approval is required (T6-12). */
+    public static final String REINSTATEMENT_KYC_REQUIRED = "REINSTATEMENT_KYC_REQUIRED";
+    /** Reinstatement: users were disabled at termination; re-enable/re-invite them once KYC is approved (T6-12). */
+    public static final String REINSTATEMENT_USERS_REVIEW = "REINSTATEMENT_USERS_REVIEW";
     public static final String SPERRVERMERK_EXPIRY_REVIEW = "SPERRVERMERK_EXPIRY_REVIEW";
     /** A legal block (Sperrvermerk) is in the register but not (yet) enforced on-chain for a wallet (H5). */
     public static final String SPERRVERMERK_FREEZE_NOT_PROPAGATED = "SPERRVERMERK_FREEZE_NOT_PROPAGATED";

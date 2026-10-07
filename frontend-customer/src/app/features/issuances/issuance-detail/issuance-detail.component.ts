@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
 import { corporateActionProgress } from '../../../core/utils/lifecycle.labels';
 import { fetchAllPages } from '../../../core/utils/paging.util';
 import { CommonModule } from '@angular/common';
@@ -50,7 +50,11 @@ import {
   failAsyncSection,
   resolveAsyncSection,
 } from '../../../core/async/async-section';
-import { StatusBadgeComponent, DataStatePillComponent } from '@registerwerk/ui';
+import {
+  ApprovalFlowError, ApprovalRequestSession, CreateApprovalRequest, StatusBadgeComponent, DataStatePillComponent, claimApproval,
+} from '@registerwerk/ui';
+import { ApprovalQueueService } from '../../../core/api/approval-queue.service';
+import { ApprovalRequestBoxComponent } from '../../../shared/components/approval/approval-request-box.component';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
 
 import { AddHolderDialogComponent } from './add-holder-dialog.component';
@@ -87,6 +91,7 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
     HolderTableComponent,
     HolderDistributionComponent,
     TokenAdminPanelComponent,
+    ApprovalRequestBoxComponent,
     AddressComponent,
     ExternalIdEditorComponent,
   ],
@@ -835,18 +840,10 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
                            autocomplete="one-time-code" />
                     <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
                   </mat-form-field>
-                  <mat-form-field appearance="outline">
-                    <mat-label>Operator approval token (ISSUER_MINT_CONFIDENTIAL)</mat-label>
-                    <input matInput [(ngModel)]="mintApprovalToken" autocomplete="off" />
-                    <mat-hint>A confidential mint needs a second approver; the recipient must be a registered, KYC-approved holder.</mat-hint>
-                  </mat-form-field>
-                  <div class="approval-request-box">
-                    Give your approver exactly this request. Their approval token is bound to it and works once:
-                    <pre class="approval-request">{{ confidentialMintApprovalRequest() }}</pre>
-                  </div>
+                  <app-approval-request-box [session]="mintSession" [request]="confidentialMintRequest()" />
                   <button type="button" mat-flat-button color="primary"
                           (click)="submitConfidentialMint()"
-                          [disabled]="minting || !isValidWalletAddress(mintToAddress) || !isValidMintAmount() || !mintApprovalToken.trim()">
+                          [disabled]="minting || !isValidWalletAddress(mintToAddress) || !isValidMintAmount() || !mintApprovedId()">
                     <mat-icon>add_circle</mat-icon>
                     {{ minting ? 'Encrypting & submitting…' : 'Mint' }}
                   </button>
@@ -1018,18 +1015,16 @@ import type { LiveHolder, MintAction, BurnAction, ForceTransferAction, ForceAppr
      .confidential-mint-title { font-size: 14px; margin: 0 0 12px; color: var(--rw-text-primary); }
      .confidential-mint-form { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
      .confidential-mint-form mat-form-field { flex: 1; min-width: 220px; }
-     .approval-request-box { flex-basis: 100%; font-size: 13px; color: var(--rw-text-secondary); }
-     .approval-request { margin: 6px 0 0; padding: 8px 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
-       font-family: var(--rw-font-mono, monospace); font-size: 12px; background: var(--rw-surface-alt, transparent);
-       border: 1px solid var(--rw-border); border-radius: 6px; color: var(--rw-text-primary); }
+     .confidential-mint-form app-approval-request-box { flex-basis: 100%; }
      .table-wrap { overflow-x: auto; }
      .live-holder-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
      .load-error { text-align: center; padding: 48px 16px; color: var(--rw-text-secondary); }
      @media (max-width: 800px) { .live-holder-grid { grid-template-columns: 1fr; } }
    `]
 })
-export class IssuanceDetailComponent implements OnInit {
+export class IssuanceDetailComponent implements OnInit, OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly approvalQueue = inject(ApprovalQueueService);
   private readonly route = inject(ActivatedRoute);
   private readonly issuanceService = inject(IssuanceService);
   readonly auth = inject(AuthService);
@@ -1064,10 +1059,12 @@ export class IssuanceDetailComponent implements OnInit {
   revealError: string | null = null;
   mintToAddress = '';
   mintAmount: number | null = null;
-  /** H13: the confidential mint needs step-up (TOTP under built-in sign-in) and a bound second-approver token. */
+  /** H13: the confidential mint needs step-up (TOTP under built-in sign-in) and a second approver (approval queue). */
   mintTotpCode = '';
-  mintApprovalToken = '';
   minting = false;
+  /** The confidential mint's approval-queue request (`ISSUER_MINT_CONFIDENTIAL`); see {@link ApprovalRequestBoxComponent}. */
+  readonly mintSession = new ApprovalRequestSession(this.approvalQueue, () => this.cdr.markForCheck());
+  private mintRequestCache: { key: string; request: CreateApprovalRequest | null } | null = null;
   identityRegistryState: AsyncSection<null> = createAsyncSection<null>(null);
   liveHoldersState: AsyncSection<null> = { data: null, status: 'ready', hasLoaded: true };
 
@@ -1597,18 +1594,39 @@ export class IssuanceDetailComponent implements OnInit {
     });
   }
 
+  /**
+   * Runs an action that needs a second approver: the initiator's own step-up (TOTP, built-in sign-in only), THEN
+   * the claim of the approved request's single-use token, then the call itself. The claim comes last on purpose:
+   * the token is valid for only a few minutes from the claim, and a wrong authenticator code must not burn the
+   * approval. A refused claim (already used / expired / approver gone) surfaces as an ApprovalFlowError.
+   */
+  private withApproval<T>(
+    approvalRequestId: string, totpCode: string | undefined,
+    call: (approval: { approvalToken: string; stepUpToken?: string }) => Observable<T>,
+  ): Observable<T> {
+    const stepUp$: Observable<string | undefined> = totpCode
+      ? this.issuanceService.stepUp(totpCode).pipe(map(r => r.stepUpToken))
+      : of(undefined);
+    return stepUp$.pipe(
+      switchMap(stepUpToken => claimApproval(this.approvalQueue, approvalRequestId).pipe(
+        map(claim => ({ approvalToken: claim.approvalToken, stepUpToken })))),
+      switchMap(call),
+    );
+  }
+
+  /** A claim failure carries its own explanation; anything else falls back to the action's message. */
+  private approvalFailure(err: unknown): string | null {
+    return err instanceof ApprovalFlowError ? err.message : null;
+  }
+
   onMint(action: MintAction): void {
     if (!this.asset?.id || this.deployments.length === 0 || this.tokenActionInProgress) return;
     this.tokenActionInProgress = true;
     const assetId = this.asset.id;
     const depId = this.deployments[0].id;
     const body = { toAddress: action.recipient, amount: action.amount };
-    const stepUp$: Observable<string | undefined> = action.totpCode
-      ? this.issuanceService.stepUp(action.totpCode, 'ISSUER_MINT').pipe(map(r => r.stepUpToken))
-      : of(undefined);
-    stepUp$.pipe(
-      switchMap(stepUpToken =>
-        this.issuanceService.mint(assetId, depId, body, { approvalToken: action.approvalToken, stepUpToken })),
+    this.withApproval(action.approvalRequestId, action.totpCode,
+      approval => this.issuanceService.mint(assetId, depId, body, approval),
     ).subscribe({
       next: (r) => {
         this.tokenActionInProgress = false;
@@ -1620,9 +1638,9 @@ export class IssuanceDetailComponent implements OnInit {
       },
       error: (err: HttpErrorResponse) => {
         this.tokenActionInProgress = false;
-        this.snackBar.open(err?.status === 403
+        this.snackBar.open(this.approvalFailure(err) ?? (err?.status === 403
           ? (err.error?.message ?? 'Mint refused: the recipient is not a registered, approved holder, or the second approval is missing.')
-          : 'Mint failed.', 'Close', { duration: 8000 });
+          : 'Mint failed.'), 'Close', { duration: 8000 });
         this.cdr.markForCheck();
       },
     });
@@ -1634,13 +1652,9 @@ export class IssuanceDetailComponent implements OnInit {
     const assetId = this.asset.id;
     const depId = this.deployments[0].id;
     const body = { fromAddress: action.fromWallet, amount: action.amount };
-    // T3-01: step-up (built-in sign-in: TOTP → scoped token) + the operator's 4-eyes approval token.
-    const stepUp$: Observable<string | undefined> = action.totpCode
-      ? this.issuanceService.stepUp(action.totpCode, 'ISSUER_BURN_EWG26').pipe(map(r => r.stepUpToken))
-      : of(undefined);
-    stepUp$.pipe(
-      switchMap(stepUpToken =>
-        this.issuanceService.burn(assetId, depId, body, { approvalToken: action.approvalToken, stepUpToken })),
+    // T3-01: step-up (built-in sign-in: TOTP -> scoped token) + the operator's 4-eyes approval (approval queue).
+    this.withApproval(action.approvalRequestId, action.totpCode,
+      approval => this.issuanceService.burn(assetId, depId, body, approval),
     ).subscribe({
       next: (r) => {
         this.tokenActionInProgress = false;
@@ -1649,7 +1663,7 @@ export class IssuanceDetailComponent implements OnInit {
       },
       error: (err: HttpErrorResponse) => {
         this.tokenActionInProgress = false;
-        this.snackBar.open(this.burnErrorMessage(err), 'Close', { duration: 8000 });
+        this.snackBar.open(this.approvalFailure(err) ?? this.burnErrorMessage(err), 'Close', { duration: 8000 });
         this.cdr.markForCheck();
       },
     });
@@ -1670,15 +1684,12 @@ export class IssuanceDetailComponent implements OnInit {
     this.tokenActionInProgress = true;
     const assetId = this.asset.id;
     const depId = this.deployments[0].id;
-    // Step-up (built-in sign-in: TOTP -> scoped token) + the operator's 4-eyes approval token.
-    const stepUp$: Observable<string | undefined> = action.totpCode
-      ? this.issuanceService.stepUp(action.totpCode, 'ISSUER_FORCED_TRANSFER_EWG24').pipe(map(r => r.stepUpToken))
-      : of(undefined);
-    stepUp$.pipe(
-      switchMap(stepUpToken => this.issuanceService.forceTransfer(assetId, depId, {
+    // Step-up (built-in sign-in: TOTP -> scoped token) + the operator's 4-eyes approval (approval queue).
+    this.withApproval(action.approvalRequestId, action.totpCode,
+      approval => this.issuanceService.forceTransfer(assetId, depId, {
         from: action.fromWallet, to: action.toWallet,
         value: action.amount, legalBasis: action.legalBasis,
-      }, { approvalToken: action.approvalToken, stepUpToken })),
+      }, approval),
     ).subscribe({
       next: (r) => {
         this.tokenActionInProgress = false;
@@ -1690,9 +1701,9 @@ export class IssuanceDetailComponent implements OnInit {
       },
       error: (err: HttpErrorResponse) => {
         this.tokenActionInProgress = false;
-        this.snackBar.open(err?.status === 403
+        this.snackBar.open(this.approvalFailure(err) ?? (err?.status === 403
           ? (err.error?.message ?? 'Forced transfer refused: the destination is not a registered, approved holder, or the second approval / authenticator code is missing.')
-          : (err?.error?.message ?? 'Force transfer failed.'), 'Close', { duration: 8000 });
+          : (err?.error?.message ?? 'Force transfer failed.')), 'Close', { duration: 8000 });
         this.cdr.markForCheck();
       },
     });
@@ -1703,14 +1714,11 @@ export class IssuanceDetailComponent implements OnInit {
     this.tokenActionInProgress = true;
     const assetId = this.asset.id;
     const depId = this.deployments[0].id;
-    const stepUp$: Observable<string | undefined> = action.totpCode
-      ? this.issuanceService.stepUp(action.totpCode, 'ISSUER_FORCED_APPROVE_OVERRIDE').pipe(map(r => r.stepUpToken))
-      : of(undefined);
-    stepUp$.pipe(
-      switchMap(stepUpToken => this.issuanceService.forceApprove(assetId, depId, {
+    this.withApproval(action.approvalRequestId, action.totpCode,
+      approval => this.issuanceService.forceApprove(assetId, depId, {
         owner: action.ownerWallet, spender: action.spenderWallet,
         value: action.amount, legalBasis: action.legalBasis,
-      }, { approvalToken: action.approvalToken, stepUpToken })),
+      }, approval),
     ).subscribe({
       next: (r) => {
         this.tokenActionInProgress = false;
@@ -1719,9 +1727,9 @@ export class IssuanceDetailComponent implements OnInit {
       },
       error: (err: HttpErrorResponse) => {
         this.tokenActionInProgress = false;
-        this.snackBar.open(err?.status === 403
+        this.snackBar.open(this.approvalFailure(err) ?? (err?.status === 403
           ? (err.error?.message ?? 'Force approve refused: the spender is not a registered, approved holder, or the second approval / authenticator code is missing.')
-          : (err?.error?.message ?? 'Force approve failed.'), 'Close', { duration: 8000 });
+          : (err?.error?.message ?? 'Force approve failed.')), 'Close', { duration: 8000 });
         this.cdr.markForCheck();
       },
     });
@@ -1769,30 +1777,48 @@ export class IssuanceDetailComponent implements OnInit {
     }
   }
 
-  /** The exact call the approver's token must be bound to: `METHOD /path` plus the JSON body. */
-  confidentialMintApprovalRequest(): string {
+  /**
+   * The exact call the approval is bound to (what {@link submitConfidentialMint} sends), or null while the form is
+   * incomplete. Memoised so the box input keeps its identity between change detections.
+   */
+  confidentialMintRequest(): CreateApprovalRequest | null {
     const dep = this.deployments[0];
-    return `POST /api/v1/assets/${this.asset?.id}/deployments/${dep?.id}/issuer/mint-confidential\n`
-      + JSON.stringify({ toAddress: this.mintToAddress.trim(), amount: this.mintAmount === null ? '' : this.mintAmount.toString() });
+    const request: CreateApprovalRequest | null = !this.asset?.id || !dep
+      || !this.isValidWalletAddress(this.mintToAddress) || !this.isValidMintAmount()
+      ? null
+      : {
+        action: 'ISSUER_MINT_CONFIDENTIAL', method: 'POST',
+        path: `/api/v1/assets/${this.asset.id}/deployments/${dep.id}/issuer/mint-confidential`,
+        body: { toAddress: this.mintToAddress.trim(), amount: this.mintAmount!.toString() },
+      };
+    const key = JSON.stringify(request);
+    if (this.mintRequestCache?.key === key) return this.mintRequestCache.request;
+    this.mintRequestCache = { key, request };
+    return request;
+  }
+
+  /** The id of the approved confidential-mint request, or null while it is not approved. */
+  mintApprovedId(): string | null {
+    return this.mintSession.phase === 'approved' ? (this.mintSession.view?.id ?? null) : null;
+  }
+
+  ngOnDestroy(): void {
+    this.mintSession.destroy();
   }
 
   submitConfidentialMint(): void {
     if (!this.asset?.id || this.deployments.length === 0 || this.minting
         || !this.isValidWalletAddress(this.mintToAddress) || !this.isValidMintAmount()
-        || !this.mintApprovalToken.trim()) return;
+        || !this.mintApprovedId()) return;
     const amount = this.mintAmount!;
     const assetId = this.asset.id;
     const depId = this.deployments[0].id;
     const body = { toAddress: this.mintToAddress.trim(), amount: amount.toString() };
-    const approvalToken = this.mintApprovalToken.trim();
+    const approvalRequestId = this.mintApprovedId()!;
     this.minting = true;
     this.cdr.markForCheck();
-    const stepUp$: Observable<string | undefined> = this.mintTotpCode.trim()
-      ? this.issuanceService.stepUp(this.mintTotpCode.trim(), 'ISSUER_MINT_CONFIDENTIAL').pipe(map(r => r.stepUpToken))
-      : of(undefined);
-    stepUp$.pipe(
-      switchMap(stepUpToken =>
-        this.issuanceService.mintConfidential(assetId, depId, body, { approvalToken, stepUpToken })),
+    this.withApproval(approvalRequestId, this.mintTotpCode.trim() || undefined,
+      approval => this.issuanceService.mintConfidential(assetId, depId, body, approval),
     ).subscribe({
       next: (r) => {
         this.txService.track(r.txId, 'Confidential mint');
@@ -1802,14 +1828,15 @@ export class IssuanceDetailComponent implements OnInit {
         this.mintToAddress = '';
         this.mintAmount = null;
         this.mintTotpCode = '';
-        this.mintApprovalToken = '';
+        this.mintSession.reset();
         this.minting = false;
         this.cdr.markForCheck();
       },
       error: (err: HttpErrorResponse) => {
-        this.snackBar.open(err?.status === 403
+        this.snackBar.open(this.approvalFailure(err) ?? (err?.status === 403
           ? (err.error?.message ?? 'Confidential mint refused: the recipient is not a registered, approved holder, or the second approval / authenticator code is missing or does not match this request.')
-          : 'Confidential mint failed.', 'Close', { duration: 8000 });
+          : 'Confidential mint failed.'), 'Close', { duration: 8000 });
+        this.mintSession.reset(); // the approval is spent by the attempt (single use), win or lose
         this.minting = false;
         this.cdr.markForCheck();
       },

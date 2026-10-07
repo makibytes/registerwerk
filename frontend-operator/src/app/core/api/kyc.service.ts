@@ -8,6 +8,8 @@ import {
   KycJurisdictionApproval,
   Jurisdiction,
   JurisdictionRequirement,
+  KycQueueItem,
+  KycReview,
 } from '../models';
 import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
 
@@ -66,6 +68,16 @@ export class KycService {
     return this.http.post(
       `${this.base}/${entityId}/kyc/approve`, body, tokens ? { headers: dualControlHeaders(tokens) } : {},
     );
+  }
+
+  /** KYC work queue (T8-03): entities awaiting a decision, expiring KYC and evidence gaps. REGISTRY_ADMIN or COMPLIANCE_OFFICER. */
+  getQueue(): Observable<KycQueueItem[]> {
+    return this.http.get<KycQueueItem[]>(`${environment.apiUrl}/kyc/queue`);
+  }
+
+  /** The scoped read a compliance officer decides on (no contact data, wallets or balances). */
+  getReview(entityId: string): Observable<KycReview> {
+    return this.http.get<KycReview>(`${environment.apiUrl}/kyc/entities/${entityId}/review`);
   }
 
   /** Entities whose KYC evidence is incomplete or stale (operator work queue). */

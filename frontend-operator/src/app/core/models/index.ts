@@ -126,6 +126,30 @@ export interface VaultRequest {
   /** Owner or refund recipient frozen / under Sperrvermerk — fulfil and cancel are refused. */
   complianceHold: boolean;
   complianceHoldReason?: string;
+  /**
+   * Forward pricing (T1-07): the instant from which a NAV struck on-chain may settle this request (its
+   * "dealing day"). Absent for requests placed before the vault had a dealing cut-off and for settled ones.
+   */
+  dealingPoint?: string;
+  /** A dealing point exists and the latest NAV was struck before it: fulfilment waits for the next NAV strike. */
+  awaitingNavStrike?: boolean;
+}
+
+/** Live on-chain forward-pricing state of an ERC-7540 vault (T1-07). */
+export interface VaultDealingState {
+  /** The deployment is an ERC-7540 vault (only those have a dealing cut-off). */
+  applicable: boolean;
+  /** The on-chain read succeeded; when false every other field is unknown. */
+  available: boolean;
+  /** false: requests settle at the NAV struck at execution time (late-trading exposure). */
+  configured: boolean;
+  /** UTC seconds since midnight of the daily cut-off. */
+  cutoffSecondsOfDay?: number;
+  periodSeconds?: number;
+  /** The dealing point a request placed now would receive. */
+  nextDealingPoint?: string;
+  /** When the latest NAV was struck on-chain (absent: never). */
+  navStruckAt?: string;
 }
 
 /** GET /deployments/{id}/vault-state — confirmed strikes only. */
@@ -135,6 +159,7 @@ export interface VaultStateSummary {
   latestNavStrikeAt?: string;
   depositCap?: string;
   minSettlementDelay?: number;
+  dealing?: VaultDealingState;
 }
 
 // ── ERC-3525 slot ─────────────────────────────────────────────────────────────
@@ -294,7 +319,7 @@ export interface LegalEntity {
   id: string;
   entityNumber: string;
   type: 'ISSUER' | 'INVESTOR' | 'AUDITOR';
-  status: 'PENDING_ONBOARDING' | 'ACTIVE' | 'SUSPENDED' | 'DISSOLVED' | 'CLOSED';
+  status: 'PENDING_ONBOARDING' | 'ACTIVE' | 'SUSPENDED' | 'DISSOLVED' | 'CLOSED' | 'PENDING_REACTIVATION';
   currentName: string;
   leiCode?: string;
   registrationNumber?: string;
@@ -1485,4 +1510,87 @@ export interface PaymentMethodView {
   customName: string | null;
   customDescription: string | null;
   note: string | null;
+}
+
+// ── KYC queue and scoped review (T8-03) ─────────────────────────────────────
+
+/** One entity awaiting a KYC / beneficial-owner / EDD decision, with the reasons it is queued. */
+export interface KycQueueItem {
+  entityId: string;
+  entityName: string;
+  homeJurisdiction: Jurisdiction;
+  kycStatus: string;
+  kycExpiryDate: string | null;
+  reasons: string[];
+}
+
+export interface KycReviewDocument {
+  id: string;
+  documentType: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentHash: string;
+  uploadedAt: string;
+  expiresAt: string | null;
+  issueDate: string | null;
+}
+
+export interface KycReviewChecklistDocument {
+  documentType: string;
+  mandatory: boolean;
+  localName: string;
+  description: string;
+  present: boolean;
+  expired: boolean;
+  tooOld: boolean;
+  documentDate: string | null;
+  documentId: string | null;
+}
+
+export interface KycReviewBeneficialOwner {
+  owner: BeneficialOwner;
+  screeningUnresolved: boolean;
+  eddInForce: boolean;
+  eddReviewDue: string | null;
+}
+
+export interface KycDecisionRecord {
+  id: string;
+  approvedBy: string | null;
+  secondApproverId: string | null;
+  jurisdiction: Jurisdiction;
+  expiryDate: string | null;
+  checklistCompliant: boolean;
+  overrideNote: string | null;
+  identifiedPct: number;
+  smoFallback: boolean;
+  createdAt: string;
+}
+
+/**
+ * What a KYC decision needs and nothing else: the compliance officer never gets the full entity, contact data,
+ * wallets or balances through this view.
+ */
+export interface KycReview {
+  entityId: string;
+  entityNumber: string | null;
+  legalName: string;
+  entityType: string;
+  entityStatus: string;
+  registrationCountry: string | null;
+  registrationNumber: string | null;
+  leiCode: string | null;
+  incorporationDate: string | null;
+  homeJurisdiction: Jurisdiction;
+  kycStatus: string;
+  kycExpiryDate: string | null;
+  documents: KycReviewDocument[];
+  checklist: Omit<KycComplianceResponse, 'documents'> & { documents: KycReviewChecklistDocument[] };
+  jurisdictionApprovals: KycJurisdictionApproval[];
+  ownership: OwnershipSummary;
+  beneficialOwners: KycReviewBeneficialOwner[];
+  screening: { entityHitUnresolved: boolean; beneficialOwnerHitUnresolved: boolean; relyingOnStaleResult: boolean };
+  gaps: string[];
+  decisions: KycDecisionRecord[];
 }

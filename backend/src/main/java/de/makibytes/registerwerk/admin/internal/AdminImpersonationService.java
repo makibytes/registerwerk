@@ -45,6 +45,7 @@ public class AdminImpersonationService {
     private final ApplicationEventPublisher eventPublisher;
     private final RegisterwerkAuthProperties authProperties;
     private final String customerFrontendUrl;
+    private final de.makibytes.registerwerk.shared.ProductionMode productionMode;
 
     public AdminImpersonationService(
             ImpersonationSessionRepository sessions,
@@ -52,7 +53,9 @@ public class AdminImpersonationService {
             LegalEntityRepository legalEntityRepository,
             ApplicationEventPublisher eventPublisher,
             RegisterwerkAuthProperties authProperties,
+            org.springframework.core.env.Environment environment,
             @Value("${registerwerk.onboarding.frontend-url}") String customerFrontendUrl) {
+        this.productionMode = de.makibytes.registerwerk.shared.ProductionMode.of(environment);
         this.sessions = sessions;
         this.appUserRepository = appUserRepository;
         this.legalEntityRepository = legalEntityRepository;
@@ -70,10 +73,19 @@ public class AdminImpersonationService {
             );
         }
 
-        boolean isAdmin = caller != null && caller.getAuthorities().stream()
-            .anyMatch(a -> a.getAuthority().equals("ROLE_REGISTRY_ADMIN"));
-        if (!isAdmin) {
-            throw new AccessDeniedException("Only REGISTRY_ADMIN users may impersonate");
+        // T6-05: production mode is read-only impersonation only. Refused before any role check so the message is
+        // the same for every caller; demo mode keeps ACT_ON_BEHALF (second approver, deny-list) unchanged.
+        if (mode == ImpersonationMode.ACT_ON_BEHALF && productionMode.enabled()) {
+            throw new AccessDeniedException("Acting on behalf of a customer is disabled in production mode; "
+                + "only read-only support sessions are available");
+        }
+        boolean isAdmin = hasAuthority(caller, "ROLE_REGISTRY_ADMIN");
+        // SUPPORT_AGENT may start READ_ONLY sessions only; every other operator role may not impersonate at all.
+        boolean isSupportAgent = hasAuthority(caller, "ROLE_SUPPORT_AGENT");
+        if (mode == ImpersonationMode.ACT_ON_BEHALF ? !isAdmin : !(isAdmin || isSupportAgent)) {
+            throw new AccessDeniedException(mode == ImpersonationMode.ACT_ON_BEHALF
+                ? "Only REGISTRY_ADMIN users may act on behalf of a customer"
+                : "Only REGISTRY_ADMIN or SUPPORT_AGENT users may impersonate");
         }
 
         UUID actorId = SecurityUtils.extractUserId(caller);
@@ -116,7 +128,7 @@ public class AdminImpersonationService {
         details.put("ticket", session.getTicketRef());
         details.put("expiresAt", expires.toString());
         eventPublisher.publishEvent(new AdminImpersonationStartedEvent(
-                actorId, actorId, "REGISTRY_ADMIN", details, approverId));
+                actorId, actorId, isAdmin ? "REGISTRY_ADMIN" : "SUPPORT_AGENT", details, approverId));
 
         String encodedName = URLEncoder.encode(target.getCurrentName(), StandardCharsets.UTF_8);
         String handoffUrl = customerFrontendUrl + "/admin/handoff#code=" + code
@@ -125,6 +137,10 @@ public class AdminImpersonationService {
 
         return new ImpersonateResponse(session.getId(), mode.name(), expires.atOffset(java.time.ZoneOffset.UTC),
                 target.getId(), target.getCurrentName(), handoffUrl);
+    }
+
+    private static boolean hasAuthority(Authentication caller, String authority) {
+        return caller != null && caller.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals(authority));
     }
 
     /** Sessions on one entity, newest first — shown to that entity's admins. */

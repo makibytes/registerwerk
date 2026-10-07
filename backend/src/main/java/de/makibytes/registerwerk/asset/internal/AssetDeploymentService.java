@@ -91,6 +91,7 @@ public class AssetDeploymentService {
     private final WalletSigner walletSigner;
     private final SolanaFinalityReader solanaFinalityReader;
     private final boolean allowNonCompliantStarknetErc3525;
+    private final de.makibytes.registerwerk.blockchain.api.Erc7540AdminPort vaultAdminPort;
 
     public AssetDeploymentService(
             AssetDeploymentRepository assetDeploymentRepository,
@@ -108,8 +109,10 @@ public class AssetDeploymentService {
             ChainEffectRecorder chainEffectRecorder,
             WalletSigner walletSigner,
             SolanaFinalityReader solanaFinalityReader,
+            de.makibytes.registerwerk.blockchain.api.Erc7540AdminPort vaultAdminPort,
             @Value("${registerwerk.starknet.erc3525.allow-non-compliant:false}")
             boolean allowNonCompliantStarknetErc3525) {
+        this.vaultAdminPort = vaultAdminPort;
         this.assetDeploymentRepository = assetDeploymentRepository;
         this.assetRepository = assetRepository;
         this.eventPublisher = eventPublisher;
@@ -521,6 +524,12 @@ public class AssetDeploymentService {
                     deploymentId, null, null, contractAddress, txHash));
             log.info("syncFromChain: confirmed deploymentId={} contractAddress={}", deploymentId, contractAddress);
             if (assetRepository.findById(deployment.getAssetId())
+                    .map(Asset::getTokenStandard).filter(TokenStandard.ERC7540::equals).isPresent()) {
+                // T1-07: forward pricing — the vault gets its dealing cut-off (registry signer, durable outbox)
+                // only once this confirmation is committed; a failure there never undoes the confirmation.
+                AfterCommit.run(() -> configureVaultDealingCutoff(deploymentId));
+            }
+            if (assetRepository.findById(deployment.getAssetId())
                     .map(Asset::getTokenStandard).filter(TokenStandard.ERC3643::equals).isPresent()) {
                 // T3-19: a suite whose deploy call timed out before its receipt is confirmed here;
                 // its suite record is written now (no-op when the deploy call already did).
@@ -531,6 +540,16 @@ public class AssetDeploymentService {
                             + "not be written: {}", deploymentId, e.getMessage(), e);
                 }
             }
+    }
+
+    private void configureVaultDealingCutoff(UUID deploymentId) {
+        try {
+            vaultAdminPort.configureDealingCutoffAfterDeployment(deploymentId);
+        } catch (RuntimeException e) {
+            log.error("Vault deployment={} is confirmed but its dealing cut-off could not be configured: {} — "
+                    + "set it with POST /api/v1/deployments/{}/dealing-cutoff", deploymentId, e.getMessage(),
+                    deploymentId, e);
+        }
     }
 
     /** Resolves the exact chain row persisted with the deployment; legacy rows are accepted only

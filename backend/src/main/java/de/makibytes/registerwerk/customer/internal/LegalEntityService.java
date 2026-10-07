@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.customer.events.EntityCreatedEvent;
 import de.makibytes.registerwerk.customer.events.EntityUpdatedEvent;
 import de.makibytes.registerwerk.customer.events.EntitySuspendedEvent;
 import de.makibytes.registerwerk.customer.events.EntityReactivatedEvent;
+import de.makibytes.registerwerk.customer.events.EntityReinstatementRequestedEvent;
 import de.makibytes.registerwerk.customer.events.EntityRenamedEvent;
 import de.makibytes.registerwerk.customer.events.EntityMergedEvent;
 import de.makibytes.registerwerk.customer.events.ClientClassifiedEvent;
@@ -260,6 +261,48 @@ public class LegalEntityService {
     }
 
     /**
+     * Starts the reinstatement of a CLOSED/DISSOLVED entity (T6-12): -&gt; PENDING_REACTIVATION,
+     * never directly ACTIVE. Needs a reason and a legal reference (the controller requires step-up
+     * and a second approver). Effects: KYC is reset (a fresh APPROVED KYC through the normal
+     * approve flow and its gates is required; it then activates the entity), a mandatory
+     * re-screening is triggered, operator tasks are raised and an audited event is emitted. The
+     * entity stays blocked like any non-ACTIVE entity; on-chain claims and org membership are not
+     * touched until the KYC is approved again (the existing reactivation listener then raises the
+     * {@code CHAIN_REINSTATEMENT_REQUIRED} task for the explicit 4-eyes chain reinstatement).
+     */
+    public void requestReinstatement(UUID id, UUID actorId, String reason, String legalReference) {
+        requireReason(reason);
+        if (legalReference == null || legalReference.isBlank()) {
+            throw new IllegalArgumentException("A legal reference is required");
+        }
+        LegalEntity entity = getEntity(id);
+        EntityStatus from = entity.getStatus();
+        if (!from.isTerminal()) {
+            throw new InvalidStateTransitionException("LegalEntity", from.name(), EntityStatus.PENDING_REACTIVATION.name());
+        }
+        KycStatus previousKyc = entity.getKycStatus();
+        entity.setKycStatus(KycStatus.NOT_STARTED);
+        entity.setKycExpiryDate(null);
+        transition(id, EntityStatus.PENDING_REACTIVATION);
+
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("reason", reason);
+        details.put("legalReference", legalReference.trim());
+        details.put("from", from.name());
+        details.put("to", EntityStatus.PENDING_REACTIVATION.name());
+        details.put("previousKycStatus", previousKyc.name());
+        eventPublisher.publishEvent(new EntityReinstatementRequestedEvent(id, actorId, null, details));
+        taskPort.open(id, EntityTask.REINSTATEMENT_KYC_REQUIRED, "",
+                "Reinstatement requested (" + legalReference.trim() + "): re-screening was triggered and KYC was reset; "
+                        + "complete a fresh KYC approval (checklist, beneficial owners, screening) to reactivate the entity.", actorId);
+        taskPort.open(id, EntityTask.REINSTATEMENT_USERS_REVIEW, "",
+                "Users were disabled at termination; re-enable or re-invite the customer's users once KYC is approved.", actorId);
+        // Mandatory re-screening: the screening module re-screens on this event; no clear result keeps KYC approval blocked.
+        eventPublisher.publishEvent(new EntityRiskDataChangedEvent(id, actorId, List.of("REINSTATEMENT")));
+        log.warn("Reinstatement requested: entity={} from={} legalReference={}", id, from, legalReference);
+    }
+
+    /**
      * Records a name change in the entity's name history and updates the current name.
      */
     public void renameEntity(UUID id, String newName, LocalDate effectiveDate, UUID actorId) {
@@ -313,7 +356,7 @@ public class LegalEntityService {
             throw new InvalidStateTransitionException(
                     "Source entity " + sourceEntityId + " is " + source.getStatus() + " and cannot be merged.");
         }
-        if (target.getStatus().isTerminal()) {
+        if (target.getStatus().isTerminal() || target.getStatus() == EntityStatus.PENDING_REACTIVATION) {
             throw new InvalidStateTransitionException(
                     "Target entity " + targetEntityId + " is " + target.getStatus() + " and cannot absorb another entity.");
         }

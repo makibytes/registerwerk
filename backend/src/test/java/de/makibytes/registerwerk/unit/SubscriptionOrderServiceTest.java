@@ -75,6 +75,7 @@ class SubscriptionOrderServiceTest {
     @Mock private FinalityGate finalityGate;
     @Mock private TokenAdminPort tokenAdminPort;
     @Mock private Erc3643MintPort erc3643MintPort;
+    @Mock private de.makibytes.registerwerk.blockchain.api.Erc7540AdminPort vaultAdminPort;
 
     private SubscriptionOrderService service;
 
@@ -89,7 +90,7 @@ class SubscriptionOrderServiceTest {
                 assetHolderRepository, investorLimitService, events,
                 new RegisterClock(Clock.fixed(Instant.parse("2026-03-02T10:00:00Z"), ZoneOffset.UTC), ZoneId.of("Europe/Berlin")),
                 deploymentRepository, bondTermsRepository, partyGate, memberWallets, finalityGate,
-                tokenAdminPort, erc3643MintPort);
+                tokenAdminPort, erc3643MintPort, vaultAdminPort);
         org.mockito.Mockito.lenient().when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         OrgMemberWallet bound = new OrgMemberWallet();
         bound.setWalletAddress("0xabc");
@@ -180,6 +181,30 @@ class SubscriptionOrderServiceTest {
         assertThatThrownBy(() -> service.submit(assetId, investorId, "0xabc", new BigDecimal("1000"), actorId, "INVESTOR"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("minimum investment");
+    }
+
+    @Test
+    @DisplayName("T1-07: a subscription asks the vault gate whether the asset's vault has a dealing cut-off "
+            + "(production refuses an unconfigured vault)")
+    void submit_consultsTheDealingCutoffGate() {
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(approvedAsset()));
+
+        service.submit(assetId, investorId, "0xabc", new BigDecimal("1000"), actorId, "INVESTOR");
+
+        verify(vaultAdminPort).requireDealingCutoffConfigured(eq(assetId), any());
+    }
+
+    @Test
+    @DisplayName("T1-07: when the vault gate refuses (no dealing cut-off in production) no order is created")
+    void submit_refusedByTheDealingCutoffGate_createsNoOrder() {
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(approvedAsset()));
+        org.mockito.Mockito.doThrow(new InvalidStateTransitionException("no dealing cut-off"))
+                .when(vaultAdminPort).requireDealingCutoffConfigured(eq(assetId), any());
+
+        assertThatThrownBy(() -> service.submit(assetId, investorId, "0xabc", new BigDecimal("1000"), actorId,
+                "INVESTOR")).isInstanceOf(InvalidStateTransitionException.class);
+
+        verify(repository, never()).save(any());
     }
 
     @Test

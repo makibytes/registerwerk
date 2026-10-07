@@ -26,8 +26,11 @@ public class AuthConfigController {
 
     private final RegisterwerkAuthProperties authProperties;
     private final RegisterwerkEntraProperties entraProperties;
+    private final de.makibytes.registerwerk.shared.ProductionMode productionMode;
 
-    AuthConfigController(RegisterwerkAuthProperties authProperties, RegisterwerkEntraProperties entraProperties) {
+    AuthConfigController(RegisterwerkAuthProperties authProperties, RegisterwerkEntraProperties entraProperties,
+                         org.springframework.core.env.Environment environment) {
+        this.productionMode = de.makibytes.registerwerk.shared.ProductionMode.of(environment);
         this.authProperties = authProperties;
         this.entraProperties = entraProperties;
     }
@@ -52,7 +55,8 @@ public class AuthConfigController {
             !entra,
             entra && entraProperties.isSupportEnabled(),
             entra && entraProperties.isRequireTwoFactorEnrolment(),
-            entraProperties.getMfaSetupUrl()
+            entraProperties.getMfaSetupUrl(),
+            productionMode.enabled()
         ));
     }
 }

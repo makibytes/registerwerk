@@ -77,7 +77,8 @@ public class OnboardingService {
     public String generateToken(UUID entityId, UUID issuedBy) {
         LegalEntity entity = legalEntityRepository.findById(entityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
-        if (entity.getStatus() == EntityStatus.CLOSED || entity.getStatus() == EntityStatus.DISSOLVED) {
+        if (entity.getStatus() == EntityStatus.CLOSED || entity.getStatus() == EntityStatus.DISSOLVED
+                || entity.getStatus() == EntityStatus.PENDING_REACTIVATION) {
             throw new IllegalStateException(
                     "Cannot issue an onboarding token for a " + entity.getStatus() + " legal entity (id=" + entityId + ")");
         }

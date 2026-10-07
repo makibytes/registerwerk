@@ -30,7 +30,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/** T3-03 interim: the "Steuerbescheinigung" became an informational Ertragsaufstellung. */
+/** T3-03: the former "Steuerbescheinigung" is an informational Ertragsübersicht (not a tax certificate). */
 class SteuerbescheinigungServiceTest {
 
     private final UUID investor = UUID.randomUUID();
@@ -108,9 +108,14 @@ class SteuerbescheinigungServiceTest {
     void printsNoComputedKest() throws Exception {
         add(ActionType.COUPON, "EUR", "100.00");
         String t = text();
-        assertThat(t).contains("Keine Steuerbescheinigung").contains("einbehalten: 0,00");
-        assertThat(t).doesNotContain("25%").doesNotContain("5,5%").doesNotContain("45a Abs. 2")
-                .doesNotContain("25.00");
+        assertThat(t).contains("Ertrags\u00fcbersicht (keine Steuerbescheinigung)")
+                .contains("Income statement (not a tax certificate)");
+        assertThat(t).contains("This document is not a tax certificate; Registerwerk does not withhold or compute taxes.")
+                .contains("Dieses Dokument ist keine Steuerbescheinigung; Registerwerk beh\u00e4lt keine Steuern ein und berechnet keine.");
+        // no tax-flavoured figures or withholding wording
+        assertThat(t).doesNotContain("Ertragsaufstellung").doesNotContain("Kapitalertragsteuer")
+                .doesNotContain("SolZ").doesNotContain("einbehalten").doesNotContain("45a")
+                .doesNotContain("25%").doesNotContain("5,5%").doesNotContain("25.00");
     }
 
     @Test

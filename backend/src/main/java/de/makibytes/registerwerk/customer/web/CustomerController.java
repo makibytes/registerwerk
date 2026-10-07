@@ -13,6 +13,7 @@ import de.makibytes.registerwerk.customer.web.dto.EntityResponse;
 import de.makibytes.registerwerk.customer.web.dto.EntityUpdateRequest;
 import de.makibytes.registerwerk.customer.web.dto.MergeEntityRequest;
 import de.makibytes.registerwerk.customer.web.dto.LifecycleReasonRequest;
+import de.makibytes.registerwerk.customer.web.dto.ReinstatementRequest;
 import de.makibytes.registerwerk.customer.web.dto.TerminateEntityRequest;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.shared.api.PageResponse;
@@ -76,7 +77,7 @@ public class CustomerController {
      * Returns a paginated list of entities, with optional type and status filters.
      */
     @GetMapping
-    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT')")
+    @PreAuthorize("hasAnyRole('REGISTRY_ADMIN', 'AUDIT', 'SUPPORT_AGENT')")
     public ResponseEntity<PageResponse<EntityResponse>> listEntities(
             @RequestParam(required = false) EntityType type,
             @RequestParam(required = false) EntityStatus status,
@@ -175,6 +176,22 @@ public class CustomerController {
                                                  @RequestBody @Valid LifecycleReasonRequest request,
                                                  Authentication auth) {
         legalEntityService.reactivateEntity(id, extractActorId(auth), request.reason());
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Starts the reinstatement of a CLOSED/DISSOLVED entity (T6-12): -&gt; PENDING_REACTIVATION, never
+     * straight to ACTIVE. Step-up, second approver, mandatory reason and legal reference. The entity
+     * stays blocked until a fresh KYC approval; re-screening, tasks and audit are handled by the
+     * service; on-chain state is untouched until then.
+     */
+    @PostMapping("/{id}/reinstate")
+    @PreAuthorize("hasRole('REGISTRY_ADMIN')")
+    @RequiresStepUp(requireSecondApprover = true, reason = "ENTITY_REINSTATE")
+    public ResponseEntity<Void> reinstateEntity(@PathVariable UUID id,
+                                                @RequestBody @Valid ReinstatementRequest request,
+                                                Authentication auth) {
+        legalEntityService.requestReinstatement(id, extractActorId(auth), request.reason(), request.legalReference());
         return ResponseEntity.noContent().build();
     }
 

@@ -8,7 +8,11 @@ import de.makibytes.registerwerk.deployment.api.VaultRequestStatus;
 import de.makibytes.registerwerk.deployment.api.VaultRequestType;
 import de.makibytes.registerwerk.blockchain.api.BlockchainTransactionService;
 import de.makibytes.registerwerk.blockchain.api.EvmContractService;
+import de.makibytes.registerwerk.blockchain.api.VaultDealingState;
 import de.makibytes.registerwerk.blockchain.api.VaultRequestView;
+import de.makibytes.registerwerk.deployment.api.AssetLookupPort;
+import de.makibytes.registerwerk.deployment.api.TokenStandard;
+import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import de.makibytes.registerwerk.blockchain.events.TokenAdminActionEvent;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
@@ -27,6 +31,7 @@ import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Uint256;
 
 import java.math.BigInteger;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,6 +76,9 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
     private final ApplicationEventPublisher eventPublisher;
     private final EvmContractService evmContractService;
     private final HolderBlockGate holderBlockGate;
+    private final VaultDealingReader dealingReader;
+    private final VaultDealingSettings dealingSettings;
+    private final AssetLookupPort assetLookup;
 
     public Erc7540AdminService(
             AssetDeploymentRepository deploymentRepository,
@@ -79,7 +87,13 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
             BlockchainTransactionService txService,
             ApplicationEventPublisher eventPublisher,
             EvmContractService evmContractService,
-            HolderBlockGate holderBlockGate) {
+            HolderBlockGate holderBlockGate,
+            VaultDealingReader dealingReader,
+            VaultDealingSettings dealingSettings,
+            AssetLookupPort assetLookup) {
+        this.dealingReader = dealingReader;
+        this.dealingSettings = dealingSettings;
+        this.assetLookup = assetLookup;
         this.deploymentRepository = deploymentRepository;
         this.vaultRequestRepository = vaultRequestRepository;
         this.durableTransactions = durableTransactions;
@@ -232,6 +246,166 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
         return tx.txId();
     }
 
+    // ── Forward pricing: dealing cut-off (T1-07) ─────────────────────────────
+
+    /**
+     * Registry {@code setDealingCutoff}: from the moment it confirms, a request placed on the vault settles
+     * only at a NAV struck at or after its dealing point (the first cut-off boundary after the request).
+     * Requests already placed keep the dealing point they were given. Audited as
+     * {@code TOKEN_ADMIN_SET_DEALING_CUTOFF}; the controller layer adds step-up and a second approver.
+     */
+    @Override
+    public UUID setDealingCutoff(UUID deploymentId, int cutoffSecondsOfDay, long periodSeconds,
+                                 UUID actorId, String actorRole) {
+        VaultDealingSettings.requireValid(cutoffSecondsOfDay, periodSeconds);
+        AssetDeployment dep = requireDeployment(deploymentId);
+        requireErc7540(dep);
+        log.info("Setting dealing cut-off {} UTC / period {}s on deployment={}",
+                VaultDealingSettings.formatCutoff(cutoffSecondsOfDay), periodSeconds, dep.getId());
+        return submitDealingCutoff(dep, cutoffSecondsOfDay, periodSeconds, actorId, actorRole);
+    }
+
+    /**
+     * Runs after the deployment confirmation committed (own transaction, hence {@code REQUIRES_NEW}): sends
+     * the configured default cut-off through the durable outbox as the registry signer. Never throws — a vault
+     * left without a cut-off is refused for subscriptions in production mode and listed by
+     * {@link VaultDealingReadinessCheck}, and an operator can set it with {@link #setDealingCutoff}.
+     */
+    @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void configureDealingCutoffAfterDeployment(UUID deploymentId) {
+        try {
+            if (!dealingSettings.autoConfigure()) {
+                log.info("Automatic dealing cut-off configuration is switched off; vault deployment={} stays "
+                        + "unconfigured until an operator sets it", deploymentId);
+                return;
+            }
+            AssetDeployment dep = requireDeployment(deploymentId);
+            if (!isErc7540(dep)) {
+                return;
+            }
+            Optional<VaultDealingState> state = dealingReader.readState(dep);
+            if (state.isPresent() && state.get().configured()) {
+                log.info("Vault deployment={} already has a dealing cut-off; leaving it as it is", deploymentId);
+                return;
+            }
+            submitDealingCutoff(dep, dealingSettings.defaultCutoffSecondsOfDay(),
+                    dealingSettings.defaultPeriodSeconds(), null, "SYSTEM");
+            log.info("Default dealing cut-off {} UTC / period {}s sent for vault deployment={}",
+                    VaultDealingSettings.formatCutoff(dealingSettings.defaultCutoffSecondsOfDay()),
+                    dealingSettings.defaultPeriodSeconds(), deploymentId);
+        } catch (RuntimeException e) {
+            log.error("Could not send the default dealing cut-off for vault deployment={} — the vault stays "
+                    + "WITHOUT forward pricing (production refuses subscriptions on it). Set it with POST "
+                    + "/api/v1/deployments/{}/dealing-cutoff: {}", deploymentId, deploymentId, e.getMessage(), e);
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public VaultDealingState dealingState(UUID deploymentId) {
+        AssetDeployment dep = deploymentRepository.findById(deploymentId)
+                .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
+        if (!isErc7540(dep)) {
+            return VaultDealingState.notApplicable();
+        }
+        if (!hasChainAddress(dep)) {
+            return VaultDealingState.unavailable();
+        }
+        return dealingReader.readState(dep).orElseGet(VaultDealingState::unavailable);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void requireDealingCutoffConfigured(UUID assetId, String action) {
+        if (!dealingSettings.production()) {
+            return;
+        }
+        Optional<AssetLookupPort.AssetInfo> asset = assetLookup.findById(assetId);
+        if (asset.isEmpty() || asset.get().tokenStandard() != TokenStandard.ERC7540) {
+            return;
+        }
+        for (AssetDeployment dep : deploymentRepository.findByAssetId(assetId)) {
+            if (!isConfirmedVault(dep)) {
+                continue;
+            }
+            Optional<VaultDealingState> state = dealingReader.readState(dep);
+            if (state.isEmpty()) {
+                throw new InvalidStateTransitionException("Vault " + dep.getContractAddress() + ": could not read "
+                        + "the on-chain dealing cut-off — " + action + " is refused (fail closed); retry once the "
+                        + "chain node is reachable.");
+            }
+            if (!state.get().configured()) {
+                throw new InvalidStateTransitionException("Vault " + dep.getContractAddress() + " has no dealing "
+                        + "cut-off configured — " + action + " is refused in production mode: without forward "
+                        + "pricing a request could settle at a NAV that is already known (late trading). Set the "
+                        + "dealing cut-off first (operator: asset > vault requests > Dealing cut-off).");
+            }
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<String> listVaultsWithoutDealingCutoff() {
+        List<String> lines = new java.util.ArrayList<>();
+        for (AssetLookupPort.AssetInfo asset : assetLookup.findAll()) {
+            if (asset.tokenStandard() != TokenStandard.ERC7540) {
+                continue;
+            }
+            for (AssetDeployment dep : deploymentRepository.findByAssetId(asset.id())) {
+                if (!isConfirmedVault(dep)) {
+                    continue;
+                }
+                Optional<VaultDealingState> state = dealingReader.readState(dep);
+                String where = asset.name() + " (" + dep.getContractAddress() + ") on " + dep.getChain() + "/"
+                        + dep.getNetwork();
+                if (state.isEmpty()) {
+                    lines.add(where + " — dealing cut-off unreadable");
+                } else if (!state.get().configured()) {
+                    lines.add(where + " — no dealing cut-off configured");
+                }
+            }
+        }
+        return lines;
+    }
+
+    private UUID submitDealingCutoff(AssetDeployment dep, int cutoffSecondsOfDay, long periodSeconds,
+                                     UUID actorId, String actorRole) {
+        Function fn = new Function("setDealingCutoff",
+                List.of(new Uint256(BigInteger.valueOf(cutoffSecondsOfDay)),
+                        new Uint256(BigInteger.valueOf(periodSeconds))),
+                Collections.emptyList());
+        preflight(dep, fn, "setting the dealing cut-off");
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("cutoffSecondsOfDay", Integer.toString(cutoffSecondsOfDay));
+        params.put("cutoffUtc", VaultDealingSettings.formatCutoff(cutoffSecondsOfDay));
+        params.put("periodSeconds", Long.toString(periodSeconds));
+        return submitEvm(dep, fn, "setDealingCutoff", params, actorId, actorRole).txId();
+    }
+
+    private boolean isErc7540(AssetDeployment dep) {
+        return assetLookup.findById(dep.getAssetId())
+                .map(a -> a.tokenStandard() == TokenStandard.ERC7540).orElse(false);
+    }
+
+    private void requireErc7540(AssetDeployment dep) {
+        TokenStandard standard = assetLookup.findById(dep.getAssetId())
+                .map(AssetLookupPort.AssetInfo::tokenStandard).orElse(null);
+        if (standard != TokenStandard.ERC7540) {
+            throw new IllegalArgumentException("The dealing cut-off exists on ERC-7540 vaults only; this "
+                    + "deployment is " + standard);
+        }
+    }
+
+    private static boolean hasChainAddress(AssetDeployment dep) {
+        return dep.getContractAddress() != null && !dep.getContractAddress().isBlank()
+                && dep.getChainConfigId() != null;
+    }
+
+    private static boolean isConfirmedVault(AssetDeployment dep) {
+        return dep.getDeploymentStatus() == AssetDeployment.DeploymentStatus.CONFIRMED && hasChainAddress(dep);
+    }
+
     // ── Query ─────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
@@ -244,6 +418,9 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
     public List<VaultRequestView> listRequestViews(UUID deploymentId, VaultRequestStatus status) {
         AssetDeployment dep = deploymentRepository.findById(deploymentId)
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", deploymentId));
+        // Forward pricing (T1-07): one live read of the vault's cut-off + last strike for the whole list.
+        VaultDealingState dealing = status == VaultRequestStatus.PENDING && hasChainAddress(dep)
+                ? dealingReader.readState(dep).orElse(null) : null;
         return vaultRequestRepository.findByAssetIdAndRequestStatus(dep.getAssetId(), status).stream()
                 // Request ids are per vault: show only this deployment's chain (legacy rows without one included).
                 .filter(r -> r.getChainConfigId() == null || dep.getChainConfigId() == null
@@ -257,7 +434,17 @@ public class Erc7540AdminService implements de.makibytes.registerwerk.blockchain
                     if (reason == null && refundTo != null && !refundTo.equalsIgnoreCase(r.getOwnerAddr())) {
                         reason = holdReasonOrUnavailable(dep, refundTo);
                     }
-                    return VaultRequestView.of(r, reason != null, reason);
+                    VaultRequestView view = VaultRequestView.of(r, reason != null, reason);
+                    if (dealing != null && dealing.configured()) {
+                        Optional<BigInteger> point = dealingReader.dealingPointOf(dep, r.getRequestId());
+                        if (point.isPresent()) {
+                            // 0 = placed before the cut-off was configured: legacy settlement, no dealing day
+                            Instant dealingPoint = point.get().signum() == 0 ? null
+                                    : Instant.ofEpochSecond(point.get().longValueExact());
+                            view = view.withDealing(dealingPoint, dealing.navStruckAt());
+                        }
+                    }
+                    return view;
                 })
                 .toList();
     }

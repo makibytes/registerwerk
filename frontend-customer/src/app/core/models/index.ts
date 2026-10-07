@@ -254,6 +254,7 @@ export type UserRole =
   | 'COMPANY_ADMIN'
   | 'REGISTRY_ADMIN'
   | 'AUDIT'
+  | 'SUPPORT_AGENT'
   | 'TRADER';
 
 export type ExternalReferenceSubjectType =

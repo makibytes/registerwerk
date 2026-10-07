@@ -33,7 +33,7 @@ public enum GatedOperation {
     CORPORATE_ACTION_SETTLEMENT_CONFIRM,
     /** Generates investor/operator confirmation documents (incl. ISO 20022) — {@code CorporateActionConfirmationService}. */
     CORPORATE_ACTION_CONFIRMATION_EXPORT,
-    /** Issues the Steuerbescheinigung tax certificate — {@code SteuerbescheinigungService.generate}. */
+    /** Issues the income statement (Ertragsübersicht, not a tax certificate) — {@code SteuerbescheinigungService.generate}. */
     TAX_CERTIFICATE_ISSUE,
 
     // ── trading ───────────────────────────────────────────────────────────────

@@ -33,7 +33,7 @@ Le rôle `AUDIT` donne un accès en lecture sur tout le registre. Il ne confère
 | Statut KYC et documents | Selon la configuration de l'opérateur |
 | Bénéficiaires effectifs | |
 | Opérations sur titres | Y compris photographies à la date d'enregistrement et droits |
-| Relevés de revenus (Ertragsaufstellung) et relevés de positions | |
+| Relevés de revenus (Ertragsübersicht) et relevés de positions | |
 | La piste d'audit | Chaque événement consigné |
 
 ---

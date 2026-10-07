@@ -32,6 +32,11 @@ class ImpersonationGuardFilterTest {
     void clear() { SecurityContextHolder.clearContext(); }
 
     private MockHttpServletResponse run(ImpersonationMode mode, String method, String path) throws Exception {
+        return run(mode, method, path, false);
+    }
+
+    private MockHttpServletResponse run(ImpersonationMode mode, String method, String path, boolean production)
+            throws Exception {
         when(state.impersonation(sid)).thenReturn(Optional.of(
                 new ImpersonationState(UUID.randomUUID(), UUID.randomUUID(), mode, true, false)));
         Jwt jwt = Jwt.withTokenValue("t").header("alg", "HS256").subject(UUID.randomUUID().toString())
@@ -39,7 +44,8 @@ class ImpersonationGuardFilterTest {
         SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
         MockHttpServletRequest req = new MockHttpServletRequest(method, path);
         MockHttpServletResponse res = new MockHttpServletResponse();
-        new ImpersonationGuardFilter(state, List.of("POST /api/v1/trading/history/*/confirm-payment", "* /api/v1/me/webhooks/**"))
+        new ImpersonationGuardFilter(state,
+                List.of("POST /api/v1/trading/history/*/confirm-payment", "* /api/v1/me/webhooks/**"), production)
                 .doFilter(req, res, chain);
         return res;
     }
@@ -61,5 +67,14 @@ class ImpersonationGuardFilterTest {
                 .isEqualTo(403);
         assertThat(run(ImpersonationMode.ACT_ON_BEHALF, "DELETE", "/api/v1/me/webhooks/1").getStatus()).isEqualTo(403);
         assertThat(run(ImpersonationMode.ACT_ON_BEHALF, "POST", "/api/v1/trading/listings").getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("T6-05: in production mode a leftover ACT_ON_BEHALF session is enforced as READ_ONLY")
+    void productionDowngradesActOnBehalf() throws Exception {
+        MockHttpServletResponse res = run(ImpersonationMode.ACT_ON_BEHALF, "POST", "/api/v1/trading/listings", true);
+        assertThat(res.getStatus()).isEqualTo(403);
+        assertThat(res.getContentAsString()).contains("IMPERSONATION_READ_ONLY");
+        assertThat(run(ImpersonationMode.ACT_ON_BEHALF, "GET", "/api/v1/assets", true).getStatus()).isEqualTo(200);
     }
 }

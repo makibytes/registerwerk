@@ -175,6 +175,21 @@ class AccessReviewServiceTest {
     }
 
     @Test
+    @DisplayName("T6-05: SUPPORT_AGENT (standing customer-read access) is privileged - revocation needs a second reviewer")
+    void recordDecision_supportAgentRevocation_isOnlyProposed() {
+        UUID campaignId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        AppUser target = user("support@test.local", AppUserRole.SUPPORT_AGENT);
+        AccessReviewItem item = item(campaignId, itemId, target);
+
+        AccessReviewItem proposed = service.recordDecision(campaignId, itemId, AccessReviewDecision.REVOKED,
+                "left the team", actorId, "COMPLIANCE_OFFICER");
+
+        assertThat(proposed.getDecision()).isEqualTo(AccessReviewDecision.REVOKE_PROPOSED);
+        verify(accountAccess, never()).disable(any(), any(), any(), any());
+    }
+
+    @Test
     @DisplayName("REVOKED on a privileged account is only a proposal; a different second reviewer makes it effective")
     void recordDecision_privilegedRevocation_needsSecondReviewer() {
         UUID campaignId = UUID.randomUUID();

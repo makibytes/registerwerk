@@ -19,4 +19,9 @@ public record KycDocumentResponse(
     Instant uploadedAt,
     LocalDate expiresAt,
     LocalDate issueDate
-) {}
+) {
+    public static KycDocumentResponse from(KycDocument doc) {
+        return new KycDocumentResponse(doc.getId(), doc.getDocumentType(), doc.getFileName(), doc.getMimeType(),
+            doc.getSizeBytes(), doc.getContentHash(), doc.getUploadedAt(), doc.getExpiresAt(), doc.getIssueDate());
+    }
+}

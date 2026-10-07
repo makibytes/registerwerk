@@ -3,6 +3,8 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { SidebarComponent } from './sidebar.component';
 import { AuthService } from '../../core/auth/auth.service';
+import { ApprovalBadgeService } from '../../core/services/approval-badge.service';
+import { signal } from '@angular/core';
 
 describe('SidebarComponent', () => {
     let authServiceSpy: MockedObject<Pick<AuthService, 'hasRole'>>;
@@ -23,6 +25,7 @@ describe('SidebarComponent', () => {
             providers: [
                 provideRouter([]),
                 { provide: AuthService, useValue: authServiceSpy },
+                { provide: ApprovalBadgeService, useValue: { pendingCount: signal(0), start: vi.fn(), stop: vi.fn() } },
             ],
         });
     });
@@ -91,6 +94,17 @@ describe('SidebarComponent', () => {
             ]);
         expect(sections.find(section => section.label === 'Registry')?.items.map(item => item.label))
             .toEqual(['Assets', 'Customers', 'Registry']);
+    });
+
+    it('shows the KYC queue to compliance officers and registry administrators, not to audit', () => {
+        const kycLinkFor = (role: string) => {
+            authServiceSpy.hasRole.mockImplementation((r: string) => r === role);
+            const compliance = createComponent().componentInstance.visibleSections.find(section => section.label === 'Compliance');
+            return compliance?.items.find(item => item.route === '/compliance/kyc');
+        };
+        expect(kycLinkFor('COMPLIANCE_OFFICER')?.label).toBe('KYC Queue');
+        expect(kycLinkFor('REGISTRY_ADMIN')?.label).toBe('KYC Queue');
+        expect(kycLinkFor('AUDIT')).toBeUndefined();
     });
 
     it('exposes the configured customer-portal URL from the environment', () => {

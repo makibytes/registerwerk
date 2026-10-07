@@ -12,6 +12,7 @@ import { LendingService } from '../../../core/api/lending.service';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { LendingMarket, LendingPosition, LendingSupplyPosition } from '../../../core/models';
 import { LendingComplianceBannerComponent } from '../compliance-banner.component';
+import { LenderEligibility, lenderBlocked, lenderNote } from '../../../core/lending/lender-copy.util';
 
 /**
  * "Liquidity" home for the Trader workspace — the guided entry point that used to not exist at
@@ -122,7 +123,7 @@ import { LendingComplianceBannerComponent } from '../compliance-banner.component
               <mat-icon class="step-icon">savings</mat-icon>
               <div class="step-body">
                 <strong>Supply &amp; earn</strong>
-                <span>Deposit stablecoin into a market and earn utilization-based yield. Lender-side eligibility is under legal review.</span>
+                <span>Deposit stablecoin into a market and earn utilization-based yield. {{ lenderText }}</span>
               </div>
               <a mat-stroked-button routerLink="/lending/supply">Supply</a>
             </mat-card-content>
@@ -163,6 +164,11 @@ export class LiquidityOverviewComponent implements OnInit {
   supplyPositions: LendingSupplyPosition[] = [];
   activeMarkets: LendingMarket[] = [];
   loadWarnings: string[] = [];
+  lenderGate: LenderEligibility | null = null;
+
+  get lenderText(): string {
+    return lenderNote(this.lenderGate);
+  }
 
   get walletConnected(): boolean {
     return this.wallet.isConnected();
@@ -179,6 +185,7 @@ export class LiquidityOverviewComponent implements OnInit {
     let supplyFailed = false;
     let marketsFailed = false;
     forkJoin({
+      gate: this.lendingService.lenderEligibility().pipe(catchError(() => of<LenderEligibility | null>(null))),
       positions: this.lendingService.myPositions().pipe(catchError(() => {
         positionsFailed = true;
         return of<LendingPosition[]>([]);
@@ -191,12 +198,14 @@ export class LiquidityOverviewComponent implements OnInit {
         marketsFailed = true;
         return of<LendingMarket[]>([]);
       })),
-    }).subscribe(({ positions, supply, markets }) => {
+    }).subscribe(({ gate, positions, supply, markets }) => {
+      this.lenderGate = gate;
       this.openLoans = positions.filter((p) => p.status === 'OPEN');
       this.supplyPositions = supply;
       this.activeMarkets = markets;
       if (positionsFailed) this.loadWarnings.push('Open loans could not be loaded.');
-      if (supplyFailed) this.loadWarnings.push('Supply positions could not be loaded.');
+      // A blocked entity is refused the supply-positions endpoint by design; that is not a load failure.
+      if (supplyFailed && !lenderBlocked(gate)) this.loadWarnings.push('Supply positions could not be loaded.');
       if (marketsFailed) this.loadWarnings.push('Available markets could not be loaded.');
       this.loading = false;
       this.cdr.markForCheck();

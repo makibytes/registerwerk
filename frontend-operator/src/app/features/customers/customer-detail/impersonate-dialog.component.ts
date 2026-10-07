@@ -8,6 +8,8 @@ import { MatRadioModule } from '@angular/material/radio';
 
 export interface ImpersonateDialogData {
   entityName: string;
+  /** Production mode is read-only impersonation only (T6-05): act-on-behalf is never offered. */
+  productionMode?: boolean;
 }
 
 export interface ImpersonateDialogResult {
@@ -37,8 +39,12 @@ export interface ImpersonateDialogResult {
       <mat-radio-group [(ngModel)]="mode" aria-label="Session mode">
         <mat-radio-button value="READ_ONLY">Read-only support session</mat-radio-button>
         <p class="mode-hint">You see what the customer sees; every change is blocked. Needs step-up.</p>
-        <mat-radio-button value="ACT_ON_BEHALF">Act on behalf of the customer</mat-radio-button>
-        <p class="mode-hint">You can change data as the customer; some actions stay denied. Needs step-up and a second approver.</p>
+        @if (data.productionMode) {
+          <p class="mode-hint">Acting on behalf of a customer is disabled in production mode; support sessions are read-only.</p>
+        } @else {
+          <mat-radio-button value="ACT_ON_BEHALF">Act on behalf of the customer</mat-radio-button>
+          <p class="mode-hint">You can change data as the customer; some actions stay denied. Needs step-up and a second approver.</p>
+        }
       </mat-radio-group>
       <mat-form-field class="full-width" appearance="outline">
         <mat-label>Reason (at least 15 characters)</mat-label>

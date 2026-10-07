@@ -86,13 +86,13 @@ description: Borrador de registro de actividades de tratamiento conforme al Art.
 | **Retención** | Duración del empleo + 2 años |
 | **Medidas de seguridad** | Hashing de contraseñas de BCrypt; JWT (de corta duración, 8 h); MFA para operaciones sensibles |
 
-## 7. Informes regulatorios (MiFIR, DAC8, Ertragsaufstellung) { #7-regulatory-reporting-mifir-dac8-steuerbescheinigung }
+## 7. Informes regulatorios (MiFIR, DAC8, Ertragsübersicht) { #7-regulatory-reporting-mifir-dac8-steuerbescheinigung }
 
 | Campo | Valor |
 |---|---|
 | **Propósito** | Notificación obligatoria de transacciones a las autoridades competentes |
 | **Base jurídica** | Obligación legal (Art. 6(1)(c)) — MiFIR art. 26, DAC8, EStG §43 |
-| **Categorías de datos** | Nombre del inversor, identificación fiscal, participaciones, transacciones, IBAN (para el Ertragsaufstellung) |
+| **Categorías de datos** | Nombre del inversor, identificación fiscal, participaciones, transacciones, IBAN (para el Ertragsübersicht) |
 | **Destinatarios** | BaFin (DE), AMF (FR), CSSF (LU), FMA (LI), BZSt (DAC8/CARF), DGFiP (FR), ACD (LU) |
 | **Retención** | 7 años (MiFIR); 10 años (eWpG) |
 | **Medidas de seguridad** | PDF firmados PAdES-B-LT; SFTP a portales de autoridad; recibos de envío |

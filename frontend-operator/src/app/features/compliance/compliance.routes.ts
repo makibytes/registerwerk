@@ -1,7 +1,31 @@
 import { Routes } from '@angular/router';
 import { roleGuard } from '../../core/auth/auth.guard';
 
+/**
+ * KYC queue and review (T8-03): registry administrators and compliance officers. Kept in a constant so the
+ * route table and its spec cannot drift apart; the backend (`KycReviewController`) is the actual boundary.
+ */
+export const KYC_REVIEW_ROLES = ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] as const;
+
 export const COMPLIANCE_ROUTES: Routes = [
+  {
+    path: 'kyc',
+    canActivate: [roleGuard],
+    data: { roles: KYC_REVIEW_ROLES },
+    loadComponent: () =>
+      import('./kyc/kyc-queue.component').then(
+        (m) => m.KycQueueComponent,
+      ),
+  },
+  {
+    path: 'kyc/:id',
+    canActivate: [roleGuard],
+    data: { roles: KYC_REVIEW_ROLES },
+    loadComponent: () =>
+      import('./kyc/kyc-review.component').then(
+        (m) => m.KycReviewComponent,
+      ),
+  },
   {
     path: 'screening',
     canActivate: [roleGuard],

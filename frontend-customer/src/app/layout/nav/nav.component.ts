@@ -33,9 +33,12 @@ const { operatorUrl } = environment;
       <div class="impersonation-bar">
         <mat-icon>admin_panel_settings</mat-icon>
         @if (isImpersonating) {
-          <span>Acting as <strong>{{ impersonationEntityName }}</strong>
-            @if (impersonationReadOnly) { (read-only support session — changes are blocked) }
-            @else { (acting on behalf — every action is audited) }
+          <span>
+            @if (impersonationReadOnly) {
+              Viewing <strong>{{ impersonationEntityName }}</strong> (read-only support session — changes are blocked)
+            } @else {
+              Acting as <strong>{{ impersonationEntityName }}</strong> (acting on behalf — every action is audited)
+            }
           </span>
           <div class="imp-actions">
             <button class="imp-btn" type="button" (click)="switchCompany()">Switch company</button>
@@ -636,7 +639,7 @@ export class NavComponent implements OnInit {
     this.userName = this.auth.getUserName();
     this.userEmail = this.auth.getUserEmail();
     this.isImpersonating = this.auth.isImpersonating();
-    this.canImpersonate = this.auth.hasRole('REGISTRY_ADMIN');
+    this.canImpersonate = this.auth.hasRole('REGISTRY_ADMIN') || this.auth.hasRole('SUPPORT_AGENT');
     this.canManageWebhooks = this.auth.hasRole('COMPANY_ADMIN');
     this.impersonationReadOnly = this.auth.isImpersonationReadOnly();
     const meta = this.auth.getImpersonationMeta();

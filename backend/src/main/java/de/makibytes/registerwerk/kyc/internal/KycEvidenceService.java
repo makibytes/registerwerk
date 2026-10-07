@@ -171,14 +171,30 @@ public class KycEvidenceService {
     }
 
     List<String> gapsOf(LegalEntity entity, LocalDate today) {
-        List<String> gaps = new ArrayList<>();
+        List<String> gaps = new ArrayList<>(expiryGapsOf(entity, today));
+        gaps.addAll(evidenceGapsOf(entity));
+        return gaps;
+    }
+
+    /** Expiry findings of an approved entity: already expired, or valid beyond the configured maximum. */
+    List<String> expiryGapsOf(LegalEntity entity, LocalDate today) {
         LocalDate expiry = entity.getKycExpiryDate();
         if (expiry == null || expiry.isBefore(today)) {
-            gaps.add("KYC_EXPIRED");
-        } else if (expiry.isAfter(latestAllowedExpiry(today))) {
-            gaps.add("EXPIRY_BEYOND_MAX_VALIDITY");
+            return List.of("KYC_EXPIRED");
         }
-        Evidence evidence = evaluate(entity.getId(), homeJurisdiction(entity));
+        if (expiry.isAfter(latestAllowedExpiry(today))) {
+            return List.of("EXPIRY_BEYOND_MAX_VALIDITY");
+        }
+        return List.of();
+    }
+
+    /** What would block an approval today: checklist, beneficial-owner coverage, PEP/EDD and screening. */
+    List<String> evidenceGapsOf(LegalEntity entity) {
+        return evidenceGapsOf(entity, evaluate(entity.getId(), homeJurisdiction(entity)));
+    }
+
+    List<String> evidenceGapsOf(LegalEntity entity, Evidence evidence) {
+        List<String> gaps = new ArrayList<>();
         KycComplianceService.ComplianceResult c = evidence.checklist();
         if (!c.fullyCompliant()) {
             gaps.add("CHECKLIST_INCOMPLETE (missing=" + c.missingCount() + ", expired=" + c.expiredCount()

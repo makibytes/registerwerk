@@ -22,11 +22,13 @@ import { type Address } from 'viem';
 import { executeWithdraw } from '../../../core/lending/withdraw.flow';
 import { formatTokenAmountGrouped, parseTokenAmount } from '../../../core/lending/token-amount.util';
 import { collateralPauseMessage } from '../../../core/utils/market-pause.util';
+import { LenderEligibility, lenderBlocked, lenderNote } from '../../../core/lending/lender-copy.util';
 
 /**
- * Lender side of the securities-backed lending facility — deliberately ungated (any stablecoin holder, no
- * KYC) per `EwpgRepoMarket`'s own asymmetric design: the fewer barriers to *supplying* capital,
- * the deeper the pool. See `contracts/src/lending/EwpgRepoMarket.sol` NatSpec.
+ * Lender side of the securities-backed lending facility. The `EwpgRepoMarket` contract itself is permissionless
+ * (see its NatSpec); in production mode the backend gates this page like the borrower side (approved, screened,
+ * professional / eligible counterparty — `GET /lending/lender-eligibility`, T2-20) and an ineligible entity sees a
+ * factual refusal instead of the supply form. Demo mode keeps the ungated flow and the legal-review wording.
  */
 @Component({
   selector: 'app-supply-earn',
@@ -49,7 +51,7 @@ import { collateralPauseMessage } from '../../../core/utils/market-pause.util';
   ],
   template: `
     <div class="page-container">
-      <app-page-header title="Supply & Earn" subtitle="Deposit stablecoin into a market and earn a transparent, utilization-based yield. Lender-side eligibility is under legal review.">
+      <app-page-header title="Supply & Earn" [subtitle]="subtitle">
         <a mat-stroked-button routerLink="/lending">
           <mat-icon>arrow_back</mat-icon>
           Liquidity
@@ -58,6 +60,16 @@ import { collateralPauseMessage } from '../../../core/utils/market-pause.util';
 
       @if (loading) {
         <div class="loading-row"><mat-spinner diameter="32"></mat-spinner></div>
+      } @else if (blocked) {
+        <mat-card class="form-card">
+          <mat-card-content role="alert">
+            <p class="error-text">
+              Your organisation cannot use Supply &amp; Earn: it does not meet the lender-side requirements.
+              @if (lenderGate?.reasons?.length) { {{ lenderGate!.reasons.join('; ') }}. }
+              Contact your relationship manager to resolve this.
+            </p>
+          </mat-card-content>
+        </mat-card>
       } @else if (loadError) {
         <mat-card class="form-card">
           <mat-card-content role="alert">
@@ -180,6 +192,16 @@ export class SupplyEarnComponent implements OnInit {
   actionError: string | null = null;
   loadError = '';
   positionsError = '';
+  /** Lender gate (T2-20): null until loaded or when the preflight is unreachable. */
+  lenderGate: LenderEligibility | null = null;
+
+  get subtitle(): string {
+    return `Deposit stablecoin into a market and earn a transparent, utilization-based yield. ${lenderNote(this.lenderGate)}`;
+  }
+
+  get blocked(): boolean {
+    return lenderBlocked(this.lenderGate);
+  }
 
   ngOnInit(): void {
     this.load();
@@ -192,6 +214,7 @@ export class SupplyEarnComponent implements OnInit {
     let marketsFailed = false;
     let positionsFailed = false;
     forkJoin({
+      gate: this.lendingService.lenderEligibility().pipe(catchError(() => of<LenderEligibility | null>(null))),
       // Not only ACTIVE: lenders must still be able to withdraw from a paused or legacy market.
       markets: this.lendingService.listMarkets().pipe(
         map((all) => all.filter((market) => market.status !== 'RETIRED')),
@@ -204,11 +227,13 @@ export class SupplyEarnComponent implements OnInit {
         positionsFailed = true;
         return of<LendingSupplyPosition[]>([]);
       })),
-    }).subscribe(({ markets, positions }) => {
+    }).subscribe(({ gate, markets, positions }) => {
+      this.lenderGate = gate;
       this.markets = markets;
       this.positions = positions;
       if (marketsFailed) this.loadError = 'Supply markets could not be loaded.';
-      if (positionsFailed) this.positionsError = 'Your existing supply positions could not be loaded.';
+      // A blocked entity is refused the positions endpoint by design; that is not a load failure.
+      if (positionsFailed && !this.blocked) this.positionsError = 'Your existing supply positions could not be loaded.';
       if (!markets.some((market) => market.id === this.selectedMarketId)) {
         this.selectedMarketId = (markets.find((market) => this.acceptsSupply(market)) ?? markets[0])?.id ?? null;
       }
@@ -241,7 +266,7 @@ export class SupplyEarnComponent implements OnInit {
 
   async supply(): Promise<void> {
     const market = this.markets.find((m) => m.id === this.selectedMarketId);
-    if (!market || this.acting || !this.isValidAmount() || !this.acceptsSupply(market)) return;
+    if (!market || this.acting || this.blocked || !this.isValidAmount() || !this.acceptsSupply(market)) return;
     this.acting = 'supply';
     this.actionError = null;
     this.cdr.markForCheck();
@@ -277,7 +302,7 @@ export class SupplyEarnComponent implements OnInit {
 
   async withdraw(all = false): Promise<void> {
     const market = this.markets.find((m) => m.id === this.selectedMarketId);
-    if (!market || this.acting || (!all && !this.isValidAmount())) return;
+    if (!market || this.acting || this.blocked || (!all && !this.isValidAmount())) return;
     this.acting = 'withdraw';
     this.actionError = null;
     this.cdr.markForCheck();

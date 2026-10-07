@@ -175,6 +175,29 @@ class KycApprovalGateTest {
     }
 
     @Test
+    @DisplayName("T6-12: a PENDING_REACTIVATION entity needs the full approval; success activates it and reuses the reactivation event; CLOSED stays refused")
+    void pendingReactivationIsActivatedByFreshApproval() {
+        entity.setStatus(EntityStatus.CLOSED);
+        assertThatThrownBy(() -> approve(null, null, true)).isInstanceOf(InvalidStateTransitionException.class);
+
+        entity.setStatus(EntityStatus.PENDING_REACTIVATION);
+        entity.setKycStatus(de.makibytes.registerwerk.customer.api.KycStatus.NOT_STARTED);
+        // gates still apply: an unresolved screening result refuses and leaves the entity pending
+        when(gate.hasUnresolvedHit(entityId)).thenReturn(true);
+        assertThatThrownBy(() -> approve(null, null, true)).isInstanceOf(ComplianceGateException.class);
+        assertThat(entity.getStatus()).isEqualTo(EntityStatus.PENDING_REACTIVATION);
+        verify(entities, never()).save(any());
+
+        when(gate.hasUnresolvedHit(entityId)).thenReturn(false);
+        approve(null, null, true);
+        assertThat(entity.getStatus()).isEqualTo(EntityStatus.ACTIVE);
+        assertThat(entity.getKycStatus()).isEqualTo(de.makibytes.registerwerk.customer.api.KycStatus.APPROVED);
+        ArgumentCaptor<Object> ev = ArgumentCaptor.forClass(Object.class);
+        verify(publisher, org.mockito.Mockito.times(2)).publishEvent(ev.capture());
+        assertThat(ev.getAllValues().get(1)).isInstanceOf(de.makibytes.registerwerk.customer.events.EntityReactivatedEvent.class);
+    }
+
+    @Test
     @DisplayName("a confirmed PEP caps the expiry at the EDD review date and without EDD blocks approval")
     void pepCapAndMissingEdd() {
         UUID personId = UUID.randomUUID();

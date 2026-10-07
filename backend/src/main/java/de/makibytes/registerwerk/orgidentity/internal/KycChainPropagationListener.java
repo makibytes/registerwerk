@@ -295,7 +295,8 @@ class KycChainPropagationListener {
 
     /**
      * Null while the lapse still applies, otherwise a note on why the row is superseded.
-     * Closure and dissolution are terminal, so they never supersede.
+     * Closure and dissolution keep applying while a reinstatement is pending (PENDING_REACTIVATION:
+     * on-chain state is untouched until the KYC is approved again), so they never supersede then.
      */
     private static String stillApplies(String trigger, LegalEntity entity) {
         if (entity == null) {
@@ -306,6 +307,7 @@ class KycChainPropagationListener {
                     ? null : "entityStatus=" + entity.getStatus();
             case TRIGGER_ENTITY_CLOSED, TRIGGER_ENTITY_DISSOLVED ->
                     entity.getStatus() == EntityStatus.CLOSED || entity.getStatus() == EntityStatus.DISSOLVED
+                            || entity.getStatus() == EntityStatus.PENDING_REACTIVATION
                             ? null : "entityStatus=" + entity.getStatus();
             default -> entity.getKycStatus() == KycStatus.EXPIRED || entity.getKycStatus() == KycStatus.REJECTED
                     ? null : "kycStatus=" + entity.getKycStatus();

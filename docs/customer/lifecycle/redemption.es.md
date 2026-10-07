@@ -97,7 +97,7 @@ Solo un subconjunto puede crearse hoy realmente — el resto está modelado (tie
 
 ## Extracto de rendimientos (no es un certificado fiscal) { #tax-certificates }
 
-Para los titulares alemanes, los rendimientos de un valor tributan. Registerwerk ofrece cada año un **Ertragsaufstellung** (extracto de rendimientos) con lo abonado al titular en un año determinado, pero **no es una Steuerbescheinigung** en el sentido del § 45a EStG.
+Para los titulares alemanes, los rendimientos de un valor tributan. Registerwerk ofrece cada año un **Ertragsübersicht** (extracto de rendimientos) con lo abonado al titular en un año determinado, pero **no es una Steuerbescheinigung** en el sentido del § 45a EStG.
 
 Se genera a partir de las filas de operaciones societarias liquidadas: para cada inversor, los derechos de cupón, intereses y dividendos del año natural, agrupados **por divisa** (nunca se suman importes de divisas distintas). Las devoluciones de principal (amortización, llamada, amortización parcial) y los desembolsos exigidos **no son rendimientos** y se excluyen; las ganancias por transmisión o amortización no se determinan, porque el registro no conserva los costes de adquisición.
 

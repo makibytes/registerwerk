@@ -3,6 +3,8 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { ShellComponent } from './shell.component';
 import { AuthService } from '../../core/auth/auth.service';
+import { ApprovalBadgeService } from '../../core/services/approval-badge.service';
+import { signal } from '@angular/core';
 import { environment } from '../../../environments/environment';
 
 describe('ShellComponent', () => {
@@ -22,6 +24,7 @@ describe('ShellComponent', () => {
             providers: [
                 provideRouter([]),
                 { provide: AuthService, useValue: authServiceSpy },
+                { provide: ApprovalBadgeService, useValue: { pendingCount: signal(0), start: vi.fn(), stop: vi.fn() } },
             ],
         });
     });

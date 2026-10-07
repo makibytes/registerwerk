@@ -112,6 +112,42 @@ class StepUpTokenValidatorTest {
                 .hasMessageContaining("no longer an enabled REGISTRY_ADMIN");
     }
 
+    private Jwt approverJwtBoundTo(UUID initiator) {
+        return Jwt.withTokenValue("raw-token")
+                .header("alg", "HS256")
+                .subject(approverId.toString())
+                .claim("roles", List.of("REGISTRY_ADMIN"))
+                .claim("acr", "stepup")
+                .claim("use", "dual_control")
+                .audience(List.of("registerwerk-dual-control"))
+                .claim("jti", "jti-fixture")
+                .claim("stepup_scope", "FORCE_BURN")
+                .claim("stepup_initiator", initiator.toString())
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(600))
+                .build();
+    }
+
+    @Test
+    @DisplayName("T8-02: an approval minted from the queue for one initiator is refused for any other presenter")
+    void rejects_tokenBoundToAnotherInitiator() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(approverJwtBoundTo(UUID.randomUUID()));
+
+        assertThatThrownBy(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("different initiator");
+    }
+
+    @Test
+    @DisplayName("T8-02: ... and accepted for the initiator it was minted for")
+    void accepts_tokenBoundToThisInitiator() {
+        when(jwtDecoder.decode("raw-token")).thenReturn(approverJwtBoundTo(initiatorId));
+        when(appUserRepository.findById(approverId)).thenReturn(Optional.of(enabledAdmin()));
+
+        assertThatCode(() -> validator.validateDualControlToken("raw-token", initiatorId.toString(), "FORCE_BURN", null))
+                .doesNotThrowAnyException();
+    }
+
     @Test
     @DisplayName("accepts a currently-enabled COMPLIANCE_OFFICER approver — segregation of duties, not just dual REGISTRY_ADMIN")
     void accepts_complianceOfficerApprover() {

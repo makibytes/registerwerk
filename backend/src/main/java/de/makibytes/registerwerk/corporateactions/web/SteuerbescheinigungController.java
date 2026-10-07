@@ -14,7 +14,8 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 /**
- * Steuerbescheinigung endpoints.
+ * Income statement endpoints (informational Ertragsübersicht, NOT a tax certificate; T3-03). The
+ * historic class name and the {@code /tax-certificates/} paths are kept for API stability.
  * Customer: GET /api/v1/me/tax-certificates/{year}
  * Operator: GET /api/v1/customers/{entityId}/tax-certificates/{year}
  */
@@ -48,7 +49,7 @@ public class SteuerbescheinigungController {
             return ResponseEntity.badRequest().build();
         }
         byte[] pdf = service.generate(entityId, year);
-        String filename = "Ertragsaufstellung-" + year + ".pdf";
+        String filename = "Ertragsuebersicht-" + year + ".pdf";
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION,

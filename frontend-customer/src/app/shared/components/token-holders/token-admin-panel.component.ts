@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -9,7 +9,20 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { AddressPickerDialogComponent, AddressPickerDialogData } from '../address-picker-dialog.component';
+import { ApprovalRequestSession, CreateApprovalRequest } from '@registerwerk/ui';
+import { ApprovalQueueService } from '../../../core/api/approval-queue.service';
+import { ApprovalRequestBoxComponent } from '../approval/approval-request-box.component';
 import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from './models';
+
+export type ApprovalKind = 'mint' | 'burn' | 'forceTransfer' | 'forceApprove';
+
+/** The `@RequiresStepUp` reason and endpoint segment of each issuer action that needs a second approver. */
+const APPROVAL_ACTIONS: Record<ApprovalKind, { action: string; segment: string }> = {
+  mint: { action: 'ISSUER_MINT', segment: 'mint' },
+  burn: { action: 'ISSUER_BURN_EWG26', segment: 'burn' },
+  forceTransfer: { action: 'ISSUER_FORCED_TRANSFER_EWG24', segment: 'forced-transfer' },
+  forceApprove: { action: 'ISSUER_FORCED_APPROVE_OVERRIDE', segment: 'forced-approve' },
+};
 
 @Component({
   selector: 'app-token-admin-panel',
@@ -24,6 +37,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
     MatDialogModule,
     MatIconModule,
     MatTooltipModule,
+    ApprovalRequestBoxComponent,
   ],
   template: `
     <div class="admin-panel">
@@ -65,17 +79,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
             </mat-form-field>
 
-            <mat-form-field class="full-width">
-              <mat-label>Operator approval token (ISSUER_MINT)</mat-label>
-              <input matInput [(ngModel)]="mintForm.approvalToken" required class="address-input">
-              <mat-hint>A mint needs a second approver, and the recipient must be a registered, KYC-approved holder.</mat-hint>
-            </mat-form-field>
-            <div class="preview-box">
-              <div class="preview-label">
-                Give your approver exactly this request. Their approval token is bound to it and works once:
-                <pre class="approval-request">{{ approvalRequest('mint') }}</pre>
-              </div>
-            </div>
+            <app-approval-request-box [session]="sessions.mint" [request]="approvalRequestFor('mint')" />
 
             <div class="preview-box">
               <span class="preview-label">Preview:</span>
@@ -106,8 +110,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <mat-icon>verified_user</mat-icon>
               <span class="preview-label">
                 A burn is a cancellation under eWpG §26. It needs an ASSET_TOKEN_ADMIN grant for this asset
-                and the approval of a registry administrator (4-eyes). Ask them for an approval token for
-                <code>ISSUER_BURN_EWG26</code>.
+                and the approval of a registry administrator (4-eyes), requested below.
               </span>
             </div>
 
@@ -138,23 +141,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
             </mat-form-field>
 
-            <mat-form-field class="full-width">
-              <mat-label>Operator approval token</mat-label>
-              <input matInput [(ngModel)]="burnForm.approvalToken" required class="address-input">
-            </mat-form-field>
-            <div class="preview-box">
-              <div class="preview-label">
-                Give your approver exactly this request. Their approval token is bound to it and works once:
-                <pre class="approval-request">{{ approvalRequest('burn') }}</pre>
-              </div>
-            </div>
-
-            @if (!burnForm.approvalToken.trim()) {
-              <div class="preview-box">
-                <mat-icon>hourglass_top</mat-icon>
-                <span class="preview-label">Awaiting second approver — paste the registry administrator's approval token.</span>
-              </div>
-            }
+            <app-approval-request-box [session]="sessions.burn" [request]="approvalRequestFor('burn')" />
 
             <div class="preview-box warning">
               <mat-icon>warning</mat-icon>
@@ -220,17 +207,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
             </mat-form-field>
 
-            <mat-form-field class="full-width">
-              <mat-label>Operator approval token (ISSUER_FORCED_TRANSFER_EWG24)</mat-label>
-              <input matInput [(ngModel)]="forceTransferForm.approvalToken" required class="address-input">
-              <mat-hint>A registry administrator issues this second-approver token; it is scoped to ISSUER_FORCED_TRANSFER_EWG24.</mat-hint>
-            </mat-form-field>
-            <div class="preview-box">
-              <div class="preview-label">
-                Give your approver exactly this request. Their approval token is bound to it and works once:
-                <pre class="approval-request">{{ approvalRequest('forceTransfer') }}</pre>
-              </div>
-            </div>
+            <app-approval-request-box [session]="sessions.forceTransfer" [request]="approvalRequestFor('forceTransfer')" />
 
             <div class="preview-box">
               <span class="preview-label">Preview:</span>
@@ -304,17 +281,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
               <mat-hint>Built-in sign-in only. With Microsoft sign-in you are asked to re-authenticate instead.</mat-hint>
             </mat-form-field>
 
-            <mat-form-field class="full-width">
-              <mat-label>Operator approval token (ISSUER_FORCED_APPROVE_OVERRIDE)</mat-label>
-              <input matInput [(ngModel)]="forceApproveForm.approvalToken" required class="address-input">
-              <mat-hint>A registry administrator issues this second-approver token; it is scoped to ISSUER_FORCED_APPROVE_OVERRIDE.</mat-hint>
-            </mat-form-field>
-            <div class="preview-box">
-              <div class="preview-label">
-                Give your approver exactly this request. Their approval token is bound to it and works once:
-                <pre class="approval-request">{{ approvalRequest('forceApprove') }}</pre>
-              </div>
-            </div>
+            <app-approval-request-box [session]="sessions.forceApprove" [request]="approvalRequestFor('forceApprove')" />
 
             <div class="preview-box">
               <span class="preview-label">Preview:</span>
@@ -341,7 +308,6 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
     </div>
   `,
   styles: [`
-    .approval-request { margin: 6px 0 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; color: var(--rw-text-primary); }
     .admin-panel {
       border: 1px solid var(--rw-border);
       border-radius: 8px;
@@ -454,7 +420,7 @@ import { MintAction, BurnAction, ForceTransferAction, ForceApproveAction } from 
     }
   `],
 })
-export class TokenAdminPanelComponent {
+export class TokenAdminPanelComponent implements OnDestroy {
   @Input() assetId!: string;
   @Input() deploymentId!: string;
   @Input() busy = false;
@@ -466,19 +432,35 @@ export class TokenAdminPanelComponent {
 
   private readonly dialog = inject(MatDialog);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly approvalQueue = inject(ApprovalQueueService);
+
+  /** One approval session per action; they live here so switching tabs does not lose a filed request. */
+  readonly sessions: Record<ApprovalKind, ApprovalRequestSession> = {
+    mint: this.newSession(),
+    burn: this.newSession(),
+    forceTransfer: this.newSession(),
+    forceApprove: this.newSession(),
+  };
+  private readonly requestCache = new Map<ApprovalKind, { key: string; request: CreateApprovalRequest | null }>();
+
+  private newSession(): ApprovalRequestSession {
+    return new ApprovalRequestSession(this.approvalQueue, () => this.cdr.markForCheck());
+  }
+
+  ngOnDestroy(): void {
+    Object.values(this.sessions).forEach(s => s.destroy());
+  }
 
   mintForm = {
     recipient: '',
     amount: '',
     totpCode: '',
-    approvalToken: '',
   };
 
   burnForm = {
     fromWallet: '',
     amount: '',
     totpCode: '',
-    approvalToken: '',
   };
 
   forceTransferForm = {
@@ -487,7 +469,6 @@ export class TokenAdminPanelComponent {
     amount: '',
     legalBasis: '',
     totpCode: '',
-    approvalToken: '',
   };
 
   forceApproveForm = {
@@ -496,7 +477,6 @@ export class TokenAdminPanelComponent {
     amount: '',
     legalBasis: '',
     totpCode: '',
-    approvalToken: '',
   };
 
   pickWallet(setter: (addr: string) => void): void {
@@ -511,35 +491,52 @@ export class TokenAdminPanelComponent {
     });
   }
 
-  isValidMintForm(): boolean {
-    return this.isValidAddress(this.mintForm.recipient) && this.isValidAmount(this.mintForm.amount)
-      && !!this.mintForm.approvalToken.trim();
+  /** The id of the approved request of this action, or null while it is not approved. */
+  private approvedId(kind: ApprovalKind): string | null {
+    const session = this.sessions[kind];
+    return session.phase === 'approved' ? (session.view?.id ?? null) : null;
   }
 
-  isValidBurnForm(): boolean {
-    return this.isValidAddress(this.burnForm.fromWallet)
-      && this.isValidAmount(this.burnForm.amount)
-      && !!this.burnForm.approvalToken.trim();
+  private mintFieldsValid(): boolean {
+    return this.isValidAddress(this.mintForm.recipient) && this.isValidAmount(this.mintForm.amount);
   }
 
-  isValidForceTransferForm(): boolean {
+  private burnFieldsValid(): boolean {
+    return this.isValidAddress(this.burnForm.fromWallet) && this.isValidAmount(this.burnForm.amount);
+  }
+
+  private forceTransferFieldsValid(): boolean {
     return (
       this.isValidAddress(this.forceTransferForm.fromWallet) &&
       this.isValidAddress(this.forceTransferForm.toWallet) &&
       this.isValidAmount(this.forceTransferForm.amount) &&
-      this.forceTransferForm.legalBasis.trim().length >= 10 &&
-      !!this.forceTransferForm.approvalToken.trim()
+      this.forceTransferForm.legalBasis.trim().length >= 10
     );
   }
 
-  isValidForceApproveForm(): boolean {
+  private forceApproveFieldsValid(): boolean {
     return (
       this.isValidAddress(this.forceApproveForm.ownerWallet) &&
       this.isValidAddress(this.forceApproveForm.spenderWallet) &&
       this.isValidAmount(this.forceApproveForm.amount) &&
-      this.forceApproveForm.legalBasis.trim().length >= 10 &&
-      !!this.forceApproveForm.approvalToken.trim()
+      this.forceApproveForm.legalBasis.trim().length >= 10
     );
+  }
+
+  isValidMintForm(): boolean {
+    return this.mintFieldsValid() && this.approvedId('mint') !== null;
+  }
+
+  isValidBurnForm(): boolean {
+    return this.burnFieldsValid() && this.approvedId('burn') !== null;
+  }
+
+  isValidForceTransferForm(): boolean {
+    return this.forceTransferFieldsValid() && this.approvedId('forceTransfer') !== null;
+  }
+
+  isValidForceApproveForm(): boolean {
+    return this.forceApproveFieldsValid() && this.approvedId('forceApprove') !== null;
   }
 
   private isValidAddress(address: string): boolean {
@@ -557,8 +554,9 @@ export class TokenAdminPanelComponent {
       recipient: this.mintForm.recipient.trim(),
       amount: this.mintForm.amount.trim(),
       totpCode: this.mintForm.totpCode.trim() || undefined,
-      approvalToken: this.mintForm.approvalToken.trim(),
+      approvalRequestId: this.approvedId('mint')!,
     });
+    this.sessions.mint.reset(); // the approval is spent by this submit, win or lose
   }
 
   submitBurn(): void {
@@ -568,8 +566,9 @@ export class TokenAdminPanelComponent {
       amount: this.burnForm.amount.trim(),
       fromWallet: this.burnForm.fromWallet.trim(),
       totpCode: this.burnForm.totpCode.trim() || undefined,
-      approvalToken: this.burnForm.approvalToken.trim(),
+      approvalRequestId: this.approvedId('burn')!,
     });
+    this.sessions.burn.reset();
   }
 
   submitForceTransfer(): void {
@@ -581,39 +580,59 @@ export class TokenAdminPanelComponent {
       amount: this.forceTransferForm.amount.trim(),
       legalBasis: this.forceTransferForm.legalBasis.trim(),
       totpCode: this.forceTransferForm.totpCode.trim() || undefined,
-      approvalToken: this.forceTransferForm.approvalToken.trim(),
+      approvalRequestId: this.approvedId('forceTransfer')!,
     });
+    this.sessions.forceTransfer.reset();
   }
 
   submitForceApprove(): void {
     if (this.busy || !this.isValidForceApproveForm()
         || !confirm('Execute this legally authorized allowance override?')) return;
     this.forceApprove.emit({
-      ownerWallet: this.forceApproveForm.ownerWallet,
-      spenderWallet: this.forceApproveForm.spenderWallet,
+      ownerWallet: this.forceApproveForm.ownerWallet.trim(),
+      spenderWallet: this.forceApproveForm.spenderWallet.trim(),
       amount: this.forceApproveForm.amount.trim(),
       legalBasis: this.forceApproveForm.legalBasis.trim(),
       totpCode: this.forceApproveForm.totpCode.trim() || undefined,
-      approvalToken: this.forceApproveForm.approvalToken.trim(),
+      approvalRequestId: this.approvedId('forceApprove')!,
     });
+    this.sessions.forceApprove.reset();
   }
 
-  /** The exact call the approver's token must be bound to: `METHOD /path` plus the JSON body (sorted keys are applied server-side). */
-  approvalRequest(kind: 'mint' | 'burn' | 'forceTransfer' | 'forceApprove'): string {
-    const base = `/api/v1/assets/${this.assetId}/deployments/${this.deploymentId}/issuer`;
+  /**
+   * The exact call the approval is bound to (what the parent will send: see issuance-detail's onMint/onBurn/...),
+   * or null while the form is incomplete. Memoised so the box input keeps its identity between change detections.
+   */
+  approvalRequestFor(kind: ApprovalKind): CreateApprovalRequest | null {
+    const request = this.buildApprovalRequest(kind);
+    const key = JSON.stringify(request);
+    const cached = this.requestCache.get(kind);
+    if (cached && cached.key === key) return cached.request;
+    this.requestCache.set(kind, { key, request });
+    return request;
+  }
+
+  private buildApprovalRequest(kind: ApprovalKind): CreateApprovalRequest | null {
+    const { action, segment } = APPROVAL_ACTIONS[kind];
+    const base = {
+      action, method: 'POST',
+      path: `/api/v1/assets/${this.assetId}/deployments/${this.deploymentId}/issuer/${segment}`,
+    };
     switch (kind) {
       case 'mint':
-        return `POST ${base}/mint\n` + JSON.stringify({ toAddress: this.mintForm.recipient.trim(), amount: this.mintForm.amount.trim() });
+        return !this.mintFieldsValid() ? null
+          : { ...base, body: { toAddress: this.mintForm.recipient.trim(), amount: this.mintForm.amount.trim() } };
       case 'burn':
-        return `POST ${base}/burn\n` + JSON.stringify({ fromAddress: this.burnForm.fromWallet.trim(), amount: this.burnForm.amount.trim() });
+        return !this.burnFieldsValid() ? null
+          : { ...base, body: { fromAddress: this.burnForm.fromWallet.trim(), amount: this.burnForm.amount.trim() } };
       case 'forceTransfer':
-        return `POST ${base}/forced-transfer\n` + JSON.stringify({
+        return !this.forceTransferFieldsValid() ? null : { ...base, body: {
           from: this.forceTransferForm.fromWallet.trim(), to: this.forceTransferForm.toWallet.trim(),
-          value: this.forceTransferForm.amount.trim(), legalBasis: this.forceTransferForm.legalBasis.trim() });
+          value: this.forceTransferForm.amount.trim(), legalBasis: this.forceTransferForm.legalBasis.trim() } };
       case 'forceApprove':
-        return `POST ${base}/forced-approve\n` + JSON.stringify({
-          owner: this.forceApproveForm.ownerWallet, spender: this.forceApproveForm.spenderWallet,
-          value: this.forceApproveForm.amount.trim(), legalBasis: this.forceApproveForm.legalBasis.trim() });
+        return !this.forceApproveFieldsValid() ? null : { ...base, body: {
+          owner: this.forceApproveForm.ownerWallet.trim(), spender: this.forceApproveForm.spenderWallet.trim(),
+          value: this.forceApproveForm.amount.trim(), legalBasis: this.forceApproveForm.legalBasis.trim() } };
     }
   }
 

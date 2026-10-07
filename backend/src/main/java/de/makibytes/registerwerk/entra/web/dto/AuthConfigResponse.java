@@ -26,6 +26,8 @@ import java.util.List;
  * @param requireTwoFactorEnrolment whether unenrolled users are redirected to /security
  * @param mfaSetupUrl              Microsoft's combined security-info registration page — the app
  *                                 cannot register an authenticator itself, so it links here
+ * @param productionMode           whether the deployment runs in production mode (T6-05: portals hide
+ *                                 act-on-behalf impersonation; T2-20: lender-side wording). Not a secret.
  */
 public record AuthConfigResponse(
         String mode,
@@ -35,5 +37,6 @@ public record AuthConfigResponse(
         boolean localRegistrationEnabled,
         boolean twoFactorPageEnabled,
         boolean requireTwoFactorEnrolment,
-        String mfaSetupUrl) {
+        String mfaSetupUrl,
+        boolean productionMode) {
 }

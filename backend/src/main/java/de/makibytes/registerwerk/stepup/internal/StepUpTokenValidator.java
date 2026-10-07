@@ -108,6 +108,14 @@ class StepUpTokenValidator {
             throw new AccessDeniedException("Dual control: approver must be a different user from the initiator.");
         }
 
+        // An approval minted for one initiator (the approval queue binds it to the requester who claimed it)
+        // works for nobody else, even with the token in hand.
+        String boundInitiator = approverJwt.getClaimAsString(JwtMintingService.CLAIM_STEPUP_INITIATOR);
+        if (boundInitiator != null && !boundInitiator.equals(primarySub)) {
+            log.warn("Dual-control approver token presented by a different initiator: sub={} action={}", primarySub, action);
+            throw new AccessDeniedException("Dual-control approver token was issued to a different initiator.");
+        }
+
         // Must be REGISTRY_ADMIN or COMPLIANCE_OFFICER (JWT claim — cheap first check before
         // the DB round-trip)
         List<String> roles = approverJwt.getClaimAsStringList("roles");
@@ -179,6 +187,16 @@ class StepUpTokenValidator {
                 exp != null ? exp : Instant.now().plusSeconds(window), digest);
     }
 
+    /** The roles that may check a dual-control action; shared with the approval queue. */
+    static boolean hasEligibleApproverRole(AppUser user) {
+        return ELIGIBLE_APPROVER_ROLES.stream().anyMatch(user::hasRole);
+    }
+
+    /** Enabled and still holding an eligible role, per the database - not per a token's claims. */
+    static boolean isEligibleApprover(AppUser user) {
+        return user != null && user.isEnabled() && hasEligibleApproverRole(user);
+    }
+
     private void requireCurrentlyEligibleApprover(String approverSub, String action) {
         UUID approverId;
         try {
@@ -187,8 +205,7 @@ class StepUpTokenValidator {
             throw new AccessDeniedException("Dual-control approver token has an invalid subject.");
         }
         AppUser approver = appUserRepository.findById(approverId).orElse(null);
-        boolean hasEligibleRole = approver != null
-                && ELIGIBLE_APPROVER_ROLES.stream().anyMatch(approver::hasRole);
+        boolean hasEligibleRole = approver != null && hasEligibleApproverRole(approver);
         if (approver == null || !approver.isEnabled() || !hasEligibleRole) {
             log.warn("Dual-control approver no longer eligible: approverId={} action={} " +
                             "(found={}, enabled={}, hasEligibleRole={})",

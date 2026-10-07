@@ -126,6 +126,55 @@ public class StepUpTokenIssuer {
             }
         }
 
+        requireSecondFactor(user, code);
+
+        Map<String, Object> claims = baseClaims(user);
+        long ttl = STEP_UP_TTL_SECONDS;
+        if (approval) {
+            putApprovalClaims(claims, action, targetDigest, JwtMintingService.newJti());
+            ttl = Math.min(ttl, dualControl.getWindowSeconds());
+        }
+        return jwtMintingService.mintLocal(userId.toString(), ttl, claims);
+    }
+
+    /**
+     * Verifies a fresh TOTP code for {@code userId} (replay-protected, lockout-counted) without minting anything.
+     * The approval queue uses it as the approver's second factor when deciding a request. Holds no transaction.
+     *
+     * @throws AccessDeniedException when the code is wrong, replayed or locked out, or the user has no TOTP
+     *         enrolment (unless the dev-only {@code allow-unenrolled} switch is on)
+     */
+    public void verifySecondFactor(UUID userId, String code) {
+        AppUser user = userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
+        if (code == null || !code.matches("\\d{6}")) {
+            throw new AccessDeniedException("Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
+        }
+        requireSecondFactor(user, code);
+    }
+
+    /**
+     * Mints the dual-control approver token for an already approved queue request: no TOTP is asked here, because
+     * the approver proved their factor when they approved. The token is bound to {@code action} + {@code
+     * targetDigest}, to the one {@code initiatorId} who may present it (checked by {@link StepUpTokenValidator})
+     * and to the queue request, carries the caller-chosen single-use {@code jti} and lives for the dual-control
+     * window - exactly the token {@link #issueAfterVerification} would have minted for the same request.
+     */
+    public MintedApproval mintApprovalToken(AppUser approver, String action, String targetDigest, UUID initiatorId,
+                                            UUID requestId, String jti) {
+        Map<String, Object> claims = baseClaims(approver);
+        putApprovalClaims(claims, action, targetDigest, jti);
+        claims.put(JwtMintingService.CLAIM_STEPUP_INITIATOR, initiatorId.toString());
+        claims.put(JwtMintingService.CLAIM_STEPUP_REQUEST, requestId.toString());
+        long ttl = Math.min(STEP_UP_TTL_SECONDS, dualControl.getWindowSeconds());
+        return new MintedApproval(jwtMintingService.mintLocal(approver.getId().toString(), ttl, claims),
+                Instant.now().plusSeconds(ttl));
+    }
+
+    /** A minted approver token and the instant it stops being accepted. */
+    public record MintedApproval(String token, Instant expiresAt) {}
+
+    private void requireSecondFactor(AppUser user, String code) {
         if (user.isTotpEnabled() && user.getTotpSecret() != null) {
             verifyAndAdvance(user, code);
         } else if (!allowUnenrolled) {
@@ -135,26 +184,27 @@ public class StepUpTokenIssuer {
                     "Step-up requires TOTP enrolment. Enrol an authenticator app first " +
                     "(POST /api/v1/auth/step-up/enroll).");
         }
+    }
 
+    private static Map<String, Object> baseClaims(AppUser user) {
         Map<String, Object> claims = new LinkedHashMap<>();
         claims.put("acr", "stepup");
         claims.put("roles", user.getRoles().stream().map(Enum::name).toList());
         claims.put("email", user.getEmail());
-        long ttl = STEP_UP_TTL_SECONDS;
-        if (approval) {
-            // C1: an approval is for the X-Dual-Control-Token header only. The marker and the dedicated
-            // audience make every Bearer-accepting layer refuse it, so it can never authenticate a caller.
-            claims.put(JwtMintingService.CLAIM_USE, JwtMintingService.USE_DUAL_CONTROL);
-            claims.put("aud", java.util.List.of(JwtMintingService.DUAL_CONTROL_AUDIENCE));
-            claims.put(JwtMintingService.CLAIM_STEPUP_SCOPE, action);
-            if (targetDigest != null) {
-                claims.put("stepup_target", targetDigest);
-            }
-            // Single-use handle; the token only ever lives for the dual-control window.
-            claims.put("jti", JwtMintingService.newJti());
-            ttl = Math.min(ttl, dualControl.getWindowSeconds());
+        return claims;
+    }
+
+    private static void putApprovalClaims(Map<String, Object> claims, String action, String targetDigest, String jti) {
+        // C1: an approval is for the X-Dual-Control-Token header only. The marker and the dedicated
+        // audience make every Bearer-accepting layer refuse it, so it can never authenticate a caller.
+        claims.put(JwtMintingService.CLAIM_USE, JwtMintingService.USE_DUAL_CONTROL);
+        claims.put("aud", java.util.List.of(JwtMintingService.DUAL_CONTROL_AUDIENCE));
+        claims.put(JwtMintingService.CLAIM_STEPUP_SCOPE, action);
+        if (targetDigest != null) {
+            claims.put("stepup_target", targetDigest);
         }
-        return jwtMintingService.mintLocal(userId.toString(), ttl, claims);
+        // Single-use handle; the token only ever lives for the dual-control window.
+        claims.put("jti", jti);
     }
 
     /** Result of starting TOTP enrolment: the raw secret and an otpauth:// URI for a QR code. */

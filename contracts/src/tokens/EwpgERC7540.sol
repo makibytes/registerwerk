@@ -18,6 +18,15 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 /// @dev Settlement model: NAV is locked at *fulfillment time* (not request time).
 ///      Operators must call setNavPerShare before fulfilling requests to ensure a current strike.
 ///
+/// @dev Forward pricing (dealing cut-off): once {setDealingCutoff} has been called, every request
+///      records its *dealing point* — the first cut-off boundary strictly after the request. It may
+///      only be fulfilled at a NAV that was struck at or after that point ({navStruckAt}), so a
+///      request placed after the cut-off can never deal at a price that was already known (late
+///      trading). Dealing points are fixed when the request is placed; changing the cut-off later
+///      does not move them. While the cut-off has never been configured the vault behaves as
+///      before (requests carry no dealing point): the operator must configure it before offering
+///      the vault to investors.
+///
 /// @dev Pending subscriptions are escrow, not fund assets: `_pendingDepositAssets`
 ///      is excluded from totalAssets() and cannot fund a redemption payout, so a
 ///      redemption can never be paid out of another investor's unsettled deposit.
@@ -59,6 +68,15 @@ contract EwpgERC7540 is EwpgERC4626 {
     ///      DepositRequest so the depositRequest() view ABI stays unchanged.
     mapping(uint256 => address) private _depositPayer;
 
+    /// @dev Dealing cut-off. Boundaries are `cutoff + k * period` seconds since the Unix epoch
+    ///      (with the default 1-day period: the cut-off time of day, UTC).
+    bool private _dealingCutoffConfigured;
+    uint256 private _dealingCutoffSecondsOfDay;
+    uint256 private _dealingPeriodSecs = 1 days;
+    /// @dev Dealing point of each request (shared id space of deposit and redeem requests);
+    ///      0 for requests placed before the cut-off was configured.
+    mapping(uint256 => uint256) private _dealingPoints;
+
     // ── Events ────────────────────────────────────────────────────────────────
 
     event DepositRequested(
@@ -87,11 +105,19 @@ contract EwpgERC7540 is EwpgERC4626 {
     );
     event RequestCancelled(uint256 indexed requestId, address indexed by);
     event MinSettlementDelayUpdated(uint256 oldDelay, uint256 newDelay);
+    event DealingCutoffUpdated(
+        uint256 oldCutoffSecondsOfDay,
+        uint256 oldPeriodSecs,
+        uint256 newCutoffSecondsOfDay,
+        uint256 newPeriodSecs
+    );
     /// @notice Registry cancelled a pending request and moved its escrow (underlying for a
     ///         deposit request, shares for a redeem request) to `to` on the stated legal basis.
     event ForcedRequestCancelled(uint256 indexed requestId, address indexed to, string legalBasis);
 
     error AsyncOnly();
+    /// @dev The NAV on the books was struck before the request's dealing point (forward pricing).
+    error NavNotStruckAfterDealingPoint(uint256 requestId, uint256 dealingPoint, uint256 navStruckAt);
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -174,6 +200,58 @@ contract EwpgERC7540 is EwpgERC4626 {
         return _minSettlementDelay;
     }
 
+    // ── Dealing cut-off (forward pricing) ─────────────────────────────────────
+
+    /// @notice Configures the dealing cut-off: `cutoffSecondsOfDay` (0..86399, seconds after
+    ///         00:00 UTC) and the dealing period (default 1 day; boundaries are
+    ///         `cutoff + k * periodSecs` since the epoch). Applies to requests placed afterwards;
+    ///         existing requests keep their dealing point. The first call switches forward
+    ///         pricing on for the vault.
+    function setDealingCutoff(uint256 cutoffSecondsOfDay, uint256 periodSecs) external onlyRegistry {
+        require(cutoffSecondsOfDay < 1 days, "EwpgERC7540: cut-off out of range");
+        require(periodSecs > 0, "EwpgERC7540: zero dealing period");
+        emit DealingCutoffUpdated(_dealingCutoffSecondsOfDay, _dealingPeriodSecs, cutoffSecondsOfDay, periodSecs);
+        _dealingCutoffConfigured = true;
+        _dealingCutoffSecondsOfDay = cutoffSecondsOfDay;
+        _dealingPeriodSecs = periodSecs;
+    }
+
+    function dealingCutoffConfigured() external view returns (bool) {
+        return _dealingCutoffConfigured;
+    }
+
+    function dealingCutoffSecondsOfDay() external view returns (uint256) {
+        return _dealingCutoffSecondsOfDay;
+    }
+
+    function dealingPeriodSecs() external view returns (uint256) {
+        return _dealingPeriodSecs;
+    }
+
+    /// @notice The dealing point a request placed in this block would get: the first cut-off
+    ///         boundary strictly after `block.timestamp`. 0 while the cut-off is not configured.
+    function nextDealingPoint() public view returns (uint256) {
+        if (!_dealingCutoffConfigured) return 0;
+        uint256 cutoff = _dealingCutoffSecondsOfDay;
+        uint256 period = _dealingPeriodSecs;
+        uint256 ts = block.timestamp;
+        return ts < cutoff ? cutoff : cutoff + ((ts - cutoff) / period + 1) * period;
+    }
+
+    /// @notice The dealing point recorded for a deposit or redeem request; 0 if the request was
+    ///         placed before the cut-off was configured (it then settles as before).
+    function dealingPointOf(uint256 requestId) external view returns (uint256) {
+        return _dealingPoints[requestId];
+    }
+
+    /// @dev Forward pricing: the NAV used for settlement must have been struck at or after the
+    ///      request's dealing point. Trivially satisfied for requests without a dealing point.
+    function _requireNavStruckAfterDealingPoint(uint256 requestId) private view {
+        uint256 dealingPoint = _dealingPoints[requestId];
+        uint256 struckAt = navStruckAt();
+        if (struckAt < dealingPoint) revert NavNotStruckAfterDealingPoint(requestId, dealingPoint, struckAt);
+    }
+
     // ── Deposit request ───────────────────────────────────────────────────────
 
     /// @notice Investor places a deposit request. Assets are transferred in immediately and held
@@ -203,10 +281,12 @@ contract EwpgERC7540 is EwpgERC4626 {
         _depositPayer[requestId] = msg.sender;
         _pendingDepositAssets += received;
         _requestTimestamps[requestId] = block.timestamp;
+        _dealingPoints[requestId] = nextDealingPoint();
         emit DepositRequested(requestId, controller, owner, received);
     }
 
-    /// @notice Operator fulfills a pending deposit request at current NAV.
+    /// @notice Operator fulfills a pending deposit request at the current NAV, which must have been
+    ///         struck at or after the request's dealing point (see {setDealingCutoff}).
     function fulfillDepositRequest(uint256 requestId) external onlyRegistry {
         DepositRequest storage req = _depositRequests[requestId];
         require(req.pending, "EwpgERC7540: not pending");
@@ -214,6 +294,7 @@ contract EwpgERC7540 is EwpgERC4626 {
                 "EwpgERC7540: settlement delay not elapsed");
         // A regulated fund must never settle at the implicit 1:1 pre-strike rate.
         require(currentNavPerShare() > 0, "EwpgERC7540: NAV not struck");
+        _requireNavStruckAfterDealingPoint(requestId);
         req.pending = false;
         _pendingDepositAssets -= req.assets;
         uint256 shares = convertToShares(req.assets);
@@ -245,16 +326,19 @@ contract EwpgERC7540 is EwpgERC4626 {
         requestId = ++_requestCounter;
         _redeemRequests[requestId] = RedeemRequest({ shares: shares, controller: controller, owner: owner, pending: true });
         _requestTimestamps[requestId] = block.timestamp;
+        _dealingPoints[requestId] = nextDealingPoint();
         emit RedeemRequested(requestId, controller, owner, shares);
     }
 
-    /// @notice Operator fulfills a pending redemption request at current NAV.
+    /// @notice Operator fulfills a pending redemption request at the current NAV, which must have been
+    ///         struck at or after the request's dealing point (see {setDealingCutoff}).
     function fulfillRedeemRequest(uint256 requestId) external onlyRegistry {
         RedeemRequest storage req = _redeemRequests[requestId];
         require(req.pending, "EwpgERC7540: not pending");
         require(block.timestamp >= _requestTimestamps[requestId] + _minSettlementDelay,
                 "EwpgERC7540: settlement delay not elapsed");
         require(currentNavPerShare() > 0, "EwpgERC7540: NAV not struck");
+        _requireNavStruckAfterDealingPoint(requestId);
         // The payout leg is invisible to the share hook (_burn is from the
         // vault), so the owner's freeze must be checked explicitly.
         require(!isFrozen(req.owner), "EwpgERC7540: owner is frozen");

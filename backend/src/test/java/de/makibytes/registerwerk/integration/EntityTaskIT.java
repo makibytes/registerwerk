@@ -48,6 +48,7 @@ class EntityTaskIT {
     @Autowired EntityTaskService service;
     @Autowired EntityTaskRepository tasks;
     @Autowired LegalEntityRepository entities;
+    @Autowired de.makibytes.registerwerk.customer.internal.LegalEntityService legalEntityService;
 
     @Test
     @DisplayName("open is idempotent per (entity, kind, ref) while OPEN; DONE tasks stay and a new one can be raised")
@@ -67,5 +68,25 @@ class EntityTaskIT {
         assertThat(done.getStatus()).isEqualTo(EntityTask.Status.DONE);
         assertThat(port.open(e.getId(), "ISSUER_ASSET_LIVE", "a1", "d", null)).isTrue();
         assertThat(tasks.countByStatus(EntityTask.Status.OPEN)).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("T6-12 (V56): a CLOSED entity can be reinstated to PENDING_REACTIVATION (CHECK constraint widened), KYC reset, tasks raised")
+    void reinstatementPersistsPendingReactivation() {
+        LegalEntity e = new LegalEntity();
+        e.setCurrentName("Reinstate Test AG");
+        e.setType(EntityType.ISSUER);
+        e.setStatus(EntityStatus.CLOSED);
+        e.setKycStatus(de.makibytes.registerwerk.customer.api.KycStatus.APPROVED);
+        e.setEntityNumber("ENT-REI-" + UUID.randomUUID().toString().substring(0, 8));
+        e = entities.saveAndFlush(e);
+
+        legalEntityService.requestReinstatement(e.getId(), UUID.randomUUID(), "court decision", "AG Berlin 12 HRB 123/26");
+
+        LegalEntity reloaded = entities.findById(e.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(EntityStatus.PENDING_REACTIVATION);
+        assertThat(reloaded.getKycStatus()).isEqualTo(de.makibytes.registerwerk.customer.api.KycStatus.NOT_STARTED);
+        assertThat(service.listForEntity(e.getId())).extracting(EntityTask::getKind)
+                .contains(EntityTask.REINSTATEMENT_KYC_REQUIRED, EntityTask.REINSTATEMENT_USERS_REVIEW);
     }
 }

@@ -613,8 +613,14 @@ public class EvmContractService {
                     DefaultBlockParameterName.LATEST).send();
             if (result.hasError()) {
                 String message = result.getError().getMessage();
-                return message != null && message.toLowerCase(java.util.Locale.ROOT).contains("revert")
-                        ? Optional.of(message) : Optional.empty();
+                if (message == null || !message.toLowerCase(java.util.Locale.ROOT).contains("revert")) {
+                    return Optional.empty();
+                }
+                // A custom error (e.g. NavNotStruckAfterDealingPoint) travels as revert data, which many nodes
+                // keep out of the message: append it so VaultRevertReasons can recognise the error.
+                String data = result.getError().getData();
+                return Optional.of(data != null && !data.isBlank() && !message.contains(data)
+                        ? message + " " + data : message);
             }
             if (result.isReverted()) {
                 return Optional.of(String.valueOf(result.getRevertReason()));

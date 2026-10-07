@@ -199,6 +199,14 @@ springdoc:
     enabled: ${SWAGGER_ENABLED:false}
 
 registerwerk:
+  vault:
+    # T1-07 forward pricing: the dealing cut-off sent to every new ERC-7540 vault once its deployment is
+    # confirmed (UTC time of day HH:mm; "off" disables the automatic step) and the dealing period in seconds
+    # (86400 = daily). Requests placed after a cut-off settle only at a NAV struck after the next one. Production
+    # mode refuses new subscriptions on a vault that has none; operators change it per vault via
+    # POST /api/v1/deployments/{id}/dealing-cutoff (step-up + second approver).
+    dealing-cutoff-utc: ${VAULT_DEALING_CUTOFF_UTC:17:00}
+    dealing-period-seconds: ${VAULT_DEALING_PERIOD_SECONDS:86400}
   sperrvermerk:
     # 6-25 / parked T6-11: block types (comma-separated BlockType names) that the daily job may lift
     # automatically after expires_at. Default empty = none: every expired block moves to EXPIRY_REVIEW,
@@ -583,6 +591,15 @@ registerwerk:
         #    approval request that travels to a second person: raw key import, keystore export.
         body-opt-out-reasons: TERM_SHEET_AMENDMENT,WALLET_IMPORT_KEYSTORE,CASP_REGISTER_IMPORT,WALLET_IMPORT_RAW,WALLET_KEYSTORE_EXPORT
         max-body-bytes: 1048576
+      # T8-02: the in-app approval queue (POST /api/v1/approvals ...). An initiator files one concrete request, an
+      # approver other than the initiator approves it with a fresh TOTP code, and the initiator claims a single-use
+      # approver token bound to exactly that request. Requests that nobody decides, or the initiator never claims,
+      # expire after `ttl`.
+      approval-queue:
+        ttl: PT15M
+        max-body-bytes: 65536
+        max-open-per-requester: 20
+        sweep-interval: PT1M
       entra:
         # Conditional Access authentication context (c1–c99) required for step-up-protected
         # actions when ENTRA_ENABLED=true. No default on purpose: guessing "c1" could mean

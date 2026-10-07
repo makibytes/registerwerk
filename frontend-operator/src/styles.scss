@@ -432,6 +432,7 @@ code {
   &.status-confirmed    { background: var(--rw-approved-bg); color: var(--rw-approved-fg); }
   &.status-transfer-pending,
   &.status-pending-onboarding,
+  &.status-pending-reactivation,
   &.status-pending-approval,
   &.status-in-progress,
   &.status-pending,

@@ -97,7 +97,7 @@ Seul un sous-ensemble peut réellement être créé aujourd'hui — le reste est
 
 ## Relevé de revenus (pas une attestation fiscale) { #tax-certificates }
 
-Pour les titulaires allemands, les revenus d'un titre sont imposables. Registerwerk fournit chaque année un **Ertragsaufstellung** (relevé de revenus) indiquant ce qui a été versé au titulaire — mais ce n'est **pas une Steuerbescheinigung** au sens du § 45a EStG.
+Pour les titulaires allemands, les revenus d'un titre sont imposables. Registerwerk fournit chaque année un **Ertragsübersicht** (relevé de revenus) indiquant ce qui a été versé au titulaire — mais ce n'est **pas une Steuerbescheinigung** au sens du § 45a EStG.
 
 Il est produit à partir des lignes d'opérations sur titres réglées : pour chaque investisseur, les droits à coupon, intérêts et dividendes de l'année civile, regroupés **par devise** (des montants en devises différentes ne sont jamais additionnés). Les remboursements de capital (remboursement, rachat, remboursement partiel) et les appels de fonds ne sont **pas des revenus** et sont exclus ; les plus-values de cession ou de remboursement ne sont pas déterminées, car le registre ne contient pas les prix de revient.
 

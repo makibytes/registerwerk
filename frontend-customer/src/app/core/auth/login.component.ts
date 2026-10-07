@@ -360,8 +360,8 @@ export class LoginComponent {
 
     this.auth.loginWithCredentials(email, this.password).subscribe({
       next: () => {
-        // REGISTRY_ADMIN with no entity context → company picker
-        if (this.auth.hasRole('REGISTRY_ADMIN') && !this.auth.getEntityId()) {
+        // REGISTRY_ADMIN / SUPPORT_AGENT (T6-05) with no entity context → company picker
+        if ((this.auth.hasRole('REGISTRY_ADMIN') || this.auth.hasRole('SUPPORT_AGENT')) && !this.auth.getEntityId()) {
           this.router.navigate(['/select-company']);
         } else {
           this.router.navigate(['/dashboard']);

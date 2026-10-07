@@ -13,5 +13,8 @@ public enum AppUserRole {
     INVESTOR,
     COMPANY_ADMIN,
     TRADER,
-    DAPP_PUBLISHER
+    DAPP_PUBLISHER,
+    /** Operator support staff (T6-05): may start READ_ONLY customer impersonation sessions (step-up + reason)
+     *  and nothing else - no write access, no act-on-behalf, no other operator privileges. */
+    SUPPORT_AGENT
 }

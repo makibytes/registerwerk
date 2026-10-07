@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, of } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 
 // ── Microsoft Entra 2FA support ───────────────────────────────────────────────
@@ -56,7 +57,8 @@ export type AppUserRole =
   | 'COMPANY_ADMIN'
   | 'ISSUER'
   | 'INVESTOR'
-  | 'TRADER';
+  | 'TRADER'
+  | 'SUPPORT_AGENT';
 
 export interface OperatorUser {
   id: string;
@@ -115,7 +117,7 @@ function userAdminHeaders(tokens: UserAdminTokens): HttpHeaders {
  * anything with an administrative role. (Bootstrap mode, fewer than two enrolled admins, waives the approver.)
  */
 export function isGatedOperatorAccount(roles: AppUserRole[], entityId: string | null): boolean {
-  return !entityId || roles.some(r => r === 'REGISTRY_ADMIN' || r === 'COMPLIANCE_OFFICER' || r === 'AUDIT');
+  return !entityId || roles.some(r => r === 'REGISTRY_ADMIN' || r === 'COMPLIANCE_OFFICER' || r === 'AUDIT' || r === 'SUPPORT_AGENT');
 }
 
 @Injectable({ providedIn: 'root' })
@@ -205,6 +207,17 @@ export class AdminUserService {
     return this.http.post<ImpersonateResponse>(this.impersonationUrl,
       { entityId, reason, ticket: ticket || undefined },
       { headers: new HttpHeaders({ Authorization: `Bearer ${stepUpToken}` }) });
+  }
+
+  /**
+   * Whether the backend runs in production mode (T6-05: production is read-only impersonation only). Read from the
+   * public auth config; an unreachable config counts as production so act-on-behalf is never offered by mistake.
+   */
+  isProductionMode(): Observable<boolean> {
+    return this.http.get<{ productionMode?: boolean }>(`${environment.apiUrl}/public/auth/config`).pipe(
+      map(cfg => cfg.productionMode !== false),
+      catchError(() => of(true)),
+    );
   }
 
   /** ACT_ON_BEHALF: step-up + second approver (`ADMIN_IMPERSONATION_ACT_ON_BEHALF`) bound to this request. */

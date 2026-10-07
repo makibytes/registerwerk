@@ -56,7 +56,8 @@ public class AccessReviewService {
 
     /** Roles whose revocation needs a second reviewer. */
     private static final Set<AppUserRole> PRIVILEGED = Set.of(
-            AppUserRole.REGISTRY_ADMIN, AppUserRole.COMPLIANCE_OFFICER, AppUserRole.COMPANY_ADMIN);
+            AppUserRole.REGISTRY_ADMIN, AppUserRole.COMPLIANCE_OFFICER, AppUserRole.COMPANY_ADMIN,
+            AppUserRole.SUPPORT_AGENT);
 
     private final AccessReviewCampaignRepository campaignRepository;
     private final AccessReviewItemRepository itemRepository;

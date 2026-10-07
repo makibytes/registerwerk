@@ -64,6 +64,14 @@ class PartyEligibilityGateImplTest {
     }
 
     @Test
+    @DisplayName("T6-12: a PENDING_REACTIVATION entity is refused like any non-ACTIVE entity")
+    void pendingReactivationRefused() {
+        entity.setStatus(EntityStatus.PENDING_REACTIVATION);
+        assertThatThrownBy(() -> gate.require(entityId, WALLET, "trade"))
+                .isInstanceOf(ComplianceGateException.class).hasMessageContaining("PENDING_REACTIVATION");
+    }
+
+    @Test
     @DisplayName("an unresolved beneficial-owner hit is refused although the entity's own KYC status is still APPROVED")
     void uboHitRefused() {
         when(screening.hasUnresolvedBeneficialOwnerHit(entityId)).thenReturn(true);

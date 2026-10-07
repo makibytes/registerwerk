@@ -100,6 +100,9 @@ class AssetDeploymentServiceTest {
     @Mock
     private de.makibytes.registerwerk.blockchain.api.SolanaFinalityReader solanaFinalityReader;
 
+    @Mock
+    private de.makibytes.registerwerk.blockchain.api.Erc7540AdminPort vaultAdminPort;
+
     /** Real instance (not a mock), same pattern as BlockchainTransactionServiceTest — a plain
      *  POJO with getters/setters is more reliable to configure directly than to stub. */
     private BlockchainTxProperties txProperties;
@@ -137,7 +140,7 @@ class AssetDeploymentServiceTest {
                 assetDeploymentRepository, assetRepository, eventPublisher, tokenDeploymentPort,
                 erc3643DeploymentPort, blockchainClientRegistry, evmContractService, completionWriter,
                 txProperties, chainConfigRepository, finalityResolver, restClientBuilder,
-                chainEffectRecorder, walletSigner, solanaFinalityReader, false);
+                chainEffectRecorder, walletSigner, solanaFinalityReader, vaultAdminPort, false);
     }
 
     @AfterEach
@@ -446,7 +449,7 @@ class AssetDeploymentServiceTest {
                 erc3643DeploymentPort, blockchainClientRegistry, evmContractService, completionWriter,
                 txProperties, chainConfigRepository,
                 new EvmFinalityResolver(chainConfigRepository, txProperties), restClientBuilder,
-                chainEffectRecorder, walletSigner, solanaFinalityReader, true);
+                chainEffectRecorder, walletSigner, solanaFinalityReader, vaultAdminPort, true);
         when(chainConfigRepository.findByIdentifierStartingWith("STARKNET_")).thenAnswer(invocation -> {
             ChainConfig config = new ChainConfig();
             config.setId(UUID.randomUUID());
@@ -739,6 +742,98 @@ class AssetDeploymentServiceTest {
         assertThat(deployment.getBlockNumber()).isEqualTo(100L);
         verify(eventPublisher).publishEvent(any(DeploymentConfirmedEvent.class));
         verify(chainEffectRecorder).recordFinalized(any());
+    }
+
+    @Test
+    @DisplayName("T1-07: a confirmed ERC-7540 vault deployment gets its dealing cut-off sent after the commit — "
+            + "and a failure of that call never undoes the confirmation")
+    void syncFromChain_erc7540_configuresDealingCutoffAfterCommit() throws java.io.IOException {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.ERC7540);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setAssetId(assetId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        Web3j web3j = org.mockito.Mockito.mock(Web3j.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        when(blockchainClientRegistry.getEvmClientByIdentifier(anyString())).thenReturn(web3j);
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1");
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100");
+        String vaultAddress = "0x" + "cd".repeat(20);
+        Log log = new Log();
+        log.setTopics(Arrays.asList(
+                "0x" + org.web3j.crypto.Hash.sha3String("VaultDeployed(bytes32,uint8,address,address)"),
+                "0x" + "1".repeat(64), "0x" + "0".repeat(64),
+                "0x" + "0".repeat(24) + vaultAddress.substring(2)));
+        receipt.setLogs(List.of(log));
+        when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(111));
+        txProperties.setDefaultConfirmations(12);
+        TransactionSynchronizationManager.initSynchronization();
+        org.mockito.Mockito.doThrow(new IllegalStateException("signer unavailable"))
+                .when(vaultAdminPort).configureDealingCutoffAfterDeployment(deploymentId);
+
+        assetDeploymentService.syncFromChain(deploymentId);
+
+        assertThat(deployment.getDeploymentStatus()).isEqualTo(AssetDeployment.DeploymentStatus.CONFIRMED);
+        // not before the commit: the confirmation (chainConfigId, block) must be durable first
+        verify(vaultAdminPort, never()).configureDealingCutoffAfterDeployment(any());
+        TransactionSynchronizationManager.getSynchronizations()
+                .forEach(synchronization -> synchronization.afterCommit());
+        verify(vaultAdminPort).configureDealingCutoffAfterDeployment(deploymentId);
+    }
+
+    @Test
+    @DisplayName("T1-07: a confirmed non-vault deployment is never touched by the dealing cut-off hook")
+    void syncFromChain_erc20_doesNotConfigureDealingCutoff() throws java.io.IOException {
+        UUID assetId = UUID.randomUUID();
+        UUID deploymentId = UUID.randomUUID();
+        Asset asset = new Asset();
+        asset.setId(assetId);
+        asset.setTokenStandard(TokenStandard.ERC20);
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+        AssetDeployment deployment = new AssetDeployment();
+        deployment.setId(deploymentId);
+        deployment.setAssetId(assetId);
+        deployment.setChain(Chain.ETHEREUM);
+        deployment.setNetwork(Network.TESTNET);
+        deployment.setDeployedByTx("0xtxhash");
+        deployment.setDeploymentStatus(AssetDeployment.DeploymentStatus.PENDING);
+        when(assetDeploymentRepository.findById(deploymentId)).thenReturn(Optional.of(deployment));
+        Web3j web3j = org.mockito.Mockito.mock(Web3j.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        when(blockchainClientRegistry.getEvmClientByIdentifier(anyString())).thenReturn(web3j);
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x1");
+        receipt.setBlockNumber("0x64");
+        receipt.setBlockHash("0xblock100");
+        String tokenAddress = "0x" + "ab".repeat(20);
+        Log log = new Log();
+        log.setTopics(Arrays.asList(
+                "0x" + org.web3j.crypto.Hash.sha3String("TokenDeployed(bytes32,uint8,address)"),
+                "0x" + "1".repeat(64), "0x" + "0".repeat(64),
+                "0x" + "0".repeat(24) + tokenAddress.substring(2)));
+        receipt.setLogs(List.of(log));
+        when(web3j.ethGetTransactionReceipt("0xtxhash").send().getTransactionReceipt())
+                .thenReturn(Optional.of(receipt));
+        when(web3j.ethBlockNumber().send().getBlockNumber()).thenReturn(BigInteger.valueOf(111));
+        txProperties.setDefaultConfirmations(12);
+        TransactionSynchronizationManager.initSynchronization();
+
+        assetDeploymentService.syncFromChain(deploymentId);
+        TransactionSynchronizationManager.getSynchronizations()
+                .forEach(synchronization -> synchronization.afterCommit());
+
+        verify(vaultAdminPort, never()).configureDealingCutoffAfterDeployment(any());
     }
 
     @Test

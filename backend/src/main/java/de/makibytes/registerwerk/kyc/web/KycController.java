@@ -1,7 +1,5 @@
 package de.makibytes.registerwerk.kyc.web;
 
-import de.makibytes.registerwerk.shared.web.DocumentStatusResponse;
-
 import java.io.IOException;
 import java.time.LocalDate;
 import java.util.List;
@@ -111,7 +109,7 @@ public class KycController {
             issueDate,
             expiresAt
         );
-        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(doc));
+        return ResponseEntity.status(HttpStatus.CREATED).body(KycDocumentResponse.from(doc));
     }
 
     /**
@@ -121,7 +119,7 @@ public class KycController {
     @PreAuthorize(DOCUMENT_READ)
     public ResponseEntity<List<KycDocumentResponse>> listDocuments(@PathVariable UUID entityId) {
         List<KycDocument> docs = kycDocumentRepository.findByLegalEntityIdAndDeletedAtIsNull(entityId);
-        return ResponseEntity.ok(docs.stream().map(this::toResponse).toList());
+        return ResponseEntity.ok(docs.stream().map(KycDocumentResponse::from).toList());
     }
 
     /**
@@ -214,7 +212,7 @@ public class KycController {
             @PathVariable UUID entityId) {
         return ResponseEntity.ok(
             kycService.getJurisdictionApprovals(entityId).stream()
-                .map(this::toJurisdictionApprovalResponse).toList());
+                .map(KycJurisdictionApprovalResponse::from).toList());
     }
 
     /**
@@ -226,7 +224,7 @@ public class KycController {
             @PathVariable UUID entityId,
             @PathVariable Jurisdiction jurisdiction) {
         return kycService.getJurisdictionApproval(entityId, jurisdiction)
-            .map(a -> ResponseEntity.ok(toJurisdictionApprovalResponse(a)))
+            .map(a -> ResponseEntity.ok(KycJurisdictionApprovalResponse.from(a)))
             .orElse(ResponseEntity.notFound().build());
     }
 
@@ -271,7 +269,7 @@ public class KycController {
             compliance.missingCount(),
             compliance.expiredCount(),
             compliance.tooOldCount());
-        return ResponseEntity.ok(toJurisdictionApprovalResponse(saved));
+        return ResponseEntity.ok(KycJurisdictionApprovalResponse.from(saved));
     }
 
     /**
@@ -287,7 +285,7 @@ public class KycController {
             Authentication auth) {
         KycJurisdictionApproval saved = kycService.rejectKycForJurisdiction(
             entityId, jurisdiction, body.reason().trim(), extractActorId(auth));
-        return ResponseEntity.ok(toJurisdictionApprovalResponse(saved));
+        return ResponseEntity.ok(KycJurisdictionApprovalResponse.from(saved));
     }
 
     /**
@@ -300,43 +298,10 @@ public class KycController {
             @PathVariable Jurisdiction jurisdiction) {
         KycComplianceService.ComplianceResult result =
             kycComplianceService.checkCompliance(entityId, jurisdiction);
-        return ResponseEntity.ok(toComplianceResponse(result));
+        return ResponseEntity.ok(KycComplianceResponse.from(result));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private KycJurisdictionApprovalResponse toJurisdictionApprovalResponse(KycJurisdictionApproval a) {
-        return new KycJurisdictionApprovalResponse(
-            a.getId(), a.getEntityId(), a.getJurisdiction().name(),
-            a.getJurisdiction().displayName, a.getStatus().name(),
-            a.getApprovedBy(), a.getApprovedAt(), a.getExpiresAt(),
-            a.getRejectionReason(), a.getOverrideNote());
-    }
-
-    private KycComplianceResponse toComplianceResponse(KycComplianceService.ComplianceResult r) {
-        var docs = r.documents().stream().map(d -> new DocumentStatusResponse(
-            d.documentType().name(), d.mandatory(), d.localName(), d.description(),
-            d.present(), d.expired(), d.tooOld(), d.documentDate(), d.documentId()
-        )).toList();
-        return new KycComplianceResponse(
-            r.jurisdiction().name(), r.jurisdiction().displayName,
-            r.entityId(), docs, r.fullyCompliant(), r.missingCount(), r.expiredCount(), r.tooOldCount()
-        );
-    }
-
-    private KycDocumentResponse toResponse(KycDocument doc) {
-        return new KycDocumentResponse(
-            doc.getId(),
-            doc.getDocumentType(),
-            doc.getFileName(),
-            doc.getMimeType(),
-            doc.getSizeBytes(),
-            doc.getContentHash(),
-            doc.getUploadedAt(),
-            doc.getExpiresAt(),
-            doc.getIssueDate()
-        );
-    }
 
     private UUID extractActorId(Authentication auth) {
         if (auth == null) return null;

@@ -12,7 +12,11 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { DatePipe, DecimalPipe, SlicePipe } from '@angular/common';
 import { VaultService } from '../../../../core/api/vault.service';
-import { VaultRequest, VaultStateSummary } from '../../../../core/models';
+import { VaultDealingState, VaultRequest, VaultStateSummary } from '../../../../core/models';
+import { withDualControl } from '../../../../shared/components/step-up/with-dual-control';
+import {
+  canFulfil, formatCutoffUtc, fulfilHint, parseCutoffUtc, periodLabel, periodSecondsOf,
+} from './vault-dealing';
 import {
   StepUpDialogComponent, StepUpDialogResult,
 } from '../../../../shared/components/step-up/step-up-dialog.component';
@@ -57,6 +61,34 @@ import {
         </div>
       }
 
+      @if (vaultState?.dealing; as dealing) {
+        @if (dealing.applicable) {
+          <div class="dealing-banner" [class.warn]="!dealing.configured || !dealing.available" data-testid="dealing-banner">
+            <mat-icon>schedule</mat-icon>
+            <span>
+              @if (!dealing.available) {
+                The dealing cut-off could not be read from the chain — Fulfil stays available, the chain decides.
+              } @else if (dealing.configured) {
+                Forward pricing: dealing cut-off
+                <strong class="mono">{{ cutoffLabel(dealing) }} UTC</strong> ({{ periodText(dealing) }}).
+                A request placed now deals at
+                <strong class="mono">{{ dealing.nextDealingPoint | date:'dd MMM yyyy HH:mm':'UTC' }} UTC</strong>.
+                @if (dealing.navStruckAt; as struckAt) {
+                  <span class="dimmed"> Latest NAV struck on-chain {{ struckAt | date:'dd MMM yyyy HH:mm':'UTC' }} UTC.</span>
+                }
+              } @else {
+                No dealing cut-off configured — requests settle at the NAV struck at execution time (late-trading
+                exposure) and production mode refuses new subscriptions on this vault.
+              }
+            </span>
+            <button type="button" mat-stroked-button class="btn-cutoff" data-testid="dealing-cutoff-btn"
+              (click)="openDealingCutoff()">
+              {{ dealing.configured ? 'Change dealing cut-off' : 'Set dealing cut-off' }}
+            </button>
+          </div>
+        }
+      }
+
       @if (pending.length === 0) {
         <div class="empty-state">
           <mat-icon class="empty-icon">done_all</mat-icon>
@@ -71,6 +103,7 @@ import {
             <span>Owner</span>
             <span class="right">Amount</span>
             <span class="right">Requested</span>
+            <span>Dealing point (UTC)</span>
             <span>Status</span>
             <span></span>
           </div>
@@ -79,7 +112,7 @@ import {
             <div class="req-row" [class.checked]="selected.has(req.id)" [class.held]="req.complianceHold">
               <mat-checkbox
                 color="primary"
-                [disabled]="!actionable(req)"
+                [disabled]="!canFulfil(req)"
                 [checked]="selected.has(req.id)"
                 (change)="toggle(req.id, $event.checked)">
               </mat-checkbox>
@@ -104,6 +137,14 @@ import {
 
               <span class="right dimmed small">{{ req.requestedAt | date:'dd MMM HH:mm' }}</span>
 
+              <span class="dealing-cell small mono" data-testid="dealing-point">
+                @if (req.dealingPoint) {
+                  {{ req.dealingPoint | date:'dd MMM HH:mm':'UTC' }}
+                } @else {
+                  <span class="dimmed" matTooltip="Placed before a dealing cut-off was configured — settles at the NAV struck at execution time">—</span>
+                }
+              </span>
+
               <span>
                 @if (req.complianceHold) {
                   <span class="status-chip hold" [matTooltip]="req.complianceHoldReason ?? ''">
@@ -111,14 +152,18 @@ import {
                   </span>
                 } @else if (req.awaitingConfirmation) {
                   <span class="status-chip waiting"><mat-icon>hourglass_top</mat-icon> Awaiting confirmation</span>
+                } @else if (req.awaitingNavStrike) {
+                  <span class="status-chip waiting" data-testid="awaiting-nav-strike" [matTooltip]="hint(req)">
+                    <mat-icon>schedule</mat-icon> Waiting for NAV strike
+                  </span>
                 } @else {
                   <span class="status-chip ready">Ready</span>
                 }
               </span>
 
               <div class="row-actions">
-                <button type="button" mat-icon-button class="btn-fulfill" [disabled]="!actionable(req)"
-                  (click)="fulfill(req)" matTooltip="Fulfil" aria-label="Fulfil request">
+                <button type="button" mat-icon-button class="btn-fulfill" [disabled]="!canFulfil(req)"
+                  (click)="fulfill(req)" [matTooltip]="hint(req)" aria-label="Fulfil request">
                   <mat-icon>check_circle_outline</mat-icon>
                 </button>
                 <button type="button" mat-icon-button class="btn-cancel" [disabled]="!actionable(req)"
@@ -178,6 +223,33 @@ import {
         </div>
       }
     </div>
+
+    <ng-template #dealingCutoffDialog>
+      <h2 mat-dialog-title>Dealing cut-off</h2>
+      <mat-dialog-content class="force-form">
+        <p class="force-note">
+          Requests placed after the cut-off settle only at a NAV struck after the next one, so nobody deals at an
+          already-known NAV. Requests already placed keep their dealing point. Needs step-up and a second approver.
+        </p>
+        <mat-form-field appearance="outline">
+          <mat-label>Daily cut-off (UTC)</mat-label>
+          <input matInput type="time" [(ngModel)]="cutoffForm.time" data-testid="cutoff-time" />
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Dealing period (hours)</mat-label>
+          <input matInput type="number" min="1" max="744" step="1" [(ngModel)]="cutoffForm.periodHours"
+            data-testid="cutoff-period" />
+          <mat-hint>24 = daily, 168 = weekly (1 hour to 31 days)</mat-hint>
+        </mat-form-field>
+      </mat-dialog-content>
+      <mat-dialog-actions align="end">
+        <button type="button" mat-stroked-button mat-dialog-close>Cancel</button>
+        <button type="button" mat-flat-button color="primary" [disabled]="!cutoffFormValid()"
+          data-testid="cutoff-submit" (click)="submitDealingCutoff()">
+          Continue to step-up
+        </button>
+      </mat-dialog-actions>
+    </ng-template>
 
     <ng-template #forceCancelDialog>
       <h2 mat-dialog-title>Force-cancel request #{{ forceTarget?.requestId }}</h2>
@@ -287,7 +359,7 @@ import {
 
     .req-row {
       display: grid;
-      grid-template-columns: 36px 90px 80px 1fr 120px 100px 190px 120px;
+      grid-template-columns: 36px 90px 80px 1fr 120px 100px 120px 190px 120px;
       gap: .5rem;
       align-items: center;
       padding: .625rem .5rem;
@@ -399,6 +471,24 @@ import {
     .nav-struck mat-icon { color: var(--rw-accent); }
     .nav-hint { color: var(--rw-text-muted); font-size: .75rem; flex-basis: 100%; }
 
+    .dealing-banner {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: .625rem;
+      padding: .75rem 1rem;
+      border: 1px solid var(--rw-border);
+      border-radius: var(--rw-radius-md);
+      color: var(--rw-text-primary);
+      font-size: .8125rem;
+      margin-bottom: 1rem;
+    }
+    .dealing-banner mat-icon { color: var(--rw-accent); }
+    .dealing-banner > span { flex: 1; min-width: 14rem; }
+    .dealing-banner.warn { background: var(--rw-pending-bg); color: var(--rw-pending-fg); }
+    .dealing-banner.warn mat-icon { color: inherit; }
+    .dealing-cell { color: var(--rw-text-secondary); }
+
     .settled-title {
       margin: 1.5rem 0 .5rem;
       font-size: .875rem;
@@ -411,7 +501,7 @@ import {
 
     @media (max-width: 720px) {
       .req-row { grid-template-columns: 28px 70px 1fr 110px; }
-      .req-row > :nth-child(4), .req-row > :nth-child(6) { display: none; }
+      .req-row > :nth-child(4), .req-row > :nth-child(6), .req-row > :nth-child(7) { display: none; }
       .req-row.settled-row { grid-template-columns: 70px 1fr 1fr; }
       .req-row.settled-row > :nth-child(n+4) { display: none; }
       .force-form { min-width: 0; }
@@ -425,6 +515,7 @@ export class VaultRequestsComponent implements OnInit {
   @Input() latestNav: number | null = null;
 
   @ViewChild('forceCancelDialog') forceCancelDialogTpl!: TemplateRef<unknown>;
+  @ViewChild('dealingCutoffDialog') dealingCutoffDialogTpl!: TemplateRef<unknown>;
 
   private readonly vaultService = inject(VaultService);
   private readonly snackBar = inject(MatSnackBar);
@@ -439,6 +530,7 @@ export class VaultRequestsComponent implements OnInit {
 
   forceTarget: VaultRequest | null = null;
   forceForm = { to: '', legalBasis: '' };
+  cutoffForm: { time: string; periodHours: number } = { time: '17:00', periodHours: 24 };
 
   get struckNav(): number | null {
     return this.vaultState?.latestNavPerShare ?? null;
@@ -450,10 +542,10 @@ export class VaultRequestsComponent implements OnInit {
     this.vaultService.getVaultRequests(this.deploymentId).subscribe({
       next: (reqs) => {
         this.pending = reqs;
-        // Drop selections that are no longer actionable (e.g. a hold appeared since).
+        // Drop selections that are no longer fulfillable (e.g. a hold appeared since).
         this.selected.forEach((id) => {
           const req = reqs.find((r) => r.id === id);
-          if (!req || !this.actionable(req)) this.selected.delete(id);
+          if (!req || !this.canFulfil(req)) this.selected.delete(id);
         });
         this.cdr.markForCheck();
       },
@@ -482,6 +574,63 @@ export class VaultRequestsComponent implements OnInit {
     return !req.complianceHold && !req.awaitingConfirmation && !this.busy.has(req.id);
   }
 
+  /** Fulfil is additionally held back until a NAV was struck after the request's dealing point (T1-07). */
+  canFulfil(req: VaultRequest): boolean {
+    return canFulfil(req, this.busy.has(req.id));
+  }
+
+  hint(req: VaultRequest): string {
+    return fulfilHint(req);
+  }
+
+  cutoffLabel(dealing: VaultDealingState): string {
+    return dealing.cutoffSecondsOfDay == null ? '—' : formatCutoffUtc(dealing.cutoffSecondsOfDay);
+  }
+
+  periodText(dealing: VaultDealingState): string {
+    return dealing.periodSeconds == null ? '' : periodLabel(dealing.periodSeconds);
+  }
+
+  openDealingCutoff(): void {
+    const dealing = this.vaultState?.dealing;
+    this.cutoffForm = {
+      time: dealing?.configured && dealing.cutoffSecondsOfDay != null ? formatCutoffUtc(dealing.cutoffSecondsOfDay) : '17:00',
+      periodHours: dealing?.configured && dealing.periodSeconds ? dealing.periodSeconds / 3600 : 24,
+    };
+    this.dialog.open(this.dealingCutoffDialogTpl, { width: '520px', maxWidth: '95vw' });
+  }
+
+  cutoffFormValid(): boolean {
+    return parseCutoffUtc(this.cutoffForm.time) !== null && periodSecondsOf(Number(this.cutoffForm.periodHours)) !== null;
+  }
+
+  /** Step-up + second approver bound to this exact body; then the registry transaction is submitted. */
+  submitDealingCutoff(): void {
+    const cutoffSecondsOfDay = parseCutoffUtc(this.cutoffForm.time);
+    const periodSeconds = periodSecondsOf(Number(this.cutoffForm.periodHours));
+    if (cutoffSecondsOfDay === null || periodSeconds === null) return;
+    const body = { cutoffSecondsOfDay, periodSeconds };
+    this.dialog.closeAll();
+    withDualControl(this.dialog, {
+      action: 'VAULT_DEALING_CUTOFF',
+      reason: `Set dealing cut-off ${this.cutoffForm.time} UTC, period ${periodLabel(periodSeconds)}`,
+      target: `POST /api/v1/deployments/${this.deploymentId}/dealing-cutoff`,
+      targetBody: body,
+    }, (tokens) => {
+      this.vaultService.setDealingCutoff(this.deploymentId, body, tokens).subscribe({
+        next: () => {
+          this.snackBar.open('Dealing cut-off submitted — it applies to requests placed after it confirms. '
+            + 'Audit event recorded.', 'Dismiss', { duration: 6000 });
+          this.load();
+        },
+        error: (err) => {
+          this.snackBar.open(err?.error?.message ?? 'Setting the dealing cut-off failed', 'Dismiss', { duration: 6000 });
+          this.cdr.markForCheck();
+        },
+      });
+    });
+  }
+
   toggle(id: string, checked: boolean): void {
     if (checked) this.selected.add(id); else this.selected.delete(id);
   }
@@ -491,7 +640,7 @@ export class VaultRequestsComponent implements OnInit {
       this.snackBar.open('Strike a NAV first before fulfilling requests', 'Dismiss', { duration: 5000 });
       return;
     }
-    if (!this.actionable(req)) return;
+    if (!this.canFulfil(req)) return;
     this.busy.add(req.id);
     this.vaultService.fulfillRequest(this.deploymentId, req.requestId).subscribe({
       next: () => {

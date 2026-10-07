@@ -86,13 +86,13 @@ description: Entwurf des Verzeichnisses von Verarbeitungstätigkeiten nach Art. 
 | **Aufbewahrung** | Beschäftigungsdauer + 2 Jahre |
 | **Sicherheitsmaßnahmen** | BCrypt-Passwort-Hashing; JWT (kurzlebig, 8 Stunden); MFA für sensible Vorgänge |
 
-## 7. Regulatorische Berichterstattung (MiFIR, DAC8, Ertragsaufstellung) { #7-regulatory-reporting-mifir-dac8-steuerbescheinigung }
+## 7. Regulatorische Berichterstattung (MiFIR, DAC8, Ertragsübersicht) { #7-regulatory-reporting-mifir-dac8-steuerbescheinigung }
 
 | Feld | Wert |
 |---|---|
 | **Zweck** | Obligatorische Transaktionsmeldung an die zuständigen Behörden |
 | **Rechtsgrundlage** | Gesetzliche Verpflichtung (Art. 6(1)(c)) — MiFIR Art. 26, DAC8, EStG §43 |
-| **Datenkategorien** | Name des Anlegers, Steuer-ID, Bestände, Transaktionen, IBAN (für die Ertragsaufstellung) |
+| **Datenkategorien** | Name des Anlegers, Steuer-ID, Bestände, Transaktionen, IBAN (für die Ertragsübersicht) |
 | **Empfänger** | BaFin (DE), AMF (FR), CSSF (LU), FMA (LI), BZSt (DAC8/CARF), DGFiP (FR), ACD (LU) |
 | **Aufbewahrung** | 7 Jahre (MiFIR); 10 Jahre (eWpG) |
 | **Sicherheitsmaßnahmen** | PAdES-B-LT-signierte PDFs; SFTP an Behördenportale; Einreichungsbelege |

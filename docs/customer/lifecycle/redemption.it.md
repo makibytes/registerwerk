@@ -97,7 +97,7 @@ Solo un sottoinsieme può essere effettivamente creato oggi — il resto è mode
 
 ## Prospetto dei proventi (non è una certificazione fiscale) { #tax-certificates }
 
-Per i titolari tedeschi i proventi di uno strumento sono imponibili. Registerwerk fornisce ogni anno un **Ertragsaufstellung** (prospetto dei proventi) con quanto pagato al titolare in un dato anno, ma **non è una Steuerbescheinigung** ai sensi del § 45a EStG.
+Per i titolari tedeschi i proventi di uno strumento sono imponibili. Registerwerk fornisce ogni anno un **Ertragsübersicht** (prospetto dei proventi) con quanto pagato al titolare in un dato anno, ma **non è una Steuerbescheinigung** ai sensi del § 45a EStG.
 
 Viene prodotto a partire dalle righe delle operazioni societarie regolate: per ciascun investitore, i diritti a cedola, interessi e dividendi dell'anno solare, raggruppati **per valuta** (importi in valute diverse non vengono mai sommati). I rimborsi di capitale (rimborso, richiamo, rimborso parziale) e i richiami di versamenti **non sono proventi** e sono esclusi; le plusvalenze da cessione o rimborso non vengono determinate, perché il registro non conserva i costi di acquisto.
 

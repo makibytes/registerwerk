@@ -481,6 +481,7 @@ export class UserListComponent implements OnInit {
       COMPANY_ADMIN: 'Company Admin',
       REGISTRY_ADMIN: 'Registry Admin',
       AUDIT: 'Audit',
+      SUPPORT_AGENT: 'Support Agent',
     };
     return labels[role] ?? role;
   }

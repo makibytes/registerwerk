@@ -14,23 +14,34 @@ public enum EntityStatus {
      * only terminal state and conflated "the legal entity ceased to exist" with "the customer
      * left this registry" — two very different events with different consequences.
      */
-    CLOSED;
+    CLOSED,
+    /**
+     * Reinstatement of a CLOSED/DISSOLVED entity is under way (T6-12): requested by a 4-eyes
+     * decision with a legal reference, never straight back to ACTIVE. The entity stays blocked
+     * like any non-ACTIVE entity (trading, settlement, issuance, sessions) until a fresh KYC
+     * approval - the existing approve flow with its gates - moves it to ACTIVE. On-chain claims
+     * and org membership are not touched in between.
+     */
+    PENDING_REACTIVATION;
 
     /**
      * The lifecycle table (6-21). PENDING_ONBOARDING leaves only through onboarding completion
      * (-&gt; ACTIVE); ACTIVE &lt;-&gt; SUSPENDED is the reversible pair; CLOSED is reached only by
      * {@code CustomerOffboardingService.terminate} and DISSOLVED only by a merger. CLOSED and
-     * DISSOLVED are terminal (re-entry is a new onboarding; interim for parked decision T6-12).
+     * DISSOLVED leave only through a reinstatement request (T6-12) into PENDING_REACTIVATION,
+     * which becomes ACTIVE on a fresh KYC approval or CLOSED again when abandoned.
      */
     public boolean canTransitionTo(EntityStatus target) {
         return switch (this) {
             case PENDING_ONBOARDING -> target == ACTIVE;
             case ACTIVE -> target == SUSPENDED || target == CLOSED || target == DISSOLVED;
             case SUSPENDED -> target == ACTIVE || target == CLOSED || target == DISSOLVED;
-            case CLOSED, DISSOLVED -> false;
+            case CLOSED, DISSOLVED -> target == PENDING_REACTIVATION;
+            case PENDING_REACTIVATION -> target == ACTIVE || target == CLOSED;
         };
     }
 
+    /** CLOSED/DISSOLVED: the relationship has ended (a reinstatement request can reopen it). */
     public boolean isTerminal() {
         return this == CLOSED || this == DISSOLVED;
     }

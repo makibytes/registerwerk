@@ -1,9 +1,10 @@
-import { Component, inject, output } from '@angular/core';
+import { Component, DestroyRef, inject, output } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../core/auth/auth.service';
+import { ApprovalBadgeService } from '../../core/services/approval-badge.service';
 
 interface NavItem {
   label: string;
@@ -136,6 +137,19 @@ interface NavSection {
       }
     }
 
+    .nav-badge {
+      margin-left: auto;
+      min-width: 20px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: var(--rw-accent);
+      color: var(--rw-accent-contrast);
+      font-size: 11px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 18px;
+    }
+
     .sidebar-footer {
       padding: 12px 14px;
       border-top: 1px solid var(--rw-sidebar-border);
@@ -206,6 +220,9 @@ interface NavSection {
           >
             <mat-icon>{{ item.icon }}</mat-icon>
             <span>{{ item.label }}</span>
+            @if (item.route === '/approvals' && approvalBadge.pendingCount() > 0) {
+              <span class="nav-badge" [attr.aria-label]="approvalBadge.pendingCount() + ' requests waiting for approval'">{{ approvalBadge.pendingCount() }}</span>
+            }
           </a>
         }
       }
@@ -225,6 +242,12 @@ interface NavSection {
 })
 export class SidebarComponent {
   private readonly auth = inject(AuthService);
+  protected readonly approvalBadge = inject(ApprovalBadgeService);
+
+  constructor() {
+    this.approvalBadge.start();
+    inject(DestroyRef).onDestroy(() => this.approvalBadge.stop());
+  }
 
   readonly navigated = output<void>();
   readonly customerUrl = environment.customerUrl;
@@ -256,6 +279,7 @@ export class SidebarComponent {
       label: 'Compliance',
       roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'],
       items: [
+        { label: 'KYC Queue', icon: 'badge', route: '/compliance/kyc', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'Screening', icon: 'policy', route: '/compliance/screening', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER'] },
         { label: 'Chain Drift', icon: 'sync_problem', route: '/compliance/chain-drift', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },
         { label: 'Unresolved Compensation', icon: 'report_problem', route: '/compliance/unresolved-compensation', roles: ['REGISTRY_ADMIN', 'COMPLIANCE_OFFICER', 'AUDIT'] },

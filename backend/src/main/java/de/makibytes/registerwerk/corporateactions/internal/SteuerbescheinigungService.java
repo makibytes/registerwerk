@@ -42,12 +42,11 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Generates the annual "Ertragsaufstellung" (income statement) for an investor. Despite the
- * historic class/endpoint name this is <b>not</b> a Steuerbescheinigung within the meaning of
- * § 45a EStG (T3-03 interim): Registerwerk does not withhold Kapitalertragsteuer/Solidaritäts-
- * zuschlag on payouts (coupons are paid gross), so certifying computed KESt/SolZ would present
- * unwithheld tax as withheld. Whether the registrar is an auszahlende Stelle that withholds is a
- * parked policy question.
+ * Generates the annual "Ertragsübersicht" (income statement) for an investor. Despite the
+ * historic class/endpoint name this is <b>not</b> a tax certificate (Steuerbescheinigung) (T3-03):
+ * Registerwerk is not an "auszahlende Stelle", does not withhold taxes and does not compute them.
+ * Coupons are paid gross; the document lists settled gross income only and carries an explicit
+ * notice in English and German.
  *
  * <p>Only recurring income actions (COUPON, INTEREST_PAYMENT, DIVIDEND) are listed. Principal
  * repayments (REDEMPTION, PARTIAL_REDEMPTION, CALL) and capital calls are not income and are
@@ -98,7 +97,7 @@ public class SteuerbescheinigungService {
     private record IncomeLine(Asset asset, String currency, BigDecimal grossIncome) {}
 
     /**
-     * Generates a Steuerbescheinigung PDF for the given entity and tax year.
+     * Generates the income statement PDF (not a tax certificate) for the given entity and calendar year.
      * @param entityId  the investor / holder legal entity
      * @param taxYear   the calendar year (e.g. 2025)
      */
@@ -113,15 +112,15 @@ public class SteuerbescheinigungService {
         List<CorporateActionEntry> entries = entryRepository.findSettledByInvestorAndPeriod(entityId, yearStart, yearEnd);
         List<IncomeLine> incomeLines = aggregateByAsset(entries);
 
-        log.info("Generating Ertragsaufstellung for entity={} taxYear={} incomeLines={}", entityId, taxYear, incomeLines.size());
+        log.info("Generating income statement for entity={} taxYear={} incomeLines={}", entityId, taxYear, incomeLines.size());
 
         try {
             byte[] unsigned = buildPdf(entity, incomeLines, taxYear);
             return signingService.isConfigured()
-                    ? signingService.signPdf(unsigned, "Ertragsaufstellung " + taxYear + " — " + entity.getEntityNumber())
+                    ? signingService.signPdf(unsigned, "Ertragsübersicht " + taxYear + " — " + entity.getEntityNumber())
                     : unsigned;
         } catch (IOException e) {
-            throw new RuntimeException("Failed to generate Ertragsaufstellung PDF", e);
+            throw new RuntimeException("Failed to generate income statement PDF", e);
         }
     }
 
@@ -183,10 +182,10 @@ public class SteuerbescheinigungService {
                 float y = PDRectangle.A4.getHeight() - margin;
 
                 // Header
-                PdfHelper.writeText(content, margin, y, fontBold, 16, "Ertragsaufstellung");
-                y -= 16;
+                PdfHelper.writeText(content, margin, y, fontBold, 16, "Ertragsübersicht (keine Steuerbescheinigung)");
+                y -= 15;
                 PdfHelper.writeText(content, margin, y, fontBold, 10,
-                    "Keine Steuerbescheinigung i.S.d. § 45a EStG - nur zur Information");
+                    "Income statement (not a tax certificate)");
                 y -= 14;
                 PdfHelper.writeText(content, margin, y, fontRegular, 10,
                     "Erträge aus elektronischen Wertpapieren - Kalenderjahr " + taxYear);
@@ -241,7 +240,7 @@ public class SteuerbescheinigungService {
                             content = new PDPageContentStream(doc, newPage(doc));
                             y = PDRectangle.A4.getHeight() - margin;
                             PdfHelper.writeText(content, cols[0], y, fontBold, 9,
-                                    "Ertragsaufstellung " + taxYear + " - Fortsetzung");
+                                    "Ertragsübersicht " + taxYear + " - Fortsetzung");
                             y -= 16;
                         }
                         String assetDesc = line.asset() != null
@@ -254,7 +253,7 @@ public class SteuerbescheinigungService {
                     }
                 }
 
-                // Tax summary
+                // Income totals
                 y -= 10;
                 content.moveTo(margin, y);
                 content.lineTo(PDRectangle.A4.getWidth() - margin, y);
@@ -277,7 +276,10 @@ public class SteuerbescheinigungService {
                     y = PDRectangle.A4.getHeight() - margin;
                 }
                 PdfHelper.writeText(content, margin, y, fontBold, 9,
-                        "Kapitalertragsteuer/SolZ einbehalten: 0,00 - Erträge wurden brutto ausgezahlt.");
+                        "This document is not a tax certificate; Registerwerk does not withhold or compute taxes.");
+                y -= 12;
+                PdfHelper.writeText(content, margin, y, fontBold, 8,
+                        "Dieses Dokument ist keine Steuerbescheinigung; Registerwerk behält keine Steuern ein und berechnet keine.");
                 y -= 12;
                 PdfHelper.writeText(content, margin, y, fontRegular, 8,
                         "Rückzahlungen/Kündigungen (Kapital) sind nicht enthalten; Veräußerungs-/Einlösungsgewinne");
@@ -286,7 +288,7 @@ public class SteuerbescheinigungService {
                         "werden nicht ermittelt (Anschaffungskosten nicht im Register).");
                 y -= 10;
                 PdfHelper.writeText(content, margin, y, fontRegular, 8,
-                        "Beträge je Währung ausgewiesen, keine Umrechnung. Kirchensteuer wird nicht erfasst.");
+                        "Beträge je Währung ausgewiesen, keine Umrechnung. Erträge wurden brutto ausgezahlt.");
                 y -= 20;
 
                 // Footer
@@ -294,8 +296,8 @@ public class SteuerbescheinigungService {
                         ? "Dieses Dokument wird digital signiert (PAdES-B-B, CMS/PKCS#7)."
                         : "Dieses Dokument ist NICHT digital signiert (kein Signaturzertifikat konfiguriert).";
                 PdfHelper.writeText(content, margin, margin + 20, fontRegular, 7,
-                    "Diese Ertragsaufstellung wurde maschinell erstellt. Sie ist keine Steuerbescheinigung und " +
-                    "ersetzt keine Bescheinigung einer auszahlenden Stelle. " + signatureClaim + " Registerwerk eWpG-Registry.");
+                    "Diese Ertragsübersicht wurde maschinell erstellt. Sie ist keine Steuerbescheinigung und " +
+                    "ersetzt keine steuerliche Bescheinigung. " + signatureClaim + " Registerwerk eWpG-Registry.");
             } finally {
                 content.close();
             }

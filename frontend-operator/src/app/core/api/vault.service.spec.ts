@@ -45,4 +45,15 @@ describe('VaultService', () => {
         expect(req.request.headers.get('X-Dual-Control-Token')).toBe('second');
         req.flush({ txId: 'tx-2' });
     });
+
+    it('setDealingCutoff() POSTs the cut-off and period with step-up and dual-control tokens', () => {
+        service.setDealingCutoff('dep-1', { cutoffSecondsOfDay: 61200, periodSeconds: 86400 },
+            { stepUpToken: 'step-up', dualControlToken: 'second' }).subscribe();
+        const req = httpMock.expectOne(`${base}/dealing-cutoff`);
+        expect(req.request.method).toBe('POST');
+        expect(req.request.body).toEqual({ cutoffSecondsOfDay: 61200, periodSeconds: 86400 });
+        expect(req.request.headers.get('Authorization')).toBe('Bearer step-up');
+        expect(req.request.headers.get('X-Dual-Control-Token')).toBe('second');
+        req.flush({ txId: 'tx-3' });
+    });
 });

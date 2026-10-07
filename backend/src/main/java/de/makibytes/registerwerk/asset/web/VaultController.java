@@ -3,10 +3,12 @@ package de.makibytes.registerwerk.asset.web;
 import de.makibytes.registerwerk.idempotency.api.RequiresIdempotencyKey;
 import de.makibytes.registerwerk.blockchain.api.Erc4626AdminPort;
 import de.makibytes.registerwerk.blockchain.api.Erc7540AdminPort;
+import de.makibytes.registerwerk.blockchain.api.VaultDealingState;
 import de.makibytes.registerwerk.blockchain.api.VaultRequestView;
 import de.makibytes.registerwerk.blockchain.web.dto.ForceCancelVaultRequestBody;
 import de.makibytes.registerwerk.blockchain.web.dto.FulfillVaultRequestBody;
 import de.makibytes.registerwerk.blockchain.web.dto.NavStrikeRequest;
+import de.makibytes.registerwerk.blockchain.web.dto.SetDealingCutoffRequest;
 import de.makibytes.registerwerk.blockchain.web.dto.TxSubmissionResponse;
 import de.makibytes.registerwerk.deployment.api.AssetVaultState;
 import de.makibytes.registerwerk.deployment.api.AssetVaultStateRepository;
@@ -84,15 +86,17 @@ public class VaultController {
     }
 
     /** Confirmed vault state. {@code latestNavPerShare}/{@code latestNavStrikeAt} is the strike a
-     *  fulfilment will settle at (only strikes confirmed on-chain are applied here). */
+     *  fulfilment will settle at (only strikes confirmed on-chain are applied here). {@code dealing} is
+     *  the live on-chain forward-pricing state (T1-07): cut-off, next dealing point and when the latest NAV
+     *  was struck. */
     public record VaultStateResponse(
             UUID assetId, BigDecimal latestNavPerShare, Instant latestNavStrikeAt,
-            BigInteger depositCap, Integer minSettlementDelay) {
-        static VaultStateResponse of(UUID assetId, AssetVaultState s) {
+            BigInteger depositCap, Integer minSettlementDelay, VaultDealingState dealing) {
+        static VaultStateResponse of(UUID assetId, AssetVaultState s, VaultDealingState dealing) {
             return s == null
-                    ? new VaultStateResponse(assetId, null, null, null, null)
+                    ? new VaultStateResponse(assetId, null, null, null, null, dealing)
                     : new VaultStateResponse(assetId, s.getLatestNavPerShare(), s.getLatestNavStrikeAt(),
-                            s.getDepositCap(), s.getMinSettlementDelay());
+                            s.getDepositCap(), s.getMinSettlementDelay(), dealing);
         }
     }
 
@@ -101,7 +105,25 @@ public class VaultController {
         var dep = deploymentRepository.findById(depId)
                 .orElseThrow(() -> new EntityNotFoundException("AssetDeployment", depId));
         return ResponseEntity.ok(VaultStateResponse.of(dep.getAssetId(),
-                vaultStateRepository.findById(dep.getAssetId()).orElse(null)));
+                vaultStateRepository.findById(dep.getAssetId()).orElse(null),
+                erc7540AdminService.dealingState(depId)));
+    }
+
+    /**
+     * Sets the vault's dealing cut-off (T1-07 forward pricing): requests placed after it confirms settle only
+     * at a NAV struck after their dealing point. It decides which NAV investors get, so it is a regulator-grade
+     * change: REGISTRY_ADMIN (class level) + step-up + a second approver, bound to this body.
+     */
+    @RequiresIdempotencyKey
+    @PostMapping("/dealing-cutoff")
+    @RequiresStepUp(requireSecondApprover = true, reason = "VAULT_DEALING_CUTOFF")
+    public ResponseEntity<TxSubmissionResponse> setDealingCutoff(
+            @PathVariable UUID depId,
+            @Valid @RequestBody SetDealingCutoffRequest body,
+            Authentication auth) {
+        UUID txId = erc7540AdminService.setDealingCutoff(depId, body.cutoffSecondsOfDay(), body.periodSeconds(),
+                SecurityUtils.extractUserId(auth), SecurityUtils.primaryRole(auth, "REGISTRY_ADMIN"));
+        return ResponseEntity.ok(new TxSubmissionResponse(txId));
     }
 
     @GetMapping("/vault-requests")

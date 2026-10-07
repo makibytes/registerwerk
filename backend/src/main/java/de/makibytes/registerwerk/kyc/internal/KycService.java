@@ -26,6 +26,7 @@ import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
 import org.springframework.security.access.AccessDeniedException;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
+import de.makibytes.registerwerk.customer.events.EntityReactivatedEvent;
 import de.makibytes.registerwerk.kyc.api.KycApprovalRecord;
 import de.makibytes.registerwerk.kyc.api.KycApprovalRecordRepository;
 import de.makibytes.registerwerk.customer.api.LegalEntity;
@@ -83,9 +84,11 @@ public class KycService {
         LegalEntity entity = legalEntityRepository.findById(entityId)
             .orElseThrow(() -> new EntityNotFoundException("LegalEntity", entityId));
 
-        if (entity.getStatus() != EntityStatus.ACTIVE && entity.getStatus() != EntityStatus.PENDING_ONBOARDING) {
+        if (entity.getStatus() != EntityStatus.ACTIVE && entity.getStatus() != EntityStatus.PENDING_ONBOARDING
+                && entity.getStatus() != EntityStatus.PENDING_REACTIVATION) {
             throw new InvalidStateTransitionException(
-                "Cannot approve KYC: the entity is " + entity.getStatus() + ", only ACTIVE or PENDING_ONBOARDING entities can be approved.");
+                "Cannot approve KYC: the entity is " + entity.getStatus()
+                    + ", only ACTIVE, PENDING_ONBOARDING or PENDING_REACTIVATION entities can be approved.");
         }
         if (screeningGate.hasUnresolvedHit(entityId)) {
             throw new ComplianceGateException(
@@ -152,8 +155,13 @@ public class KycService {
             }
         }
 
+        boolean reinstating = entity.getStatus() == EntityStatus.PENDING_REACTIVATION;
         entity.setKycStatus(KycStatus.APPROVED);
         entity.setKycExpiryDate(effectiveExpiry);
+        if (reinstating) {
+            // T6-12: the fresh approval (all gates above passed) completes the reinstatement.
+            entity.setStatus(EntityStatus.ACTIVE);
+        }
         legalEntityRepository.save(entity);
 
         String snapshot = checklistSnapshot(evidence);
@@ -181,6 +189,13 @@ public class KycService {
         if (cappedBy != null) payload.put("expiryCappedBy", cappedBy);
         if (approverId != null) payload.put("dualControlApproverId", approverId.toString());
         eventPublisher.publishEvent(new KycApprovedEvent(entityId, actorId, null, payload));
+        if (reinstating) {
+            // Reuses the reactivation path: supersedes unfinished lapses and raises CHAIN_REINSTATEMENT_REQUIRED
+            // (org and claims are re-established explicitly, 4-eyes - never automatically).
+            eventPublisher.publishEvent(new EntityReactivatedEvent(entityId, actorId, null, Map.of(
+                "reason", "Reinstatement completed: KYC re-approved",
+                "from", EntityStatus.PENDING_REACTIVATION.name(), "to", EntityStatus.ACTIVE.name())));
+        }
         log.info("KYC approved for entityId={}", entityId);
     }
 
