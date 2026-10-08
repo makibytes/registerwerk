@@ -73,21 +73,31 @@ describe('SelectCompanyComponent', () => {
         expect(component.loadingEntities).toBe(false);
     });
 
-    it('debounces search input before reloading entities', async () => {
-        const fixture = createComponent();
-        const component = fixture.componentInstance;
-        adminService.listEntities.mockClear();
+    it('debounces search input before reloading entities', () => {
+        // Fake timers: the previous version asserted from a bare setTimeout that nothing awaited. It
+        // fired after the test had ended — against whatever mock a *later* test had assigned to
+        // `adminService` — and surfaced as an unhandled error that failed the whole run whenever the
+        // worker was still alive 350 ms later.
+        vi.useFakeTimers();
+        try {
+            const fixture = createComponent();
+            const component = fixture.componentInstance;
+            adminService.listEntities.mockClear();
 
-        component.searchQuery = 'acme';
-        component.onSearch();
+            component.searchQuery = 'acme';
+            component.onSearch();
 
-        // Immediately after typing, no new call yet — it is debounced.
-        expect(adminService.listEntities).not.toHaveBeenCalled();
+            // Immediately after typing, no new call yet — it is debounced (300 ms).
+            expect(adminService.listEntities).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(299);
+            expect(adminService.listEntities).not.toHaveBeenCalled();
 
-        setTimeout(() => {
+            vi.advanceTimersByTime(1);
+            expect(adminService.listEntities).toHaveBeenCalledTimes(1);
             expect(adminService.listEntities).toHaveBeenCalledWith('acme');
-            ;
-        }, 350);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     describe('selectEntity()', () => {
