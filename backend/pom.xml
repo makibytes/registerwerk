@@ -40,6 +40,14 @@
     <tomcat.version>11.0.25</tomcat.version>
     <jackson-bom.version>3.1.7</jackson-bom.version>
     <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
+    <!-- Dependency-Check findings (backend.yml, failBuildOnCVSS=7) that are real, so fixed rather than suppressed:
+         - Kotlin: CVE-2026-53914 affects Kotlin before 2.4.20 (the BOM still manages 2.3.21 for kotlin-stdlib,
+           which okhttp/web3j and tuweni pull in).
+         - vertx-core 4.5.11 reaches the app only through web3j -> tuweni-bytes, but it carries real advisories
+           (GHSA-3g76-f9xq-8vp6 / GHSA-cphf-4846-3xx9, fixed in 4.5.27; CVE-2026-15075/15076 up to and including
+           4.5.29). 4.5.35 is the newest 4.5.x patch release; the Boot BOM does not manage vert.x. -->
+    <kotlin.version>2.4.20</kotlin.version>
+    <vertx.version>4.5.35</vertx.version>
     <!-- Bouncy Castle publishes the provider artifacts at 1.85.2 while the PKIX/utility
          artifacts currently use 1.85. Keep each artifact on its newest compatible patch. -->
     <bouncycastle.provider.version>1.85.2</bouncycastle.provider.version>
@@ -54,6 +62,11 @@
 
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>io.vertx</groupId>
+        <artifactId>vertx-core</artifactId>
+        <version>${vertx.version}</version>
+      </dependency>
       <dependency>
         <groupId>org.springframework.modulith</groupId>
         <artifactId>spring-modulith-bom</artifactId>

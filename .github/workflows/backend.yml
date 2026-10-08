@@ -125,6 +125,7 @@ jobs:
           format: sarif
           output: trivy-backend.sarif
           severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
           exit-code: "1"
 
       # The scan action runs in the workspace root, not in this job's default working directory.
@@ -179,6 +180,7 @@ jobs:
         run: ./mvnw org.owasp:dependency-check-maven:13.0.0:check -B
              -DnvdApiKey="$NVD_API_KEY"
              -DdataDirectory="$NVD_DATA_DIR"
+             -DsuppressionFiles=dependency-check-suppressions.xml
              -DfailBuildOnCVSS=7
              -Dformat=JSON
 

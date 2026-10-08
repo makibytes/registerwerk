@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OWASP Dependency-Check suppressions (backend.yml, job "OWASP Dependency-Check", failBuildOnCVSS=7).
+
+  Every entry is a CPE/name-matching false positive that was checked against the CVE record and the
+  actual Maven coordinates, and is scoped to one package URL pattern and one CVE (no blanket
+  suppressions). Each expires (`until`) so it is re-reviewed instead of silently living forever; when it
+  expires the build fails again and the entry is either renewed after a fresh check or removed.
+
+  Real findings are fixed in pom.xml instead of being suppressed here (vertx-core, kotlin; see the
+  property comments there). Reviewed 2026-10-09.
+-->
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+
+  <suppress until="2027-04-09Z">
+    <notes><![CDATA[
+      CVE-2026-33117 is in the Key Vault *Keys* library of the Azure SDK for Java (affected: < 4.10.6).
+      This project uses com.azure:azure-security-keyvault-keys 4.10.6, i.e. the fixed release, and
+      Dependency-Check does not flag it. The jars below only match because their CPE is the umbrella
+      product "azure_sdk_for_java", which has no per-library version. OSV/GHSA list no advisory for any
+      of them.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/com\.azure/(azure-core|azure-core-http-netty|azure-json|azure-identity)@.*$</packageUrl>
+    <cve>CVE-2026-33117</cve>
+  </suppress>
+
+  <suppress until="2027-04-09Z">
+    <notes><![CDATA[
+      CVE-2023-36415 affects azure-identity for Java before 1.10.2 (MITRE record: "Azure Identity SDK
+      for Java 1.0.0 < 1.10.2"). This project uses azure-identity 1.18.3. The match comes from a CPE
+      version range that does not distinguish the per-language SDKs; OSV/GHSA list no advisory for 1.18.3.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/com\.azure/azure-identity@.*$</packageUrl>
+    <cve>CVE-2023-36415</cve>
+  </suppress>
+
+  <suppress until="2027-04-09Z">
+    <notes><![CDATA[
+      dev.cel:protobuf is the Common Expression Language (cel-java) module that grpc-xds pulls in at
+      runtime (optional); it is not protobuf-java. CVE-2022-3171 and CVE-2024-7254 are protobuf-java
+      parsing issues; the CPE "protobuf-java 0.13.0" is matched only because of the cel module's own
+      version number. protobuf-java itself is a separate artifact and is not flagged. OSV/GHSA list no
+      advisory for dev.cel:protobuf.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/dev\.cel/protobuf@.*$</packageUrl>
+    <cve>CVE-2022-3171</cve>
+    <cve>CVE-2024-7254</cve>
+  </suppress>
+
+</suppressions>
