@@ -1,8 +1,8 @@
 {
   "$schema": "./registry.schema.json",
   "schemaVersion": 1,
-  "registryRevision": 4,
-  "generatedAt": "2026-10-07",
+  "registryRevision": 5,
+  "generatedAt": "2026-10-08",
   "historyPath": "docs/claims/registry.history.json",
   "suppressionsPath": "docs/claims/suppressions.json",
   "externalApprovalEnabled": false,
@@ -90,7 +90,7 @@
       "statement": "The EVM subgraph gate validates configured ABI handler signatures and compiles every mapping; it does not prove deployed bytecode identity, chain finality, replay correctness, or legal effect.",
       "path": "docs/claims/README.md",
       "textSha256": "11aa4589b9d1f86d75771c1c6a7efa5ec085f5d6aee9c18c2b6f3fd0530c5fd6",
-      "recordSha256": "e56cab2da778ebec6915bfd37fe351f7d05e8fa31be2470ffc9a8bed8da64e28",
+      "recordSha256": "a03c306a74951d4fcc58c9dbbd8e8bae85b45627fdfabdccb9cf4f3c316807b2",
       "category": "OPERATIONS",
       "status": "SELF_ASSESSED_UNREVIEWED",
       "scope": "Static EVM subgraph manifest, ABI, renderer, code generation, and mapping build gate.",
@@ -114,7 +114,7 @@
         {
           "type": "REPOSITORY",
           "reference": "indexer/evm/subgraph/package.json",
-          "sha256": "b24e15b351cd8299ee9ded3611a362c6ede216f82a8b05d02b9ce4b00664a7e0"
+          "sha256": "60c0e57990f35b57d9aedd6f35f65d278c42661bdc4fb5798cd6d347119b458a"
         }
       ],
       "limitations": [
