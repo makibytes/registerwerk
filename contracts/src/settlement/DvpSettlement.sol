@@ -245,10 +245,14 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
         trade.state = TradeState.Settled;
         if (trade.lockedLeg == LockedLeg.Asset) {
             if (msg.sender != trade.buyer) revert NotCounterparty(tradeId, msg.sender);
+            // `from` is the caller: the check above reverts unless msg.sender == trade.buyer.
+            // slither-disable-next-line arbitrary-send-erc20
             trade.paymentToken.safeTransferFrom(trade.buyer, trade.seller, trade.paymentAmount);
             trade.assetToken.safeTransfer(trade.buyer, trade.assetAmount);
         } else {
             if (msg.sender != trade.seller) revert NotCounterparty(tradeId, msg.sender);
+            // `from` is the caller: the check above reverts unless msg.sender == trade.seller.
+            // slither-disable-next-line arbitrary-send-erc20
             trade.assetToken.safeTransferFrom(trade.seller, trade.buyer, trade.assetAmount);
             trade.paymentToken.safeTransfer(trade.seller, trade.paymentAmount);
         }

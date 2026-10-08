@@ -31,6 +31,7 @@ This page lists, in one place, what you should not assume. It has three parts: [
 | Held entitlements | A coupon or redemption entitlement held back for a blocked holder has no automated "pay later" path; an operator resolves it outside the system |
 | Operator UI gaps | The replacement of a legacy ERC-3643 compliance module is API only; there is no read view of per-deployment freeze status ("confirmed on N of M deployments") |
 | Migration pod | Flyway runs inside the backend, so the backend pod also holds the schema owner's password. A separate migration job is not built |
+| Confidential factory size | `EwpgConfidentialFactory` embeds the creation code of both confidential token contracts, so its runtime is 27,451 bytes, 2,875 bytes over the EIP-170 limit of 24,576. It cannot be deployed on a chain that enforces the limit. The contract-size check in CI (`scripts/check-contract-sizes.mjs`) exempts exactly this contract, fails if it grows, and fails once the exemption is no longer needed. The fix is the split `AssetTokenFactory` already has (a small coordinator plus per-token deployer modules); it changes the factory's ABI consumers and is not done yet |
 
 ### Where the product is looser than the backend
 

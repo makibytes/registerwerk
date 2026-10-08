@@ -316,6 +316,10 @@ contract EwpgBondDesk is RegisterwerkGated {
         if (amount == 0) revert ZeroAmount();
         if (bond.isFrozen(investor)) revert HolderFrozen(investor);
         uint256 cost = amount * pricePerUnit;
+        // The pull is authorised by the investor's own ERC-20 allowance (or EIP-2612 permit) to
+        // this desk; the proceeds can only go to the immutable treasury and the bond mints to the
+        // same investor. See "Payment leg" in the contract header.
+        // slither-disable-next-line arbitrary-send-erc20
         paymentToken.safeTransferFrom(investor, treasury, cost);
         bond.mint(investor, amount);
         emit BondSubscribed(investor, amount, cost);
@@ -409,12 +413,16 @@ contract EwpgBondDesk is RegisterwerkGated {
 
         if (paid != 0) {
             couponPaid[period][holder] = true;
+            // `from` is the immutable treasury, which pre-approves this desk ("Payment leg" above).
+            // slither-disable-next-line arbitrary-send-erc20
             paymentToken.safeTransferFrom(treasury, holder, paid);
             emit CouponPaid(period, holder, paid);
         }
         if (held != 0) {
             withheld[period][holder] = held;
             totalWithheld += held;
+            // `from` is the immutable treasury, which pre-approves this desk ("Payment leg" above).
+            // slither-disable-next-line arbitrary-send-erc20
             paymentToken.safeTransferFrom(treasury, address(this), held);
             emit CouponWithheld(period, holder, held);
         }
@@ -442,6 +450,8 @@ contract EwpgBondDesk is RegisterwerkGated {
         redeemed[holder] = true;
         uint256 principal = balance * pricePerUnit;
         if (balance > 0) {
+            // `from` is the immutable treasury, which pre-approves this desk ("Payment leg" above).
+            // slither-disable-next-line arbitrary-send-erc20
             paymentToken.safeTransferFrom(treasury, holder, principal);
             bond.burn(holder, balance);
         }
@@ -506,6 +516,8 @@ contract EwpgBondDesk is RegisterwerkGated {
         redeemed[holder] = true;
         uint256 principal = balance * pricePerUnit;
         if (balance > 0) {
+            // `from` is the immutable treasury, which pre-approves this desk ("Payment leg" above).
+            // slither-disable-next-line arbitrary-send-erc20
             paymentToken.safeTransferFrom(treasury, to, principal);
             bond.burn(holder, balance);
         }

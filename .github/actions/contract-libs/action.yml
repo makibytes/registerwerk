@@ -1,0 +1,23 @@
+name: Check out contract libraries
+description: >-
+  Initialises only the public Foundry library submodules under contracts/lib (run after
+  actions/checkout).
+
+# actions/checkout's `submodules: recursive` initialises every submodule in .gitmodules,
+# including docs/_chaincache. That one is the private sibling repository makibytes/chaincache,
+# which the repository-scoped GITHUB_TOKEN cannot read, so the checkout itself fails with
+# "repository 'https://github.com/makibytes/chaincache/' not found". Jobs that only need the
+# Solidity dependencies (forge build/test, Slither, ABI parity) therefore check out without
+# submodules and call this action instead. The docs workflow builds placeholders for the
+# Chaincache pages on purpose (ALLOW_MISSING_CHAINCACHE_DOCS=1) and needs no submodule at all.
+
+runs:
+  using: composite
+  steps:
+    - name: Initialise contracts/lib submodules
+      shell: bash
+      # The pathspec is relative to the repository root, whatever `defaults.run.working-directory`
+      # the calling job sets (indexers.yml works in indexer/evm/subgraph).
+      working-directory: ${{ github.workspace }}
+      # Same flags actions/checkout uses for a shallow checkout (fetch-depth: 1).
+      run: git submodule update --init --force --depth=1 --recursive -- contracts/lib

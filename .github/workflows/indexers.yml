@@ -22,17 +22,27 @@ jobs:
   evm-subgraph:
     name: EVM Subgraph — ABI Parity, Manifest, Build
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: indexer/evm/subgraph
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/contract-libs
       - uses: actions/setup-node@v4
         with:
           node-version: "24.19.0"
           cache: npm
           cache-dependency-path: indexer/evm/subgraph/package-lock.json
+      # `npm test` starts with validate-abi-parity.mjs, which diffs the checked-in subgraph ABIs
+      # against the canonical Forge artifacts under contracts/out (gitignored), so the contracts
+      # must be built first.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.1
+      - name: Build contracts (canonical ABIs)
+        run: forge build
+        working-directory: contracts
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run audit:build-tools
