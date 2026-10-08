@@ -85,7 +85,7 @@ git clone <your-registerwerk-remote> && cd registerwerk
 git submodule update --init --recursive
 cp .env.example.test .env
 # Supply Chaincache under CHAINCACHE_IMAGE (pull, docker load, or build it independently).
-docker build -t registerwerk-chaincache:latest ../chaincache  # example for a sibling checkout
+docker build -t chaincache:latest ../chaincache  # example for a sibling checkout
 docker compose up -d --build
 ```
 

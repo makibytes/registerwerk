@@ -96,7 +96,7 @@ checkout and never builds `../chaincache`:
 
 ```bash
 # A registry pull or `docker load` works equally well.
-docker build -t registerwerk-chaincache:latest ../chaincache
+docker build -t chaincache:latest ../chaincache
 ```
 
 ```bash

@@ -206,7 +206,7 @@ orchestration: there is no `../chaincache` build context and no second Compose p
 ```dotenv
 COMPOSE_PROFILES=docs,chaincache-true
 CHAINCACHE_ENABLED=true
-CHAINCACHE_IMAGE=registerwerk-chaincache:latest
+CHAINCACHE_IMAGE=chaincache:latest
 CHAINCACHE_PULL_POLICY=missing
 ```
 

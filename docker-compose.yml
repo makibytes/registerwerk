@@ -98,7 +98,7 @@ services:
   #     an isolated local devnet structurally cannot (real reorgs, cross-provider agreement).
   # Every other chain stays direct-to-node, untouched.
   chaincache-sepolia:
-    image: ${CHAINCACHE_IMAGE:-registerwerk-chaincache:latest}
+    image: ${CHAINCACHE_IMAGE:-chaincache:latest}
     pull_policy: ${CHAINCACHE_PULL_POLICY:-missing}
     profiles: ["chaincache-${CHAINCACHE_ENABLED:-false}"]
     logging: *default-logging
@@ -160,7 +160,7 @@ services:
     restart: unless-stopped
 
   chaincache-base:
-    image: ${CHAINCACHE_IMAGE:-registerwerk-chaincache:latest}
+    image: ${CHAINCACHE_IMAGE:-chaincache:latest}
     pull_policy: ${CHAINCACHE_PULL_POLICY:-missing}
     profiles: ["chaincache-${CHAINCACHE_ENABLED:-false}"]
     logging: *default-logging
