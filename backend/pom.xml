@@ -8,7 +8,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>4.1.0</version>
+    <version>4.1.1</version>
     <relativePath/>
   </parent>
 
@@ -32,9 +32,14 @@
     <awssdk.version>2.51.3</awssdk.version>
     <shedlock.version>7.7.0</shedlock.version>
     <resilience4j.version>2.2.0</resilience4j.version>
-    <!-- Narrow security patch overrides until the next Spring Boot BOM release carries them. -->
-    <netty.version>4.2.16.Final</netty.version>
-    <postgresql.version>42.7.13</postgresql.version>
+    <!-- Narrow security patch overrides until the next Spring Boot BOM release carries them.
+         Boot 4.1.1 already manages Netty 4.2.17 and PostgreSQL 42.7.13 (the former netty/postgresql
+         overrides are gone), but still ships Tomcat 11.0.24 and Jackson 3.1.5 / 2.21.5, which the
+         Trivy image scan in backend.yml rejects: Tomcat security-constraint/authentication
+         bypasses fixed in 11.0.25, jackson-core/-databind HIGHs fixed in 3.1.7 / 2.21.7. -->
+    <tomcat.version>11.0.25</tomcat.version>
+    <jackson-bom.version>3.1.7</jackson-bom.version>
+    <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
     <!-- Bouncy Castle publishes the provider artifacts at 1.85.2 while the PKIX/utility
          artifacts currently use 1.85. Keep each artifact on its newest compatible patch. -->
     <bouncycastle.provider.version>1.85.2</bouncycastle.provider.version>

@@ -14,6 +14,7 @@ import de.makibytes.registerwerk.deployment.api.AssetCouponPaymentRepository;
 import de.makibytes.registerwerk.deployment.api.CouponStatus;
 import de.makibytes.registerwerk.deployment.api.TokenStandard;
 import de.makibytes.registerwerk.deployment.api.schedule.Target2Calendar;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -78,6 +79,7 @@ class CouponScheduleServiceIT {
     @Autowired AssetCouponPaymentRepository couponPaymentRepository;
     @Autowired CorporateActionRepository corporateActionRepository;
     @Autowired CouponPaymentJob couponPaymentJob;
+    @Autowired RegisterClock registerClock;
     @LocalServerPort int port;
 
     private String url(String path) {
@@ -119,7 +121,9 @@ class CouponScheduleServiceIT {
 
     @Test
     void bondTermsGenerateScheduleAndCouponJobRaisesAction() {
-        LocalDate today = LocalDate.now();
+        // The register's calendar day, not the JVM's: they differ for two hours every evening (CI runs
+        // in UTC, the register in Europe/Berlin), which is when "today" in this test went stale.
+        LocalDate today = registerClock.today();
         Asset asset = asset(AssetStatus.APPROVED);
         String path = "/api/v1/assets/" + asset.getId() + "/bond-terms";
 
@@ -165,7 +169,7 @@ class CouponScheduleServiceIT {
 
     @Test
     void regenerationReplacesOnlyUnraisedFutureRows() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = registerClock.today();
         Asset asset = asset(AssetStatus.APPROVED);
         String path = "/api/v1/assets/" + asset.getId() + "/bond-terms";
         rest.exchange(url(path), HttpMethod.POST, new HttpEntity<>(terms(today.minusYears(1), today.plusYears(3)),
