@@ -118,10 +118,17 @@ jobs:
           distribution: temurin
           cache: maven
 
+      # NVD rejects requests without an API key (repository secret NVD_API_KEY). The plugin reads the
+      # Maven user properties `failBuildOnCVSS` and `format`; the `dependency-check.`-prefixed spellings
+      # this step used before are ignored, so it ran with the defaults (never fail, HTML report).
+      # The plugin version is pinned so the gate does not change underneath the build.
       - name: OWASP Dependency-Check
-        run: ./mvnw org.owasp:dependency-check-maven:check -B
-             -Ddependency-check.failBuildOnCVSS=7
-             -Ddependency-check.format=JSON
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: ./mvnw org.owasp:dependency-check-maven:13.0.0:check -B
+             -DnvdApiKey="$NVD_API_KEY"
+             -DfailBuildOnCVSS=7
+             -Dformat=JSON
         continue-on-error: false
 
       - name: Upload OWASP report
@@ -149,7 +156,7 @@ jobs:
 
       - name: Upload Trivy SARIF
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('backend/trivy-backend.sarif') != ''
         with:
           sarif_file: trivy-backend.sarif
 

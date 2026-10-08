@@ -78,7 +78,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
       - uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('frontend-operator/trivy-op.sarif') != ''
         with:
           sarif_file: trivy-op.sarif
 
@@ -97,6 +97,11 @@ jobs:
           cache: npm
           cache-dependency-path: frontend-customer/package-lock.json
       - run: npm ci
+      # frontend-shared resolves @angular/* from a sibling node_modules. The committed symlink points
+      # at frontend-operator's (what the shared-library lint job uses); this app has to compile the
+      # library against its own copy, exactly as frontend-customer/Dockerfile does.
+      - name: Point the shared library at this app's node_modules
+        run: ln -sfn "$PWD/node_modules" ../frontend-shared/node_modules
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm run test -- --watch=false
@@ -115,7 +120,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
       - uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('frontend-customer/trivy-cust.sarif') != ''
         with:
           sarif_file: trivy-cust.sarif
 
