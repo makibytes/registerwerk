@@ -29,3 +29,20 @@ b55bd725aec4502d5d729d6d10fed52883100ddc:docs/operator/api-reference.it.md:curl-
 # PEM only so the disposable demo SoftHSM token can import it (deploy/softhsm/init-token.sh says so
 # explicitly). Intentionally public, never a real credential, demo profile only.
 77b5c474bb14bbf9c25d920341c22fe736d79be2:deploy/softhsm/demo-operator-key.pem:private-key:1
+
+# Reviewed 2026-10-08 when secret scanning moved from gitleaks-action (org licence required) to
+# the gitleaks CLI, which scans the whole history instead of only the pushed commit range.
+# None of the three is a credential.
+
+# Throwaway signer constant in a Mockito unit test (derived address 0x2c7536E3...5c23). It is
+# referenced only by backend unit tests (this one and EvmContractServiceResignTest) — no config,
+# script, seeder or deployment uses it, and nothing is ever signed with it outside the test JVM.
+a716293ecc4174e502afd579a28e01b0d4a7a3b4:backend/src/test/java/de/makibytes/registerwerk/asset/internal/GasSponsorshipVoucherServiceTest.java:generic-api-key:60
+
+# Anvil/Foundry's publicly documented account #0 development key (address 0xf39Fd6e5...2266, as the
+# line's own comment says) in the local e2e script that runs against a throwaway Anvil node.
+b0db7829847a07eaa2a254c55d2b81c1a5b709b8:scripts/e2e-exactly-once/run.sh:generic-api-key:29
+
+# Not a key: the PEM *header* string literal TrpAdapter checks for before parsing a PKCS#8 file
+# ("TRP private key must be unencrypted PKCS#8 PEM").
+16e59ab4622aedd9cbef353c3a0140f269d254e7:backend/src/main/java/de/makibytes/registerwerk/travelrule/internal/TrpAdapter.java:private-key:198

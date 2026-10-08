@@ -72,7 +72,7 @@ jobs:
           npx --prefix docs playwright install --with-deps chromium
           docker run --rm -d --name registerwerk-docs-ci -p 48003:80 registerwerk-docs:ci
           trap 'docker stop registerwerk-docs-ci' EXIT
-          for attempt in {1..30}; do
+          for _ in {1..30}; do
             curl --fail --silent http://127.0.0.1:48003/healthz && break
             sleep 1
           done

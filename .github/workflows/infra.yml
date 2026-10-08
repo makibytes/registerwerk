@@ -60,6 +60,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.3"
       - name: Parse gateway/kong.yml
         run: |
           docker run --rm -e KONG_DATABASE=off \
@@ -67,10 +70,16 @@ jobs:
             kong:3.9.3 kong config parse /kong.yml
       # Must stay identical to gateway/kong.yml (Helm can only read files inside its own chart
       # directory, so this is a separate copy — see the SYNC NOTE at the top of the file).
-      - name: Parse deploy/helm/registerwerk/files/kong.yml
+      # The copy is a Helm template (the ip-restriction allow list is a `{{- range }}` over
+      # kong.adminAllowCidrs), so the file itself is not valid YAML: render it with the CI test
+      # values and parse what Helm would actually ship to Kong.
+      - name: Parse the rendered deploy/helm/registerwerk/files/kong.yml
+        working-directory: deploy/helm/registerwerk
         run: |
+          helm template test . -f values.yaml -f ci/test-values.yaml --show-only templates/kong-configmap.yaml \
+            | sed -n '/kong.yml: |-/,$p' | tail -n +2 | sed 's/^    //' > "$RUNNER_TEMP/helm-kong.yml"
           docker run --rm -e KONG_DATABASE=off \
-            -v "$PWD/deploy/helm/registerwerk/files/kong.yml:/kong.yml:ro" \
+            -v "$RUNNER_TEMP/helm-kong.yml:/kong.yml:ro" \
             kong:3.9.3 kong config parse /kong.yml
 
   helm:
