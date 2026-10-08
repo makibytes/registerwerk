@@ -78,7 +78,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
       - uses: github/codeql-action/upload-sarif@v3
-        if: always() && hashFiles('frontend-operator/trivy-op.sarif') != ''
+        if: always() && hashFiles('trivy-op.sarif') != ''
         with:
           sarif_file: trivy-op.sarif
 
@@ -120,7 +120,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
       - uses: github/codeql-action/upload-sarif@v3
-        if: always() && hashFiles('frontend-customer/trivy-cust.sarif') != ''
+        if: always() && hashFiles('trivy-cust.sarif') != ''
         with:
           sarif_file: trivy-cust.sarif
 
