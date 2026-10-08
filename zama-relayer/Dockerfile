@@ -16,7 +16,10 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 # npm is only an image-build tool. Keeping its full dependency tree in the running image added
 # avoidable HIGH/CRITICAL advisories even though the relayer starts with plain `node`.
-RUN apk add --no-cache python3 make g++ \
+# The pinned node tag can lag patched Alpine packages (the Trivy gate in CI fails on a fixable
+# OpenSSL HIGH otherwise), so the runtime layer is upgraded during the build, as backend/Dockerfile does.
+RUN apk upgrade --no-cache \
+    && apk add --no-cache python3 make g++ \
     && npm ci --omit=dev \
     && npm uninstall --global npm \
     && apk del python3 make g++

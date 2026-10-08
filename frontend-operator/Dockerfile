@@ -14,6 +14,10 @@ ARG BUILD_CONFIG=production
 RUN npm run build -- --configuration=${BUILD_CONFIG}
 
 FROM nginx:1.30.4-alpine
+# The pinned nginx tag can lag patched Alpine packages (the Trivy gate in CI fails on fixable
+# HIGH CVEs in libexpat/util-linux otherwise), so upgrade the small runtime layer during the
+# build, as backend/Dockerfile does.
+RUN apk upgrade --no-cache
 # nginx defaults worker_processes to "auto" — one per host CPU, so an 8-core demo host ran 8
 # workers here, 8 more in the customer frontend and 8 in Kong. Serving a static SPA needs nowhere
 # near that, and the process list it produced made an unrelated CPU problem look like an nginx one.
