@@ -63,9 +63,11 @@ public interface ZamaRelayerClient {
 
     /**
      * Requests the Relayer's KMS publicly decrypt {@code ciphertextHandle} — used for values a
-     * contract itself allowed for public decryption (see {@code TFHE.allow(..., address(this))}
-     * plus {@code Gateway.requestDecryption} in the confidential contracts), not a specific
-     * user's private balance.
+     * contract itself made publicly decryptable (see {@code FHE.makePubliclyDecryptable} in the
+     * confidential contracts), not a specific user's private balance. The sidecar's response also
+     * carries {@code abiEncodedClearValues} and {@code decryptionProof}, which a caller that wants
+     * to put the value on chain submits to the contract ({@code FHE.checkSignatures}); this method
+     * only returns the cleartext.
      */
     BigInteger requestPublicDecrypt(String ciphertextHandle);
 }

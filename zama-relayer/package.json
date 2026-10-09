@@ -17,17 +17,17 @@
     "wrap-operator-key": "node --loader ts-node/esm scripts/wrap-operator-key.ts"
   },
   "dependencies": {
-    "@zama-fhe/relayer-sdk": "^0.4.4",
+    "@zama-fhe/relayer-sdk": "^0.4.5",
     "express": "^5.2.1",
-    "viem": "^2.55.11"
+    "viem": "^2.57.4"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^24.13.3",
     "@types/supertest": "^7.2.1",
-    "supertest": "^7.0.0",
+    "supertest": "^7.3.1",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^5.0.3"
   }
 }

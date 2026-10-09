@@ -16,8 +16,8 @@ describe('POST /v1/public-decrypt', () => {
   it('decrypts a publicly-disclosed handle', async () => {
     const publicDecrypt = vi.fn().mockResolvedValue({
       clearValues: { '0xhandle': 123456n },
-      abiEncodedClearValues: '0x',
-      decryptionProof: '0x',
+      abiEncodedClearValues: '0x000000000000000000000000000000000000000000000000000000000001e240',
+      decryptionProof: '0x01deadbeef',
     });
     mockedGetFheInstance.mockResolvedValue({ publicDecrypt } as never);
 
@@ -25,7 +25,11 @@ describe('POST /v1/public-decrypt', () => {
     const res = await request(app).post('/v1/public-decrypt').set('Authorization', AUTH_HEADER).send({ ciphertextHandle: '0xhandle' });
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ cleartext: '123456' });
+    expect(res.body).toEqual({
+      cleartext: '123456',
+      abiEncodedClearValues: '0x000000000000000000000000000000000000000000000000000000000001e240',
+      decryptionProof: '0x01deadbeef',
+    });
     expect(publicDecrypt).toHaveBeenCalled();
   });
 

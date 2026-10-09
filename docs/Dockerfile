@@ -28,7 +28,7 @@ COPY docs/ ./docs/
 # Material otherwise downloads Mermaid from unpkg at runtime. The docs CSP correctly disallows
 # third-party scripts, so provide the pinned renderer locally before Material's bundle starts.
 COPY --from=docs-assets /assets/node_modules/mermaid/dist/mermaid.min.js \
-  ./docs/assets/vendor/mermaid-11.16.1.min.js
+  ./docs/assets/vendor/mermaid-12.1.0.min.js
 
 # hooks.py substitutes {{ backend_url }} into pages. This used to be read from the environment at
 # serve time; now that the site is prebuilt it is necessarily a build-time value. Override with

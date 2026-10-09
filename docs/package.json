@@ -10,9 +10,9 @@
     "test:frontends": "node ./scripts/verify-frontends.mjs"
   },
   "dependencies": {
-    "mermaid": "11.16.1"
+    "mermaid": "12.1.0"
   },
   "devDependencies": {
-    "playwright": "1.62.1"
+    "playwright": "1.64.0"
   }
 }
