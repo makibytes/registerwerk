@@ -8,6 +8,7 @@ on:
       - frontend-customer/**
       - frontend-shared/**
       - scripts/docker-build-retry.sh
+      - scripts/docker-hub-mirror.sh
       - .github/workflows/frontend.yml
   pull_request:
     branches: [main, develop]
@@ -16,6 +17,7 @@ on:
       - frontend-customer/**
       - frontend-shared/**
       - scripts/docker-build-retry.sh
+      - scripts/docker-hub-mirror.sh
 
 permissions:
   contents: read

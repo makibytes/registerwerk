@@ -3,10 +3,10 @@ name: Backend CI
 on:
   push:
     branches: [main, feat/**, fix/**, release/**, develop, review/**]
-    paths: [backend/**, scripts/docker-build-retry.sh, .github/workflows/backend.yml]
+    paths: [backend/**, scripts/docker-build-retry.sh, scripts/docker-hub-mirror.sh, .github/workflows/backend.yml]
   pull_request:
     branches: [main, develop]
-    paths: [backend/**, scripts/docker-build-retry.sh, .github/workflows/backend.yml]
+    paths: [backend/**, scripts/docker-build-retry.sh, scripts/docker-hub-mirror.sh, .github/workflows/backend.yml]
 
 permissions:
   contents: read
@@ -39,7 +39,9 @@ jobs:
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:18.6-alpine
+        # Service containers are pulled before any step runs, so the daemon mirror below cannot help;
+        # the image is addressed through Google's Docker Hub cache (Docker Hub rate-limits shared runners).
+        image: mirror.gcr.io/library/postgres:18.6-alpine
         env:
           POSTGRES_DB: registerwerk_test
           POSTGRES_USER: registerwerk
@@ -62,6 +64,11 @@ jobs:
           java-version: "25"
           distribution: temurin
           cache: maven
+
+      # Testcontainers pulls postgres/ryuk through the daemon.
+      - name: Pull Docker Hub images through a mirror
+        working-directory: .
+        run: scripts/docker-hub-mirror.sh
 
       - name: Build and verify (tests + JaCoCo)
         run: ./mvnw verify -B
