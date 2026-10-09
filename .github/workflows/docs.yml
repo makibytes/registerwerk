@@ -61,7 +61,7 @@ jobs:
         # explicit build arg keeps the fifth path testable with marked placeholders; normal
         # builds still require the pinned submodule and render its canonical Markdown.
         run: >-
-          docker build
+          scripts/docker-build-retry.sh
           --build-arg ALLOW_MISSING_CHAINCACHE_DOCS=1
           -f docs/Dockerfile
           -t registerwerk-docs:ci

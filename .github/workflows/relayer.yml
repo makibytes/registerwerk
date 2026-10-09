@@ -37,7 +37,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Build production container
-        run: docker build -t registerwerk-zama-relayer:ci .
+        run: ../scripts/docker-build-retry.sh -t registerwerk-zama-relayer:ci .
       - name: Scan production container
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:

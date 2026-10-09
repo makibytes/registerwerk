@@ -69,7 +69,7 @@ jobs:
       - run: npm run test -- --watch=false
       - run: npm run build -- --configuration production
       - name: Build production container
-        run: docker build -f frontend-operator/Dockerfile -t registerwerk-operator:ci .
+        run: scripts/docker-build-retry.sh -f frontend-operator/Dockerfile -t registerwerk-operator:ci .
         working-directory: .
       - name: Scan production container
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
@@ -109,7 +109,7 @@ jobs:
       - run: npm run test -- --watch=false
       - run: npm run build -- --configuration production
       - name: Build production container
-        run: docker build -f frontend-customer/Dockerfile -t registerwerk-customer:ci .
+        run: scripts/docker-build-retry.sh -f frontend-customer/Dockerfile -t registerwerk-customer:ci .
         working-directory: .
       - name: Scan production container
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
