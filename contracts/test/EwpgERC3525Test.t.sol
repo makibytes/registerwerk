@@ -277,6 +277,59 @@ contract EwpgERC3525Test is Test {
         assertEq(token.balanceOf(tokenB), 500e18);
     }
 
+    /// The interface makes `approve`/`transferFrom` payable, but the token never takes payment: ether
+    /// sent along would be locked forever (slither `locked-ether`), so it is refused.
+    function test_payableEntryPoints_rejectEther() public {
+        vm.startPrank(registry);
+        uint256 tokenA = token.mint(alice, SLOT_BONDS, 1000e18);
+        uint256 tokenB = token.mint(bob, SLOT_BONDS, 0);
+        vm.stopPrank();
+        vm.deal(alice, 1 ether);
+
+        vm.startPrank(alice);
+        vm.expectRevert(ERC3525.EtherNotAccepted.selector);
+        token.approve{value: 1 wei}(tokenA, bob, 1e18);
+        vm.expectRevert(ERC3525.EtherNotAccepted.selector);
+        token.transferFrom{value: 1 wei}(tokenA, tokenB, 1e18);
+        vm.expectRevert(ERC3525.EtherNotAccepted.selector);
+        token.transferFrom{value: 1 wei}(tokenA, bob, 1e18);
+        vm.stopPrank();
+
+        assertEq(address(token).balance, 0);
+        vm.prank(alice);
+        token.transferFrom(tokenA, tokenB, 1e18); // zero value still works
+        assertEq(token.balanceOf(tokenB), 1e18);
+    }
+
+    /// The force-operation flag is transient (EIP-1153): a forced operation must not leave a
+    /// storage slot behind, and the flag must be cleared again so the compliance hooks bite afterwards.
+    function test_forceOpFlag_isTransientAndClearedAfterwards() public {
+        vm.prank(registry);
+        uint256 tokenA = token.mint(alice, SLOT_BONDS, 1000e18);
+        vm.prank(registry);
+        uint256 tokenB = token.mint(bob, SLOT_BONDS, 0);
+
+        vm.record();
+        vm.prank(registry);
+        token.forcedTransferValue(tokenA, tokenB, 10e18, "BaFin Az. 1");
+        (, bytes32[] memory writes) = vm.accesses(address(token));
+        // balances of the two tokens are the only persistent writes (the flag would add a third slot)
+        uint256 distinct;
+        for (uint256 i; i < writes.length; ++i) {
+            bool seen;
+            for (uint256 j; j < i; ++j) {
+                if (writes[j] == writes[i]) seen = true;
+            }
+            if (!seen) ++distinct;
+        }
+        assertEq(distinct, 2, "a forced value transfer writes the two token balances only");
+
+        // Flag cleared: an ordinary transfer to a non-whitelisted address is blocked again.
+        vm.prank(alice);
+        vm.expectRevert("EwpgERC3525: recipient not whitelisted");
+        token.transferFrom(tokenA, mallory, 1e18);
+    }
+
     function test_forcedTransferValue_revertsForDifferentSlots() public {
         vm.startPrank(registry);
         uint256 tokenA = token.mint(alice, SLOT_BONDS, 1000e18);

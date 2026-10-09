@@ -65,6 +65,7 @@ abstract contract ERC3525 is ERC721, IERC3525 {
     function approve(uint256 tokenId, address operator, uint256 value)
         public payable virtual override
     {
+        _rejectEther();
         address owner = ownerOf(tokenId);
         require(msg.sender == owner || isApprovedForAll(owner, msg.sender),
                 "ERC3525: caller is not owner nor approved-for-all");
@@ -77,6 +78,7 @@ abstract contract ERC3525 is ERC721, IERC3525 {
     function transferFrom(uint256 fromTokenId, uint256 toTokenId, uint256 value)
         public payable virtual override
     {
+        _rejectEther();
         _requireSenderApproved(fromTokenId, value);
         require(_tokenData[fromTokenId].slot == _tokenData[toTokenId].slot,
                 "ERC3525: tokens in different slots");
@@ -87,6 +89,7 @@ abstract contract ERC3525 is ERC721, IERC3525 {
         public payable virtual override
         returns (uint256 newTokenId)
     {
+        _rejectEther();
         _requireSenderApproved(fromTokenId, value);
         // Create the destination position without issuing value, then move the
         // requested value through the same transfer hook used by token-to-token
@@ -95,6 +98,15 @@ abstract contract ERC3525 is ERC721, IERC3525 {
         newTokenId = _mintToken(to, _tokenData[fromTokenId].slot, 0);
         _transferValue(fromTokenId, newTokenId, value);
         return newTokenId;
+    }
+
+    /// @dev The ERC-3525 interface declares `approve` / `transferFrom` `payable` (so a sale-style
+    ///      implementation may take payment) but this token never does; ether sent along would be
+    ///      locked in the contract forever, so it is refused.
+    error EtherNotAccepted();
+
+    function _rejectEther() private view {
+        if (msg.value != 0) revert EtherNotAccepted();
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────

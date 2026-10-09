@@ -4,7 +4,7 @@ pragma solidity ^0.8.36;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../ecosystem/RegisterwerkGated.sol";
 import "../ecosystem/interfaces/IPermissionOracle.sol";
@@ -77,7 +77,7 @@ struct MarketParams {
 ///      this market's own quoted maximum must not become immediately
 ///      liquidatable the moment any interest accrues — restoring the buffer `EwpgRepoFacility`
 ///      always enforced (`maxLtvBps < liquidationThresholdBps`).
-contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuard {
+contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
     bytes32 public constant BORROW = keccak256("repo-facility.borrow");

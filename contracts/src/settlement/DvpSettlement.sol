@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
 /// @title DvpSettlement
@@ -54,7 +54,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 ///      any other destination named in an order goes through the separate `LEGAL_ORDER_ROLE`
 ///      ({proposeForceCancel} → {LEGAL_ORDER_DELAY} → {executeForceCancel}), during which the
 ///      parties and monitors can see it coming and the admin can {withdrawForceCancel} it.
-contract DvpSettlement is ReentrancyGuard, AccessControl {
+contract DvpSettlement is ReentrancyGuardTransient, AccessControl {
     using SafeERC20 for IERC20;
 
     /// @notice Role held by the registry operator's backend wallet(s).
@@ -117,16 +117,22 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
         Payment
     }
 
+    /// @dev Five storage slots, not seven (Glamsterdam, EIP-8037: every new slot written by a lock
+    ///      costs ~110k gas): `seller`, `expiry`, `lockedLeg` and `state` share slot 0, the two
+    ///      amounts share the last one. Amounts are therefore `uint128` (a lock above 2^128 - 1 base
+    ///      units reverts {InvalidTrade}); the terms digest and every event still use the full
+    ///      `uint256` encoding, so {hashTerms} is unchanged. The member order is also the order of
+    ///      the {trades} getter's return tuple.
     struct Trade {
         address seller; // delivers assetToken, receives paymentToken
+        uint64 expiry; // after this timestamp the locker may reclaim via cancel()
+        LockedLeg lockedLeg;
+        TradeState state;
         address buyer; // pays paymentToken, receives assetToken
         IERC20 assetToken;
-        uint256 assetAmount;
         IERC20 paymentToken;
-        uint256 paymentAmount;
-        LockedLeg lockedLeg;
-        uint64 expiry; // after this timestamp the locker may reclaim via cancel()
-        TradeState state;
+        uint128 assetAmount;
+        uint128 paymentAmount;
     }
 
     mapping(bytes32 => Trade) public trades;
@@ -239,22 +245,20 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
         if (actualTermsHash != expectedTermsHash) {
             revert TermsMismatch(tradeId, expectedTermsHash, actualTermsHash);
         }
+        // Only the counterparty of the escrowed leg may settle; checked before any external call, and the
+        // pull below names `msg.sender` itself as the payer so no third party's allowance is ever spent.
+        bool assetLocked = trade.lockedLeg == LockedLeg.Asset;
+        if (msg.sender != (assetLocked ? trade.buyer : trade.seller)) revert NotCounterparty(tradeId, msg.sender);
         if (_isFrozen(trade.assetToken, trade.seller)) revert PartyFrozen(tradeId, trade.seller);
         if (_isFrozen(trade.assetToken, trade.buyer)) revert PartyFrozen(tradeId, trade.buyer);
 
         trade.state = TradeState.Settled;
-        if (trade.lockedLeg == LockedLeg.Asset) {
-            if (msg.sender != trade.buyer) revert NotCounterparty(tradeId, msg.sender);
-            // `from` is the caller: the check above reverts unless msg.sender == trade.buyer.
-            // slither-disable-next-line arbitrary-send-erc20
-            trade.paymentToken.safeTransferFrom(trade.buyer, trade.seller, trade.paymentAmount);
-            trade.assetToken.safeTransfer(trade.buyer, trade.assetAmount);
+        if (assetLocked) {
+            trade.paymentToken.safeTransferFrom(msg.sender, trade.seller, trade.paymentAmount);
+            trade.assetToken.safeTransfer(msg.sender, trade.assetAmount);
         } else {
-            if (msg.sender != trade.seller) revert NotCounterparty(tradeId, msg.sender);
-            // `from` is the caller: the check above reverts unless msg.sender == trade.seller.
-            // slither-disable-next-line arbitrary-send-erc20
-            trade.assetToken.safeTransferFrom(trade.seller, trade.buyer, trade.assetAmount);
-            trade.paymentToken.safeTransfer(trade.seller, trade.paymentAmount);
+            trade.assetToken.safeTransferFrom(msg.sender, trade.buyer, trade.assetAmount);
+            trade.paymentToken.safeTransfer(msg.sender, trade.paymentAmount);
         }
         emit TradeSettled(tradeId);
     }
@@ -408,19 +412,20 @@ contract DvpSettlement is ReentrancyGuard, AccessControl {
         if (
             seller == address(0) || buyer == address(0) || seller == buyer || address(assetToken) == address(0)
                 || address(paymentToken) == address(0) || assetAmount == 0 || paymentAmount == 0
+                || assetAmount > type(uint128).max || paymentAmount > type(uint128).max
                 || expiry <= block.timestamp
         ) revert InvalidTrade();
 
         trades[tradeId] = Trade({
             seller: seller,
+            expiry: expiry,
+            lockedLeg: lockedLeg,
+            state: TradeState.Locked,
             buyer: buyer,
             assetToken: assetToken,
-            assetAmount: assetAmount,
             paymentToken: paymentToken,
-            paymentAmount: paymentAmount,
-            lockedLeg: lockedLeg,
-            expiry: expiry,
-            state: TradeState.Locked
+            assetAmount: uint128(assetAmount),
+            paymentAmount: uint128(paymentAmount)
         });
     }
 

@@ -3,7 +3,7 @@ pragma solidity ^0.8.36;
 
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "../compliance/EwpgCompliance.sol";
 import "../documents/EwpgDocumentManagement.sol";
 
@@ -23,7 +23,7 @@ import "../documents/EwpgDocumentManagement.sol";
 ///
 /// NOTE: IEwpgAdminControls.forcedTransfer / forceBurn operate on a single id/amount pair.
 ///       For multi-id operations use forcedTransferBatch / forceBurnBatch.
-contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement, ReentrancyGuard {
+contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement, ReentrancyGuardTransient {
     /// @notice Links this contract to the off-chain registry asset record.
     bytes32 public immutable assetId;
 
@@ -68,7 +68,7 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         bytes calldata data
     ) external onlyRegistry nonReentrant {
         require(isWhitelisted(to), "EwpgERC1155: recipient not whitelisted");
-        uint256 total;
+        uint256 total = 0;
         for (uint256 i; i < amounts.length; i++) total += amounts[i];
         _requireWithinCap(_totalMinted, total);
         _totalMinted += total;

@@ -1,8 +1,15 @@
 #!/usr/bin/env node
-// Enforces the EIP-170 (24,576 B runtime) and EIP-3860 (49,152 B initcode) limits on every
-// contract `forge build --sizes` reports, so nothing deployable silently outgrows a mainnet-
-// grade EVM. `forge build --sizes` alone fails on ANY oversize contract; this wrapper keeps that
-// strictness and adds one explicit, shrink-only exception list for known, owned debt:
+// Enforces the contract-size limits of the chains Registerwerk targets on every contract
+// `forge build --sizes` reports, so nothing deployable silently outgrows them.
+//
+// Registerwerk targets Glamsterdam-era chains only. EIP-7954 raises the limits to 65,536 B of runtime
+// code (was 24,576, EIP-170) and 131,072 B of initcode (was 49,152, EIP-3860). Forge's own
+// `runtime_margin` / `init_margin` still measure against the old limits, so this script computes the
+// margins itself. Size is no longer a hard wall below 64 KiB, but it is the main cost lever: since
+// EIP-8037 every deployed byte costs 1,530 gas of state gas (it was 200), so the script also prints
+// what the largest contracts cost to deploy (information only).
+//
+// It keeps a shrink-only exception list for known, owned debt:
 //
 //   - an exempted contract may not grow beyond the sizes recorded below;
 //   - it must be removed from the list once it is back within the limits (a stale exemption
@@ -15,39 +22,43 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+/** EIP-7954 (Glamsterdam): maximum runtime code size, in bytes. */
+export const MAX_RUNTIME = 65_536;
+/** EIP-7954 (Glamsterdam): maximum initcode size, in bytes. */
+export const MAX_INITCODE = 131_072;
+/** EIP-8037: state gas per deployed byte (`CPSB`), and the account-creation share in bytes. */
+export const STATE_GAS_PER_BYTE = 1530;
+export const STATE_BYTES_PER_NEW_ACCOUNT = 120;
+
 /**
  * Known oversize contracts. `runtime`/`init` are the sizes in bytes measured when the exemption
  * was recorded; they are ceilings, not targets.
  */
-export const EXEMPTIONS = {
-  EwpgConfidentialFactory: {
-    runtime: 27451,
-    init: 27972,
-    reason:
-      "embeds the creation code of both ConfidentialERC20 and ConfidentialERC3643, so its runtime is "
-      + "2,875 B over EIP-170 and it cannot be deployed on a chain that enforces the limit. It needs "
-      + "the same split AssetTokenFactory got (coordinator plus per-token deployer modules); until then "
-      + "it is a documented known limitation (docs/platform/known-limitations.md).",
-  },
-};
+export const EXEMPTIONS = {};
+
+/** Gas to deploy `runtimeBytes` of code under EIP-8037 (account creation + code deposit, state gas only). */
+export function deployStateGas(runtimeBytes) {
+  return (STATE_BYTES_PER_NEW_ACCOUNT + runtimeBytes) * STATE_GAS_PER_BYTE;
+}
 
 /**
- * @param {Record<string, {runtime_size:number, init_size:number, runtime_margin:number, init_margin:number}>} sizes
- *        the JSON printed by `forge build --sizes --json`
+ * @param {Record<string, {runtime_size:number, init_size:number}>} sizes
+ *        the JSON printed by `forge build --sizes --json` (only the two sizes are used)
  * @param {typeof EXEMPTIONS} exemptions
  * @returns {string[]} problems; empty when the build may pass
  */
 export function evaluate(sizes, exemptions = EXEMPTIONS) {
   const problems = [];
   for (const [name, size] of Object.entries(sizes)) {
-    // A negative margin is the amount by which the contract is over the limit.
-    const over = size.runtime_margin < 0 || size.init_margin < 0;
+    const runtimeMargin = MAX_RUNTIME - size.runtime_size;
+    const initMargin = MAX_INITCODE - size.init_size;
+    const over = runtimeMargin < 0 || initMargin < 0;
     const exemption = exemptions[name];
     if (!exemption) {
       if (over) {
         problems.push(
-          `${name}: runtime ${size.runtime_size} B (margin ${size.runtime_margin}), initcode ${size.init_size} B `
-          + `(margin ${size.init_margin}) is over the EIP-170 / EIP-3860 limit and has no exemption`,
+          `${name}: runtime ${size.runtime_size} B (margin ${runtimeMargin}), initcode ${size.init_size} B `
+          + `(margin ${initMargin}) is over the EIP-7954 limit (${MAX_RUNTIME} B / ${MAX_INITCODE} B) and has no exemption`,
         );
       }
       continue;
@@ -96,6 +107,11 @@ function main() {
     console.error(problems.map((problem) => `ERROR ${problem}`).join("\n"));
     process.exit(1);
   }
+  const largest = Object.entries(sizes)
+    .sort(([, a], [, b]) => b.runtime_size - a.runtime_size)
+    .slice(0, 5)
+    .map(([name, size]) => `${name} ${size.runtime_size} B ≈ ${(deployStateGas(size.runtime_size) / 1e6).toFixed(1)}M gas`);
+  console.log(`largest contracts (deploy state gas under EIP-8037): ${largest.join("; ")}`);
   console.log(`contract sizes OK: ${Object.keys(sizes).length} contracts checked, ${exempted.length} exempt`);
 }
 

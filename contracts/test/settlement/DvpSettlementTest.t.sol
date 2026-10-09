@@ -224,7 +224,41 @@ contract DvpSettlementTest is Test {
         dvp.lockAsset(REF, buyer, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, uint64(block.timestamp));
         vm.expectRevert(DvpSettlement.InvalidTrade.selector);
         dvp.lockAsset(REF, seller, asset, ASSET_AMOUNT, cash, PAYMENT_AMOUNT, expiry); // self-trade
+        // Amounts are stored as uint128 (packed): anything wider is refused rather than truncated.
+        vm.expectRevert(DvpSettlement.InvalidTrade.selector);
+        dvp.lockAsset(REF, buyer, asset, uint256(type(uint128).max) + 1, cash, PAYMENT_AMOUNT, expiry);
+        vm.expectRevert(DvpSettlement.InvalidTrade.selector);
+        dvp.lockAsset(REF, buyer, asset, ASSET_AMOUNT, cash, uint256(type(uint128).max) + 1, expiry);
         vm.stopPrank();
+    }
+
+    /// Glamsterdam (EIP-8037): each new storage slot costs ~110k gas, so a lock must not spread the
+    /// trade over more slots than it needs. Seller/expiry/leg/state share one slot and the two
+    /// amounts another: 5 trade slots (it was 7). This pins the count so a field added without
+    /// thinking about packing fails here, not on mainnet gas.
+    function test_lockAsset_writesFiveTradeSlots() public {
+        asset.mint(seller, ASSET_AMOUNT);
+        vm.record();
+        _lockAsset();
+        (, bytes32[] memory writes) = vm.accesses(address(dvp));
+        // The optimizer may store a packed slot field by field; only the distinct slots cost state gas.
+        uint256 distinct;
+        for (uint256 i; i < writes.length; ++i) {
+            bool seen;
+            for (uint256 j; j < i; ++j) {
+                if (writes[j] == writes[i]) seen = true;
+            }
+            if (!seen) ++distinct;
+        }
+        assertEq(distinct, 5, "the trade must occupy exactly 5 storage slots");
+    }
+
+    function test_maxUint128Amounts_roundTripThroughTheTermsHash() public {
+        uint256 big = type(uint128).max;
+        asset.mint(seller, big);
+        vm.prank(seller);
+        bytes32 id = dvp.lockAsset(keccak256("big"), buyer, asset, big, cash, big, expiry);
+        assertEq(dvp.termsHashOf(id), dvp.hashTerms(seller, buyer, asset, big, cash, big, DvpSettlement.LockedLeg.Asset, expiry));
     }
 
     // ── pause ────────────────────────────────────────────────────
@@ -428,7 +462,7 @@ contract DvpSettlementTest is Test {
 
         assertEq(fbond.balanceOf(buyer), ASSET_AMOUNT);
         assertEq(fbond.balanceOf(address(dvp)), 0);
-        (,,,,,,,, DvpSettlement.TradeState state) = dvp.trades(id);
+        (,,, DvpSettlement.TradeState state,,,,,) = dvp.trades(id);
         assertEq(uint8(state), uint8(DvpSettlement.TradeState.Cancelled));
 
         vm.prank(operator);
@@ -502,7 +536,7 @@ contract DvpSettlementTest is Test {
 
         assertEq(cash.balanceOf(custodian), PAYMENT_AMOUNT);
         assertEq(cash.balanceOf(address(dvp)), 0);
-        (,,,,,,,, DvpSettlement.TradeState state) = dvp.trades(TRADE);
+        (,,, DvpSettlement.TradeState state,,,,,) = dvp.trades(TRADE);
         assertEq(uint8(state), uint8(DvpSettlement.TradeState.Cancelled));
         (, uint64 pendingAt,) = dvp.pendingForceCancels(TRADE);
         assertEq(pendingAt, 0, "proposal cleared");

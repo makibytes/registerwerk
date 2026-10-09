@@ -35,6 +35,9 @@ abstract contract AssetTokenDeployerBase is IAssetTokenDeployer {
     error NotFactory();
     error FactoryAlreadyBound();
 
+    /// @notice The one factory allowed to call {deploy}; emitted once, when the registry binds it.
+    event FactoryBound(address indexed factory);
+
     constructor(address registryWallet_) {
         if (registryWallet_ == address(0)) revert NotRegistry();
         registryWallet = registryWallet_;
@@ -45,6 +48,7 @@ abstract contract AssetTokenDeployerBase is IAssetTokenDeployer {
         if (factory != address(0)) revert FactoryAlreadyBound();
         if (factory_ == address(0) || factory_.code.length == 0) revert NotFactory();
         factory = factory_;
+        emit FactoryBound(factory_);
     }
 
     modifier onlyFactory() {

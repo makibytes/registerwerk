@@ -5,6 +5,8 @@ import {IEntryPoint, IPaymaster, PackedUserOperation} from "@openzeppelin/contra
 import {ERC4337Utils} from "@openzeppelin/contracts/account/utils/draft-ERC4337Utils.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {SlotDerivation} from "@openzeppelin/contracts/utils/SlotDerivation.sol";
+import {TransientSlot} from "@openzeppelin/contracts/utils/TransientSlot.sol";
 import "./RegisterwerkGated.sol";
 import "./interfaces/IPermissionOracle.sol";
 
@@ -38,6 +40,16 @@ import "./interfaces/IPermissionOracle.sol";
 ///      unused-gas penalty are added — and refunds the rest of the reservation. The books
 ///      therefore never exceed the real EntryPoint deposit ({depositSurplus} ≥ 0).
 ///
+///      **Why the reservations are transient (Glamsterdam).** A reservation lives from
+///      `validatePaymasterUserOp` to `postOp`, both inside one `handleOps` transaction, and is
+///      always back to zero when it ends. As ordinary storage it would be a new slot written in
+///      validation and cleared in postOp; under EIP-8037 that costs ~110k gas of *peak* headroom
+///      per slot (~220k for the two counters), which the 150k `paymasterVerificationGasLimit` cannot
+///      cover — every sponsored operation would fail validation. EIP-1153 transient storage is
+///      cleared by the protocol and costs ~100 gas per access. `spentByOrg` stays persistent (it is
+///      the cumulative record); its first write per (policy, org) creates a slot, which is why
+///      {MIN_POST_OP_GAS_LIMIT} is 150,000.
+///
 ///      **Ownership.** Each policy records its `funder`; only the funder can change the
 ///      voucher signer or top up, and withdrawals ({withdrawPolicy}) always pay the funder —
 ///      `paymaster.configure` holders can trigger a refund or deactivate a policy but never
@@ -49,6 +61,12 @@ import "./interfaces/IPermissionOracle.sol";
 ///      ERC-7562 the paymaster must be staked ({addStake}) to be accepted by public bundlers.
 contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
     using ERC4337Utils for PackedUserOperation;
+    using SlotDerivation for bytes32;
+    using TransientSlot for *;
+
+    /// @dev Namespaces of the two transient reservation counters (EIP-1153), see the contract docs.
+    bytes32 private constant _RESERVED_BY_POLICY = keccak256("registerwerk.EwpgPaymaster.policyReserved");
+    bytes32 private constant _RESERVED_BY_ORG = keccak256("registerwerk.EwpgPaymaster.reservedByOrg");
 
     /// @notice Operator safety valve and EntryPoint stake management — only for wallets of {operatorOrg}.
     bytes32 public constant CONFIGURE = keccak256("paymaster.configure");
@@ -68,9 +86,11 @@ contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
     ///         (which already bounds postOp's own gas plus its 10% unused-gas penalty).
     uint256 public constant POST_OP_OVERHEAD_GAS = 10_000;
 
-    /// @notice Minimum `paymasterPostOpGasLimit` — below it postOp could run out of gas, which
-    ///         would leave the op's reservation locked forever.
-    uint256 public constant MIN_POST_OP_GAS_LIMIT = 50_000;
+    /// @notice Minimum `paymasterPostOpGasLimit` — below it postOp could run out of gas.
+    /// @dev The worst case is the first sponsorship of an org under a policy, when `spentByOrg` is a
+    ///      new storage slot: ~110k gas under EIP-8037/8038 (it was ~22k, hence the former 50,000)
+    ///      plus ~25k for the two existing slots (`policyBalance`, `totalBooked`) and the event.
+    uint256 public constant MIN_POST_OP_GAS_LIMIT = 150_000;
 
     /// @notice The ERC-4337 EntryPoint this paymaster is registered with.
     IEntryPoint public immutable entryPoint;
@@ -90,15 +110,22 @@ contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
 
     /// @notice policyId => unreserved sponsorship budget, in wei.
     mapping(bytes32 => uint256) public policyBalance;
-    /// @notice policyId => wei reserved by validated-but-not-yet-settled UserOperations.
-    mapping(bytes32 => uint256) public policyReserved;
     /// @notice policyId => sender org => cumulative wei booked against this policy.
     mapping(bytes32 => mapping(address => uint256)) public spentByOrg;
-    /// @notice policyId => sender org => wei currently reserved.
-    mapping(bytes32 => mapping(address => uint256)) public reservedByOrg;
 
     /// @notice Σ policyBalance + Σ policyReserved — what the books say the deposit must cover.
     uint256 public totalBooked;
+
+    /// @notice policyId => wei reserved by validated-but-not-yet-settled UserOperations of the
+    ///         *current transaction* (transient: always 0 between transactions).
+    function policyReserved(bytes32 policyId) public view returns (uint256) {
+        return _RESERVED_BY_POLICY.deriveMapping(policyId).asUint256().tload();
+    }
+
+    /// @notice policyId => sender org => wei currently reserved (transient, see {policyReserved}).
+    function reservedByOrg(bytes32 policyId, address org) public view returns (uint256) {
+        return _RESERVED_BY_ORG.deriveMapping(policyId).deriveMapping(org).asUint256().tload();
+    }
 
     /// @notice Who supplied the current EntryPoint stake; {withdrawStake} always pays them.
     address public stakeFunder;
@@ -355,12 +382,15 @@ contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
 
         // Reserve the worst case now, so later ops in the same bundle see the reduced budget.
         if (maxCost > policyBalance[policyId]) revert PolicyBudgetExceeded(policyId);
-        if (spentByOrg[policyId][org] + reservedByOrg[policyId][org] + maxCost > orgBudgetCap[policyId]) {
+        TransientSlot.Uint256Slot orgReserved = _RESERVED_BY_ORG.deriveMapping(policyId).deriveMapping(org).asUint256();
+        uint256 orgReservedNow = orgReserved.tload();
+        if (spentByOrg[policyId][org] + orgReservedNow + maxCost > orgBudgetCap[policyId]) {
             revert OrgBudgetExceeded(policyId, org);
         }
         policyBalance[policyId] -= maxCost;
-        policyReserved[policyId] += maxCost;
-        reservedByOrg[policyId][org] += maxCost;
+        TransientSlot.Uint256Slot policyReservedSlot = _RESERVED_BY_POLICY.deriveMapping(policyId).asUint256();
+        policyReservedSlot.tstore(policyReservedSlot.tload() + maxCost);
+        orgReserved.tstore(orgReservedNow + maxCost);
 
         context = abi.encode(policyId, org, sender, maxCost, userOp.paymasterPostOpGasLimit());
     }
@@ -404,9 +434,11 @@ contract EwpgPaymaster is RegisterwerkGated, IPaymaster {
         if (charge > maxCost) charge = maxCost;
 
         // Safe: validation added exactly `maxCost` to both reservations, and charge <= maxCost.
+        TransientSlot.Uint256Slot policyReservedSlot = _RESERVED_BY_POLICY.deriveMapping(policyId).asUint256();
+        TransientSlot.Uint256Slot orgReserved = _RESERVED_BY_ORG.deriveMapping(policyId).deriveMapping(org).asUint256();
         unchecked {
-            policyReserved[policyId] -= maxCost;
-            reservedByOrg[policyId][org] -= maxCost;
+            policyReservedSlot.tstore(policyReservedSlot.tload() - maxCost);
+            orgReserved.tstore(orgReserved.tload() - maxCost);
             policyBalance[policyId] += maxCost - charge;
             totalBooked -= charge;
         }

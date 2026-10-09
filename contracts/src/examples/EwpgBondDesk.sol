@@ -178,6 +178,16 @@ contract EwpgBondDesk is RegisterwerkGated {
     /// @notice Sum of all {withheld} amounts — what the desk holds in escrow.
     uint256 public totalWithheld;
 
+    /// @notice An investor's standing, bounded and expiring consent to be subscribed by this desk's
+    ///         operator. Packed into one slot (`unitsLeft` + `validUntil`).
+    struct SubscriptionConsent {
+        uint128 unitsLeft;
+        uint64 validUntil;
+    }
+
+    /// @notice investor => consent recorded by {authorizeSubscription}, consumed by {subscribe}.
+    mapping(address => SubscriptionConsent) public subscriptionConsent;
+
     /// @notice Circuit breaker for every cash-leg function ({subscribe}, {payCoupon},
     ///         {redeem}). Distinct from pausing the bond token itself: this stops the
     ///         desk's payment leg specifically, e.g. when the operator disables the
@@ -186,6 +196,8 @@ contract EwpgBondDesk is RegisterwerkGated {
     bool public paused;
 
     event BondSubscribed(address indexed investor, uint256 amount, uint256 paid);
+    /// @dev `units == 0` is a revocation.
+    event SubscriptionAuthorized(address indexed investor, uint128 units, uint64 validUntil);
     event CouponPaid(uint256 indexed period, address indexed holder, uint256 amount);
     event BondRedeemed(address indexed holder, uint256 amount, uint256 principal);
     event DeskPaused(address indexed by);
@@ -213,6 +225,9 @@ contract EwpgBondDesk is RegisterwerkGated {
     error HolderNotFrozen(address holder);
     error NothingWithheld(uint256 period, address holder);
     error LegalBasisRequired();
+    /// @notice The investor has not authorised (enough, unexpired) units for the operator to subscribe.
+    error NoSubscriptionConsent(address investor, uint256 requestedUnits);
+    error ConsentExpiryInThePast(uint64 validUntil);
 
     constructor(
         IPermissionOracle oracle_,
@@ -285,13 +300,19 @@ contract EwpgBondDesk is RegisterwerkGated {
     ///         below. The investor must have approved this desk on the payment token.
     ///         Reverts {HolderFrozen} for a frozen investor: T-REX `mint` checks identity
     ///         and compliance, not the address freeze.
+    ///
+    ///         Consent: an ERC-20 allowance alone is not consent to *this* purchase — it is
+    ///         open-ended in amount and time, and here the operator picks both. So the investor must
+    ///         also have called {authorizeSubscription} for at least `amount` units, unexpired; the
+    ///         units are consumed. (The permit path, {subscribeWithPermit}, carries its consent in
+    ///         the signature, which is bound to the exact cost and a deadline.)
     function subscribe(address investor, uint256 amount)
         external
         requiresOrgPermission(operatorOrg, ISSUE)
         requiresClaim(TOPIC_KYC)
         whenNotPaused
     {
-        _subscribe(investor, amount);
+        _subscribe(investor, amount, true);
     }
 
     /// @notice Same as {subscribe}, but spends a signed EIP-2612 `permit` instead of
@@ -309,20 +330,45 @@ contract EwpgBondDesk is RegisterwerkGated {
         bytes32 s
     ) external requiresOrgPermission(operatorOrg, ISSUE) requiresClaim(TOPIC_KYC) whenNotPaused {
         IERC20Permit(address(paymentToken)).permit(investor, address(this), amount * pricePerUnit, deadline, v, r, s);
-        _subscribe(investor, amount);
+        // The signature is the investor's consent to exactly this cost before `deadline`, so no
+        // separate {authorizeSubscription} is needed on this path.
+        _subscribe(investor, amount, false);
     }
 
-    function _subscribe(address investor, uint256 amount) private {
+    /// @notice The investor (the caller) authorises the desk's operator to subscribe them for up to
+    ///         `units` bond units until `validUntil` — the explicit, bounded consent {subscribe}
+    ///         requires on top of the ERC-20 allowance. Replaces any earlier authorisation; `units`
+    ///         of zero revokes it. Needs no permission: it only ever lets the caller be charged.
+    function authorizeSubscription(uint128 units, uint64 validUntil) external {
+        if (units != 0 && validUntil <= block.timestamp) revert ConsentExpiryInThePast(validUntil);
+        subscriptionConsent[msg.sender] =
+            SubscriptionConsent({unitsLeft: units, validUntil: units == 0 ? 0 : validUntil});
+        emit SubscriptionAuthorized(msg.sender, units, units == 0 ? 0 : validUntil);
+    }
+
+    function _subscribe(address investor, uint256 amount, bool needsConsent) private {
         if (amount == 0) revert ZeroAmount();
         if (bond.isFrozen(investor)) revert HolderFrozen(investor);
+        if (needsConsent) _consumeConsent(investor, amount);
         uint256 cost = amount * pricePerUnit;
-        // The pull is authorised by the investor's own ERC-20 allowance (or EIP-2612 permit) to
-        // this desk; the proceeds can only go to the immutable treasury and the bond mints to the
-        // same investor. See "Payment leg" in the contract header.
+        // Pulling from `investor` is exactly what a primary-market desk does, and it is reachable
+        // only through the ISSUE-gated {subscribe}/{subscribeWithPermit}. What authorises it is the
+        // investor's own money-moving act for this purchase — a {authorizeSubscription} record or
+        // an EIP-2612 signature over this exact cost — in addition to the ERC-20 allowance; the
+        // proceeds go to the immutable treasury and the bond mints to the same investor.
         // slither-disable-next-line arbitrary-send-erc20
         paymentToken.safeTransferFrom(investor, treasury, cost);
         bond.mint(investor, amount);
         emit BondSubscribed(investor, amount, cost);
+    }
+
+    function _consumeConsent(address investor, uint256 amount) private {
+        SubscriptionConsent memory consent = subscriptionConsent[investor];
+        if (consent.unitsLeft < amount || block.timestamp > consent.validUntil) {
+            revert NoSubscriptionConsent(investor, amount);
+        }
+        // Safe: `amount <= unitsLeft` was just checked.
+        subscriptionConsent[investor].unitsLeft = consent.unitsLeft - uint128(amount);
     }
 
     /// @notice Pay the current coupon period to the given holders in the payment token,
@@ -413,19 +459,24 @@ contract EwpgBondDesk is RegisterwerkGated {
 
         if (paid != 0) {
             couponPaid[period][holder] = true;
-            // `from` is the immutable treasury, which pre-approves this desk ("Payment leg" above).
-            // slither-disable-next-line arbitrary-send-erc20
-            paymentToken.safeTransferFrom(treasury, holder, paid);
+            _payFromTreasury(holder, paid);
             emit CouponPaid(period, holder, paid);
         }
         if (held != 0) {
             withheld[period][holder] = held;
             totalWithheld += held;
-            // `from` is the immutable treasury, which pre-approves this desk ("Payment leg" above).
-            // slither-disable-next-line arbitrary-send-erc20
-            paymentToken.safeTransferFrom(treasury, address(this), held);
+            _payFromTreasury(address(this), held);
             emit CouponWithheld(period, holder, held);
         }
+    }
+
+    /// @dev Every payout of the desk (coupon, withheld escrow, principal) leaves the issuer treasury
+    ///      through here. `from` is the immutable {treasury}, which pre-approves this desk on the
+    ///      payment token ("Payment leg" in the contract header); the callers are all gated by an
+    ///      operator-org permission and pay amounts derived from record-date snapshots or balances.
+    function _payFromTreasury(address to, uint256 amount) private {
+        // slither-disable-next-line arbitrary-send-erc20
+        paymentToken.safeTransferFrom(treasury, to, amount);
     }
 
     /// @notice Pay out a matured holder's principal from the treasury and burn their
@@ -450,9 +501,7 @@ contract EwpgBondDesk is RegisterwerkGated {
         redeemed[holder] = true;
         uint256 principal = balance * pricePerUnit;
         if (balance > 0) {
-            // `from` is the immutable treasury, which pre-approves this desk ("Payment leg" above).
-            // slither-disable-next-line arbitrary-send-erc20
-            paymentToken.safeTransferFrom(treasury, holder, principal);
+            _payFromTreasury(holder, principal);
             bond.burn(holder, balance);
         }
         emit BondRedeemed(holder, balance, principal);
@@ -516,9 +565,7 @@ contract EwpgBondDesk is RegisterwerkGated {
         redeemed[holder] = true;
         uint256 principal = balance * pricePerUnit;
         if (balance > 0) {
-            // `from` is the immutable treasury, which pre-approves this desk ("Payment leg" above).
-            // slither-disable-next-line arbitrary-send-erc20
-            paymentToken.safeTransferFrom(treasury, to, principal);
+            _payFromTreasury(to, principal);
             bond.burn(holder, balance);
         }
         emit ForcedRedemption(holder, to, balance, principal, legalBasis);

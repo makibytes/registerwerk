@@ -15,6 +15,7 @@ contract EwpgComplianceModuleTest is EwpgBondDeskTest {
     function _registerSecondWallet() internal {
         vm.prank(operator);
         identityRegistry.registerIdentity(wallet2, IIdentity(investor1Identity), COUNTRY_DE);
+        _consent(wallet2);
     }
 
     function _mint(address to, uint256 amount) internal {

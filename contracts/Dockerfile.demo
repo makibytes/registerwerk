@@ -1,4 +1,4 @@
-FROM ghcr.io/foundry-rs/foundry:v1.7.1 AS dependencies
+FROM ghcr.io/foundry-rs/foundry:v1.8.5 AS dependencies
 
 # A Docker build context contains the checked-out files, not the contents of uninitialized git
 # submodules. Fetch the exact commits recorded by this repository's gitlinks so a clean clone and
@@ -22,10 +22,10 @@ RUN for dependency in forge-std openzeppelin-contracts openzeppelin-contracts-up
       tar -xzf "/tmp/${dependency}.tar.gz" --strip-components=1 -C "/tmp/dependencies/${dependency}"; \
     done
 
-FROM ghcr.io/foundry-rs/foundry:v1.7.1
+FROM ghcr.io/foundry-rs/foundry:v1.8.5
 
 ADD --chmod=755 https://github.com/ethereum/solidity/releases/download/v0.8.30/solc-static-linux /home/foundry/.local/share/svm/0.8.30/solc-0.8.30
-ADD --chmod=755 https://github.com/ethereum/solidity/releases/download/v0.8.36/solc-static-linux /home/foundry/.local/share/svm/0.8.36/solc-0.8.36
+ADD --chmod=755 https://github.com/ethereum/solidity/releases/download/v0.8.37/solc-static-linux /home/foundry/.local/share/svm/0.8.37/solc-0.8.37
 
 WORKDIR /contracts
 COPY . .

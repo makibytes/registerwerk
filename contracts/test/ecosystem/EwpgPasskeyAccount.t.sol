@@ -176,6 +176,18 @@ contract EwpgPasskeyAccountTest is Test {
         a.guardianExecute(address(0xB0B), 0, "");
     }
 
+    /// A value call to address(0) succeeds and burns the ether: the guardian override refuses it.
+    function test_guardianExecute_refusesTheZeroAddressTarget() public {
+        address guardian = address(0x6A);
+        EwpgPasskeyAccount a = new EwpgPasskeyAccount(IEntryPoint(address(entryPoint)), qx, qy, guardian);
+        vm.deal(address(a), 1 ether);
+
+        vm.prank(guardian);
+        vm.expectRevert(EwpgPasskeyAccount.ZeroTarget.selector);
+        a.guardianExecute(address(0), 1 ether, "");
+        assertEq(address(a).balance, 1 ether, "nothing burned");
+    }
+
     function test_zeroGuardianRejected() public {
         vm.expectRevert(EwpgPasskeyAccount.ZeroGuardian.selector);
         new EwpgPasskeyAccount(IEntryPoint(address(entryPoint)), qx, qy, address(0));

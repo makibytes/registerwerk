@@ -63,7 +63,12 @@ contract EwpgPaymasterTest is Test {
 
     bytes32 constant POLICY = keccak256("issuer-demo-bond");
     uint128 constant PM_VERIFICATION_GAS = 150_000;
-    uint128 constant PM_POSTOP_GAS = 80_000;
+    // Glamsterdam (EIP-8037/8038): the first sponsorship of an org creates `spentByOrg` (a new storage
+    // slot, ~110k gas) inside postOp, so the postOp budget must exceed MIN_POST_OP_GAS_LIMIT (150k).
+    uint128 constant PM_POSTOP_GAS = 200_000;
+    // Glamsterdam: the EntryPoint creates the sender's nonce slot (~110k gas) inside the account's
+    // verification budget on a first operation, so the old 100k left no room for the account itself.
+    uint256 constant ACCOUNT_VERIFICATION_GAS = 300_000;
     uint128 constant FEE_CAP = 10 gwei;
 
     function setUp() public {
@@ -119,7 +124,7 @@ contract EwpgPaymasterTest is Test {
         op.sender = sender;
         op.nonce = nonce;
         op.callData = hex"";
-        op.accountGasLimits = bytes32((uint256(100_000) << 128) | uint256(callGas));
+        op.accountGasLimits = bytes32((ACCOUNT_VERIFICATION_GAS << 128) | uint256(callGas));
         op.preVerificationGas = 21_000;
         op.gasFees = bytes32((fee << 128) | fee);
     }
@@ -155,6 +160,21 @@ contract EwpgPaymasterTest is Test {
         return _voucher(op, op, POLICY, SIGNER_PK, uint48(block.timestamp + 300), FEE_CAP);
     }
 
+    /// Like {_signed} but with an explicit `paymasterPostOpGasLimit`.
+    function _signedWithPostOpGas(PackedUserOperation memory op, uint128 postOpGas)
+        internal
+        view
+        returns (PackedUserOperation memory)
+    {
+        bytes memory prefix = abi.encodePacked(address(pm), PM_VERIFICATION_GAS, postOpGas);
+        uint48 until = uint48(block.timestamp + 300);
+        op.paymasterAndData = abi.encodePacked(prefix, POLICY, until, uint48(0), FEE_CAP, new bytes(65));
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(_hash(op, POLICY, until, 0, FEE_CAP));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(SIGNER_PK, digest);
+        op.paymasterAndData = abi.encodePacked(prefix, POLICY, until, uint48(0), FEE_CAP, r, s, v);
+        return op;
+    }
+
     function _handle(PackedUserOperation memory op) internal {
         PackedUserOperation[] memory ops = new PackedUserOperation[](1);
         ops[0] = op;
@@ -183,6 +203,23 @@ contract EwpgPaymasterTest is Test {
         assertEq(pm.reservedByOrg(POLICY, address(orgId)), 0);
         assertEq(pm.policyBalance(POLICY), 10 ether - booked);
         assertGe(pm.depositSurplus(), 0);
+    }
+
+    /// Glamsterdam (EIP-8037/8038): the first sponsorship of an org under a policy creates `spentByOrg` in
+    /// postOp - a new storage slot, ~110k gas - and MIN_POST_OP_GAS_LIMIT has to be enough for exactly that
+    /// worst case. A second op of the same org (existing slot) must then fit as well.
+    function test_firstSponsorshipOfAnOrg_fitsInTheMinimumPostOpGas() public {
+        assertEq(pm.spentByOrg(POLICY, address(orgId)), 0, "no slot yet: postOp has to create it");
+        uint128 minimum = uint128(pm.MIN_POST_OP_GAS_LIMIT());
+
+        _handle(_signedWithPostOpGas(_op(address(acctA), 0, 100_000, 2 gwei), minimum));
+        uint256 afterFirst = pm.spentByOrg(POLICY, address(orgId));
+        assertGt(afterFirst, 0, "the first op settled and created the slot");
+
+        _handle(_signedWithPostOpGas(_op(address(acctB), 0, 100_000, 2 gwei), minimum));
+        assertGt(pm.spentByOrg(POLICY, address(orgId)), afterFirst, "the second op settled too");
+        assertEq(pm.policyReserved(POLICY), 0);
+        assertGe(pm.depositSurplus(), 0, "books stay solvent at the minimum budgets");
     }
 
     // ── T2-01: no voucher / foreign voucher / inflated gas ───────────────────
@@ -290,8 +327,11 @@ contract EwpgPaymasterTest is Test {
     function test_orgCap_isSharedAcrossWalletsOfOneOrg() public {
         bytes32 capped = keccak256("capped-policy");
         vm.prank(issuerTreasury);
-        // One op at 10 gwei reserves ~(100k+100k+150k+80k+21k) * 10 gwei ≈ 0.0045 ETH.
-        pm.registerPolicy{value: 1 ether}(capped, voucherSigner, 0.006 ether);
+        // One op reserves maxCost = (account + call + paymaster verification + postOp + pre-verification gas) × fee.
+        // The cap is 1.2 × that: the first op fits, and after it the org has already booked more than the
+        // 0.2 × headroom (its postOp reservation alone is ~27% of maxCost), so a second wallet cannot fit.
+        uint256 maxCost = (ACCOUNT_VERIFICATION_GAS + 100_000 + PM_VERIFICATION_GAS + PM_POSTOP_GAS + 21_000) * 10 gwei;
+        pm.registerPolicy{value: 1 ether}(capped, voucherSigner, (maxCost * 6) / 5);
 
         PackedUserOperation memory op1 = _op(address(acctA), 0, 100_000, 10 gwei);
         _handle(_voucher(op1, op1, capped, SIGNER_PK, uint48(block.timestamp + 300), FEE_CAP));
@@ -588,6 +628,8 @@ contract EwpgPaymasterTest is Test {
         op.nonce = 7;
         op.initCode = hex"7702";
         op.callData = hex"deadbeef";
+        // Explicit values, not the suite's gas constants: the backend's GasSponsorshipVoucherDigestTest pins
+        // the same digest over the same fields, so this vector must not move when the budgets do.
         op.accountGasLimits = bytes32((uint256(100_000) << 128) | uint256(200_000));
         op.preVerificationGas = 21_000;
         op.gasFees = bytes32((uint256(1 gwei) << 128) | uint256(10 gwei));

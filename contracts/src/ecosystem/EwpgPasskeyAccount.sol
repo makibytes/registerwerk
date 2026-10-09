@@ -70,6 +70,7 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
     /// @notice A guardian function was called in the context of an EIP-7702 delegating account
     ///         rather than at the deployed instance.
     error NotInstance();
+    error ZeroTarget();
     error SelfCallTrampolineForbidden();
     error ZeroGuardian();
 
@@ -100,6 +101,8 @@ contract EwpgPasskeyAccount is Account, SignerWebAuthn, ERC7821, IERC1271 {
     {
         if (msg.sender != guardian) revert NotGuardian();
         if (address(this) != _self) revert NotInstance();
+        // A value call to address(0) succeeds and burns the ether; the guardian has other ways to destroy.
+        if (target == address(0)) revert ZeroTarget();
         (bool ok, bytes memory returned) = target.call{value: value}(data);
         if (!ok) {
             assembly ("memory-safe") { revert(add(returned, 32), mload(returned)) }

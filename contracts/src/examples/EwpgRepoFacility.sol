@@ -3,7 +3,7 @@ pragma solidity ^0.8.36;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "../ecosystem/RegisterwerkGated.sol";
 import "../ecosystem/interfaces/IPermissionOracle.sol";
 
@@ -55,7 +55,7 @@ import "../ecosystem/interfaces/IPermissionOracle.sol";
 ///      Operator functions are bound to this instance's {operatorOrg}: a same-slug grant held
 ///      by another org does not reach them. Price marks use their own `repo-facility.price`
 ///      code, so a routine price pusher does not also hold `repo-facility.configure`.
-contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuard {
+contract EwpgRepoFacility is RegisterwerkGated, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
     bytes32 public constant BORROW = keccak256("repo-facility.borrow");

@@ -4,7 +4,7 @@ pragma solidity ^0.8.36;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "../ecosystem/RegisterwerkGated.sol";
 import "../ecosystem/interfaces/IPermissionOracle.sol";
 
@@ -25,7 +25,7 @@ import "../ecosystem/interfaces/IPermissionOracle.sol";
 ///      deposit sets the pool ratio and permanently locks `MINIMUM_LIQUIDITY` shares
 ///      (minted to a burn address) to guard against a first-depositor share-price
 ///      manipulation attack.
-contract StablecoinAmm is ERC20, ReentrancyGuard, RegisterwerkGated {
+contract StablecoinAmm is ERC20, ReentrancyGuardTransient, RegisterwerkGated {
     using SafeERC20 for IERC20;
 
     bytes32 public constant PROVIDE_LIQUIDITY = keccak256("stablecoin-amm.provide-liquidity");

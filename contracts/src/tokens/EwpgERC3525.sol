@@ -3,6 +3,7 @@ pragma solidity ^0.8.36;
 
 import "../standards/erc3525/ERC3525.sol";
 import "../compliance/EwpgCompliance.sol";
+import {TransientSlot} from "@openzeppelin/contracts/utils/TransientSlot.sol";
 
 /// @title EwpgERC3525
 /// @notice Semi-fungible security token (EIP-3525) for eWpG-regulated bonds and fund shares.
@@ -40,7 +41,18 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
 
     mapping(uint256 => SlotConfig) private _slots;
     mapping(uint256 => bool) private _frozenTokens; // tokenId → frozen
-    bool private _inForceOp;
+    /// @dev True only while a registry force operation runs (it lifts the whitelist/freeze/pause
+    ///      hooks). Transient (EIP-1153): it is set and cleared inside one transaction, and as a
+    ///      storage bool it would create a slot (~110k gas under EIP-8037) in every forced operation.
+    bytes32 private constant _FORCE_OP_SLOT = keccak256("registerwerk.EwpgERC3525.inForceOp");
+
+    function _inForceOp() private view returns (bool) {
+        return TransientSlot.tload(TransientSlot.asBoolean(_FORCE_OP_SLOT));
+    }
+
+    function _setForceOp(bool active) private {
+        TransientSlot.tstore(TransientSlot.asBoolean(_FORCE_OP_SLOT), active);
+    }
 
     // ── Events ────────────────────────────────────────────────────────────────
 
@@ -122,7 +134,7 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
 
     function slotConfig(uint256 slot)
         external view
-        returns (uint256 supplyCap, uint256 totalMinted, bool paused, bytes32 metadataHash)
+        returns (uint256 slotSupplyCap, uint256 slotTotalMinted, bool slotPaused, bytes32 slotMetadataHash)
     {
         SlotConfig storage cfg = _slots[slot];
         return (cfg.supplyCap, cfg.totalMinted, cfg.paused, cfg.metadataHash);
@@ -156,9 +168,9 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
     ) external onlyRegistry {
         require(slotOf(fromTokenId) == slotOf(toTokenId),
                 "EwpgERC3525: tokens in different slots");
-        _inForceOp = true;
+        _setForceOp(true);
         _transferValue(fromTokenId, toTokenId, value);
-        _inForceOp = false;
+        _setForceOp(false);
         emit ForcedValueTransfer(fromTokenId, toTokenId, value, legalBasis);
     }
 
@@ -167,10 +179,10 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         uint256 value,
         string calldata legalBasis
     ) external onlyRegistry {
-        _inForceOp = true;
+        _setForceOp(true);
         require(balanceOf(tokenId) >= value, "EwpgERC3525: insufficient balance");
         _burnValue(tokenId, value);
-        _inForceOp = false;
+        _setForceOp(false);
         emit ForcedValueBurn(tokenId, value, legalBasis);
     }
 
@@ -189,9 +201,9 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         uint256 value,
         string calldata legalBasis
     ) external override onlyRegistry {
-        _inForceOp = true;
+        _setForceOp(true);
         _transfer(from, to, value);
-        _inForceOp = false;
+        _setForceOp(false);
         emit ForcedTransfer(from, to, value, legalBasis);
     }
 
@@ -216,13 +228,13 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         uint256 value,
         string calldata legalBasis
     ) external override onlyRegistry {
-        _inForceOp = true;
+        _setForceOp(true);
         uint256 remaining = balanceOf(value);
         if (remaining > 0) {
             _burnValue(value, remaining);
         }
         _burnToken(value);
-        _inForceOp = false;
+        _setForceOp(false);
         emit ForceBurned(from, value, legalBasis);
     }
 
@@ -235,7 +247,7 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
     function transferFrom(uint256 fromTokenId, address to, uint256 value)
         public payable virtual override returns (uint256 newTokenId)
     {
-        if (!_inForceOp && to != address(0)) {
+        if (!_inForceOp() && to != address(0)) {
             require(isWhitelisted(to), "EwpgERC3525: recipient not whitelisted");
         }
         return super.transferFrom(fromTokenId, to, value);
@@ -268,7 +280,7 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         internal virtual override returns (address)
     {
         address from = _ownerOf(tokenId);
-        if (!_inForceOp && from != address(0) && to != address(0)) {
+        if (!_inForceOp() && from != address(0) && to != address(0)) {
             _requireTransferable(from, to);
             require(!_frozenTokens[tokenId], "EwpgERC3525: token is frozen");
             require(!_slots[slotOf(tokenId)].paused, "EwpgERC3525: slot is paused");
@@ -280,7 +292,7 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
     function _transferValue(uint256 fromTokenId, uint256 toTokenId, uint256 value)
         internal virtual override
     {
-        if (!_inForceOp) {
+        if (!_inForceOp()) {
             require(!isPaused(), "EwpgERC3525: global transfers are paused");
             require(!_slots[slotOf(fromTokenId)].paused, "EwpgERC3525: slot is paused");
             require(!_frozenTokens[fromTokenId], "EwpgERC3525: source token is frozen");

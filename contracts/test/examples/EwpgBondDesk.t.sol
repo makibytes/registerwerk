@@ -211,6 +211,11 @@ contract EwpgBondDeskTest is Test {
         stable.approve(address(desk), type(uint256).max);
         vm.prank(investor4);
         stable.approve(address(desk), type(uint256).max);
+        // ...and consent, per investor, to the operator subscribing them (see authorizeSubscription).
+        _consent(investor1);
+        _consent(investor2);
+        _consent(investor3);
+        _consent(investor4);
 
         vm.startPrank(operator);
         IOwnable2Step(address(bond)).acceptOwnership(); // see IOwnable2Step NatSpec
@@ -261,6 +266,65 @@ contract EwpgBondDeskTest is Test {
         assertEq(complianceModule.getInvestorCount(complianceAddr), 1);
         assertEq(stable.balanceOf(investor1), investorCashBefore - 1000 * PRICE_PER_UNIT);
         assertEq(stable.balanceOf(issuerTreasury), treasuryCashBefore + 1000 * PRICE_PER_UNIT);
+    }
+
+    /// @dev The investor's open-ended authorisation, for the many tests that are not about consent.
+    function _consent(address investor) internal {
+        vm.prank(investor);
+        desk.authorizeSubscription(type(uint128).max, type(uint64).max);
+    }
+
+    // ── consent: an allowance alone is not consent to this purchase ─────────
+
+    /// @notice The slither `arbitrary-send-erc20` finding on `_subscribe`, made concrete: with a standing
+    ///         unlimited allowance, an operator could pull any amount from any investor at any time.
+    ///         It now needs the investor's own bounded, expiring authorisation as well.
+    function test_subscribe_withAllowanceButNoConsent_reverts() public {
+        address newcomer = makeAddr("allowanceOnly");
+        stable.mint(newcomer, 1_000_000e6);
+        vm.prank(newcomer);
+        stable.approve(address(desk), type(uint256).max);
+        uint256 cashBefore = stable.balanceOf(newcomer);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NoSubscriptionConsent.selector, newcomer, 10));
+        desk.subscribe(newcomer, 10);
+        assertEq(stable.balanceOf(newcomer), cashBefore, "no cash may leave without consent");
+    }
+
+    function test_subscribe_consentIsBoundedConsumedAndExpires() public {
+        vm.prank(investor1);
+        desk.authorizeSubscription(150, uint64(block.timestamp + 1 days));
+
+        vm.prank(alice);
+        desk.subscribe(investor1, 100);
+        (uint128 left,) = desk.subscriptionConsent(investor1);
+        assertEq(left, 50, "units are consumed");
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NoSubscriptionConsent.selector, investor1, 51));
+        desk.subscribe(investor1, 51); // more than was authorised
+        vm.prank(alice);
+        desk.subscribe(investor1, 50); // exactly the rest
+
+        vm.prank(investor1);
+        desk.authorizeSubscription(10, uint64(block.timestamp + 1 hours));
+        vm.warp(block.timestamp + 1 hours + 1);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NoSubscriptionConsent.selector, investor1, 1));
+        desk.subscribe(investor1, 1); // expired
+    }
+
+    function test_authorizeSubscription_canBeRevokedAndRejectsAPastExpiry() public {
+        vm.prank(investor1);
+        desk.authorizeSubscription(0, 0); // revoke the setUp consent
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.NoSubscriptionConsent.selector, investor1, 1));
+        desk.subscribe(investor1, 1);
+
+        vm.prank(investor1);
+        vm.expectRevert(abi.encodeWithSelector(EwpgBondDesk.ConsentExpiryInThePast.selector, uint64(block.timestamp)));
+        desk.authorizeSubscription(5, uint64(block.timestamp));
     }
 
     function test_subscribe_revertsWithoutInvestorAllowance() public {
@@ -321,6 +385,7 @@ contract EwpgBondDeskTest is Test {
         stable.mint(strangerInvestor, 1_000_000e6);
         vm.prank(strangerInvestor);
         stable.approve(address(desk), type(uint256).max);
+        _consent(strangerInvestor); // consented and funded: the only thing missing is a T-REX identity
 
         vm.prank(alice);
         vm.expectRevert();
