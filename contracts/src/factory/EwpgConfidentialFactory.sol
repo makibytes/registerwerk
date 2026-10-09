@@ -15,8 +15,8 @@ import "../confidential/ConfidentialERC3643.sol";
  * the backend {ConfidentialErc20Service} / {ConfidentialErc3643Service} can
  * reuse the same event-parsing logic.
  *
- * @dev {fhevmInfra} holds the five FHEVM/Gateway host-contract addresses for
- * whichever network this factory instance is deployed on. These are
+ * @dev {fhevmInfra} holds the three FHEVM host-contract addresses (ACL, FHEVMExecutor
+ * and KMSVerifier) for whichever network this factory instance is deployed on. These are
  * owner-settable, not hardcoded — see {ConfidentialERC20.FhevmInfra}'s
  * class-level note: Zama's own mainnet addresses are still being finalised
  * and are governance-upgradeable even once live, and T-REX Chain (which
@@ -36,13 +36,7 @@ contract EwpgConfidentialFactory is Ownable {
         address indexed tokenAddress
     );
 
-    event FhevmInfraUpdated(
-        address aclAddress,
-        address tfheExecutorAddress,
-        address fhePaymentAddress,
-        address kmsVerifierAddress,
-        address gatewayAddress
-    );
+    event FhevmInfraUpdated(address aclAddress, address coprocessorAddress, address kmsVerifierAddress);
 
     error FhevmInfraNotConfigured();
 
@@ -52,10 +46,7 @@ contract EwpgConfidentialFactory is Ownable {
 
     function setFhevmInfra(ConfidentialERC20.FhevmInfra calldata _infra) external onlyOwner {
         fhevmInfra = _infra;
-        emit FhevmInfraUpdated(
-            _infra.aclAddress, _infra.tfheExecutorAddress, _infra.fhePaymentAddress,
-            _infra.kmsVerifierAddress, _infra.gatewayAddress
-        );
+        emit FhevmInfraUpdated(_infra.aclAddress, _infra.coprocessorAddress, _infra.kmsVerifierAddress);
     }
 
     /**
@@ -128,7 +119,10 @@ contract EwpgConfidentialFactory is Ownable {
     }
 
     function _requireFhevmInfraConfigured() internal view {
-        if (fhevmInfra.aclAddress == address(0) || fhevmInfra.gatewayAddress == address(0)) {
+        if (
+            fhevmInfra.aclAddress == address(0) || fhevmInfra.coprocessorAddress == address(0)
+                || fhevmInfra.kmsVerifierAddress == address(0)
+        ) {
             revert FhevmInfraNotConfigured();
         }
     }

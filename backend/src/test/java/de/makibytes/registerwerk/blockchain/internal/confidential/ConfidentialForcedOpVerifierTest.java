@@ -74,12 +74,12 @@ class ConfidentialForcedOpVerifierTest {
     }
 
     @Test
-    @DisplayName("event topics match the Solidity signatures (euint64 is uint256 in the ABI)")
+    @DisplayName("event topics match the Solidity signatures (euint64 is bytes32 in the ABI since fhevm-solidity 0.14)")
     void topicsMatchContractEvents() {
         assertThat(ConfidentialForcedOpVerifier.TRANSFER_TOPIC)
-                .isEqualTo(Hash.sha3String("ConfidentialTransfer(address,address,uint256)"));
+                .isEqualTo(Hash.sha3String("ConfidentialTransfer(address,address,bytes32)"));
         assertThat(ConfidentialForcedOpVerifier.BURN_TOPIC)
-                .isEqualTo(Hash.sha3String("ConfidentialBurn(address,uint256)"));
+                .isEqualTo(Hash.sha3String("ConfidentialBurn(address,bytes32)"));
     }
 
     @Test

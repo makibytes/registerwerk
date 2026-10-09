@@ -113,6 +113,33 @@ same time.
    deployment can only be returned by the counterparty's `cancel` or a token-agent
    `forcedTransfer`; inventory them before retiring the old desk.
 
+## Static analysis (Slither) triage
+
+CI runs Slither 0.11.6 on `contracts/` (vendored libraries excluded) and fails on any High finding.
+No High finding is open. The seven `arbitrary-send-erc20` Highs that used to be suppressed were
+reviewed one by one:
+
+| Where | Verdict |
+|---|---|
+| `DvpSettlement.settle` (2) | Not reachable by a third party, and now not even suppressed: the counterparty is checked first and the pull names `msg.sender` as the payer, so no other account's allowance can be spent. |
+| `EwpgBondDesk._subscribe` | Reachable only through the `bond-desk.issue`-gated `subscribe`/`subscribeWithPermit`, so not an outsider's drain. It was still a real weakness: an ERC-20 allowance is open-ended in amount and time, and the operator chose both. `subscribe` now also needs the investor's own `authorizeSubscription(units, validUntil)` (bounded, expiring, revocable, consumed per subscription); the permit path carries its consent in the signature. One suppression remains, documented. |
+| `EwpgBondDesk` coupon, escrow and redemption payouts (4) | `from` is the immutable issuer treasury that pre-approves the desk; the callers are operator-org gated and pay snapshot- or balance-derived amounts. The four calls now share one helper with a single documented suppression. |
+
+The Medium and Low findings that remain were triaged as intended behaviour:
+
+| Detector (count) | Disposition |
+|---|---|
+| `incorrect-equality` (26) | `== 0` on amounts, balances and timestamps that are zero exactly when a state is unset; no value can be forced to a non-zero dust amount to flip them. |
+| `divide-before-multiply` (9) | The discrete per-step index update of `EwpgRepoFacility` (an example); the truncation per accrual step is part of the specified arithmetic. |
+| `unused-return` (6) | Tuple members that are not needed (`getDocument`, `getClaim`, `tryRecover`) and the scaled amount that `EwpgRepoVault` does not use when it allocates to a market. |
+| `reentrancy-no-eth` (5), `reentrancy-benign` (2) | Calls to the fhEVM coprocessor (`TFHE.*`) and to the T-REX factory, both trusted infrastructure addresses fixed at deployment. |
+| `missing-zero-check` (12) | `operatorOrg`/`curatorOrg` are validated by `_requireOrg`, which Slither does not see through; zero `compliance`/`identityRegistry` on the confidential token means "none" and is handled; `governanceToken` is informational. |
+| `timestamp` (47), `calls-loop` (24), `reentrancy-events` (14) | Time-based business rules, deliberate batch payouts, and events emitted after trusted calls. |
+
+Fixed in the same pass: `locked-ether` (ERC-3525 now rejects ether), `uninitialized-local`,
+`write-after-write` (the force-operation flag is transient), `shadowing-local`, `events-access`
+(`FactoryBound`), and a zero-target check in `EwpgPasskeyAccount.guardianExecute`.
+
 ## Production acceptance criteria
 
 Before deploying value-bearing contracts or attaching a production HSM:

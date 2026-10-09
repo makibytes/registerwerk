@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.36;
 
-// Zama fhEVM — Fully Homomorphic Encryption for EVM.
-// Imports become available after `forge install zama-ai/fhevm-solidity`.
-import "@fhevm/lib/TFHE.sol";
-import "@fhevm/gateway/GatewayCaller.sol";
-import "@fhevm/gateway/lib/Gateway.sol";
+// Zama FHEVM — Fully Homomorphic Encryption for EVM (@fhevm/solidity 0.14, the zama-ai/fhevm monorepo's
+// `library-solidity`, vendored as the `lib/fhevm` submodule; the encrypted types come from `lib/encrypted-types`).
+import {FHE, euint64, ebool, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
+import {CoprocessorConfig} from "@fhevm/solidity/lib/Impl.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "../documents/EwpgDocumentManagement.sol";
 
@@ -16,31 +15,33 @@ import "../documents/EwpgDocumentManagement.sol";
  * Implements the ERC-7984 "Confidential Fungible Token" interface as
  * standardised by OpenZeppelin's confidential-contracts suite
  * (https://docs.openzeppelin.com/confidential-contracts/token) and backed by
- * Zama's fhEVM (the legacy TFHE.sol / Gateway API vendored under
- * `lib/fhevm` — zama-ai/fhevm-solidity). Balances, allowances and transfer
+ * Zama's FHEVM (the `FHE` library of fhevm-solidity 0.14, vendored under
+ * `lib/fhevm/library-solidity` from the zama-ai/fhevm monorepo). Balances, allowances and transfer
  * amounts are stored as euint64 ciphertexts — neither validators, indexers
  * nor block explorers can read cleartext values.
  *
- * @dev FHEVM/Gateway infrastructure addresses (ACL, TFHEExecutor, FHEPayment,
- * KMSVerifier, Gateway) are supplied by the deploying factory at construction
- * time via {FhevmInfra}, NOT hardcoded per network. This is deliberate: the
- * vendored `ZamaFHEVMConfig`/`ZamaGatewayConfig` libraries provide only a
- * Sepolia configuration. Injecting addresses keeps deployments independent
- * of library defaults and avoids contract redeployment when infrastructure
- * addresses change. This contract does not assume
- * T-REX's addresses match Ethereum's.
+ * @dev The FHEVM host-contract addresses (ACL, the FHEVMExecutor "coprocessor" and the
+ * KMSVerifier) are supplied by the deploying factory at construction time via
+ * {FhevmInfra}, NOT hardcoded per network. This is deliberate: the library's
+ * `ZamaConfig` knows Ethereum, Polygon, their testnets and the local network
+ * only. Injecting addresses keeps deployments independent of library defaults
+ * and avoids contract redeployment when infrastructure addresses change. This
+ * contract does not assume T-REX's addresses match Ethereum's. (The Gateway of
+ * FHEVM before 0.9 is gone: it lives on its own chain and a host-chain contract no
+ * longer talks to it.)
  *
  * Two decryption paths exist, both real here:
  *   - User decryption (a holder reading their OWN balance) is off-chain:
  *     the holder's wallet signs an EIP-712 request and calls the Zama
- *     Relayer's `userDecrypt`; the contract's only job is the `TFHE.allow`
+ *     Relayer's `userDecrypt`; the contract's only job is the `FHE.allow`
  *     ACL grant already present on every mutation below.
- *   - Public/oracle decryption (see {requestSupplyDisclosure}) is on-chain:
- *     the contract itself asks the Gateway to decrypt a handle and receive
- *     the cleartext back via a signed callback — used here for a
- *     regulator-triggered total-supply disclosure, since eWpG/MiCAR
- *     oversight cannot rely on a holder's own signature to see aggregate
- *     figures.
+ *   - Public decryption (see {requestSupplyDisclosure} / {fulfillSupplyDisclosure})
+ *     is verified on-chain: the owner marks a handle publicly decryptable, anyone
+ *     fetches the cleartext and the KMS decryption proof from the Zama Relayer
+ *     (`publicDecrypt`) and submits both; the contract checks the KMS signatures
+ *     with `FHE.checkSignatures` before recording the value — used here for a
+ *     regulator-triggered total-supply disclosure, since eWpG/MiCAR oversight
+ *     cannot rely on a holder's own signature to see aggregate figures.
  *
  * Events:
  *   - `ConfidentialTransfer` and `ConfidentialMint`/`ConfidentialBurn` are
@@ -52,7 +53,7 @@ import "../documents/EwpgDocumentManagement.sol";
  *   Registerwerk itself is the confidential-token client — issuers, investors, the registry
  *   operator, and an auditor role all interact with encrypted balances THROUGH Registerwerk, not
  *   around it. Zama's ACL grants are additive and per-ciphertext-handle (there is no "revoke" —
- *   once a handle has been `TFHE.allow`ed to an address, that grant is permanent for that specific
+ *   once a handle has been `FHE.allow`ed to an address, that grant is permanent for that specific
  *   handle; only handles minted/transferred AFTER a viewer is removed stop including them). This
  *   contract uses that primitive to isolate holders from each other while giving Registerwerk's
  *   registry roles full visibility:
@@ -64,17 +65,13 @@ import "../documents/EwpgDocumentManagement.sol";
  *       wallet — granted decrypt rights on EVERY handle (balance + total supply) at the moment it
  *       is minted or updated. See {_grantBalanceAcl}/{_grantSupplyAcl}.
  */
-contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
-    using TFHE for euint64;
-
-    /// @dev The five addresses a deploying factory must supply — see the class-level note on
-    ///      why these are injected rather than hardcoded per network.
+contract ConfidentialERC20 is Ownable, EwpgDocumentManagement {
+    /// @dev The three FHEVM host-contract addresses a deploying factory must supply — see the
+    ///      class-level note on why these are injected rather than hardcoded per network.
     struct FhevmInfra {
         address aclAddress;
-        address tfheExecutorAddress;
-        address fhePaymentAddress;
+        address coprocessorAddress;
         address kmsVerifierAddress;
-        address gatewayAddress;
     }
 
     // ── Viewer ACL registry ─────────────────────────────────────────────────
@@ -95,24 +92,28 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
     euint64 internal _totalSupply;
 
     bytes32 public immutable assetId;
-    address public immutable gatewayAddress;
 
-    // ── Supply disclosure (public/oracle decryption) ────────────────────────
+    // ── Supply disclosure (public decryption) ───────────────────────────────
+    /// @notice requestId => the total-supply handle that was made publicly decryptable for it.
+    mapping(uint256 => euint64) public supplyDisclosureHandle;
     mapping(uint256 => bool) public supplyDisclosureFulfilled;
     uint64 public lastDisclosedSupply;
     uint256 public lastDisclosureRequestId;
+    uint256 private _nextDisclosureRequestId;
 
     // ── Events (ERC-7984) ──────────────────────────────────────────────────
     event ConfidentialTransfer(address indexed from, address indexed to, euint64 handle);
     event ConfidentialApproval(address indexed owner, address indexed spender, euint64 handle);
     event ConfidentialMint(address indexed to, euint64 handle);
     event ConfidentialBurn(address indexed from, euint64 handle);
-    event SupplyDisclosureRequested(uint256 indexed requestId);
+    event SupplyDisclosureRequested(uint256 indexed requestId, euint64 handle);
     event SupplyDisclosureFulfilled(uint256 indexed requestId, uint64 supply);
 
     // ── Errors ─────────────────────────────────────────────────────────────
     error InsufficientConfidentialBalance();
     error UnauthorizedDecryption();
+    error UnknownDisclosureRequest(uint256 requestId);
+    error DisclosureAlreadyFulfilled(uint256 requestId);
 
     constructor(
         bytes32 _assetId,
@@ -125,15 +126,12 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
         assetId    = _assetId;
         name       = _name;
         symbol     = _symbol;
-        gatewayAddress = _infra.gatewayAddress;
 
-        TFHE.setFHEVM(FHEVMConfigStruct({
+        FHE.setCoprocessor(CoprocessorConfig({
             ACLAddress: _infra.aclAddress,
-            TFHEExecutorAddress: _infra.tfheExecutorAddress,
-            FHEPaymentAddress: _infra.fhePaymentAddress,
+            CoprocessorAddress: _infra.coprocessorAddress,
             KMSVerifierAddress: _infra.kmsVerifierAddress
         }));
-        Gateway.setGateway(_infra.gatewayAddress);
 
         // Registerwerk provisions the registry operator + auditor (and, for ERC-3643, the issuer's
         // bound wallet) as viewers from block one, so no post-deploy transaction is needed before
@@ -142,7 +140,7 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
             _addViewer(_initialViewers[i]);
         }
 
-        _totalSupply = TFHE.asEuint64(0);
+        _totalSupply = FHE.asEuint64(0);
         _grantSupplyAcl();
     }
 
@@ -206,11 +204,11 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
     ///      op (add/sub/select) produces a brand-new ciphertext handle with no ACL grants of
     ///      its own; prior grants on the OLD handle do not carry over.
     function _grantBalanceAcl(address holder) internal {
-        TFHE.allowThis(_balances[holder]);
-        TFHE.allow(_balances[holder], holder);
+        FHE.allowThis(_balances[holder]);
+        FHE.allow(_balances[holder], holder);
         uint256 len = _viewers.length;
         for (uint256 i = 0; i < len; i++) {
-            TFHE.allow(_balances[holder], _viewers[i]);
+            FHE.allow(_balances[holder], _viewers[i]);
         }
     }
 
@@ -218,10 +216,10 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
     ///      so operator/auditor viewers can `userDecrypt` supply directly, in addition to the
     ///      existing {requestSupplyDisclosure} on-chain oracle path.
     function _grantSupplyAcl() internal {
-        TFHE.allowThis(_totalSupply);
+        FHE.allowThis(_totalSupply);
         uint256 len = _viewers.length;
         for (uint256 i = 0; i < len; i++) {
-            TFHE.allow(_totalSupply, _viewers[i]);
+            FHE.allow(_totalSupply, _viewers[i]);
         }
     }
 
@@ -229,13 +227,13 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
     ///      A TRANSFER/MINT/BURN EVENT — a fresh ciphertext distinct from `_balances`/
     ///      `_totalSupply` (which get their own grants via {_grantBalanceAcl}/{_grantSupplyAcl}),
     ///      so without this call the handle the class-level docs describe as decryptable "for
-    ///      indexing purposes" was never actually `TFHE.allow`ed to anyone and any off-chain
+    ///      indexing purposes" was never actually `FHE.allow`ed to anyone and any off-chain
     ///      viewer decrypt of it (e.g. Travel Rule screening, reconciliation) would be rejected.
     function _grantHandleAcl(euint64 handle) internal {
-        TFHE.allowThis(handle);
+        FHE.allowThis(handle);
         uint256 len = _viewers.length;
         for (uint256 i = 0; i < len; i++) {
-            TFHE.allow(handle, _viewers[i]);
+            FHE.allow(handle, _viewers[i]);
         }
     }
 
@@ -245,25 +243,25 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
      * @notice Transfer an encrypted amount to `to`.
      * @dev The homomorphic sub/add preserves correctness even though the
      *      amount is never revealed; if the sender has insufficient balance
-     *      the subtraction becomes a no-op via `TFHE.select`, mirroring the
+     *      the subtraction becomes a no-op via `FHE.select`, mirroring the
      *      ERC-7984 "silent failure" semantics.
      */
     function confidentialTransfer(
         address to,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) public virtual returns (euint64 transferred) {
-        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
+        euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
         return _transfer(msg.sender, to, amount);
     }
 
     function confidentialTransferFrom(
         address from,
         address to,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) public virtual returns (euint64 transferred) {
-        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
+        euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
         return _transferFrom(from, to, amount);
     }
 
@@ -276,30 +274,30 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
         returns (euint64 transferred)
     {
         euint64 currentAllowance = _allowances[from][msg.sender];
-        ebool allowed = TFHE.le(amount, currentAllowance);
-        euint64 gated = TFHE.select(allowed, amount, TFHE.asEuint64(0));
+        ebool allowed = FHE.le(amount, currentAllowance);
+        euint64 gated = FHE.select(allowed, amount, FHE.asEuint64(0));
         // Decrement the allowance by what _transfer actually moved (it independently re-gates
         // by from's balance), not by `gated` — otherwise a transfer that moves zero tokens
         // because the balance check failed would still burn the spender's allowance.
         transferred = _transfer(from, to, gated);
-        _allowances[from][msg.sender] = TFHE.sub(currentAllowance, transferred);
-        TFHE.allowThis(_allowances[from][msg.sender]);
-        // Re-grant the spender's own ACL on the new allowance handle — TFHE.sub produces a
+        _allowances[from][msg.sender] = FHE.sub(currentAllowance, transferred);
+        FHE.allowThis(_allowances[from][msg.sender]);
+        // Re-grant the spender's own ACL on the new allowance handle — FHE.sub produces a
         // fresh ciphertext with no carried-over ACL, so without this the spender is locked out
         // of decrypting their own remaining allowance after the very first transfer (the same
         // bug class already fixed for confidentialBurn above, reintroduced here).
-        TFHE.allow(_allowances[from][msg.sender], msg.sender);
+        FHE.allow(_allowances[from][msg.sender], msg.sender);
     }
 
     function confidentialApprove(
         address spender,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) external {
-        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
+        euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
         _allowances[msg.sender][spender] = amount;
-        TFHE.allowThis(amount);
-        TFHE.allow(amount, spender);
+        FHE.allowThis(amount);
+        FHE.allow(amount, spender);
         emit ConfidentialApproval(msg.sender, spender, amount);
     }
 
@@ -307,12 +305,12 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
 
     function confidentialMint(
         address to,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) public virtual onlyOwner {
-        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
-        _balances[to] = TFHE.add(_balances[to], amount);
-        _totalSupply  = TFHE.add(_totalSupply, amount);
+        euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
+        _balances[to] = FHE.add(_balances[to], amount);
+        _totalSupply  = FHE.add(_totalSupply, amount);
         _grantBalanceAcl(to);
         _grantSupplyAcl();
         _grantHandleAcl(amount);
@@ -321,16 +319,16 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
 
     function confidentialBurn(
         address from,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) public virtual onlyOwner {
-        euint64 amount  = TFHE.asEuint64(encryptedAmount, inputProof);
-        ebool enough    = TFHE.le(amount, _balances[from]);
-        euint64 actual  = TFHE.select(enough, amount, TFHE.asEuint64(0));
-        _balances[from] = TFHE.sub(_balances[from], actual);
-        _totalSupply    = TFHE.sub(_totalSupply, actual);
-        // Previously this only re-armed TFHE.allowThis on the new handles and never re-granted
-        // the holder (or any viewer) `TFHE.allow(_balances[from], from)` — since sub() produces a
+        euint64 amount  = FHE.fromExternal(encryptedAmount, inputProof);
+        ebool enough    = FHE.le(amount, _balances[from]);
+        euint64 actual  = FHE.select(enough, amount, FHE.asEuint64(0));
+        _balances[from] = FHE.sub(_balances[from], actual);
+        _totalSupply    = FHE.sub(_totalSupply, actual);
+        // Previously this only re-armed FHE.allowThis on the new handles and never re-granted
+        // the holder (or any viewer) `FHE.allow(_balances[from], from)` — since sub() produces a
         // brand-new ciphertext handle, the holder would have been permanently locked out of their
         // own post-burn balance. Fixed by routing through the same _grantBalanceAcl/_grantSupplyAcl
         // helpers every other mutation uses.
@@ -361,28 +359,48 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
         return _allowances[owner_][spender];
     }
 
-    // ── Public/oracle decryption: regulator-triggered supply disclosure ─────
+    // ── Public decryption: regulator-triggered supply disclosure ────────────
 
     /**
-     * @notice Requests the Gateway decrypt the current total supply — the
-     *         on-chain (not off-chain-signed) decryption path, for MiCAR/eWpG
-     *         disclosure obligations that need a value the CONTRACT itself
-     *         published, not one a single holder happened to reveal.
-     * @dev Owner-gated: this is a registry/compliance action, not a public one.
+     * @notice Marks the CURRENT total-supply handle publicly decryptable and opens a disclosure
+     *         request for it — the on-chain-verified (not off-chain-signed) decryption path, for
+     *         MiCAR/eWpG disclosure obligations that need a value the CONTRACT itself published,
+     *         not one a single holder happened to reveal. Anyone may then fetch the cleartext and
+     *         the KMS decryption proof from the Zama Relayer (`publicDecrypt`) and pass them to
+     *         {fulfillSupplyDisclosure}.
+     * @dev Owner-gated: this is a registry/compliance action, not a public one. The request is
+     *      bound to the handle as it is NOW: later mints or burns create a new supply handle and
+     *      do not invalidate (or leak through) an open request.
      */
     function requestSupplyDisclosure() external onlyOwner returns (uint256 requestId) {
-        uint256[] memory cts = new uint256[](1);
-        cts[0] = Gateway.toUint256(_totalSupply);
-        requestId = Gateway.requestDecryption(
-            cts, this.callbackSupplyDisclosure.selector, 0, block.timestamp + 1 days, false
-        );
-        emit SupplyDisclosureRequested(requestId);
+        euint64 handle = FHE.makePubliclyDecryptable(_totalSupply);
+        requestId = ++_nextDisclosureRequestId;
+        supplyDisclosureHandle[requestId] = handle;
+        emit SupplyDisclosureRequested(requestId, handle);
     }
 
-    /// @dev Called back by the Gateway only — `onlyGateway` (from {GatewayCaller}) verifies
-    ///      `msg.sender` is the configured Gateway contract, which itself only forwards a
-    ///      result after the KMS's threshold-decryption signatures have been checked.
-    function callbackSupplyDisclosure(uint256 requestId, uint64 decryptedSupply) external onlyGateway {
+    /**
+     * @notice Records the cleartext of a requested supply handle once the KMS signatures over it
+     *         verify. Permissionless on purpose: the proof, not the caller, is the authority, so
+     *         the operator, an auditor or a bot can relay it.
+     * @param abiEncodedCleartexts The ABI-encoding of the decrypted `uint64` supply.
+     * @param decryptionProof      The KMS public-decryption proof (signatures + extra data).
+     */
+    function fulfillSupplyDisclosure(
+        uint256 requestId,
+        bytes calldata abiEncodedCleartexts,
+        bytes calldata decryptionProof
+    ) external {
+        euint64 handle = supplyDisclosureHandle[requestId];
+        if (!FHE.isInitialized(handle)) revert UnknownDisclosureRequest(requestId);
+        if (supplyDisclosureFulfilled[requestId]) revert DisclosureAlreadyFulfilled(requestId);
+
+        bytes32[] memory handlesList = new bytes32[](1);
+        handlesList[0] = FHE.toBytes32(handle);
+        // Reverts unless enough registered KMS signers signed exactly these handles and cleartexts.
+        FHE.checkSignatures(handlesList, abiEncodedCleartexts, decryptionProof);
+
+        uint64 decryptedSupply = abi.decode(abiEncodedCleartexts, (uint64));
         supplyDisclosureFulfilled[requestId] = true;
         lastDisclosedSupply = decryptedSupply;
         lastDisclosureRequestId = requestId;
@@ -401,10 +419,10 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement, GatewayCaller {
         internal
         returns (euint64 transferred)
     {
-        ebool enough    = TFHE.le(amount, _balances[from]);
-        transferred     = TFHE.select(enough, amount, TFHE.asEuint64(0));
-        _balances[from] = TFHE.sub(_balances[from], transferred);
-        _balances[to]   = TFHE.add(_balances[to],   transferred);
+        ebool enough    = FHE.le(amount, _balances[from]);
+        transferred     = FHE.select(enough, amount, FHE.asEuint64(0));
+        _balances[from] = FHE.sub(_balances[from], transferred);
+        _balances[to]   = FHE.add(_balances[to],   transferred);
         _grantBalanceAcl(from);
         _grantBalanceAcl(to);
         _grantHandleAcl(transferred);

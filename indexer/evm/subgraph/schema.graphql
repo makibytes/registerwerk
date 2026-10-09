@@ -519,7 +519,7 @@ A single confidential-token lifecycle event. eventType differentiates the three 
   - TRANSFER: from/to both populated
   - MINT: only to populated
   - BURN: only from populated
-`handle` is the FHE ciphertext handle (a euint64 — ABI-encoded as uint256) of the transferred
+`handle` is the FHE ciphertext handle (a euint64 — ABI-encoded as bytes32 since fhevm-solidity 0.14, exposed here as the same 256-bit number) of the transferred
 amount — opaque here; decrypting it requires the registry operator's registered-viewer key via
 the Zama Relayer (see backend ZamaRelayerClient.requestOperatorDecrypt), never this indexer.
 """

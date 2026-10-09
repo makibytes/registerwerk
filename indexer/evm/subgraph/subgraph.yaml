@@ -513,9 +513,9 @@ templates:
         - name: ConfidentialERC20
           file: ./abis/ConfidentialERC20.json
       eventHandlers:
-        - event: ConfidentialTransfer(indexed address,indexed address,uint256)
+        - event: ConfidentialTransfer(indexed address,indexed address,bytes32)
           handler: handleConfidentialTransfer
-        - event: ConfidentialMint(indexed address,uint256)
+        - event: ConfidentialMint(indexed address,bytes32)
           handler: handleConfidentialMint
-        - event: ConfidentialBurn(indexed address,uint256)
+        - event: ConfidentialBurn(indexed address,bytes32)
           handler: handleConfidentialBurn

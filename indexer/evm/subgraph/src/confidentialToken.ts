@@ -4,6 +4,16 @@ import {
   ConfidentialBurn as ConfidentialBurnEvent,
 } from '../generated/templates/ConfidentialERC20/ConfidentialERC20'
 import { ConfidentialToken, ConfidentialTokenEvent } from '../generated/schema'
+import { BigInt, Bytes } from '@graphprotocol/graph-ts'
+
+/**
+ * `handle` is a bytes32 since fhevm-solidity 0.14 (it was a uint256 in FHEVM 0.6). The schema keeps it as a
+ * BigInt, the same number as before, so consumers of the GraphQL API are unaffected: the 32 bytes are
+ * big-endian, graph-ts reads them little-endian, hence the reversal.
+ */
+function handleAsBigInt(handle: Bytes): BigInt {
+  return BigInt.fromUnsignedBytes(changetype<Bytes>(handle.slice(0).reverse()))
+}
 
 /**
  * Lifecycle-event ingestion for confidential (Zama fhEVM) tokens  —
@@ -28,7 +38,7 @@ export function handleConfidentialTransfer(event: ConfidentialTransferEvent): vo
   let e = newEvent(token.id, event.transaction.hash.toHexString(), event.logIndex.toString(), 'TRANSFER')
   e.from = event.params.from
   e.to = event.params.to
-  e.handle = event.params.handle
+  e.handle = handleAsBigInt(event.params.handle)
   e.blockNumber = event.block.number
   e.blockTimestamp = event.block.timestamp
   e.transactionHash = event.transaction.hash
@@ -42,7 +52,7 @@ export function handleConfidentialMint(event: ConfidentialMintEvent): void {
 
   let e = newEvent(token.id, event.transaction.hash.toHexString(), event.logIndex.toString(), 'MINT')
   e.to = event.params.to
-  e.handle = event.params.handle
+  e.handle = handleAsBigInt(event.params.handle)
   e.blockNumber = event.block.number
   e.blockTimestamp = event.block.timestamp
   e.transactionHash = event.transaction.hash
@@ -56,7 +66,7 @@ export function handleConfidentialBurn(event: ConfidentialBurnEvent): void {
 
   let e = newEvent(token.id, event.transaction.hash.toHexString(), event.logIndex.toString(), 'BURN')
   e.from = event.params.from
-  e.handle = event.params.handle
+  e.handle = handleAsBigInt(event.params.handle)
   e.blockNumber = event.block.number
   e.blockTimestamp = event.block.timestamp
   e.transactionHash = event.transaction.hash

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.36;
 
-// Zama fhEVM imports (available after `forge install zama-ai/fhevm-solidity`).
-import "@fhevm/lib/TFHE.sol";
-import "@fhevm/gateway/GatewayCaller.sol";
+// Zama FHEVM (@fhevm/solidity 0.14, vendored as the `lib/fhevm` submodule).
+import {FHE, euint64, ebool, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "./ConfidentialERC20.sol";
@@ -22,7 +21,7 @@ import "./ConfidentialERC20.sol";
  *  - Owner/agent roles mirror the non-confidential {EwpgERC3643} so the
  *    Registerwerk lifecycle services can treat both variants uniformly.
  *
- * FHEVM/Gateway infrastructure is injected via {ConfidentialERC20.FhevmInfra}
+ * FHEVM host-contract infrastructure is injected via {ConfidentialERC20.FhevmInfra}
  * at construction — see that contract's class-level note for why these
  * addresses are not hardcoded per network.
  */
@@ -120,11 +119,11 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
      */
     function confidentialTransfer(
         address to,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) public virtual override returns (euint64 transferred) {
         _checkTransfer(msg.sender, to);
-        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
+        euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
         transferred = _transfer(msg.sender, to, amount);
         if (compliance != address(0)) {
             IConfidentialCompliance(compliance).transferred(msg.sender, to, transferred);
@@ -133,16 +132,16 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
 
     function confidentialMint(
         address to,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) public virtual override onlyAgent {
         if (identityRegistry != address(0)
             && !IIdentityRegistryMinimal(identityRegistry).isVerified(to)) {
             revert RecipientNotVerified();
         }
-        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
-        _balances[to] = TFHE.add(_balances[to], amount);
-        _totalSupply  = TFHE.add(_totalSupply, amount);
+        euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
+        _balances[to] = FHE.add(_balances[to], amount);
+        _totalSupply  = FHE.add(_totalSupply, amount);
         _grantBalanceAcl(to);
         _grantSupplyAcl();
         _grantHandleAcl(amount);
@@ -154,14 +153,14 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
 
     function confidentialBurn(
         address from,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) public virtual override onlyAgent {
-        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
-        ebool enough   = TFHE.le(amount, _balances[from]);
-        euint64 actual = TFHE.select(enough, amount, TFHE.asEuint64(0));
-        _balances[from] = TFHE.sub(_balances[from], actual);
-        _totalSupply    = TFHE.sub(_totalSupply, actual);
+        euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
+        ebool enough   = FHE.le(amount, _balances[from]);
+        euint64 actual = FHE.select(enough, amount, FHE.asEuint64(0));
+        _balances[from] = FHE.sub(_balances[from], actual);
+        _totalSupply    = FHE.sub(_totalSupply, actual);
         _grantBalanceAcl(from);
         _grantSupplyAcl();
         _grantHandleAcl(actual);
@@ -179,11 +178,11 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
     function confidentialTransferFrom(
         address from,
         address to,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) public virtual override returns (euint64 transferred) {
         _checkTransfer(from, to);
-        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
+        euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
         transferred = _transferFrom(from, to, amount);
         if (compliance != address(0)) {
             IConfidentialCompliance(compliance).transferred(from, to, transferred);
@@ -196,14 +195,14 @@ contract ConfidentialERC3643 is ConfidentialERC20 {
     function forcedTransfer(
         address from,
         address to,
-        einput encryptedAmount,
+        externalEuint64 encryptedAmount,
         bytes calldata inputProof
     ) external onlyAgent returns (euint64 transferred) {
         if (identityRegistry != address(0)
             && !IIdentityRegistryMinimal(identityRegistry).isVerified(to)) {
             revert RecipientNotVerified();
         }
-        euint64 amount = TFHE.asEuint64(encryptedAmount, inputProof);
+        euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
         transferred = _transfer(from, to, amount);
         // Bypassing _checkTransfer (pause/freeze) is intentional for a regulatory override, but
         // the compliance module's bookkeeping (cumulative holdings/investor counts/transfer

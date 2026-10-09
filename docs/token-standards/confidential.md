@@ -37,15 +37,15 @@ deployed via `contracts/src/factory/EwpgConfidentialFactory.sol`.
 ## Which chains actually run this
 
 Zama's fhEVM coprocessor runs on **Ethereum and Base** (per Zama's own "fhEVM Coprocessor" product
-announcement) — plus **Sepolia today** as the fully-configured testnet (real ACL/Executor/
-Payment/KMSVerifier/Gateway addresses are vendored in `contracts/lib/fhevm/config/`, and the same
-real Sepolia addresses are bundled in `@zama-fhe/relayer-sdk` as `SepoliaConfig`). Zama's own
+announcement) — plus **Sepolia today** as the fully-configured testnet (the real ACL/FHEVMExecutor/
+KMSVerifier addresses are in `ZamaConfig.sol` of `contracts/lib/fhevm/library-solidity/config/`, and
+the same real Sepolia addresses are bundled in `@zama-fhe/relayer-sdk` as `SepoliaConfig`). Zama's own
 Ethereum **mainnet** addresses were still being finalised at the time of writing (targeted Q3
 2026) and are governance-upgradeable even once live.
 
 **Fhenix and Inco are NOT Zama fhEVM chains.** They run their own, separate, incompatible FHE
 stacks. `ConfidentialERC20`/`ConfidentialERC3643` are built specifically against Zama's
-`TFHE.sol`/Gateway API and will not function on either.
+`FHE` library (fhevm-solidity 0.14) and will not function on either.
 
 **T-REX Chain**: T-REX Network announced in March 2026 that Zama is becoming the confidentiality
 layer for the T-REX Ledger — directly relevant to `CONF_ERC3643`, which already combines T-REX
@@ -89,17 +89,18 @@ normal deployment/gas cost, with no per-investor supply-reconciliation complexit
 ## What the contracts actually do
 
 - `confidentialTransfer` / `confidentialTransferFrom` / `confidentialApprove` — ERC-7984 encrypted
-  transfer/allowance, with `TFHE.select`-based silent-failure semantics on insufficient balance
+  transfer/allowance, with `FHE.select`-based silent-failure semantics on insufficient balance
   (matches ERC-7984 convention, not a bug).
 - `confidentialMint` / `confidentialBurn` — owner/agent-gated, granting the viewer set (above) on
   every mutated handle. On `ConfidentialERC3643`, `confidentialBurn` is also the
   compulsory-cancellation primitive (eWpG §26 Einziehung) for encrypted amounts.
 - `ConfidentialERC3643` additionally enforces T-REX identity verification, freeze, pause, and a
   pluggable `IConfidentialCompliance` module before any transfer.
-- `requestSupplyDisclosure` / `callbackSupplyDisclosure` — the **public/oracle decryption** path:
-  the contract itself asks Zama's Gateway to decrypt the total supply and receives the cleartext
-  back via a signed callback, for a regulator-triggered disclosure — distinct from a holder/viewer
-  decrypting their own or another's balance via the Relayer (below).
+- `requestSupplyDisclosure` / `fulfillSupplyDisclosure` — the **public decryption** path: the owner
+  marks the total-supply handle publicly decryptable, anyone relays the cleartext and the KMS
+  decryption proof from the Relayer's `publicDecrypt`, and the contract verifies the signatures
+  (`FHE.checkSignatures`) before recording the value, for a regulator-triggered disclosure —
+  distinct from a holder/viewer decrypting their own or another's balance via the Relayer (below).
 
 ---
 
@@ -114,7 +115,7 @@ normal deployment/gas cost, with no per-investor supply-reconciliation complexit
 | Operator | Headless decrypt for reports/reconciliation | Backend's dedicated operator-decrypt key via `zama-relayer`, no wallet | ✅ Real — `ConfidentialBalanceReconciliationService`, `GET .../confidential-reconciliation` |
 | Operator / Auditor | Reveal + reconcile via own wallet | Browser: `frontend-operator`'s Confidential Balances tab (`ConfidentialViewerPanelComponent`) | ✅ Real |
 | Operator | Confidential force-burn (§26 Einziehung) | Backend encrypts server-side via `zama-relayer`, then submits | ✅ Real — `TokenAdminService.confidentialForceBurn`, `POST .../force-burn-confidential` |
-| Regulator | Public/oracle total-supply disclosure | On-chain: `requestSupplyDisclosure`/`callbackSupplyDisclosure` | ✅ Real, Foundry-tested |
+| Regulator | Public total-supply disclosure | On-chain: `requestSupplyDisclosure`, then anyone submits the relayer's proof to `fulfillSupplyDisclosure` | ✅ Foundry-tested against cleartext host-contract mocks; not yet run against a live coprocessor |
 | Confidential ERC-3643 freeze/pause/forced-transfer via the operator API | — | `Erc3643Controller` targets the plaintext `EwpgERC3643` ABI; calling it against `ConfidentialERC3643` sends mismatched calldata | ❌ Not wired — only forced-burn has a confidential-specific path today |
 | Confidential payment rail (encrypted stablecoin amounts in the DvP cash leg) | — | — | ❌ Not built |
 

@@ -18,7 +18,7 @@ import org.web3j.abi.EventEncoder;
 import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Event;
-import org.web3j.abi.datatypes.generated.Uint256;
+import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
@@ -65,12 +65,15 @@ class ConfidentialForcedOpVerifier {
     static final String FORCE_BURN = "confidentialForceBurn";
     static final Set<String> METHODS = Set.of(FORCED_TRANSFER, FORCE_BURN);
 
-    /** euint64 is {@code type euint64 is uint256} in the pinned fhEVM lib, so the ABI type is uint256. */
+    /**
+     * euint64 is {@code type euint64 is bytes32} in fhevm-solidity 0.14 (the encrypted-types library), so the
+     * ABI type of the handle is bytes32 and the topic0 differs from the {@code uint256} of FHEVM 0.6.
+     */
     static final String TRANSFER_TOPIC = EventEncoder.encode(new Event("ConfidentialTransfer", List.of(
             new TypeReference<Address>(true) {}, new TypeReference<Address>(true) {},
-            new TypeReference<Uint256>() {})));
+            new TypeReference<Bytes32>() {})));
     static final String BURN_TOPIC = EventEncoder.encode(new Event("ConfidentialBurn", List.of(
-            new TypeReference<Address>(true) {}, new TypeReference<Uint256>() {})));
+            new TypeReference<Address>(true) {}, new TypeReference<Bytes32>() {})));
 
     static final int MAX_ATTEMPTS = 8;
     static final Duration BASE_BACKOFF = Duration.ofSeconds(30);

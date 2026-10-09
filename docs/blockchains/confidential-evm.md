@@ -6,8 +6,9 @@ description: Which chains actually run Registerwerk's confidential contracts, an
 # Confidential EVM (Zama fhEVM)
 
 Registerwerk's confidential contracts (`ConfidentialERC20`, `ConfidentialERC3643`) are built
-against **Zama's** fhEVM — specifically the `TFHE.sol`/Gateway API vendored under
-`contracts/lib/fhevm` (the `zama-ai/fhevm-solidity` submodule) on the contract side, and the real
+against **Zama's** FHEVM — specifically the `FHE` library of fhevm-solidity 0.14, vendored as the
+`contracts/lib/fhevm` submodule (the `zama-ai/fhevm` monorepo; its `library-solidity` directory,
+plus the `encrypted-types` submodule it imports) on the contract side, and the real
 `@zama-fhe/relayer-sdk` package on both the backend (`zama-relayer` sidecar) and browser
 (`frontend-customer`/`frontend-operator`) sides.
 
@@ -30,16 +31,18 @@ ordinary EVM entries in the `Chain` enum but are not valid confidential-deployme
 
 Every FHEVM host-contract address is injected, never hardcoded per chain:
 
-```java
+```solidity
 // ConfidentialERC20.FhevmInfra — passed to the constructor via EwpgConfidentialFactory
 struct FhevmInfra {
     address aclAddress;
-    address tfheExecutorAddress;
-    address fhePaymentAddress;
+    address coprocessorAddress;   // the FHEVMExecutor
     address kmsVerifierAddress;
-    address gatewayAddress;
 }
 ```
+
+The Gateway and the payment contract of the earlier FHEVM (0.6) are gone from this struct: since
+FHEVM 0.9 the Gateway lives on its own chain and a host-chain contract no longer talks to it, and
+FHE operations are no longer paid for through a host-chain payment contract.
 
 1. Deploy `EwpgConfidentialFactory` (or reuse one) on the target chain, calling `setFhevmInfra`
    with that chain's real Zama addresses.
@@ -76,10 +79,13 @@ small operator/auditor/issuer "viewer" set can decrypt every handle. This lives 
   deliberately NOT an on-chain transaction-signing wallet) and self-signs the same EIP-712
   request, then completes `userDecrypt` in one round trip. See
   `ConfidentialBalanceReconciliationService` and `ZamaRelayerClient.requestOperatorDecrypt`.
-- **Public/oracle decryption** (`ConfidentialERC20.requestSupplyDisclosure`): the contract itself
-  requests the Gateway decrypt a value (e.g. total supply) and receives the cleartext back via a
-  signed callback. Repository implementation and Foundry tests are present, but live-coprocessor
-  integration and production readiness remain unverified.
+- **Public decryption** (`ConfidentialERC20.requestSupplyDisclosure` /
+  `fulfillSupplyDisclosure`): the owner marks the total-supply handle publicly decryptable; anyone
+  fetches the cleartext and the KMS decryption proof from the relayer (`publicDecrypt`) and submits
+  both, and the contract verifies the KMS signatures with `FHE.checkSignatures` before recording the
+  value. The Foundry tests run against cleartext mocks of the host contracts
+  (`contracts/test/mocks/MockFhevm.sol`, which sign and verify a simplified digest, not the real
+  EIP-712 one); live-coprocessor integration and production readiness remain unverified.
 
 `zama-relayer` (repo root `zama-relayer/`) is Registerwerk's own sidecar wrapping the real
 `@zama-fhe/relayer-sdk`'s Node build — it exists only because Zama publishes no Java/JVM client;

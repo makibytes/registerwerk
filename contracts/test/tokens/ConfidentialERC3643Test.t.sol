@@ -1,321 +1,398 @@
-// SPDX-License-Identifier: GPL-3.0
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.36;
 
-import "forge-std/Test.sol";
+import {euint64, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
+import "../helpers/FhevmMockSetup.sol";
 import "../../src/confidential/ConfidentialERC3643.sol";
 
-/// @notice Tests for the fhEVM-backed confidential ERC-3643 token.
-///
-/// @dev Every state-changing operation (including the constructor) calls TFHE
-///      precompiles that only exist on a real fhEVM coprocessor network (Zama's own
-///      Sepolia/Ethereum deployments, or T-REX Chain once it publishes its FHEVM
-///      infrastructure addresses — NOT Fhenix/Inco, which are separate, non-Zama FHE
-///      stacks). On a vanilla EVM the deployment reverts, so all tests self-skip unless
-///      run against a real fhEVM fork:
-///        forge test --fork-url $SEPOLIA_RPC --match-contract ConfidentialERC3643Test
-contract ConfidentialERC3643Test is Test {
+/// @dev A T-REX identity registry reduced to what the token asks: who is verified.
+contract MockIdentityRegistry {
+    mapping(address => bool) public isVerified;
 
-    ConfidentialERC3643 token;
-    bool fhevmAvailable;
+    function setVerified(address who, bool verified) external {
+        isVerified[who] = verified;
+    }
+}
 
-    address owner = address(0x1);
-    // Zama's real, documented Sepolia testnet addresses (lib/fhevm/config/ZamaFHEVMConfig.sol).
-    ConfidentialERC20.FhevmInfra sepoliaInfra = ConfidentialERC20.FhevmInfra({
-        aclAddress: 0xFee8407e2f5e3Ee68ad77cAE98c434e637f516e5,
-        tfheExecutorAddress: 0x687408aB54661ba0b4aeF3a44156c616c6955E07,
-        fhePaymentAddress: 0xFb03BE574d14C256D56F09a198B586bdfc0A9de2,
-        kmsVerifierAddress: 0x9D6891A6240D6130c54ae243d8005063D05fE14b,
-        gatewayAddress: 0x33347831500F1e73f0ccCBb95c9f86B94d7b1123
-    });
-    bytes32 assetId = keccak256("conf-erc3643");
-    address operatorViewer = address(0x50);
-    address auditorViewer = address(0x51);
-    address[] initialViewers;
+/// @dev A compliance module that records the hooks the token calls.
+contract MockConfidentialCompliance {
+    bool public allow = true;
+    uint256 public transferredCalls;
+    uint256 public createdCalls;
+    uint256 public destroyedCalls;
+    address public lastFrom;
+    address public lastTo;
 
-    function setUp() public {
-        initialViewers.push(operatorViewer);
-        initialViewers.push(auditorViewer);
-        // Deploy through an external self-call: forge's dynamic test linking rewrites an inline
-        // `try new ...` into vm.deployCode, whose revert the try/catch cannot catch.
-        try this.deployToken() returns (ConfidentialERC3643 deployed) {
-            token = deployed;
-            fhevmAvailable = true;
-        } catch {
-            fhevmAvailable = false;
-        }
+    function setAllow(bool allowed) external {
+        allow = allowed;
     }
 
-    function deployToken() external returns (ConfidentialERC3643) {
+    function canTransfer(address, address) external view returns (bool) {
+        return allow;
+    }
+
+    function transferred(address from, address to, euint64) external {
+        ++transferredCalls;
+        lastFrom = from;
+        lastTo = to;
+    }
+
+    function created(address, euint64) external {
+        ++createdCalls;
+    }
+
+    function destroyed(address, euint64) external {
+        ++destroyedCalls;
+    }
+}
+
+/// @notice Tests for the confidential ERC-3643 security token on the cleartext FHEVM mocks (see
+///         test/mocks/MockFhevm.sol). They used to self-skip unless run against a real fhEVM network and,
+///         where they ran, could only show that a call sequence did not revert; now balances, ACL grants
+///         and the compliance hooks are asserted.
+contract ConfidentialERC3643Test is FhevmMockSetup {
+    ConfidentialERC3643 token;
+    MockIdentityRegistry identity;
+    MockConfidentialCompliance compliance;
+
+    address owner = makeAddr("owner");
+    address alice = makeAddr("alice");
+    address bob = makeAddr("bob");
+    address spender = makeAddr("spender");
+    address agent = makeAddr("agent");
+    address operatorViewer = makeAddr("operatorViewer");
+    address auditorViewer = makeAddr("auditorViewer");
+    bytes32 assetId = keccak256("conf-erc3643");
+
+    function setUp() public {
+        ConfidentialERC20.FhevmInfra memory infra = _deployFhevmMocks();
+        identity = new MockIdentityRegistry();
+        compliance = new MockConfidentialCompliance();
+        identity.setVerified(alice, true);
+        identity.setVerified(bob, true);
+
+        address[] memory viewers = new address[](2);
+        viewers[0] = operatorViewer;
+        viewers[1] = auditorViewer;
         vm.prank(owner);
-        return new ConfidentialERC3643(
-            assetId,
-            "Confidential Security Token",
-            "cSEC",
-            sepoliaInfra,
-            initialViewers,
-            address(0x10),  // identity registry (stub)
-            address(0x11),  // compliance (stub)
-            owner
+        token = new ConfidentialERC3643(
+            assetId, "Confidential Security Token", "cSEC", infra, viewers,
+            address(identity), address(compliance), owner
         );
     }
 
-    modifier onFhevm() {
-        vm.skip(!fhevmAvailable);
-        _;
+    function _mint(address to, uint256 amount) internal {
+        (externalEuint64 handle, bytes memory proof) = _input(amount);
+        vm.prank(owner);
+        token.confidentialMint(to, handle, proof);
     }
 
-    // ── Metadata ───────────────────────────────────────────────────────────
+    function _balance(address who) internal view returns (uint256) {
+        return _clear(token.confidentialBalanceOf(who));
+    }
 
-    function test_assetId_stored() public onFhevm {
+    // ── Metadata / wiring ──────────────────────────────────────────────────
+
+    function test_metadataAndWiring() public view {
         assertEq(token.assetId(), assetId);
-    }
-
-    function test_name_and_symbol() public onFhevm {
         assertEq(token.name(), "Confidential Security Token");
         assertEq(token.symbol(), "cSEC");
-    }
-
-    function test_decimals() public onFhevm {
         assertEq(token.decimals(), 6);
-    }
-
-    function test_initialIdentityRegistry() public onFhevm {
-        assertEq(token.identityRegistry(), address(0x10));
-    }
-
-    function test_initialCompliance() public onFhevm {
-        assertEq(token.compliance(), address(0x11));
+        assertEq(token.identityRegistry(), address(identity));
+        assertEq(token.compliance(), address(compliance));
+        assertFalse(token.paused());
+        assertTrue(token.isAgent(owner));
     }
 
     // ── Pause / unpause ────────────────────────────────────────────────────
 
-    function test_notPausedOnDeploy() public onFhevm {
-        assertFalse(token.paused());
-    }
-
-    function test_pause_unpause() public onFhevm {
+    function test_pause_unpause() public {
         vm.prank(owner);
         token.pause();
         assertTrue(token.paused());
-
         vm.prank(owner);
         token.unpause();
         assertFalse(token.paused());
     }
 
-    function test_onlyAgent_canPause() public onFhevm {
+    function test_onlyAgent_canPauseAndUnpause() public {
         vm.prank(address(0x99));
         vm.expectRevert(ConfidentialERC3643.NotAgent.selector);
         token.pause();
-    }
 
-    function test_onlyAgent_canUnpause() public onFhevm {
         vm.prank(owner);
         token.pause();
-
         vm.prank(address(0x99));
         vm.expectRevert(ConfidentialERC3643.NotAgent.selector);
         token.unpause();
+    }
+
+    // ── Mint / burn ────────────────────────────────────────────────────────
+
+    function test_mint_toAVerifiedInvestorNotifiesCompliance() public {
+        _mint(alice, 1_000);
+        assertEq(_balance(alice), 1_000);
+        assertEq(_clear(token.confidentialTotalSupply()), 1_000);
+        assertEq(compliance.createdCalls(), 1);
+        assertTrue(_persistAllowed(token.confidentialBalanceOf(alice), alice));
+        assertTrue(_persistAllowed(token.confidentialBalanceOf(alice), operatorViewer));
+    }
+
+    function test_mint_revertsForAnUnverifiedRecipient() public {
+        address stranger = makeAddr("stranger");
+        (externalEuint64 handle, bytes memory proof) = _input(1);
+        vm.prank(owner);
+        vm.expectRevert(ConfidentialERC3643.RecipientNotVerified.selector);
+        token.confidentialMint(stranger, handle, proof);
+    }
+
+    function test_burn_reducesBalanceAndNotifiesCompliance() public {
+        _mint(alice, 1_000);
+        (externalEuint64 handle, bytes memory proof) = _input(300);
+        vm.prank(owner);
+        token.confidentialBurn(alice, handle, proof);
+        assertEq(_balance(alice), 700);
+        assertEq(_clear(token.confidentialTotalSupply()), 700);
+        assertEq(compliance.destroyedCalls(), 1);
+    }
+
+    function test_onlyAgent_canMintAndBurn() public {
+        (externalEuint64 handle, bytes memory proof) = _input(1);
+        vm.prank(address(0x99));
+        vm.expectRevert(ConfidentialERC3643.NotAgent.selector);
+        token.confidentialMint(alice, handle, proof);
+        vm.prank(address(0x99));
+        vm.expectRevert(ConfidentialERC3643.NotAgent.selector);
+        token.confidentialBurn(alice, handle, proof);
     }
 
     // ── Confidential transfer ──────────────────────────────────────────────
 
-    function test_confidentialTransfer_revertsWhenPaused() public onFhevm {
+    function test_transfer_betweenVerifiedInvestorsMovesTheAmountAndNotifiesCompliance() public {
+        _mint(alice, 1_000);
+        (externalEuint64 handle, bytes memory proof) = _input(250);
+        vm.prank(alice);
+        token.confidentialTransfer(bob, handle, proof);
+        assertEq(_balance(alice), 750);
+        assertEq(_balance(bob), 250);
+        assertEq(compliance.transferredCalls(), 1);
+        assertEq(compliance.lastFrom(), alice);
+        assertEq(compliance.lastTo(), bob);
+    }
+
+    function test_transfer_revertsWhenPaused() public {
+        _mint(alice, 10);
         vm.prank(owner);
         token.pause();
-
+        (externalEuint64 handle, bytes memory proof) = _input(1);
+        vm.prank(alice);
         vm.expectRevert(ConfidentialERC3643.TransferPaused.selector);
-        token.confidentialTransfer(address(0x3), einput.wrap(bytes32(0)), hex"");
+        token.confidentialTransfer(bob, handle, proof);
     }
 
-    /// @notice confidentialTransferFrom must
-    ///         (a) decrement the spender's allowance by what actually moved, not the requested
-    ///         amount, so a transfer that moves zero tokens because the balance check
-    ///         independently fails cannot still burn the allowance, and (b) re-grant the
-    ///         spender's own ACL on the resulting allowance handle, since TFHE.sub produces a
-    ///         fresh ciphertext with no carried-over grant. Neither can be asserted by decrypting
-    ///         a value in a plain Foundry unit test (no off-chain Relayer/userDecrypt available
-    ///         here) — this only proves the call sequence completes without reverting under a
-    ///         real fhEVM; full verification requires `forge test --fork-url $SEPOLIA_RPC` plus
-    ///         the Zama Relayer SDK to actually decrypt the post-call allowance both on-chain
-    ///         (via requestOperatorDecrypt) and as the spender (via userDecrypt).
-    ///         Identity/compliance are disabled here since this test's purpose is allowance/ACL
-    ///         correctness, not compliance gating (covered by the tests below) — the configured
-    ///         identityRegistry/compliance are unmocked stub addresses with no contract code, so
-    ///         a bool-returning call against them (isVerified/canTransfer) would itself revert.
-    function test_confidentialTransferFrom_doesNotRevert_afterApprove() public onFhevm {
-        address spender = address(0x60);
-        vm.startPrank(owner);
-        token.setIdentityRegistry(address(0));
-        token.setCompliance(address(0));
-        token.confidentialApprove(spender, einput.wrap(bytes32(0)), hex"");
-        vm.stopPrank();
+    function test_transfer_revertsForAFrozenOrUnverifiedOrRejectedParty() public {
+        _mint(alice, 10);
+        (externalEuint64 handle, bytes memory proof) = _input(1);
 
-        vm.prank(spender);
-        token.confidentialTransferFrom(owner, address(0x61), einput.wrap(bytes32(0)), hex"");
-    }
-
-    /// @notice Regression test for: before the fix, the base
-    ///         ConfidentialERC20.confidentialTransferFrom wasn't `virtual` and ConfidentialERC3643
-    ///         never overrode it — so an approved spender could move encrypted tokens through the
-    ///         allowance path with zero compliance enforcement, even while the token was paused.
-    ///         Now confidentialTransferFrom must run the same _checkTransfer gate as
-    ///         confidentialTransfer.
-    function test_confidentialTransferFrom_revertsWhenPaused() public onFhevm {
-        address spender = address(0x60);
         vm.prank(owner);
-        token.confidentialApprove(spender, einput.wrap(bytes32(0)), hex"");
+        token.setAddressFrozen(bob, true);
+        vm.prank(alice);
+        vm.expectRevert(ConfidentialERC3643.AddressIsFrozen.selector);
+        token.confidentialTransfer(bob, handle, proof);
+        vm.prank(owner);
+        token.setAddressFrozen(bob, false);
+
+        identity.setVerified(bob, false);
+        vm.prank(alice);
+        vm.expectRevert(ConfidentialERC3643.RecipientNotVerified.selector);
+        token.confidentialTransfer(bob, handle, proof);
+        identity.setVerified(bob, true);
+        identity.setVerified(alice, false);
+        vm.prank(alice);
+        vm.expectRevert(ConfidentialERC3643.SenderNotVerified.selector);
+        token.confidentialTransfer(bob, handle, proof);
+        identity.setVerified(alice, true);
+
+        compliance.setAllow(false);
+        vm.prank(alice);
+        vm.expectRevert(ConfidentialERC3643.ComplianceRejected.selector);
+        token.confidentialTransfer(bob, handle, proof);
+    }
+
+    // ── Allowance path (must be gated exactly like a direct transfer) ──────
+
+    /// confidentialTransferFrom must decrement the allowance by what actually moved and re-grant the
+    /// spender on the new allowance handle (a subtraction yields a fresh ciphertext with no grant).
+    function test_transferFrom_consumesTheAllowanceAndRegrantsTheSpender() public {
+        _mint(alice, 1_000);
+        (externalEuint64 ah, bytes memory ap) = _input(300);
+        vm.prank(alice);
+        token.confidentialApprove(spender, ah, ap);
+
+        (externalEuint64 th, bytes memory tp) = _input(100);
+        vm.prank(spender);
+        token.confidentialTransferFrom(alice, bob, th, tp);
+
+        assertEq(_balance(bob), 100);
+        euint64 remaining = token.confidentialAllowance(alice, spender);
+        assertEq(_clear(remaining), 200);
+        assertTrue(_persistAllowed(remaining, spender));
+    }
+
+    /// Regression: the base confidentialTransferFrom was not `virtual` and the 3643 token never
+    /// overrode it, so an approved spender could move tokens with no compliance enforcement at all.
+    function test_transferFrom_isGatedByPauseFreezeIdentityAndCompliance() public {
+        _mint(alice, 100);
+        (externalEuint64 ah, bytes memory ap) = _input(50);
+        vm.prank(alice);
+        token.confidentialApprove(spender, ah, ap);
+        (externalEuint64 th, bytes memory tp) = _input(1);
 
         vm.prank(owner);
         token.pause();
-
         vm.prank(spender);
         vm.expectRevert(ConfidentialERC3643.TransferPaused.selector);
-        token.confidentialTransferFrom(owner, address(0x61), einput.wrap(bytes32(0)), hex"");
-    }
-
-    /// @notice Regression test for: a frozen sender must also block the
-    ///         allowance-based path, not just direct confidentialTransfer.
-    function test_confidentialTransferFrom_revertsWhenSenderFrozen() public onFhevm {
-        address spender = address(0x60);
+        token.confidentialTransferFrom(alice, bob, th, tp);
         vm.prank(owner);
-        token.confidentialApprove(spender, einput.wrap(bytes32(0)), hex"");
+        token.unpause();
 
-        vm.prank(owner); // owner is an agent by default
-        token.setAddressFrozen(owner, true);
-
+        vm.prank(owner);
+        token.setAddressFrozen(alice, true);
         vm.prank(spender);
         vm.expectRevert(ConfidentialERC3643.AddressIsFrozen.selector);
-        token.confidentialTransferFrom(owner, address(0x61), einput.wrap(bytes32(0)), hex"");
+        token.confidentialTransferFrom(alice, bob, th, tp);
+        vm.prank(owner);
+        token.setAddressFrozen(alice, false);
+
+        identity.setVerified(bob, false);
+        vm.prank(spender);
+        vm.expectRevert(ConfidentialERC3643.RecipientNotVerified.selector);
+        token.confidentialTransferFrom(alice, bob, th, tp);
     }
 
     // ── Forced transfer ─────────────────────────────────────────────────────
 
-    /// @notice Regression test for: forcedTransfer bypasses pause/freeze
-    ///         intentionally (regulatory override) but must still notify the compliance module's
-    ///         bookkeeping hook (transferred()), matching real T-REX's Token.forcedTransfer.
-    ///         Compliance is left as the stub address here on purpose: transferred() has no
-    ///         return value, so calling it against a stub with no contract code succeeds
-    ///         trivially (no ABI-decode step) — this proves the added call doesn't break the
-    ///         path, though a real IConfidentialCompliance mock would be needed to assert it was
-    ///         actually invoked with the right arguments.
-    function test_forcedTransfer_worksWhilePausedAndNotifiesCompliance() public onFhevm {
+    /// A regulatory override bypasses pause and freeze, still needs a verified recipient, and still
+    /// tells the compliance module (as T-REX's Token.forcedTransfer does) so its counters do not drift.
+    function test_forcedTransfer_bypassesPauseAndFreezeButNotifiesCompliance() public {
+        _mint(alice, 500);
         vm.startPrank(owner);
         token.pause();
-        token.setIdentityRegistry(address(0));
+        token.setAddressFrozen(alice, true);
         vm.stopPrank();
 
-        vm.prank(owner); // owner is an agent by default
-        token.forcedTransfer(owner, address(0x62), einput.wrap(bytes32(0)), hex"");
+        (externalEuint64 handle, bytes memory proof) = _input(200);
+        vm.prank(owner);
+        token.forcedTransfer(alice, bob, handle, proof);
+
+        assertEq(_balance(alice), 300);
+        assertEq(_balance(bob), 200);
+        assertEq(compliance.transferredCalls(), 1);
     }
 
-    function test_onlyAgent_canForceTransfer() public onFhevm {
+    function test_forcedTransfer_stillRequiresAVerifiedRecipientAndAnAgent() public {
+        _mint(alice, 5);
+        (externalEuint64 handle, bytes memory proof) = _input(1);
+        identity.setVerified(bob, false);
+        vm.prank(owner);
+        vm.expectRevert(ConfidentialERC3643.RecipientNotVerified.selector);
+        token.forcedTransfer(alice, bob, handle, proof);
+
         vm.prank(address(0x99));
         vm.expectRevert(ConfidentialERC3643.NotAgent.selector);
-        token.forcedTransfer(owner, address(0x62), einput.wrap(bytes32(0)), hex"");
+        token.forcedTransfer(alice, bob, handle, proof);
     }
 
-    // ── Confidential mint / burn authorization ─────────────────────────────
+    // ── Agent management and admin setters ─────────────────────────────────
 
-    function test_onlyAgent_canMint() public onFhevm {
-        vm.prank(address(0x99));
-        vm.expectRevert(ConfidentialERC3643.NotAgent.selector);
-        token.confidentialMint(address(0x2), einput.wrap(bytes32(0)), hex"");
-    }
-
-    function test_onlyAgent_canBurn() public onFhevm {
-        vm.prank(address(0x99));
-        vm.expectRevert(ConfidentialERC3643.NotAgent.selector);
-        token.confidentialBurn(address(0x2), einput.wrap(bytes32(0)), hex"");
-    }
-
-    // ── Agent management ───────────────────────────────────────────────────
-
-    function test_addAndRemoveAgent() public onFhevm {
-        address agent = address(0x42);
+    function test_addAndRemoveAgent() public {
         vm.prank(owner);
         token.addAgent(agent);
         assertTrue(token.isAgent(agent));
+
+        // an agent may now pause
+        vm.prank(agent);
+        token.pause();
+        assertTrue(token.paused());
 
         vm.prank(owner);
         token.removeAgent(agent);
         assertFalse(token.isAgent(agent));
     }
 
-    // ── Admin setters ──────────────────────────────────────────────────────
-
-    function test_setIdentityRegistry() public onFhevm {
-        address newIR = address(0x20);
-        vm.prank(owner);
-        token.setIdentityRegistry(newIR);
-        assertEq(token.identityRegistry(), newIR);
-    }
-
-    function test_setCompliance() public onFhevm {
-        address newC = address(0x21);
-        vm.prank(owner);
-        token.setCompliance(newC);
-        assertEq(token.compliance(), newC);
-    }
-
-    function test_onlyOwner_canSetIdentityRegistry() public onFhevm {
-        vm.prank(address(0x99));
-        vm.expectRevert();
+    function test_setIdentityRegistryAndComplianceAreOwnerOnly() public {
+        vm.startPrank(owner);
         token.setIdentityRegistry(address(0x20));
+        token.setCompliance(address(0x21));
+        vm.stopPrank();
+        assertEq(token.identityRegistry(), address(0x20));
+        assertEq(token.compliance(), address(0x21));
+
+        vm.startPrank(address(0x99));
+        vm.expectRevert();
+        token.setIdentityRegistry(address(0x22));
+        vm.expectRevert();
+        token.setCompliance(address(0x22));
+        vm.stopPrank();
+    }
+
+    function test_zeroRegistryAndComplianceDisableTheirChecks() public {
+        vm.startPrank(owner);
+        token.setIdentityRegistry(address(0));
+        token.setCompliance(address(0));
+        vm.stopPrank();
+        identity.setVerified(bob, false);
+        compliance.setAllow(false);
+
+        _mint(alice, 10);
+        (externalEuint64 handle, bytes memory proof) = _input(4);
+        vm.prank(alice);
+        token.confidentialTransfer(bob, handle, proof);
+        assertEq(_balance(bob), 4);
     }
 
     // ── Viewer ACL registry ─────────────────────────────────────────────────
-    // The isolation guarantee (an investor can only decrypt their OWN balance, never another
-    // holder's) plus operator/auditor/issuer full visibility comes from this viewer set — see
-    // ConfidentialERC20's class-level "Viewer ACL model" note. addViewer/removeViewer/viewers()
-    // are plain storage operations (no TFHE precompile calls themselves) but the token can only be
-    // constructed on a real fhEVM (see setUp), so these still self-skip per this file's convention.
+    // The isolation guarantee (an investor can only decrypt their OWN balance, never another holder's)
+    // plus operator/auditor/issuer full visibility comes from this viewer set - see ConfidentialERC20's
+    // class-level "Viewer ACL model" note.
 
-    function test_initialViewersGrantedAtConstruction() public onFhevm {
+    function test_initialViewersGrantedAtConstruction() public view {
         assertTrue(token.isViewer(operatorViewer));
         assertTrue(token.isViewer(auditorViewer));
-        address[] memory current = token.viewers();
-        assertEq(current.length, 2);
+        assertEq(token.viewers().length, 2);
     }
 
-    function test_addViewer_ownerCanAdd() public onFhevm {
-        address issuerWallet = address(0x60);
+    function test_addViewer_ownerCanAddAndIsIdempotent() public {
+        address issuerWallet = makeAddr("issuerWallet");
         vm.prank(owner);
         token.addViewer(issuerWallet);
         assertTrue(token.isViewer(issuerWallet));
         assertEq(token.viewers().length, 3);
+
+        vm.prank(owner);
+        token.addViewer(operatorViewer);
+        assertEq(token.viewers().length, 3);
     }
 
-    function test_addViewer_revertsForNonOwner() public onFhevm {
+    function test_addViewer_revertsForNonOwner() public {
         vm.prank(address(0x99));
         vm.expectRevert();
         token.addViewer(address(0x60));
     }
 
-    function test_addViewer_isIdempotent() public onFhevm {
-        vm.startPrank(owner);
-        token.addViewer(operatorViewer);
-        vm.stopPrank();
-        assertEq(token.viewers().length, 2);
-    }
-
-    function test_removeViewer_ownerCanRemove() public onFhevm {
+    function test_removeViewer() public {
         vm.prank(owner);
         token.removeViewer(operatorViewer);
         assertFalse(token.isViewer(operatorViewer));
         assertEq(token.viewers().length, 1);
         assertTrue(token.isViewer(auditorViewer));
-    }
 
-    function test_removeViewer_revertsForNonOwner() public onFhevm {
+        vm.prank(owner);
+        token.removeViewer(address(0x61)); // unknown viewer: no-op
+        assertEq(token.viewers().length, 1);
+
         vm.prank(address(0x99));
         vm.expectRevert();
-        token.removeViewer(operatorViewer);
-    }
-
-    function test_removeViewer_noopForUnknownViewer() public onFhevm {
-        vm.prank(owner);
-        token.removeViewer(address(0x61));
-        assertEq(token.viewers().length, 2);
+        token.removeViewer(auditorViewer);
     }
 }

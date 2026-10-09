@@ -12,7 +12,7 @@
 
 [submodule "contracts/lib/fhevm"]
 	path = contracts/lib/fhevm
-	url = https://github.com/zama-ai/fhevm-solidity.git
+	url = https://github.com/zama-ai/fhevm.git
 [submodule "contracts/lib/onchain-id"]
 	path = contracts/lib/onchain-id
 	url = https://github.com/onchain-id/solidity.git
@@ -25,3 +25,6 @@
 [submodule "contracts/lib/account-abstraction"]
 	path = contracts/lib/account-abstraction
 	url = https://github.com/eth-infinitism/account-abstraction.git
+[submodule "contracts/lib/encrypted-types"]
+	path = contracts/lib/encrypted-types
+	url = https://github.com/confidential-token-association/encrypted-types.git

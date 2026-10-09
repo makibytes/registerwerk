@@ -1,35 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.36;
 
-import "forge-std/Test.sol";
+import "../helpers/FhevmMockSetup.sol";
 import "../../src/factory/EwpgConfidentialFactory.sol";
 import "../../src/confidential/ConfidentialERC20.sol";
 
 /// @notice Tests for the CREATE2 factory the backend's ConfidentialErc20Service /
 ///         ConfidentialErc3643Service call via Web3j (registerwerk.contracts.confidential-factory).
 ///
-/// @dev deployConfidentialErc20/deployConfidentialErc3643 construct fhEVM tokens whose
-///      constructors call TFHE precompiles unavailable on vanilla EVM — those two paths
-///      self-skip unless run against an fhEVM fork, same convention as
-///      test/tokens/ConfidentialERC3643Test.t.sol. Owner/access-control behavior needs no
-///      fhEVM and is tested unconditionally.
-///
-///      The FhevmInfra addresses below are Zama's REAL, documented Sepolia testnet addresses
-///      (see lib/fhevm/config/ZamaFHEVMConfig.sol's getSepoliaConfig()/getGetwayConfig()) —
-///      not placeholders — since this factory's whole purpose after the confidential-token
-///      review is to reject an unconfigured/zero-address deploy rather than silently accept one.
-contract EwpgConfidentialFactoryTest is Test {
+/// @dev The tokens it deploys call into the FHEVM host contracts, so the factory is configured with
+///      the cleartext mocks of test/mocks/MockFhevm.sol (the infra addresses are injected, not
+///      hardcoded) and the deployment paths run like any other instead of self-skipping.
+contract EwpgConfidentialFactoryTest is FhevmMockSetup {
     EwpgConfidentialFactory factory;
-    bool fhevmAvailable;
+    ConfidentialERC20.FhevmInfra infra;
 
     address owner = makeAddr("registryWallet");
-    ConfidentialERC20.FhevmInfra sepoliaInfra = ConfidentialERC20.FhevmInfra({
-        aclAddress: 0xFee8407e2f5e3Ee68ad77cAE98c434e637f516e5,
-        tfheExecutorAddress: 0x687408aB54661ba0b4aeF3a44156c616c6955E07,
-        fhePaymentAddress: 0xFb03BE574d14C256D56F09a198B586bdfc0A9de2,
-        kmsVerifierAddress: 0x9D6891A6240D6130c54ae243d8005063D05fE14b,
-        gatewayAddress: 0x33347831500F1e73f0ccCBb95c9f86B94d7b1123
-    });
     bytes32 constant ASSET_ID = keccak256("conf-factory-asset-1");
 
     address operatorViewer = makeAddr("operatorViewer");
@@ -37,52 +23,44 @@ contract EwpgConfidentialFactoryTest is Test {
     address[] initialViewers;
 
     function setUp() public {
-        factory = new EwpgConfidentialFactory(sepoliaInfra, owner);
+        infra = _deployFhevmMocks();
+        factory = new EwpgConfidentialFactory(infra, owner);
         initialViewers.push(operatorViewer);
         initialViewers.push(auditorViewer);
-
-        vm.prank(owner);
-        try factory.deployConfidentialErc20(ASSET_ID, "Confidential Token", "cTKN", initialViewers)
-            returns (address) {
-            fhevmAvailable = true;
-        } catch {
-            fhevmAvailable = false;
-        }
-    }
-
-    modifier onFhevm() {
-        vm.skip(!fhevmAvailable);
-        _;
     }
 
     // ── Ownership / configuration (no fhEVM required) ───────────────────────
 
     function test_fhevmInfraIsSet() public view {
-        (address acl,,,, address gateway) = factory.fhevmInfra();
-        assertEq(acl, sepoliaInfra.aclAddress);
-        assertEq(gateway, sepoliaInfra.gatewayAddress);
+        (address aclAddress, address coprocessor, address kmsVerifier) = factory.fhevmInfra();
+        assertEq(aclAddress, infra.aclAddress);
+        assertEq(coprocessor, infra.coprocessorAddress);
+        assertEq(kmsVerifier, infra.kmsVerifierAddress);
     }
 
     function test_setFhevmInfra_ownerCanUpdate() public {
         ConfidentialERC20.FhevmInfra memory newInfra = ConfidentialERC20.FhevmInfra({
             aclAddress: makeAddr("newAcl"),
-            tfheExecutorAddress: makeAddr("newExecutor"),
-            fhePaymentAddress: makeAddr("newPayment"),
-            kmsVerifierAddress: makeAddr("newKmsVerifier"),
-            gatewayAddress: makeAddr("newGateway")
+            coprocessorAddress: makeAddr("newCoprocessor"),
+            kmsVerifierAddress: makeAddr("newKmsVerifier")
         });
         vm.prank(owner);
+        vm.expectEmit(false, false, false, true, address(factory));
+        emit EwpgConfidentialFactory.FhevmInfraUpdated(
+            newInfra.aclAddress, newInfra.coprocessorAddress, newInfra.kmsVerifierAddress
+        );
         factory.setFhevmInfra(newInfra);
-        (address acl,,,, address gateway) = factory.fhevmInfra();
-        assertEq(acl, newInfra.aclAddress);
-        assertEq(gateway, newInfra.gatewayAddress);
+        (address aclAddress, address coprocessor, address kmsVerifier) = factory.fhevmInfra();
+        assertEq(aclAddress, newInfra.aclAddress);
+        assertEq(coprocessor, newInfra.coprocessorAddress);
+        assertEq(kmsVerifier, newInfra.kmsVerifierAddress);
     }
 
     function test_setFhevmInfra_revertsForNonOwner() public {
         vm.expectRevert(
             abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", address(this))
         );
-        factory.setFhevmInfra(sepoliaInfra);
+        factory.setFhevmInfra(infra);
     }
 
     function test_deployConfidentialErc20_revertsForNonOwner() public {
@@ -94,12 +72,26 @@ contract EwpgConfidentialFactoryTest is Test {
 
     function test_deployConfidentialErc20_revertsWhenInfraNotConfigured() public {
         EwpgConfidentialFactory unconfigured = new EwpgConfidentialFactory(
-            ConfidentialERC20.FhevmInfra(address(0), address(0), address(0), address(0), address(0)),
-            owner
+            ConfidentialERC20.FhevmInfra(address(0), address(0), address(0)), owner
         );
         vm.prank(owner);
         vm.expectRevert(EwpgConfidentialFactory.FhevmInfraNotConfigured.selector);
         unconfigured.deployConfidentialErc20(keccak256("unconfigured-asset"), "X", "X", initialViewers);
+    }
+
+    /// Any of the three host addresses missing is "not configured" (the Gateway used to be the odd one out).
+    function test_deploy_revertsWhenOnlyOneInfraAddressIsMissing() public {
+        ConfidentialERC20.FhevmInfra[3] memory partial_ = [
+            ConfidentialERC20.FhevmInfra(address(0), infra.coprocessorAddress, infra.kmsVerifierAddress),
+            ConfidentialERC20.FhevmInfra(infra.aclAddress, address(0), infra.kmsVerifierAddress),
+            ConfidentialERC20.FhevmInfra(infra.aclAddress, infra.coprocessorAddress, address(0))
+        ];
+        for (uint256 i; i < partial_.length; ++i) {
+            EwpgConfidentialFactory f = new EwpgConfidentialFactory(partial_[i], owner);
+            vm.prank(owner);
+            vm.expectRevert(EwpgConfidentialFactory.FhevmInfraNotConfigured.selector);
+            f.deployConfidentialErc20(keccak256(abi.encode("partial", i)), "X", "X", initialViewers);
+        }
     }
 
     function test_deployConfidentialErc3643_revertsForZeroIdentityRegistry() public {
@@ -111,10 +103,9 @@ contract EwpgConfidentialFactoryTest is Test {
         );
     }
 
-    // ── CREATE2 deployment (fhEVM only) ──────────────────────────────────────
+    // ── CREATE2 deployment ───────────────────────────────────────────────────
 
-    function test_deployConfidentialErc20_deterministicAddressPerAssetId() public onFhevm {
-        // Fresh salt — setUp already consumed ASSET_ID when probing fhEVM availability.
+    function test_deployConfidentialErc20_deterministicAddressPerAssetId() public {
         bytes32 assetId = keccak256("determinism-asset");
 
         vm.prank(owner);
@@ -127,17 +118,18 @@ contract EwpgConfidentialFactoryTest is Test {
         factory.deployConfidentialErc20(assetId, "Confidential Token", "cTKN", initialViewers);
     }
 
-    function test_deployConfidentialErc20_grantsInitialViewers() public onFhevm {
+    function test_deployConfidentialErc20_grantsInitialViewers() public {
         bytes32 assetId = keccak256("viewer-grant-asset");
         vm.prank(owner);
         address deployed = factory.deployConfidentialErc20(assetId, "Confidential Token", "cTKN", initialViewers);
         ConfidentialERC20 token = ConfidentialERC20(deployed);
+        assertEq(token.owner(), owner, "the registry wallet that called the factory owns the token");
         assertTrue(token.isViewer(operatorViewer));
         assertTrue(token.isViewer(auditorViewer));
         assertFalse(token.isViewer(makeAddr("someRandomAddress")));
     }
 
-    function test_deployConfidentialErc3643_succeeds() public onFhevm {
+    function test_deployConfidentialErc3643_succeeds() public {
         vm.prank(owner);
         address deployed = factory.deployConfidentialErc3643(
             keccak256("conf-3643-asset-1"),

@@ -27,6 +27,10 @@ import {TransientSlot} from "@openzeppelin/contracts/utils/TransientSlot.sol";
 ///
 ///   Global (inherited from EwpgCompliance):
 ///     pause / unpause, freezeAddress / unfreezeAddress, setSupplyCap
+// IERC3525 declares `approve` and both `transferFrom` overloads payable, so slither sees payable entry points
+// and no way to send ether out. Every one of them reverts {ERC3525.EtherNotAccepted} for a non-zero value
+// (test_payableEntryPoints_rejectEther), so no ether can ever arrive to be locked.
+// slither-disable-next-line locked-ether
 contract EwpgERC3525 is ERC3525, EwpgCompliance {
     // ── Storage ───────────────────────────────────────────────────────────────
 
