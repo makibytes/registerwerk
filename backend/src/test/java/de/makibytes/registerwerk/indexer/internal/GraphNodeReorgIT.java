@@ -60,7 +60,7 @@ class GraphNodeReorgIT {
     // container's own network interface (not just its loopback) accepts connections, which is
     // what lets Testcontainers reach it via the mapped host port.
     @Container
-    static GenericContainer<?> anvil = new GenericContainer<>("ghcr.io/foundry-rs/foundry:v1.7.1")
+    static GenericContainer<?> anvil = new GenericContainer<>("ghcr.io/foundry-rs/foundry:v1.8.5")
             .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("anvil"))
             .withCommand("--host", "0.0.0.0", "--chain-id", "11155111")
             .withExposedPorts(8545)
