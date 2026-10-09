@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
@@ -12,8 +13,26 @@ const customerPassword = process.env.CUSTOMER_SMOKE_PASSWORD ?? 'demo1234!';
 const operatorEmail = process.env.DEFAULT_ADMIN_EMAIL ?? 'admin@local';
 const operatorPassword = process.env.DEFAULT_ADMIN_PASSWORD ?? 'changeme-please';
 
+// The demo seeds its operator users (not the bootstrap admin) with this fixed authenticator secret
+// (DemoDataSeeder.DEMO_TOTP_SECRET), so support-session step-up can be driven without a phone.
+const supportEmail = process.env.SUPPORT_SMOKE_EMAIL ?? 'dual-control.admin@registerwerk-demo.internal';
+const supportPassword = process.env.SUPPORT_SMOKE_PASSWORD ?? 'demo1234!';
+const supportTotpSecret = process.env.SUPPORT_SMOKE_TOTP_SECRET ?? 'JBSWY3DPEHPK3PXP';
+const only = process.env.VERIFY_ONLY; // 'customer' | 'operator' | 'impersonation' — default: everything
+
+function totp(secret, now = Date.now()) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const bits = [...secret.replaceAll('=', '').toUpperCase()].map((c) => alphabet.indexOf(c).toString(2).padStart(5, '0')).join('');
+  const key = Buffer.from(bits.match(/.{8}/g).map((b) => Number.parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(now / 30_000)));
+  const h = createHmac('sha1', key).update(counter).digest();
+  const o = h[19] & 15;
+  return String((((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1_000_000).padStart(6, '0');
+}
+
 await mkdir(screenshotDir, { recursive: true });
-const browser = await chromium.launch();
+const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 
 function monitor(page, origin, failures = []) {
   page.on('pageerror', (error) => failures.push(`page: ${error.message}`));
@@ -194,10 +213,87 @@ async function verifyOperator() {
   }
 }
 
+/**
+ * The customer portal's support-session journey, against the real backend: sign in as an operator,
+ * pick a company, give a reason and an authenticator code, land on the customer's dashboard under the
+ * read-only banner, then leave again. Also proves the two ways this has failed before are visible:
+ * a wrong code is explained inline (not swallowed), and the form is on screen right after choosing.
+ */
+async function verifyImpersonation() {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  const failures = [];
+  try {
+    await page.goto(new URL('/login', customerUrl).href, { waitUntil: 'domcontentloaded' });
+    await page.locator('#email').fill(supportEmail);
+    await page.locator('#password').fill(supportPassword);
+    await submitLogin(page, page.locator('button[type="submit"]'), '/api/v1/public/auth/login', 'Support');
+    await page.waitForURL('**/select-company', { timeout: 30_000 });
+    await settle(page);
+    monitor(page, new URL(customerUrl).origin, failures);
+    // Expected, asserted-on refusals below are not runtime failures.
+    const expectedRefusals = [];
+    page.on('response', (response) => {
+      if (response.url().endsWith('/api/v1/auth/step-up') && response.status() === 403) {
+        expectedRefusals.push(`HTTP 403: ${response.url()}`);
+      }
+    });
+
+    const rows = page.locator('button.entity-row');
+    await rows.first().waitFor({ state: 'visible' });
+    assert.ok(await rows.count() >= 2, 'the company picker must list the seeded companies');
+    await page.screenshot({ path: `${screenshotDir}/support-picker.png`, fullPage: true });
+
+    // Choosing a company must bring the session form into view immediately.
+    const companyName = (await rows.first().locator('.entity-name').innerText()).trim();
+    await rows.first().click();
+    const form = page.locator('[aria-label="Start support session"]');
+    await form.waitFor({ state: 'visible' });
+    const box = await form.boundingBox();
+    assert.ok(box && box.y >= 0 && box.y + box.height <= 800, 'the session form must be fully inside the viewport');
+    assert.ok((await form.innerText()).includes(companyName), 'the form must name the chosen company');
+
+    // A wrong authenticator code is explained on the form, not as a bare "Access denied".
+    await page.getByLabel('Reason', { exact: true }).fill('Smoke test: verifying the support-session journey');
+    await page.getByLabel('Authenticator code').fill('000000');
+    await page.getByRole('button', { name: 'Start session' }).click();
+    const alert = form.locator('[role="alert"]');
+    await alert.waitFor({ state: 'visible' });
+    assert.match(await alert.innerText(), /TOTP code|code/i, 'a wrong code must be explained on the form');
+    assert.ok(!/^Access denied/i.test((await alert.innerText()).trim()), 'the message must be specific');
+    await page.screenshot({ path: `${screenshotDir}/support-wrong-code.png`, fullPage: true });
+
+    // The real code starts the session. A code is single-use per 30 s step, so use the next step's.
+    await page.getByLabel('Authenticator code').fill(totp(supportTotpSecret, Date.now() + 30_000));
+    await page.getByRole('button', { name: 'Start session' }).click();
+    await page.waitForURL('**/dashboard', { timeout: 30_000 });
+    await settle(page);
+    await page.getByText('read-only support session', { exact: false }).first().waitFor({ state: 'visible' });
+    assert.ok((await page.locator('body').innerText()).includes(companyName), 'the banner must name the impersonated company');
+    await assertVisualFoundation(page, 'impersonated dashboard');
+    await page.screenshot({ path: `${screenshotDir}/support-dashboard.png`, fullPage: true });
+
+    // Leaving restores the operator's own session (the picker), and the picker works a second time.
+    await page.getByRole('button', { name: /Exit impersonation/i }).click();
+    await page.waitForURL('**/select-company', { timeout: 30_000 });
+    await page.locator('button.entity-row').first().waitFor({ state: 'visible' });
+
+    const unexpected = failures.filter((f) => !expectedRefusals.includes(f) && !f.includes('/api/v1/demo/onchain')
+      && !/Failed to load resource: the server responded with a status of (403|404)/.test(f));
+    assert.deepEqual(unexpected, [], `Support-session runtime failures:\n${unexpected.join('\n')}`);
+  } catch (error) {
+    await page.screenshot({ path: `${screenshotDir}/support-failure.png`, fullPage: true });
+    throw error;
+  } finally {
+    await context.close();
+  }
+}
+
 try {
-  await verifyCustomer();
-  await verifyOperator();
-  console.log(`Customer and operator headless Chromium checks passed. Screenshots: ${screenshotDir}`);
+  if (!only || only === 'customer') await verifyCustomer();
+  if (!only || only === 'operator') await verifyOperator();
+  if (!only || only === 'impersonation') await verifyImpersonation();
+  console.log(`Headless Chromium checks passed (${only ?? 'customer, operator, impersonation'}). Screenshots: ${screenshotDir}`);
 } finally {
   await browser.close();
 }

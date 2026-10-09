@@ -105,6 +105,11 @@ class StepUpEnrollmentIT {
                 new HttpEntity<>(new StepUpRequest("123456", "TOTP", null), authHeaders()),
                 String.class);
         assertThat(beforeEnroll.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        // The refusal says WHY (and carries a stable code): the customer portal's impersonation picker
+        // used to show a bare "Access denied" for an operator who had simply not enrolled yet.
+        assertThat(beforeEnroll.getBody())
+                .contains("\"code\":\"STEP_UP_ENROLMENT_REQUIRED\"")
+                .contains("Step-up requires TOTP enrolment");
 
         ResponseEntity<TotpEnrollmentResponse> enrollResponse = rest.postForEntity(
                 "/api/v1/auth/step-up/enroll",
@@ -142,5 +147,21 @@ class StepUpEnrollmentIT {
                 StepUpResponse.class);
         assertThat(stepUpResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(stepUpResponse.getBody().stepUpToken()).isNotBlank();
+
+        // Presenting the same code again is a replay and says so, with its own code.
+        ResponseEntity<String> replay = rest.postForEntity(
+                "/api/v1/auth/step-up",
+                new HttpEntity<>(new StepUpRequest(stepUpCode, "TOTP", null), authHeaders()),
+                String.class);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(replay.getBody()).contains("\"code\":\"STEP_UP_CODE_REPLAYED\"");
+
+        // A malformed code is reported as invalid rather than as a missing permission.
+        ResponseEntity<String> malformed = rest.postForEntity(
+                "/api/v1/auth/step-up",
+                new HttpEntity<>(new StepUpRequest("12ab", "TOTP", null), authHeaders()),
+                String.class);
+        assertThat(malformed.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(malformed.getBody()).contains("\"code\":\"STEP_UP_CODE_INVALID\"");
     }
 }

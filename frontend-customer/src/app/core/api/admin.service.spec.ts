@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { AdminService } from './admin.service';
+import { AdminService, handoffCodeFrom } from './admin.service';
+import { SUPPRESS_ERROR_TOAST } from '../interceptors/error-context';
 import { environment } from '../../../environments/environment';
 
 describe('AdminService', () => {
@@ -63,5 +64,62 @@ describe('AdminService', () => {
         expect('action' in req.request.body).toBe(false);
         expect('target' in req.request.body).toBe(false);
         req.flush({ stepUpToken: 'x' });
+    });
+
+    it('impersonate() and stepUp() ask the global interceptor not to toast, because the picker shows the failure inline', () => {
+        service.stepUp('123456').subscribe({ error: () => undefined });
+        httpMock.expectOne(`${environment.apiUrl}/auth/step-up`).flush({}, { status: 403, statusText: 'Forbidden' });
+        service.impersonate('e', 'a reason that is long enough', 'tok').subscribe({ error: () => undefined });
+        const req = httpMock.expectOne(`${environment.apiUrl}/impersonation`);
+        expect(req.request.context.get(SUPPRESS_ERROR_TOAST)).toBe(true);
+        req.flush({}, { status: 403, statusText: 'Forbidden' });
+    });
+
+    it('startReadOnlySession() chains step-up -> impersonation and yields the handoff code', () => {
+        let result: { handoffCode: string } | undefined;
+        service.startReadOnlySession('ent-1', 'Customer asked for help', '123456', 'TCK-1')
+            .subscribe(r => (result = r));
+
+        const stepUp = httpMock.expectOne(`${environment.apiUrl}/auth/step-up`);
+        expect(stepUp.request.body).toEqual({ code: '123456', method: 'TOTP' });
+        stepUp.flush({ stepUpToken: 'su-tok' });
+
+        const imp = httpMock.expectOne(`${environment.apiUrl}/impersonation`);
+        expect(imp.request.headers.get('Authorization')).toBe('Bearer su-tok');
+        expect(imp.request.body).toEqual({ entityId: 'ent-1', reason: 'Customer asked for help', ticket: 'TCK-1' });
+        imp.flush({
+            sessionId: 's1', mode: 'READ_ONLY', expiresAt: '2026-01-01T00:00:00Z', entityId: 'ent-1', entityName: 'Acme',
+            handoffUrl: 'http://x/admin/handoff#code=one-time&entityId=ent-1&entityName=Acme',
+        });
+
+        expect(result?.handoffCode).toBe('one-time');
+    });
+
+    it('startReadOnlySession() fails visibly when the response carries no handoff code', () => {
+        let error: unknown;
+        service.startReadOnlySession('ent-1', 'Customer asked for help', '123456').subscribe({ error: e => (error = e) });
+        httpMock.expectOne(`${environment.apiUrl}/auth/step-up`).flush({ stepUpToken: 'su-tok' });
+        httpMock.expectOne(`${environment.apiUrl}/impersonation`).flush({
+            sessionId: 's1', mode: 'READ_ONLY', expiresAt: 'x', entityId: 'e', entityName: 'n', handoffUrl: 'http://x/admin/handoff',
+        });
+        expect((error as Error).message).toContain('handoff code');
+    });
+
+    it('startReadOnlySession() does not call /impersonation when step-up is refused', () => {
+        let error: unknown;
+        service.startReadOnlySession('ent-1', 'Customer asked for help', '000000').subscribe({ error: e => (error = e) });
+        httpMock.expectOne(`${environment.apiUrl}/auth/step-up`)
+            .flush({ code: 'STEP_UP_CODE_INVALID', message: 'Invalid TOTP code.' }, { status: 403, statusText: 'Forbidden' });
+        httpMock.expectNone(`${environment.apiUrl}/impersonation`);
+        expect(error).toBeTruthy();
+    });
+
+    describe('handoffCodeFrom()', () => {
+        it('reads the code from the fragment and tolerates anything else', () => {
+            expect(handoffCodeFrom('https://c/admin/handoff#code=abc&entityId=1')).toBe('abc');
+            expect(handoffCodeFrom('https://c/admin/handoff#entityId=1')).toBeNull();
+            expect(handoffCodeFrom('https://c/admin/handoff')).toBeNull();
+            expect(handoffCodeFrom(undefined)).toBeNull();
+        });
     });
 });

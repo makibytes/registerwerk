@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
+import { HttpClient, HttpContext, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Router } from '@angular/router';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { errorInterceptor } from './error.interceptor';
+import { SUPPRESS_ERROR_TOAST } from './error-context';
 import { AuthService } from '../auth/auth.service';
 import { clearAuthRedirectCooldown } from '../auth/redirect-guard';
 
@@ -72,6 +73,28 @@ describe('errorInterceptor 401 handling', () => {
         http.get('/api/v1/b').subscribe({ error: () => undefined });
         httpMock.expectOne('/api/v1/a').flush({}, { status: 401, statusText: 'Unauthorized' });
         httpMock.expectOne('/api/v1/b').flush({}, { status: 401, statusText: 'Unauthorized' });
+        expect(auth.login).toHaveBeenCalledTimes(1);
+    });
+
+    it('a 403 shows the generic toast unless the caller renders the failure itself', () => {
+        http.get('/api/v1/assets').subscribe({ error: () => undefined });
+        httpMock.expectOne('/api/v1/assets').flush({}, { status: 403, statusText: 'Forbidden' });
+        expect(snackBar.open).toHaveBeenCalledTimes(1);
+
+        snackBar.open.mockClear();
+        const context = new HttpContext().set(SUPPRESS_ERROR_TOAST, true);
+        let body: unknown;
+        http.post('/api/v1/auth/step-up', {}, { context }).subscribe({ error: e => (body = e.error) });
+        httpMock.expectOne('/api/v1/auth/step-up')
+            .flush({ code: 'STEP_UP_ENROLMENT_REQUIRED' }, { status: 403, statusText: 'Forbidden' });
+        expect(snackBar.open).not.toHaveBeenCalled();
+        expect(body).toEqual({ code: 'STEP_UP_ENROLMENT_REQUIRED' });
+    });
+
+    it('a suppressed request still redirects to sign-in on a 401', () => {
+        const context = new HttpContext().set(SUPPRESS_ERROR_TOAST, true);
+        http.post('/api/v1/impersonation', {}, { context }).subscribe({ error: () => undefined });
+        httpMock.expectOne('/api/v1/impersonation').flush({}, { status: 401, statusText: 'Unauthorized' });
         expect(auth.login).toHaveBeenCalledTimes(1);
     });
 });

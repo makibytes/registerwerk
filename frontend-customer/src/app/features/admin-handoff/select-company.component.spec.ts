@@ -1,18 +1,16 @@
-import { beforeEach, describe, expect, it, type Mock, type MockedObject, vi } from "vitest";
+import { beforeEach, describe, expect, it, type MockedObject, vi } from "vitest";
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { Router } from '@angular/router';
-import { MatSnackBar } from '@angular/material/snack-bar';
 import { of, throwError } from 'rxjs';
-import { SelectCompanyComponent } from './select-company.component';
+import { SelectCompanyComponent, describeSupportSessionError } from './select-company.component';
 import { AuthService } from '../../core/auth/auth.service';
 import { AdminService, EntityListItem, EntityPage, ImpersonateResponse } from '../../core/api/admin.service';
 
 describe('SelectCompanyComponent', () => {
     let authService: MockedObject<Pick<AuthService, 'enterImpersonation' | 'logout'>>;
-    let adminService: MockedObject<Pick<AdminService, 'listEntities' | 'impersonate' | 'stepUp'>>;
+    let adminService: MockedObject<Pick<AdminService, 'listEntities' | 'startReadOnlySession'>>;
     let router: MockedObject<Pick<Router, 'navigate'>>;
-    let snackBarOpenSpy: Mock;
 
     const entity: EntityListItem = {
         id: 'ent-1',
@@ -38,20 +36,12 @@ describe('SelectCompanyComponent', () => {
         };
         adminService = {
             listEntities: vi.fn().mockName("AdminService.listEntities"),
-            impersonate: vi.fn().mockName("AdminService.impersonate"),
-            stepUp: vi.fn().mockName("AdminService.stepUp")
+            startReadOnlySession: vi.fn().mockName("AdminService.startReadOnlySession")
         };
         router = {
             navigate: vi.fn().mockName("Router.navigate")
         };
-        // Spying on the prototype (rather than providing a `useValue` spy object) matters here: this
-        // component imports MatSnackBarModule directly, and the standalone component's own injector
-        // scope resolves a real MatSnackBar instance regardless of a TestBed-level provider override
-        // — spying on the prototype method works no matter which instance ends up injected.
-        snackBarOpenSpy = vi.spyOn(MatSnackBar.prototype, 'open').mockReturnValue({} as never);
-
         adminService.listEntities.mockReturnValue(of(page));
-        adminService.stepUp.mockReturnValue(of({ stepUpToken: 'su-tok' }));
 
         TestBed.configureTestingModule({
             imports: [SelectCompanyComponent],
@@ -74,10 +64,8 @@ describe('SelectCompanyComponent', () => {
     });
 
     it('debounces search input before reloading entities', () => {
-        // Fake timers: the previous version asserted from a bare setTimeout that nothing awaited. It
-        // fired after the test had ended — against whatever mock a *later* test had assigned to
-        // `adminService` — and surfaced as an unhandled error that failed the whole run whenever the
-        // worker was still alive 350 ms later.
+        // Fake timers: an assertion made from a bare setTimeout nothing awaits fires after the test has
+        // ended, against a later test's mocks, and fails the whole run as an unhandled error.
         vi.useFakeTimers();
         try {
             const fixture = createComponent();
@@ -100,8 +88,38 @@ describe('SelectCompanyComponent', () => {
         }
     });
 
+    describe('choosing a company', () => {
+        it('replaces the list with the session form, so the form can never be below the fold', () => {
+            const fixture = createComponent();
+            const root: HTMLElement = fixture.nativeElement;
+            expect(root.querySelectorAll('button.entity-row').length).toBe(1);
+            expect(root.querySelector('[aria-label="Start support session"]')).toBeNull();
+
+            (root.querySelector('button.entity-row') as HTMLButtonElement).click();
+            fixture.detectChanges();
+
+            expect(root.querySelector('[aria-label="Start support session"]')).not.toBeNull();
+            expect(root.querySelectorAll('button.entity-row').length).toBe(0);
+            expect(root.textContent).toContain('Acme GmbH');
+        });
+
+        it('"Back" returns to the list and clears the previous error', () => {
+            const fixture = createComponent();
+            const component = fixture.componentInstance;
+            component.chooseEntity(entity);
+            component.sessionError = 'old error';
+
+            component.cancelPending();
+            fixture.detectChanges();
+
+            expect(component.pending).toBeNull();
+            expect(component.sessionError).toBe('');
+            expect((fixture.nativeElement as HTMLElement).querySelectorAll('button.entity-row').length).toBe(1);
+        });
+    });
+
     describe('selectEntity()', () => {
-        const impersonateResponse: ImpersonateResponse = {
+        const session: ImpersonateResponse = {
             sessionId: 'sess-1',
             mode: 'READ_ONLY',
             expiresAt: '2026-01-01T00:00:00Z',
@@ -111,60 +129,90 @@ describe('SelectCompanyComponent', () => {
         };
 
         function select(component: SelectCompanyComponent) {
-            component.reason = 'Customer asked for help with an order';
+            component.chooseEntity(entity);
+            component.reason = '  Customer asked for help with an order ';
+            component.ticket = ' TCK-1 ';
             component.totpCode = '123456';
             component.selectEntity(entity);
         }
 
-        it('impersonates via AdminService then enters impersonation via AuthService, navigating on success', () => {
+        it('starts the session via AdminService then enters impersonation via AuthService, navigating on success', () => {
             const fixture = createComponent();
             const component = fixture.componentInstance;
-            adminService.impersonate.mockReturnValue(of(impersonateResponse));
+            adminService.startReadOnlySession.mockReturnValue(of({ handoffCode: 'one-time-code', session }));
             authService.enterImpersonation.mockReturnValue(of(void 0));
 
             select(component);
 
-            expect(adminService.stepUp).toHaveBeenCalledWith('123456', 'ADMIN_IMPERSONATION');
-            expect(adminService.impersonate).toHaveBeenCalledWith('ent-1', 'Customer asked for help with an order', 'su-tok', '');
+            expect(adminService.startReadOnlySession).toHaveBeenCalledWith(
+                'ent-1', 'Customer asked for help with an order', '123456', 'TCK-1');
             expect(authService.enterImpersonation).toHaveBeenCalledWith('one-time-code', 'ent-1', 'Acme GmbH');
             expect(router.navigate).toHaveBeenCalledWith(['/dashboard']);
         });
 
-        it('shows an error and resets selecting state when AuthService.enterImpersonation() fails', () => {
+        it('shows the failure inline and keeps the form when AuthService.enterImpersonation() fails', () => {
             const fixture = createComponent();
             const component = fixture.componentInstance;
-            adminService.impersonate.mockReturnValue(of(impersonateResponse));
+            adminService.startReadOnlySession.mockReturnValue(of({ handoffCode: 'one-time-code', session }));
             authService.enterImpersonation.mockReturnValue(throwError(() => ({ error: { message: 'Impersonation session exchange failed' } })));
 
             select(component);
+            fixture.detectChanges();
 
             expect(component.selecting).toBeNull();
             expect(router.navigate).not.toHaveBeenCalled();
-            expect(snackBarOpenSpy).toHaveBeenCalledWith('Impersonation session exchange failed', 'Dismiss', { duration: 6000 });
+            const alert = (fixture.nativeElement as HTMLElement).querySelector('[role="alert"]');
+            expect(alert?.textContent).toContain('Impersonation session exchange failed');
         });
 
-        it('shows an error when AdminService.impersonate() itself fails', () => {
+        it('explains a missing authenticator enrolment instead of a bare "Access denied"', () => {
             const fixture = createComponent();
             const component = fixture.componentInstance;
-            adminService.impersonate.mockReturnValue(throwError(() => ({ error: { message: 'Forbidden' } })));
+            adminService.startReadOnlySession.mockReturnValue(throwError(() => ({
+                status: 403,
+                error: { code: 'STEP_UP_ENROLMENT_REQUIRED', message: 'Step-up requires TOTP enrolment.' },
+            })));
 
             select(component);
+            fixture.detectChanges();
 
             expect(authService.enterImpersonation).not.toHaveBeenCalled();
             expect(component.selecting).toBeNull();
-            expect(snackBarOpenSpy).toHaveBeenCalledWith('Forbidden', 'Dismiss', { duration: 6000 });
+            const alert = (fixture.nativeElement as HTMLElement).querySelector('[role="alert"]');
+            expect(alert?.textContent).toContain('no authenticator app enrolled');
+            // The code field is cleared: a TOTP code is single-use, so retyping is required anyway.
+            expect(component.totpCode).toBe('');
         });
 
-        it('ignores a second click while a selection is already in progress', () => {
+        it('shows the backend message when the session cannot be started', () => {
             const fixture = createComponent();
             const component = fixture.componentInstance;
-            adminService.impersonate.mockReturnValue(of(impersonateResponse));
-            authService.enterImpersonation.mockReturnValue(of(void 0));
+            adminService.startReadOnlySession.mockReturnValue(throwError(() => ({
+                status: 403, error: { message: 'This TOTP code was already used. Wait for the next code.' } })));
+
+            select(component);
+
+            expect(component.sessionError).toBe('This TOTP code was already used. Wait for the next code.');
+        });
+
+        it('ignores a second submit while a selection is already in progress', () => {
+            const fixture = createComponent();
+            const component = fixture.componentInstance;
 
             component.selecting = 'ent-1';
             component.selectEntity(entity);
 
-            expect(adminService.impersonate).not.toHaveBeenCalled();
+            expect(adminService.startReadOnlySession).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('describeSupportSessionError()', () => {
+        it('covers unreachable server, throttling, backend message and an unknown shape', () => {
+            expect(describeSupportSessionError({ status: 0 })).toContain('could not be reached');
+            expect(describeSupportSessionError({ status: 429 })).toContain('Too many attempts');
+            expect(describeSupportSessionError({ status: 403, error: { message: 'Nope' } })).toBe('Nope');
+            expect(describeSupportSessionError(new Error('boom'))).toBe('boom');
+            expect(describeSupportSessionError(null)).toBe('The support session could not be started.');
         });
     });
 

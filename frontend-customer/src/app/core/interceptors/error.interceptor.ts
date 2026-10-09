@@ -5,6 +5,7 @@ import { catchError, tap, throwError } from 'rxjs';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { AuthService } from '../auth/auth.service';
 import { clearAuthRedirectCooldown, requestAuthRedirect } from '../auth/redirect-guard';
+import { SUPPRESS_ERROR_TOAST } from './error-context';
 
 /**
  * Reads an OAuth2 claims challenge out of a 401.
@@ -43,11 +44,15 @@ function isAuthProbe(url: string): boolean {
  *  403 PASSWORD_CHANGE_REQUIRED → routes to /change-password (no toast)
  *  403 → shows "Access denied" toast
  *  5xx → shows generic error toast
+ *
+ * The last two are skipped for requests carrying {@link SUPPRESS_ERROR_TOAST}: those callers show the
+ * failure inline.
  */
 export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   const snackBar = inject(MatSnackBar);
   const auth = inject(AuthService);
   const router = inject(Router);
+  const callerReportsErrors = req.context.get(SUPPRESS_ERROR_TOAST);
 
   return next(req).pipe(
     // Any successful response proves the session is good, so a later genuine expiry is not
@@ -105,6 +110,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
             );
             break;
           }
+          if (callerReportsErrors) break;
           snackBar.open(
             'Access denied. You do not have permission to perform this action.',
             'Dismiss',
@@ -118,7 +124,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
           break;
 
         default:
-          if (err.status >= 500) {
+          if (err.status >= 500 && !callerReportsErrors) {
             snackBar.open(
               'A server error occurred. Please try again later.',
               'Dismiss',

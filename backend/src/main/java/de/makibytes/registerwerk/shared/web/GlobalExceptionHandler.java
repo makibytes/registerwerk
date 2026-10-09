@@ -8,6 +8,7 @@ import de.makibytes.registerwerk.shared.LoginDisabledException;
 import de.makibytes.registerwerk.shared.LoginThrottledException;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.shared.TransientChainException;
+import de.makibytes.registerwerk.shared.api.CodedAccessDeniedException;
 import de.makibytes.registerwerk.shared.api.ErrorResponse;
 import de.makibytes.registerwerk.shared.events.RejectedActionEvent;
 import jakarta.validation.ConstraintViolationException;
@@ -166,6 +167,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(UnsupportedOperationException.class)
     public ResponseEntity<ErrorResponse> handleUnsupported(UnsupportedOperationException ex, HttpServletRequest request) {
         return buildResponse(HttpStatus.NOT_IMPLEMENTED, ex.getMessage(), request.getRequestURI());
+    }
+
+    /**
+     * A refusal about the caller's own credential (step-up enrolment, code, replay, lockout): the message
+     * and a stable code are returned so the UI can say what to do instead of a bare "Access denied".
+     */
+    @ExceptionHandler(CodedAccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleCodedAccessDenied(CodedAccessDeniedException ex, HttpServletRequest request) {
+        recordRejectionIfMutating("ACCESS_DENIED", ex.getMessage(), request);
+        ErrorResponse body = new ErrorResponse(HttpStatus.FORBIDDEN.value(), ex.getMessage(),
+                Instant.now(), request.getRequestURI(), ex.code());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
     }
 
     @ExceptionHandler(AccessDeniedException.class)

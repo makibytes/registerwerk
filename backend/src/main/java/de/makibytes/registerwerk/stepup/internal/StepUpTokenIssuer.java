@@ -9,6 +9,7 @@ import de.makibytes.registerwerk.stepup.api.DualControlTarget;
 import de.makibytes.registerwerk.stepup.events.TotpLifecycleEvent;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import de.makibytes.registerwerk.shared.api.CodedAccessDeniedException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -55,6 +56,12 @@ public class StepUpTokenIssuer {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(StepUpTokenIssuer.class);
 
     private static final int STEP_UP_TTL_SECONDS = 600;
+    /** Stable codes of the refusals a client must tell apart (see {@link CodedAccessDeniedException}). */
+    public static final String CODE_ENROLMENT_REQUIRED = "STEP_UP_ENROLMENT_REQUIRED";
+    public static final String CODE_INVALID = "STEP_UP_CODE_INVALID";
+    public static final String CODE_REPLAYED = "STEP_UP_CODE_REPLAYED";
+    public static final String CODE_LOCKED = "STEP_UP_LOCKED";
+
     private static final int TOTP_WINDOW = 1;     // ±1 step = ±30s tolerance
     private static final int TOTP_STEP_SECONDS = 30;
     private static final int TOTP_DIGITS = 6;
@@ -116,7 +123,8 @@ public class StepUpTokenIssuer {
                 .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
 
         if (code == null || !code.matches("\\d{6}")) {
-            throw new AccessDeniedException("Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
+            throw new CodedAccessDeniedException(CODE_INVALID,
+                    "Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
         }
         boolean approval = action != null && !action.isBlank();
         String targetDigest = null;
@@ -158,7 +166,8 @@ public class StepUpTokenIssuer {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("AppUser", userId));
         if (code == null || !code.matches("\\d{6}")) {
-            throw new AccessDeniedException("Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
+            throw new CodedAccessDeniedException(CODE_INVALID,
+                    "Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
         }
         requireSecondFactor(user, code);
     }
@@ -190,7 +199,7 @@ public class StepUpTokenIssuer {
         } else if (!allowUnenrolled) {
             // Without a second factor the step-up token is meaningless — refusing
             // here forces enrolment before any dual-control action can be approved.
-            throw new AccessDeniedException(
+            throw new CodedAccessDeniedException(CODE_ENROLMENT_REQUIRED,
                     "Step-up requires TOTP enrolment. Enrol an authenticator app first " +
                     "(POST /api/v1/auth/step-up/enroll).");
         }
@@ -352,10 +361,11 @@ public class StepUpTokenIssuer {
     private void verifyAndAdvance(AppUser user, String code) {
         UUID userId = user.getId();
         if (code == null || !code.matches("\\d{6}")) {
-            throw new AccessDeniedException("Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
+            throw new CodedAccessDeniedException(CODE_INVALID,
+                    "Invalid TOTP code. Provide a 6-digit code from your authenticator app.");
         }
         if (!state.reserveAttempt(userId)) {
-            throw new AccessDeniedException("Too many failed step-up attempts. Try again later.");
+            throw new CodedAccessDeniedException(CODE_LOCKED, "Too many failed step-up attempts. Try again later.");
         }
         String secret;
         try {
@@ -376,11 +386,12 @@ public class StepUpTokenIssuer {
             }
         }
         if (matched < 0) {
-            throw new AccessDeniedException("Invalid TOTP code. Check your authenticator app's time sync.");
+            throw new CodedAccessDeniedException(CODE_INVALID,
+                    "Invalid TOTP code. Check your authenticator app's time sync.");
         }
         if (!state.acceptStep(userId, matched)) {
             // RFC 6238 §5.2: a code at or before the last accepted step is a replay.
-            throw new AccessDeniedException("This TOTP code was already used. Wait for the next code.");
+            throw new CodedAccessDeniedException(CODE_REPLAYED, "This TOTP code was already used. Wait for the next code.");
         }
     }
 

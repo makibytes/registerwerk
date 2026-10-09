@@ -102,6 +102,10 @@ by default, so neither Zone.js nor an explicit `provideZonelessChangeDetection()
 | Customer | `--rw-nav-bg: #111827`, `--rw-accent: #0D9488` (teal) |
 | Both | Font: **Manrope**; Angular Material M3 (operator: indigo palette, customer: teal palette) |
 
+**Shared UI library:** `frontend-shared/` (`@registerwerk/ui`) is compiled by whichever app imports it, so its `node_modules` must point at *that app's* single copy of Angular. It is an untracked symlink, re-pointed by `frontend-shared/link-node-modules.mjs` from the `pre*` npm hooks (`prestart`/`prebuild`/`pretest`/`prelint`) and by the Dockerfiles. Never commit it, and never build with a link to the other app: two Angular copies crash at runtime inside shared components, a dangling link fails the build with NG2012.
+
+**Support session (customer portal `/select-company`):** step-up -> `POST /api/v1/impersonation` -> `POST /api/v1/public/auth/impersonate` lives in `AdminService.startReadOnlySession`; the picker renders failures inline (`SUPPRESS_ERROR_TOAST` keeps the global toast away). Step-up refusals carry a `code` (`STEP_UP_ENROLMENT_REQUIRED`, `STEP_UP_CODE_INVALID`, `STEP_UP_CODE_REPLAYED`, `STEP_UP_LOCKED`; `CodedAccessDeniedException`). Regression nets: `impersonation-flow.spec.ts` (real services, mocked network), `StepUpEnrollmentIT`, and the `impersonation` journey in `docs/scripts/verify-frontends.mjs` (`VERIFY_ONLY=impersonation`). The built-in bootstrap admin has no authenticator, so it cannot start a session until it enrols one in the operator portal; the demo's `dual-control.admin@registerwerk-demo.internal` is pre-enrolled.
+
 **Operator structure:** sidebar + topbar layout; `ShellComponent` wraps all guarded routes.
 **Customer structure:** sticky top nav; impersonation bar shown for `REGISTRY_ADMIN` and `SUPPORT_AGENT` users (always, not only when actively impersonating; read-only sessions show a banner).
 

@@ -6,10 +6,30 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
-import { switchMap } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
 import { AdminService, EntityListItem } from '../../core/api/admin.service';
+import { environment } from '../../../environments/environment';
+
+/**
+ * What to tell the operator when starting a support session fails. The backend answers step-up
+ * refusals with a specific message and a stable `code` (STEP_UP_*), so each one is explained instead of
+ * collapsing into "Access denied".
+ */
+export function describeSupportSessionError(err: unknown): string {
+  const e = err as { status?: number; error?: { message?: string; code?: string } | null; message?: string } | null;
+  const body = e?.error;
+  if (body?.code === 'STEP_UP_ENROLMENT_REQUIRED') {
+    return 'Your account has no authenticator app enrolled, so your identity cannot be confirmed. '
+      + 'Enrol one in the operator portal (Security), then try again.';
+  }
+  if (e?.status === 0) {
+    return 'The server could not be reached. Check your connection and try again.';
+  }
+  if (e?.status === 429) {
+    return 'Too many attempts. Please wait a moment and try again.';
+  }
+  return body?.message ?? e?.message ?? 'The support session could not be started.';
+}
 
 @Component({
   selector: 'app-select-company',
@@ -21,7 +41,6 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
     MatProgressSpinnerModule,
     MatFormFieldModule,
     MatInputModule,
-    MatSnackBarModule,
   ],
   styles: [`
     .page {
@@ -178,7 +197,17 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
       margin-top: 2px;
     }
 
-    .reason-panel { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .reason-panel { display: flex; flex-direction: column; gap: 10px; }
+    .session-error {
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(248,113,113,0.4);
+      background: rgba(248,113,113,0.1);
+      color: #FCA5A5;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .session-error a { color: #FDE68A; }
     .reason-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
     .loading-row {
@@ -239,69 +268,76 @@ import { AdminService, EntityListItem } from '../../core/api/admin.service';
           <p class="subtitle">Choose the company you want to manage in the customer portal.</p>
         </div>
 
-        <div class="search-wrap">
-          <input
-            class="search-input"
-            type="text"
-            [(ngModel)]="searchQuery"
-            (ngModelChange)="onSearch()"
-            placeholder="Search companies…"
-            aria-label="Search companies"
-          />
-        </div>
-
-        @if (loadingEntities) {
-          <div class="loading-row"><mat-spinner diameter="28" /></div>
-        } @else if (loadError) {
-          <div class="empty-msg" role="alert">
-            {{ loadError }}
-            <button class="retry-btn" type="button" (click)="loadEntities()">Retry</button>
-          </div>
-        } @else if (entities.length === 0) {
-          <div class="empty-msg">No companies found.</div>
-        } @else {
-          <div class="entity-list">
-            @for (entity of entities; track entity.id) {
-              <button
-                class="entity-row"
-                type="button"
-                (click)="chooseEntity(entity)"
-                [disabled]="!!selecting"
-                [attr.aria-label]="'Manage ' + entity.currentName"
-              >
-                <div class="entity-icon"><mat-icon>domain</mat-icon></div>
-                <div>
-                  <div class="entity-name">{{ entity.currentName }}</div>
-                  <div class="entity-meta">{{ entity.entityNumber }} · {{ entity.type }}</div>
-                </div>
-                @if (selecting === entity.id) {
-                  <mat-spinner diameter="18" style="margin-left:auto;" />
-                }
-              </button>
-            }
-          </div>
-        }
-
         @if (pending) {
-          <div class="reason-panel" role="group" aria-label="Start support session">
+          <form class="reason-panel" role="group" aria-label="Start support session"
+                (ngSubmit)="selectEntity(pending)">
             <div class="entity-name">Read-only support session for {{ pending.currentName }}</div>
             <p class="entity-meta">
               You will see the customer's data but cannot change anything. The reason is shown to the
               company's administrators and written to the audit trail. Acting on behalf of a customer is
               a separate action with a second approver in the operator console.
             </p>
-            <input class="search-input" type="text" [(ngModel)]="reason" maxlength="500"
+            <input class="search-input" type="text" name="reason" [(ngModel)]="reason" maxlength="500"
                    placeholder="Reason (at least 15 characters)" aria-label="Reason" />
-            <input class="search-input" type="text" [(ngModel)]="ticket" maxlength="100"
+            <input class="search-input" type="text" name="ticket" [(ngModel)]="ticket" maxlength="100"
                    placeholder="Ticket reference (optional)" aria-label="Ticket reference" />
-            <input class="search-input" type="text" [(ngModel)]="totpCode" maxlength="6" inputmode="numeric"
+            <input class="search-input" type="text" name="totp" [(ngModel)]="totpCode" maxlength="6" inputmode="numeric"
                    autocomplete="one-time-code" placeholder="Authenticator code (6 digits)" aria-label="Authenticator code" />
+            @if (sessionError) {
+              <div class="session-error" role="alert">
+                {{ sessionError }}
+                @if (operatorUrl && enrolmentNeeded) {
+                  <a [href]="operatorUrl" target="_blank" rel="noopener">Open operator portal</a>
+                }
+              </div>
+            }
             <div class="reason-actions">
-              <button class="retry-btn" type="button" (click)="pending = null">Cancel</button>
-              <button class="retry-btn" type="button" (click)="selectEntity(pending)"
-                      [disabled]="!!selecting || reason.trim().length < 15 || totpCode.length < 6">Start session</button>
+              <button class="retry-btn" type="button" (click)="cancelPending()" [disabled]="!!selecting">Back</button>
+              <button class="retry-btn" type="submit"
+                      [disabled]="!!selecting || reason.trim().length < 15 || totpCode.length < 6">
+                @if (selecting) { Starting… } @else { Start session }
+              </button>
             </div>
+          </form>
+        } @else {
+          <div class="search-wrap">
+            <input
+              class="search-input"
+              type="text"
+              [(ngModel)]="searchQuery"
+              (ngModelChange)="onSearch()"
+              placeholder="Search companies…"
+              aria-label="Search companies"
+            />
           </div>
+
+          @if (loadingEntities) {
+            <div class="loading-row"><mat-spinner diameter="28" /></div>
+          } @else if (loadError) {
+            <div class="empty-msg" role="alert">
+              {{ loadError }}
+              <button class="retry-btn" type="button" (click)="loadEntities()">Retry</button>
+            </div>
+          } @else if (entities.length === 0) {
+            <div class="empty-msg">No companies found.</div>
+          } @else {
+            <div class="entity-list">
+              @for (entity of entities; track entity.id) {
+                <button
+                  class="entity-row"
+                  type="button"
+                  (click)="chooseEntity(entity)"
+                  [attr.aria-label]="'Manage ' + entity.currentName"
+                >
+                  <div class="entity-icon"><mat-icon>domain</mat-icon></div>
+                  <div>
+                    <div class="entity-name">{{ entity.currentName }}</div>
+                    <div class="entity-meta">{{ entity.entityNumber }} · {{ entity.type }}</div>
+                  </div>
+                </button>
+              }
+            </div>
+          }
         }
 
         <div class="logout-link">
@@ -316,7 +352,6 @@ export class SelectCompanyComponent implements OnInit, OnDestroy {
   private readonly adminService = inject(AdminService);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);
-  private readonly snackBar = inject(MatSnackBar);
 
   entities: EntityListItem[] = [];
   loadingEntities = true;
@@ -343,9 +378,23 @@ export class SelectCompanyComponent implements OnInit, OnDestroy {
   reason = '';
   ticket = '';
   totpCode = '';
+  /** Why the last attempt failed, shown inside the session form. */
+  sessionError = '';
+  enrolmentNeeded = false;
+  readonly operatorUrl = environment.operatorUrl;
 
+  /** Opens the session form for `entity` (it replaces the list, so it can never be below the fold). */
   chooseEntity(entity: EntityListItem): void {
     this.pending = entity;
+    this.sessionError = '';
+    this.enrolmentNeeded = false;
+    this.cdr.markForCheck();
+  }
+
+  cancelPending(): void {
+    this.pending = null;
+    this.sessionError = '';
+    this.totpCode = '';
     this.cdr.markForCheck();
   }
 
@@ -353,32 +402,25 @@ export class SelectCompanyComponent implements OnInit, OnDestroy {
   selectEntity(entity: EntityListItem): void {
     if (this.selecting) return;
     this.selecting = entity.id;
-    this.adminService.stepUp(this.totpCode, 'ADMIN_IMPERSONATION').pipe(
-      switchMap(r => this.adminService.impersonate(entity.id, this.reason.trim(), r.stepUpToken, this.ticket.trim())),
-    ).subscribe({
-      next: (res) => {
-        const code = new URLSearchParams(res.handoffUrl.split('#')[1] ?? '').get('code');
-        if (!code) {
-          this.selecting = null;
-          this.cdr.markForCheck();
-          this.snackBar.open('Impersonation failed: no handoff code returned.', 'Dismiss', { duration: 6000 });
-          return;
-        }
-        this.auth.enterImpersonation(code, res.entityId, res.entityName).subscribe({
+    this.sessionError = '';
+    this.enrolmentNeeded = false;
+    this.adminService.startReadOnlySession(entity.id, this.reason.trim(), this.totpCode, this.ticket.trim()).subscribe({
+      next: ({ handoffCode, session }) => {
+        this.auth.enterImpersonation(handoffCode, session.entityId, session.entityName).subscribe({
           next: () => this.router.navigate(['/dashboard']),
-          error: (err) => {
-            this.selecting = null;
-            this.cdr.markForCheck();
-            this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
-          },
+          error: (err) => this.fail(err),
         });
       },
-      error: (err) => {
-        this.selecting = null;
-        this.cdr.markForCheck();
-        this.snackBar.open(err?.error?.message ?? 'Impersonation failed', 'Dismiss', { duration: 6000 });
-      },
+      error: (err) => this.fail(err),
     });
+  }
+
+  private fail(err: unknown): void {
+    this.selecting = null;
+    this.totpCode = '';
+    this.enrolmentNeeded = (err as { error?: { code?: string } } | null)?.error?.code === 'STEP_UP_ENROLMENT_REQUIRED';
+    this.sessionError = describeSupportSessionError(err);
+    this.cdr.markForCheck();
   }
 
   logout(): void {

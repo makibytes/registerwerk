@@ -5,11 +5,17 @@
     "node": "24.x"
   },
   "scripts": {
+    "prestart": "node ../frontend-shared/link-node-modules.mjs",
     "start": "ng serve --port 44200",
+    "prebuild": "node ../frontend-shared/link-node-modules.mjs",
     "build": "ng build",
+    "prebuild:prod": "node ../frontend-shared/link-node-modules.mjs",
     "build:prod": "ng build --configuration production",
+    "prebuild:testnet": "node ../frontend-shared/link-node-modules.mjs",
     "build:testnet": "ng build --configuration testnet",
+    "pretest": "node ../frontend-shared/link-node-modules.mjs",
     "test": "ng test",
+    "prelint": "node ../frontend-shared/link-node-modules.mjs",
     "lint": "ng lint"
   },
   "dependencies": {
