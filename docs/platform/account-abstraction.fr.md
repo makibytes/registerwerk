@@ -62,7 +62,7 @@ de la signature : ils se trouvent dans `paymasterAndData`, qui fait partie de `u
 bon ne peut pas signer `userOpHash`. Un mauvais signataire renvoie `SIG_VALIDATION_FAILED`
 (l'EntryPoint signale `AA34`) et un bon expiré renvoie `AA32`. La validation échoue aussi si la
 politique est inactive ou non enregistrée, si `maxFeePerGas` dépasse le plafond signé, si
-`paymasterPostOpGasLimit` est inférieur à 50 000 gas ou si le sender n'est pas un membre actif
+`paymasterPostOpGasLimit` est inférieur à 150 000 gas ou si le sender n'est pas un membre actif
 vérifié KYC (défense en profondeur ; le backend le vérifie aussi).
 
 **Émetteur de bons (backend).** `POST /api/v1/gas-sponsorship/vouchers` (JWT client,
@@ -80,7 +80,7 @@ l'identifiant du déploiement et la UserOperation préparée. Avant de signer, i
   `execute`/`executeBatch` cible le contrat du jeton du déploiement sans valeur, et `initCode` est
   vide ou se limite au marqueur EIP-7702. Les déploiements par factory sont refusés.
 - le **gas** : `maxFeePerGas` ≤ `registerwerk.paymaster.max-fee-per-gas-cap-wei` (le plafond est
-  signé dans le bon), la somme des limites de gas ≤ `max-total-gas` et le gas de postOp ≥ 50 000.
+  signé dans le bon), la somme des limites de gas ≤ `max-total-gas` et le gas de postOp ≥ 150 000.
 - le **plafond mensuel** de la politique (`monthlyCapEth`). Chaque bon émis compte pour son coût
   dans le pire cas (`Σ limites de gas × maxFeePerGas`, le préfinancement de l'EntryPoint) et est
   enregistré dans `gas_sponsorship_voucher`, de sorte que le plafond s'applique avant le règlement

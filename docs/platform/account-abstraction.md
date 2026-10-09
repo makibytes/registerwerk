@@ -70,7 +70,7 @@ inside `paymasterAndData`, which is part of `userOpHash`, so a voucher cannot si
 `userOpHash`. A wrong signer returns `SIG_VALIDATION_FAILED` (the EntryPoint reports
 `AA34`) and an expired voucher returns `AA32`. Validation also reverts when the policy is
 inactive or unregistered, when `maxFeePerGas` is above the signed cap, when
-`paymasterPostOpGasLimit` is below 50,000 gas, or when the sender is not an active KYC'd
+`paymasterPostOpGasLimit` is below 150,000 gas, or when the sender is not an active KYC'd
 member (defence in depth; the backend checks this too).
 
 **Voucher issuer (backend).** `POST /api/v1/gas-sponsorship/vouchers` (customer JWT,
@@ -87,7 +87,7 @@ takes the deployment id and the prepared UserOperation. Before signing it checks
   `execute`/`executeBatch` batch targets the deployment's token contract with zero value,
   and `initCode` is empty or the bare EIP-7702 marker. Factory deployments are refused.
 - **gas**: `maxFeePerGas` ≤ `registerwerk.paymaster.max-fee-per-gas-cap-wei` (the cap is
-  signed into the voucher), the summed gas limits ≤ `max-total-gas`, and postOp gas ≥ 50,000.
+  signed into the voucher), the summed gas limits ≤ `max-total-gas`, and postOp gas ≥ 150,000.
 - the policy's **monthly cap** (`monthlyCapEth`). Each issued voucher counts at its worst-case
   cost (`Σ gas limits × maxFeePerGas`, the EntryPoint prefund) and is recorded in
   `gas_sponsorship_voucher`, so the cap is effective before any operation settles. A voucher
@@ -246,6 +246,13 @@ now implements `ERC20Permit` so the example/tests can exercise this end to end
 `contracts/test/examples/EwpgBondDesk.t.sol`). Not every real payment rail supports this: USDC
 implements EIP-2612 natively; verify AllUnity Euro's support before wiring `subscribeWithPermit`
 up against it in production — the plain `subscribe` path remains available either way.
+
+An ERC-20 allowance alone is not consent to one specific purchase (it is open-ended in amount
+and time, and on the plain `subscribe` path the operator chooses both), so `subscribe` also
+needs the investor's own on-chain `authorizeSubscription(units, validUntil)`: a bounded,
+expiring authorisation that each subscription consumes and the investor can revoke
+(`units = 0`). The permit path needs none, because the EIP-2612 signature is already bound to
+the exact cost and a deadline.
 
 ## Signature formats
 

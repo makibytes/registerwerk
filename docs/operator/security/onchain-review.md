@@ -11,7 +11,7 @@ integration. This is an engineering review, not an independent audit or a substi
 
 | Area | Finding | Resolution |
 | --- | --- | --- |
-| Factory deployment | The previous monolithic factory runtime exceeded the EIP-170 size limit. | Split deployment into a 3 KB coordinator and per-standard deployer modules. CI now runs `forge build --sizes`, and the demo deploys on strict Anvil settings. |
+| Factory deployment | The previous monolithic factory runtime exceeded the EIP-170 size limit (24,576 bytes). | Split deployment into a 3 KB coordinator and per-standard deployer modules. CI runs `forge build --sizes` against the Glamsterdam limits (EIP-7954: 65,536 / 131,072 bytes), and the demo deploys on `anvil --hardfork amsterdam`. See [Glamsterdam](../../platform/glamsterdam.md). |
 | Upgradeability | A single upgradeable implementation would couple unrelated token standards and issued products. | Issued products stay immutable; a small UUPS deployment registry coordinates versioned addresses. ERC-3643 retains the T-REX proxy model. |
 | Upgrade authorization | Registry upgrades and mutations must not be publicly reachable. | Both are owner-gated and tested for unauthorized callers, non-contract implementations, and storage preservation. |
 | Smart accounts | A passkey/EntryPoint path could otherwise bypass recovery and administration policy. | Routine, administrative, and recovery selectors are separated. EntryPoint execution is limited by target-and-selector policy; guardian-only operations cannot pass through it. |

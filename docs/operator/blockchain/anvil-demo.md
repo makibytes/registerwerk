@@ -42,8 +42,12 @@ docker compose run --rm demo-onchain-deploy
 curl http://localhost:48080/api/v1/demo/onchain
 ```
 
-The factory is split into a 3 KB coordinator and one deployer module per standard. Every runtime
-is below EIP-170 and the fixture deploys on a strict EVM; the demo does not disable size limits.
+The factory is split into a 3 KB coordinator and one deployer module per standard. The devnet
+runs `anvil --hardfork amsterdam --gas-limit 200000000`, the Glamsterdam rules ([see
+Glamsterdam](../../platform/glamsterdam.md)): every runtime is below the 64 KiB limit of EIP-7954 and
+the demo does not disable size limits. A deployment now costs 1,530 gas per code byte, which is why
+the devnet's block gas limit is 200M and the deployment scripts run with
+`--gas-estimate-multiplier 200`.
 
 The `RegisterwerkDeploymentRegistry` is a UUPS proxy and records the current product address,
 revision, timestamp and manifest hash per standard. Issued ERC-20/721/1155/3525/4626/7540 products

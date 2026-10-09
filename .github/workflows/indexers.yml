@@ -39,7 +39,7 @@ jobs:
       # must be built first.
       - uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.1
+          version: v1.8.5
       - name: Build contracts (canonical ABIs)
         run: forge build
         working-directory: contracts

@@ -67,8 +67,13 @@ public class GasSponsorshipVoucherService {
 
     private static final Logger log = LoggerFactory.getLogger(GasSponsorshipVoucherService.class);
 
-    /** Mirrors {@code EwpgPaymaster.MIN_POST_OP_GAS_LIMIT}. */
-    static final BigInteger MIN_POST_OP_GAS_LIMIT = BigInteger.valueOf(50_000);
+    /**
+     * Mirrors {@code EwpgPaymaster.MIN_POST_OP_GAS_LIMIT}. 150,000 since Glamsterdam: the first
+     * sponsorship of an org under a policy creates a storage slot in postOp, which costs ~110k gas
+     * under EIP-8037/8038 (about 22k before, hence the former 50,000). Below this the postOp runs out
+     * of gas and the op's spend is silently not booked.
+     */
+    static final BigInteger MIN_POST_OP_GAS_LIMIT = BigInteger.valueOf(150_000);
 
     /** Simple7702Account (viem {@code toSimple7702SmartAccount}) execution entry points. */
     static final String EXECUTE_SELECTOR = selector("execute(address,uint256,bytes)");

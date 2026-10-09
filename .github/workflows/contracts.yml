@@ -28,7 +28,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.1
+          version: v1.8.5
 
       # No `forge install` here: with no arguments it checks out every submodule in the repository,
       # including the private docs/_chaincache, and fails. The contract-libs action above already
@@ -94,7 +94,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.1
+          version: v1.8.5
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"

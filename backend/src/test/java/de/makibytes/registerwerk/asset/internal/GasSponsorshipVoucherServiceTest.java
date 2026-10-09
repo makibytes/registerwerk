@@ -158,7 +158,7 @@ class GasSponsorshipVoucherServiceTest {
     static PaymasterVoucherDigest.UserOpFields op(byte[] callData, BigInteger maxFee, byte[] initCode) {
         return new PaymasterVoucherDigest.UserOpFields(SENDER, BigInteger.ONE, initCode, callData,
                 BigInteger.valueOf(100_000), BigInteger.valueOf(200_000),
-                BigInteger.valueOf(150_000), BigInteger.valueOf(80_000), BigInteger.valueOf(50_000),
+                BigInteger.valueOf(150_000), BigInteger.valueOf(200_000), BigInteger.valueOf(50_000),
                 BigInteger.valueOf(1_000_000_000L), maxFee);
     }
 
@@ -181,8 +181,8 @@ class GasSponsorshipVoucherServiceTest {
         assertThat(new BigInteger(1, Arrays.copyOfRange(data, 44, 60))).isEqualTo(properties.getMaxFeePerGasCapWei());
         assertThat(v.paymaster()).isEqualTo(PAYMASTER);
         assertThat(v.chainId()).isEqualTo(11155111L);
-        // maxCost = (100k + 200k + 150k + 80k + 50k) * 2 gwei — EntryPoint v0.8 requiredPrefund
-        assertThat(v.maxCostWei()).isEqualTo(BigInteger.valueOf(580_000L).multiply(BigInteger.valueOf(2_000_000_000L)));
+        // maxCost = (100k + 200k + 150k + 200k + 50k) * 2 gwei — EntryPoint v0.8 requiredPrefund
+        assertThat(v.maxCostWei()).isEqualTo(BigInteger.valueOf(700_000L).multiply(BigInteger.valueOf(2_000_000_000L)));
 
         byte[] digest = PaymasterVoucherDigest.digest(op, 11155111L, PAYMASTER, policyId, validUntil, 0L,
                 properties.getMaxFeePerGasCapWei());
@@ -306,7 +306,7 @@ class GasSponsorshipVoucherServiceTest {
         earlier.setSender(SENDER);
         earlier.setUserOpNonce(BigInteger.ONE);
         earlier.setCreatedAt(Instant.parse("2026-09-15T09:59:00Z"));
-        BigInteger cost = BigInteger.valueOf(580_000L).multiply(BigInteger.valueOf(2_000_000_000L));
+        BigInteger cost = BigInteger.valueOf(700_000L).multiply(BigInteger.valueOf(2_000_000_000L));
         earlier.setMaxCostWei(cost);
         when(voucherRepository.findByPolicyIdAndSenderAndUserOpNonce(eq(policy.getId()), eq(SENDER), eq(BigInteger.ONE)))
                 .thenReturn(Optional.of(earlier));

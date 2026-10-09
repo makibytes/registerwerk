@@ -15,7 +15,7 @@ const forgeOut = path.resolve(repoRoot, 'contracts', process.env.FOUNDRY_OUT || 
 const artifactPaths = {
   AssetTokenFactory: 'AssetTokenFactory.sol/AssetTokenFactory.json',
   EwpgRepoMarketFactory: 'EwpgRepoMarketFactory.sol/EwpgRepoMarketFactory.json',
-  DvpSettlement: 'DvpSettlement.sol/DvpSettlement.0.8.36.json',
+  DvpSettlement: 'DvpSettlement.sol/DvpSettlement.json',
   EwpgBondDesk: 'EwpgBondDesk.sol/EwpgBondDesk.json',
   StablecoinAmm: 'StablecoinAmm.sol/StablecoinAmm.json',
   EwpgConfidentialFactory: 'EwpgConfidentialFactory.sol/EwpgConfidentialFactory.json',
@@ -109,9 +109,29 @@ for (const line of manifest.split(/\r?\n/)) {
 }
 
 const failures = []
+/**
+ * Forge appends the compiler version to an artifact's file name once a source file is compiled with more than
+ * one solc (here the 0.8.30 vendored libraries and the project's own compiler), and which of the files carries
+ * the plain name moves with the toolchain. Hard-coding one of them broke this check whenever solc was bumped, so
+ * the plain file is used when it exists and otherwise the highest-versioned one. The events of every variant are
+ * the same: they come from the same source.
+ */
+function resolveArtifact(relativeArtifact) {
+  const exact = path.join(forgeOut, relativeArtifact)
+  if (fs.existsSync(exact)) return exact
+  const dir = path.dirname(exact)
+  const base = path.basename(relativeArtifact, '.json')
+  if (!fs.existsSync(dir)) return exact
+  const versioned = fs.readdirSync(dir)
+    .map((file) => file.match(new RegExp(`^${base}\\.(\\d+)\\.(\\d+)\\.(\\d+)\\.json$`)))
+    .filter(Boolean)
+    .sort((a, b) => b.slice(1).map(Number).reduce((acc, n, i) => acc || n - Number(a[i + 1]), 0))
+  return versioned.length ? path.join(dir, versioned[0][0]) : exact
+}
+
 for (const [name, relativeArtifact] of Object.entries(artifactPaths)) {
   const abiPath = path.join(subgraphDir, 'abis', `${name}.json`)
-  const artifactPath = path.join(forgeOut, relativeArtifact)
+  const artifactPath = resolveArtifact(relativeArtifact)
   if (!fs.existsSync(abiPath)) {
     failures.push(`${name}: missing checked-in subgraph ABI ${abiPath}`)
     continue

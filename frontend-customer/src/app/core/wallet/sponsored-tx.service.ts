@@ -19,12 +19,22 @@ import { WalletService } from './wallet.service';
 import { GasSponsorshipApiService } from '../api/gas-sponsorship.service';
 import { environment } from '../../../environments/environment';
 
-/** Paymaster gas limits signed into every voucher (postOp must stay >= EwpgPaymaster.MIN_POST_OP_GAS_LIMIT). */
-const PAYMASTER_VERIFICATION_GAS = 150_000n;
-const PAYMASTER_POST_OP_GAS = 80_000n;
-/** Fallbacks when the bundler cannot estimate an unsponsored operation. */
-const DEFAULT_CALL_GAS = 300_000n;
-const DEFAULT_VERIFICATION_GAS = 150_000n;
+/**
+ * Paymaster gas limits signed into every voucher (postOp must stay >= EwpgPaymaster.MIN_POST_OP_GAS_LIMIT).
+ *
+ * Sized for Glamsterdam (EIP-8037/8038), where a new storage slot costs ~110k gas instead of ~22k: the first
+ * sponsorship of an org under a policy creates one inside postOp (the contract measured ~125k, so 200k leaves
+ * margin; the old 80k would silently fail to book the spend), and validation needs ~100-120k. Unused
+ * verification gas is refunded; unused postOp gas only costs the EntryPoint's 10% penalty.
+ */
+const PAYMASTER_VERIFICATION_GAS = 200_000n;
+const PAYMASTER_POST_OP_GAS = 200_000n;
+/**
+ * Fallbacks when the bundler cannot estimate an unsponsored operation. The verification fallback covers the
+ * EntryPoint creating the sender's nonce slot (~110k gas) on a first operation, on top of the account's own checks.
+ */
+const DEFAULT_CALL_GAS = 600_000n;
+const DEFAULT_VERIFICATION_GAS = 300_000n;
 const DEFAULT_PRE_VERIFICATION_GAS = 60_000n;
 
 /** The backend refused a voucher, or no sponsorship is configured: pay gas yourself. */

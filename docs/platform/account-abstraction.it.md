@@ -70,7 +70,7 @@ policy, la finestra di validità e il tetto del prezzo del gas, sotto il tag di 
 Un firmatario errato restituisce `SIG_VALIDATION_FAILED` (l'EntryPoint segnala `AA34`) e un voucher
 scaduto restituisce `AA32`. La validazione va inoltre in revert se la policy è inattiva o non
 registrata, se `maxFeePerGas` supera il tetto firmato, se `paymasterPostOpGasLimit` è inferiore a
-50.000 gas o se il sender non è un membro attivo con KYC (difesa in profondità; anche il backend lo
+150.000 gas o se il sender non è un membro attivo con KYC (difesa in profondità; anche il backend lo
 verifica).
 
 **Emittente dei voucher (backend).** `POST /api/v1/gas-sponsorship/vouchers` (JWT cliente,
@@ -88,7 +88,7 @@ l'id del deployment e la UserOperation preparata. Prima di firmare verifica che:
   `initCode` sia vuoto o soltanto il marcatore EIP-7702. I deployment tramite factory vengono
   rifiutati.
 - **gas**: `maxFeePerGas` ≤ `registerwerk.paymaster.max-fee-per-gas-cap-wei` (il tetto viene
-  firmato nel voucher), la somma dei limiti di gas ≤ `max-total-gas` e il gas di postOp ≥ 50.000.
+  firmato nel voucher), la somma dei limiti di gas ≤ `max-total-gas` e il gas di postOp ≥ 150.000.
 - il **tetto mensile** della policy (`monthlyCapEth`) sia rispettato. Ogni voucher emesso conta
   per il suo costo nel caso peggiore (`Σ limiti di gas × maxFeePerGas`, il prefund dell'EntryPoint)
   e viene registrato in `gas_sponsorship_voucher`, così il tetto è efficace prima che qualsiasi

@@ -203,7 +203,7 @@ class EvmContractServiceSafetyTest {
         assertThatThrownBy(() -> service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT, PAUSE))
                 .isInstanceOf(FeeAboveCeilingException.class).hasMessageContaining("gasPrice");
 
-        stubEstimate(26_000_000L); // 26M * 1.2 = 31.2M > 30M
+        stubEstimate(51_000_000L); // 51M * 1.2 = 61.2M > 60M
         assertThatThrownBy(() -> service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT, PAUSE))
                 .isInstanceOf(FeeAboveCeilingException.class).hasMessageContaining("gasLimit");
         assertNothingSigned();
@@ -268,7 +268,7 @@ class EvmContractServiceSafetyTest {
         assertThat(service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT, PAUSE)).isEqualTo("0xok");
         ArgumentCaptor<RawTransaction> tx = ArgumentCaptor.forClass(RawTransaction.class);
         verify(signer).signTransaction(tx.capture(), eq(PINNED));
-        assertThat(tx.getValue().getGasLimit()).isEqualTo(BigInteger.valueOf(500_000L));
+        assertThat(tx.getValue().getGasLimit()).isEqualTo(BigInteger.valueOf(1_500_000L));
 
         stubEstimateError(-32000, "insufficient funds for transfer", null);
         assertThatThrownBy(() -> service.submit(CHAIN_CONFIG_ID, web3j, signer, CONTRACT, PAUSE))

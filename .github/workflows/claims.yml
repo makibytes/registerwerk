@@ -46,7 +46,7 @@ jobs:
           node-version: "24.19.0"
       - uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.1
+          version: v1.8.5
       - run: node scripts/run-claim-evidence.mjs contract-erc3525
 
   backend-evidence:
@@ -81,7 +81,7 @@ jobs:
       # Forge artifacts under contracts/out, so the contracts must be built first.
       - uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.1
+          version: v1.8.5
       - run: forge build
         working-directory: contracts
       - run: npm ci

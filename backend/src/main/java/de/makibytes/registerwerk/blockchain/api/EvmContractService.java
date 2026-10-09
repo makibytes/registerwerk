@@ -72,8 +72,12 @@ public class EvmContractService {
 
     private static final Logger log = LoggerFactory.getLogger(EvmContractService.class);
 
-    private static final BigInteger CALL_GAS_LIMIT   = BigInteger.valueOf(500_000L);
-    private static final BigInteger DEPLOY_GAS_LIMIT = BigInteger.valueOf(5_000_000L);
+    // Fallbacks, used only when the node cannot estimate. Sized for Glamsterdam (EIP-8037/8038): a new storage
+    // slot costs ~110k gas (it was ~22k) and every byte of deployed code 1,530 gas (it was 200), so a
+    // register call that creates a few slots needs well over the former 500k, and a per-asset token
+    // deployment (8-16 KB of code) 13-25M gas, not 5M. Unused gas is refunded.
+    private static final BigInteger CALL_GAS_LIMIT   = BigInteger.valueOf(1_500_000L);
+    private static final BigInteger DEPLOY_GAS_LIMIT = BigInteger.valueOf(40_000_000L);
     private static final int        RECEIPT_POLL_ATTEMPTS = 60;
 
     private final BlockchainClientRegistry clientRegistry;

@@ -72,7 +72,7 @@ liegen in `paymasterAndData`, das Teil von `userOpHash` ist – ein Voucher kann
 `userOpHash` signieren. Ein falscher Signer liefert `SIG_VALIDATION_FAILED` (der EntryPoint meldet
 `AA34`), ein abgelaufener Voucher `AA32`. Die Validierung bricht außerdem ab, wenn die Policy
 inaktiv oder nicht registriert ist, `maxFeePerGas` über der signierten Obergrenze liegt,
-`paymasterPostOpGasLimit` unter 50.000 Gas liegt oder der Sender kein aktives, KYC-geprüftes
+`paymasterPostOpGasLimit` unter 150.000 Gas liegt oder der Sender kein aktives, KYC-geprüftes
 Mitglied ist (Defence in Depth; das Backend prüft das ebenfalls).
 
 **Voucher-Aussteller (Backend).** `POST /api/v1/gas-sponsorship/vouchers` (Kunden-JWT,
@@ -90,7 +90,7 @@ die Deployment-ID und die vorbereitete UserOperation entgegen. Vor dem Signieren
   `execute`/`executeBatch`-Batch zielt ohne Wert auf den Token-Contract des Deployments, und
   `initCode` ist leer oder nur der EIP-7702-Marker. Factory-Deployments werden abgelehnt.
 - **Gas**: `maxFeePerGas` ≤ `registerwerk.paymaster.max-fee-per-gas-cap-wei` (die Obergrenze wird
-  in den Voucher signiert), die Summe der Gaslimits ≤ `max-total-gas` und postOp-Gas ≥ 50.000.
+  in den Voucher signiert), die Summe der Gaslimits ≤ `max-total-gas` und postOp-Gas ≥ 150.000.
 - die **Monatsobergrenze** der Policy (`monthlyCapEth`). Jeder ausgestellte Voucher zählt mit seinen
   Worst-Case-Kosten (`Σ Gaslimits × maxFeePerGas`, der EntryPoint-Prefund) und wird in
   `gas_sponsorship_voucher` festgehalten, sodass die Obergrenze greift, bevor eine Operation

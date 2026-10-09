@@ -865,6 +865,7 @@ nav:
       - Webhooks: platform/webhooks.md
       - Register units: platform/register-units.md
       - Open decisions and known limitations: platform/known-limitations.md
+      - Glamsterdam (EVM upgrade): platform/glamsterdam.md
       - Account abstraction: platform/account-abstraction.md
       - DeFi interoperability: platform/defi-interoperability.md
       - dApp development & marketplace: platform/dapp-development.md

@@ -70,7 +70,7 @@ dentro de `paymasterAndData`, que forma parte de `userOpHash`, así que un vale 
 `userOpHash`. Un firmante incorrecto devuelve `SIG_VALIDATION_FAILED` (el EntryPoint informa
 `AA34`) y un vale caducado devuelve `AA32`. La validación también revierte si la política está
 inactiva o no registrada, si `maxFeePerGas` supera el tope firmado, si `paymasterPostOpGasLimit` es
-inferior a 50.000 de gas o si el sender no es un miembro activo con KYC (defensa en profundidad; el
+inferior a 150.000 de gas o si el sender no es un miembro activo con KYC (defensa en profundidad; el
 backend también lo comprueba).
 
 **Emisor de vales (backend).** `POST /api/v1/gas-sponsorship/vouchers` (JWT de cliente,
@@ -87,7 +87,7 @@ el id del despliegue y la UserOperation preparada. Antes de firmar comprueba:
   `execute`/`executeBatch` apunta al contrato del token del despliegue sin valor, y `initCode` está
   vacío o es solo el marcador EIP-7702. Se rechazan los despliegues mediante factory.
 - **gas**: `maxFeePerGas` ≤ `registerwerk.paymaster.max-fee-per-gas-cap-wei` (el tope se firma en
-  el vale), la suma de los límites de gas ≤ `max-total-gas` y el gas de postOp ≥ 50.000.
+  el vale), la suma de los límites de gas ≤ `max-total-gas` y el gas de postOp ≥ 150.000.
 - el **tope mensual** de la política (`monthlyCapEth`). Cada vale emitido cuenta con su coste en el
   peor caso (`Σ límites de gas × maxFeePerGas`, el prefund del EntryPoint) y se registra en
   `gas_sponsorship_voucher`, de modo que el tope es efectivo antes de que se liquide ninguna

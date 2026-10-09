@@ -34,7 +34,7 @@ public class EvmSubmissionSettings {
             @Value("${registerwerk.blockchain.immediate-submit-acquire-timeout-ms:10000}") long acquireTimeoutMs,
             @Value("${registerwerk.blockchain.fee-cap.default-max-fee-gwei:500}") long maxFeeGwei,
             @Value("${registerwerk.blockchain.fee-cap.default-max-tip-gwei:50}") long maxTipGwei,
-            @Value("${registerwerk.blockchain.fee-cap.max-gas-limit:30000000}") long maxGasLimit) {
+            @Value("${registerwerk.blockchain.fee-cap.max-gas-limit:60000000}") long maxGasLimit) {
         this.immediateSubmitPermits = configuredPermits > 0 ? configuredPermits : Math.max(1, poolSize / 4);
         this.acquireTimeoutMs = acquireTimeoutMs;
         this.defaultMaxFeePerGasWei = GWEI.multiply(BigInteger.valueOf(maxFeeGwei));
@@ -42,9 +42,13 @@ public class EvmSubmissionSettings {
         this.maxGasLimit = BigInteger.valueOf(maxGasLimit);
     }
 
-    /** Production defaults (500 gwei / 50 gwei / 30M gas, 5 permits). */
+    /**
+     * Production defaults (500 gwei / 50 gwei / 60M gas, 5 permits). The gas ceiling is 60M, not 30M, since
+     * Glamsterdam: with EIP-8037 a contract deployment pays 1,530 gas per code byte (it was 200), so a
+     * 15 KB per-asset token costs ~24M gas and an estimate with the 20% safety margin passes 29M.
+     */
     public static EvmSubmissionSettings defaults() {
-        return new EvmSubmissionSettings(0, 20, 10_000, 500, 50, 30_000_000);
+        return new EvmSubmissionSettings(0, 20, 10_000, 500, 50, 60_000_000);
     }
 
     public int immediateSubmitPermits() { return immediateSubmitPermits; }

@@ -38,10 +38,18 @@ services:
   # Port 8545 remains private to the Compose network. The host uses 48545 by default so this
   # disposable node cannot collide with a real node listening on the conventional port.
   anvil:
-    image: ghcr.io/foundry-rs/foundry:v1.7.1
+    image: ghcr.io/foundry-rs/foundry:v1.8.5
     logging: *default-logging
     entrypoint: ["anvil"]
     command:
+      # Registerwerk targets Glamsterdam chains only (see docs/platform/glamsterdam.md): the Amsterdam
+      # hardfork rules (EIP-7954 64 KiB contracts, EIP-8037/8038 state-gas schedule) and the 200M block
+      # gas limit that fork is meant to carry. Several demo deployments exceed anvil's 30M default,
+      # because a contract costs 1,530 gas per code byte now.
+      - "--hardfork"
+      - "amsterdam"
+      - "--gas-limit"
+      - "200000000"
       - "--host"
       - "0.0.0.0"
       - "--chain-id"
@@ -243,8 +251,12 @@ services:
           script_target="$$1"
           attempt=1
           while true; do
+            # --gas-estimate-multiplier 200: forge's simulation under-estimates small calls under the
+            # Amsterdam schedule (e.g. a no-op SSTORE came out at 21,247 gas and ran out of gas on-chain
+            # at the default 130% = 29,346); unused gas is refunded, so the headroom costs nothing.
             if timeout 300 forge script "$$script_target" \
-                --rpc-url http://anvil:8545 --broadcast --non-interactive; then
+                --rpc-url http://anvil:8545 --broadcast --non-interactive \
+                --gas-estimate-multiplier 200; then
               return 0
             fi
             status=$$?
