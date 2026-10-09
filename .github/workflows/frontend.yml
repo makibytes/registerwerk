@@ -7,6 +7,7 @@ on:
       - frontend-operator/**
       - frontend-customer/**
       - frontend-shared/**
+      - scripts/docker-build-retry.sh
       - .github/workflows/frontend.yml
   pull_request:
     branches: [main, develop]
@@ -14,6 +15,7 @@ on:
       - frontend-operator/**
       - frontend-customer/**
       - frontend-shared/**
+      - scripts/docker-build-retry.sh
 
 permissions:
   contents: read

@@ -3,10 +3,10 @@ name: Zama Relayer CI
 on:
   push:
     branches: [main, feat/**, fix/**, develop, review/**]
-    paths: [zama-relayer/**, .github/workflows/relayer.yml]
+    paths: [zama-relayer/**, scripts/docker-build-retry.sh, .github/workflows/relayer.yml]
   pull_request:
     branches: [main, develop]
-    paths: [zama-relayer/**, .github/workflows/relayer.yml]
+    paths: [zama-relayer/**, scripts/docker-build-retry.sh, .github/workflows/relayer.yml]
 
 permissions:
   contents: read
