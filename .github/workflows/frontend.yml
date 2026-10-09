@@ -42,6 +42,10 @@ jobs:
           cache-dependency-path: frontend-operator/package-lock.json
       - run: npm ci
         working-directory: frontend-operator
+      # frontend-shared/node_modules is an untracked symlink; point it at the operator app's install
+      # (frontend-shared/link-node-modules.mjs), as the app scripts and the Dockerfiles do.
+      - run: node ../frontend-shared/link-node-modules.mjs
+        working-directory: frontend-operator
       - run: ./node_modules/.bin/eslint projects/ui/src
         working-directory: frontend-shared
 

@@ -67,7 +67,16 @@ jobs:
       # and one timestamp-stub test. They are excluded from this run only, by exact name (forge matches
       # filters against the full signature, hence the trailing `\(`); every other test still has to pass
       # for the report to be produced.
+      #
+      # The report is compiled for Osaka, not Amsterdam: `forge coverage --ir-minimum` (Foundry 1.8.5)
+      # does not carry `experimental = true` into its own solc settings, so with `evm_version =
+      # "amsterdam"` it dies with "EVM version 'amsterdam' is experimental and can only be used with
+      # the 'settings.experimental' option enabled". Coverage only needs line hits; the Amsterdam
+      # gas schedule is exercised by `forge test` above.
       - name: Coverage report
+        env:
+          FOUNDRY_EVM_VERSION: osaka
+          FOUNDRY_EXPERIMENTAL: "false"
         run: >-
           forge coverage --ir-minimum --report lcov --report-file lcov.info
           --no-match-test '^(test_bundle_cannotOverspendPolicy|test_constructor_deploysWhenMinedAfterTheScriptTimestamp|test_expiredVoucher_rejected|test_honestOp_bookedChargeCoversRealDepositDelta|test_orgCap_isSharedAcrossWalletsOfOneOrg|test_org_withoutValidKycClaim_isNotSponsored|test_pushPrice_oldMarksAreForgottenOnlyAfterMoreThanOneWindow|test_pushPrice_skippedWindowDoesNotResetTheBand|test_voucherForAnotherSender_failsSignature|test_voucherFromWrongSigner_failsSignature|test_voucherGasFieldsAreSigned)\('
