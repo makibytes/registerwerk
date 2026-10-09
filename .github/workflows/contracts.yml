@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/contract-libs
 
       - name: Install Foundry
@@ -52,7 +52,7 @@ jobs:
       # `forge build --sizes` fails on any contract over EIP-170/EIP-3860; the wrapper keeps that and
       # adds one explicit, shrink-only exemption (EwpgConfidentialFactory, see the script and
       # docs/platform/known-limitations.md).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24.19.0"
       - name: Test the contract-size checker
@@ -74,7 +74,7 @@ jobs:
         working-directory: contracts
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: contracts/lcov.info
           flags: solidity
@@ -84,7 +84,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/contract-libs
 
       # crytic/slither-action@v0.4.0 builds with its own, older Foundry, which cannot resolve this
@@ -95,7 +95,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.8.1
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install Slither
@@ -114,7 +114,7 @@ jobs:
           --sarif "$GITHUB_WORKSPACE/slither.sarif"
 
       - name: Upload Slither SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('slither.sarif') != ''
         with:
           sarif_file: slither.sarif

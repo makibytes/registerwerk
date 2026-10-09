@@ -21,7 +21,7 @@ jobs:
       run:
         working-directory: contracts/cairo
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pinned to match the toolchain this suite was developed and last verified against
       # (scarb 2.18.0 / cairo 2.18.0, snforge 0.61.0) — see Scarb.toml for the corresponding
@@ -32,7 +32,7 @@ jobs:
           scarb-version: "2.18.0"
 
       - name: Install Starknet Foundry
-        uses: foundry-rs/setup-snfoundry@v3
+        uses: foundry-rs/setup-snfoundry@v6
         with:
           starknet-foundry-version: "0.61.0"
 

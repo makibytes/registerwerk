@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The check diffs against origin/main to find newly-added migration files — a shallow
           # (default) checkout has no history to diff against.
@@ -54,10 +54,10 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Java 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: "25"
           distribution: temurin
@@ -73,7 +73,7 @@ jobs:
           REGISTERWERK_WALLET_MASTER_KEY: ci-wallet-master-key-32-chars-min
 
       - name: Upload JaCoCo report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: jacoco-report
@@ -90,9 +90,9 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Java 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: "25"
           distribution: temurin
@@ -111,7 +111,7 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build production container
         run: docker build -t registerwerk-backend:ci .
@@ -130,7 +130,7 @@ jobs:
 
       # The scan action runs in the workspace root, not in this job's default working directory.
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('trivy-backend.sarif') != ''
         with:
           sarif_file: trivy-backend.sarif
@@ -150,10 +150,10 @@ jobs:
     env:
       NVD_DATA_DIR: ${{ github.workspace }}/.dependency-check-data
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Java 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: "25"
           distribution: temurin
@@ -193,7 +193,7 @@ jobs:
           key: dependency-check-nvd-${{ github.run_id }}
 
       - name: Upload OWASP report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: owasp-dependency-check
@@ -214,17 +214,17 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Java 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: "25"
           distribution: temurin
           cache: maven
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: java-kotlin
 
@@ -235,6 +235,6 @@ jobs:
         run: ./mvnw compile -B -DskipTests
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:java-kotlin"
