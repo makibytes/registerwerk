@@ -8,7 +8,7 @@ Diese Anleitung behandelt die Bereitstellung und Verwaltung vertraulicher ERC-20
 
 ## Voraussetzungen
 
-1. Eine Chain mit **echter Zama-fhEVM-Infrastruktur** — heute Ethereum Sepolia (dokumentierte Adressen sind in `contracts/lib/fhevm/config/` vendored und in `@zama-fhe/relayer-sdk` als `SepoliaConfig` gebündelt) oder Ethereum-/Base-Mainnet, sobald Zama dort endgültige Adressen veröffentlicht. Die vertrauliche Bereitstellung ist auf `Chain.ETHEREUM`/`Chain.BASE` beschränkt — **nicht** Fhenix/Inco.
+1. Eine Chain mit **echter Zama-fhEVM-Infrastruktur** — heute Ethereum Sepolia (dokumentierte Adressen sind in `contracts/lib/fhevm/library-solidity/config/` vendored und in `@zama-fhe/relayer-sdk` als `SepoliaConfig` gebündelt) oder Ethereum-/Base-Mainnet, sobald Zama dort endgültige Adressen veröffentlicht. Die vertrauliche Bereitstellung ist auf `Chain.ETHEREUM`/`Chain.BASE` beschränkt — **nicht** Fhenix/Inco.
 2. `EwpgConfidentialFactory` bereitgestellt und mit den echten FHEVM-Adressen dieser Chain konfiguriert (`setFhevmInfra`) — siehe `docs/blockchains/confidential-evm.md` im Repository.
 3. Nur für `CONF_ERC3643`: eine echte T-REX-`IdentityRegistry`, die für vertrauliche Assets auf dieser Chain bereitgestellt und über `registerwerk.contracts.confidential-identity-registry.<chain>` konfiguriert ist. Die Bereitstellung schlägt sichtbar fehl, wenn dies nicht gesetzt ist.
 4. Die dedizierten Nur-Entschlüsselung-Viewer-Adressen des Betreibers und eines Prüfers, konfiguriert über `registerwerk.contracts.confidential-operator-viewer.<chain>` / `.confidential-auditor-viewer.<chain>` — diese werden ab Block eins zu Viewern auf jedem auf dieser Chain bereitgestellten vertraulichen Token.

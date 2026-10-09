@@ -6,8 +6,9 @@ description: Qué cadenas gestionan realmente los contratos confidenciales de Re
 # EVM confidencial (Zama fhEVM) { #confidential-evm-zama-fhevm }
 
 Los contratos confidenciales de Registerwerk (`ConfidentialERC20`, `ConfidentialERC3643`) se construyen
-contra el fhEVM de **Zama**, específicamente la API `TFHE.sol`/Gateway incluida (vendored) en
-`contracts/lib/fhevm` (el submódulo `zama-ai/fhevm-solidity`) en el lado del contrato, y el paquete real
+contra el fhEVM de **Zama**, específicamente la biblioteca `FHE` de fhevm-solidity 0.14, incluida (vendored) como
+submódulo `contracts/lib/fhevm` (el monorepo `zama-ai/fhevm`; su directorio `library-solidity`, más el submódulo
+`encrypted-types` que importa) en el lado del contrato, y el paquete real
 `@zama-fhe/relayer-sdk` tanto en el backend (sidecar `zama-relayer`) como en el navegador
 (`frontend-customer`/`frontend-operator`).
 
@@ -30,16 +31,18 @@ siendo entradas EVM ordinarias del enum `Chain`, pero no son destinos válidos p
 
 Se inyecta cada dirección de contrato de host FHEVM, nunca se codifica por cadena:
 
-```java
+```solidity
 // ConfidentialERC20.FhevmInfra — passed to the constructor via EwpgConfidentialFactory
 struct FhevmInfra {
     address aclAddress;
-    address tfheExecutorAddress;
-    address fhePaymentAddress;
+    address coprocessorAddress;   // the FHEVMExecutor
     address kmsVerifierAddress;
-    address gatewayAddress;
 }
 ```
+
+El Gateway y el contrato de pago del FHEVM anterior (0.6) ya no forman parte de esta estructura: desde
+FHEVM 0.9 el Gateway vive en su propia cadena y un contrato de la cadena host ya no se comunica con él, y las
+operaciones FHE ya no se pagan mediante un contrato de pago de la cadena host.
 
 1. Implemente `EwpgConfidentialFactory` (o reutilice uno) en la cadena de destino, llamando a `setFhevmInfra`
 con las direcciones Zama reales de esa cadena.

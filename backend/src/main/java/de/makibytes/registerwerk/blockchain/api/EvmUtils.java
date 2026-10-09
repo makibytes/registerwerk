@@ -192,8 +192,9 @@ public final class EvmUtils {
     }
 
     /**
-     * Encodes a {@code uint256} (e.g. an {@code euint64} FHE ciphertext handle — a UDVT wrapping
-     * {@code uint256}, see {@code lib/fhevm/lib/TFHE.sol}'s {@code type euint64 is uint256;}) as
+     * Encodes a 256-bit value (e.g. an {@code euint64} FHE ciphertext handle — a UDVT wrapping
+     * {@code bytes32} since fhevm-solidity 0.14, see {@code lib/encrypted-types}' {@code type euint64
+     * is bytes32;}; it was a {@code uint256} in the earlier TFHE API) as
      * a 0x-prefixed, zero-padded 32-byte hex string, the form
      * {@code ZamaRelayerClient}/{@code zama-relayer} expect for a ciphertext handle.
      */

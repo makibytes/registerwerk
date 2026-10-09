@@ -11,7 +11,7 @@ ARG OPENZEPPELIN_CONTRACTS_UPGRADEABLE_REF=7bf4727aacdbfaa0f36cbd664654d0c9e1dc5
 ARG ERC3643_REF=a708758313f7589c6709c29d003f73b6db24663a
 # zama-ai/fhevm is a monorepo (the 0.14 line); only its `library-solidity` directory is imported, so only that
 # directory is unpacked below. `encrypted-types` supplies the euint*/ebool value types the library imports.
-ARG FHEVM_REF=07b4abd6a6452e2095b5ee853619405bcee710ad
+ARG FHEVM_REF=309acbe070d572d2b74c70f1deaced36fc8f103c
 ARG ENCRYPTED_TYPES_REF=ccec4c48d05e361151f52bfc1eb4d57f60bcb187
 ARG ONCHAIN_ID_REF=0e681fbf40f7982be5f76f3bbb1f2995e28e40f8
 ADD --chmod=644 https://codeload.github.com/foundry-rs/forge-std/tar.gz/${FORGE_STD_REF} /tmp/forge-std.tar.gz

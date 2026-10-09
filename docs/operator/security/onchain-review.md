@@ -132,7 +132,7 @@ The Medium and Low findings that remain were triaged as intended behaviour:
 | `incorrect-equality` (26) | `== 0` on amounts, balances and timestamps that are zero exactly when a state is unset; no value can be forced to a non-zero dust amount to flip them. |
 | `divide-before-multiply` (9) | The discrete per-step index update of `EwpgRepoFacility` (an example); the truncation per accrual step is part of the specified arithmetic. |
 | `unused-return` (6) | Tuple members that are not needed (`getDocument`, `getClaim`, `tryRecover`) and the scaled amount that `EwpgRepoVault` does not use when it allocates to a market. |
-| `reentrancy-no-eth` (5), `reentrancy-benign` (2) | Calls to the fhEVM coprocessor (`TFHE.*`) and to the T-REX factory, both trusted infrastructure addresses fixed at deployment. |
+| `reentrancy-no-eth` (5), `reentrancy-benign` (2) | Calls to the fhEVM coprocessor (`FHE.*`) and to the T-REX factory, both trusted infrastructure addresses fixed at deployment. |
 | `missing-zero-check` (12) | `operatorOrg`/`curatorOrg` are validated by `_requireOrg`, which Slither does not see through; zero `compliance`/`identityRegistry` on the confidential token means "none" and is handled; `governanceToken` is informational. |
 | `timestamp` (47), `calls-loop` (24), `reentrancy-events` (14) | Time-based business rules, deliberate batch payouts, and events emitted after trusted calls. |
 

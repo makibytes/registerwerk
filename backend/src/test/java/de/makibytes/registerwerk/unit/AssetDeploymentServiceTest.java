@@ -281,7 +281,7 @@ class AssetDeploymentServiceTest {
     @DisplayName("deploy should allow confidential tokens on real Zama-coprocessor chains (Ethereum, Base)")
     void deploy_shouldAllowConfidentialTokensOnFhevmChains() {
         // FHEVM_CHAINS previously listed FHENIX/INCO — separate, non-Zama FHE stacks that
-        // Registerwerk's ConfidentialERC20/ERC3643 (built against Zama's TFHE.sol) cannot
+        // Registerwerk's ConfidentialERC20/ERC3643 (built against Zama's FHE library) cannot
         // actually run on. Ethereum/Base are Zama's real, documented coprocessor chains.
         UUID assetId = UUID.randomUUID();
         UUID deploymentId = UUID.randomUUID();

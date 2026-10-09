@@ -70,7 +70,7 @@ public class AssetDeploymentService {
      * and other EVM chains" announcement. Deliberately excludes {@code FHENIX}/{@code INCO} —
      * both real chains but running their OWN, separate, non-Zama FHE stacks with incompatible
      * libraries; Registerwerk's confidential contracts (ConfidentialERC20/ERC3643) are built
-     * specifically against Zama's TFHE.sol/Gateway API and will not function against either.
+     * specifically against Zama's FHE library (fhevm-solidity 0.14) and will not function against either.
      */
     private static final EnumSet<Chain> FHEVM_CHAINS =
             EnumSet.of(Chain.ETHEREUM, Chain.BASE);

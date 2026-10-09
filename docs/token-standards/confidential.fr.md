@@ -39,15 +39,15 @@ déployés via `contracts/src/factory/EwpgConfidentialFactory.sol`.
 
 Le coprocesseur fhEVM de Zama tourne sur **Ethereum et Base** (d'après l'annonce produit « fhEVM
 Coprocessor » de Zama elle-même) — plus **Sepolia aujourd'hui**, en tant que testnet entièrement
-configuré (les véritables adresses ACL/Executor/Payment/KMSVerifier/Gateway sont vendorisées dans
-`contracts/lib/fhevm/config/`, et ces mêmes adresses Sepolia réelles sont incluses dans
+configuré (les véritables adresses ACL/FHEVMExecutor/KMSVerifier se trouvent dans `ZamaConfig.sol` de
+`contracts/lib/fhevm/library-solidity/config/`, et ces mêmes adresses Sepolia réelles sont incluses dans
 `@zama-fhe/relayer-sdk` sous le nom `SepoliaConfig`). Les adresses **mainnet** Ethereum propres à
 Zama étaient encore en cours de finalisation au moment de la rédaction (objectif T3 2026), et
 resteront évolutives par gouvernance même une fois en ligne.
 
 **Fhenix et Inco ne sont PAS des chaînes fhEVM de Zama.** Elles font tourner leurs propres piles FHE
 séparées et incompatibles. `ConfidentialERC20`/`ConfidentialERC3643` sont construits spécifiquement
-contre l'API `TFHE.sol`/Gateway de Zama et ne fonctionneront sur aucune des deux.
+contre la bibliothèque `FHE` de Zama (fhevm-solidity 0.14) et ne fonctionneront sur aucune des deux.
 
 **T-REX Chain** : T-REX Network a annoncé en mars 2026 que Zama devient la couche de confidentialité
 du T-REX Ledger — directement pertinent pour `CONF_ERC3643`, qui combine déjà l'identité/conformité
@@ -96,7 +96,7 @@ par investisseur.
 ## Ce que les contrats font réellement { #what-the-contracts-actually-do }
 
 - `confidentialTransfer` / `confidentialTransferFrom` / `confidentialApprove` — transfert/allocation
-  chiffrés ERC-7984, avec une sémantique d'échec silencieux basée sur `TFHE.select` en cas de solde
+  chiffrés ERC-7984, avec une sémantique d'échec silencieux basée sur `FHE.select` en cas de solde
   insuffisant (conforme à la convention ERC-7984, ce n'est pas un bug).
 - `confidentialMint` / `confidentialBurn` — restreints au owner/agent, accordant le jeu de viewers
   (ci-dessus) sur chaque handle muté. Sur `ConfidentialERC3643`, `confidentialBurn` est aussi la

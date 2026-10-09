@@ -6,8 +6,9 @@ description: Quali blockchain eseguono davvero i contratti confidenziali di Regi
 # EVM confidenziale (Zama fhEVM)
 
 I contratti confidenziali di Registerwerk (`ConfidentialERC20`, `ConfidentialERC3643`) sono
-sviluppati sull'fhEVM di **Zama** — nello specifico sull'API `TFHE.sol`/Gateway inclusa nel
-repository sotto `contracts/lib/fhevm` (il submodule `zama-ai/fhevm-solidity`) sul lato contratti, e
+sviluppati sull'fhEVM di **Zama** — nello specifico sulla libreria `FHE` di fhevm-solidity 0.14, inclusa come
+submodule `contracts/lib/fhevm` (il monorepo `zama-ai/fhevm`; la sua directory `library-solidity`, più il submodule
+`encrypted-types` che importa) sul lato contratti, e
 sul pacchetto reale `@zama-fhe/relayer-sdk` sia sul lato backend (sidecar `zama-relayer`) sia sul
 lato browser (`frontend-customer`/`frontend-operator`).
 
@@ -31,16 +32,18 @@ normali voci EVM nell'enum `Chain`, ma non sono destinazioni valide per deployme
 Ogni indirizzo dei contratti host FHEVM viene iniettato, mai scritto in modo fisso per singola
 blockchain:
 
-```java
+```solidity
 // ConfidentialERC20.FhevmInfra — passed to the constructor via EwpgConfidentialFactory
 struct FhevmInfra {
     address aclAddress;
-    address tfheExecutorAddress;
-    address fhePaymentAddress;
+    address coprocessorAddress;   // the FHEVMExecutor
     address kmsVerifierAddress;
-    address gatewayAddress;
 }
 ```
+
+Il Gateway e il contratto di pagamento del precedente FHEVM (0.6) non fanno più parte di questa struttura: da
+FHEVM 0.9 il Gateway vive su una propria blockchain e un contratto della blockchain host non comunica più con
+esso, e le operazioni FHE non vengono più pagate tramite un contratto di pagamento sulla blockchain host.
 
 1. Fai il deployment di `EwpgConfidentialFactory` (o riutilizzane uno) sulla blockchain di
    destinazione, chiamando `setFhevmInfra` con gli indirizzi Zama reali di quella blockchain.

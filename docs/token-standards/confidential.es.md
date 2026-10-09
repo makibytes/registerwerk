@@ -39,15 +39,15 @@ implementados mediante `contracts/src/factory/EwpgConfidentialFactory.sol`.
 
 El coprocesador fhEVM de Zama se ejecuta en **Ethereum y Base** (según el propio anuncio de
 producto "fhEVM Coprocessor" de Zama) — más **Sepolia hoy** como testnet totalmente configurada
-(las direcciones reales de ACL/Executor/Payment/KMSVerifier/Gateway están incluidas (vendored) en
-`contracts/lib/fhevm/config/`, y esas mismas direcciones reales de Sepolia se incluyen en
+(las direcciones reales de ACL/FHEVMExecutor/KMSVerifier están en `ZamaConfig.sol` de
+`contracts/lib/fhevm/library-solidity/config/`, y esas mismas direcciones reales de Sepolia se incluyen en
 `@zama-fhe/relayer-sdk` como `SepoliaConfig`). Las direcciones propias de Zama para la **mainnet**
 de Ethereum aún se estaban finalizando en el momento de escribir esto (objetivo: tercer trimestre
 de 2026) y son actualizables por gobernanza incluso una vez activas.
 
 **Fhenix e Inco NO son cadenas de Zama fhEVM.** Ejecutan sus propias pilas FHE, independientes e
 incompatibles con la de Zama. `ConfidentialERC20`/`ConfidentialERC3643` están construidos
-específicamente contra la API `TFHE.sol`/Gateway de Zama y no funcionarán en ninguna de las dos.
+específicamente contra la biblioteca `FHE` de Zama (fhevm-solidity 0.14) y no funcionarán en ninguna de las dos.
 
 **T-REX Chain**: T-REX Network anunció en marzo de 2026 que Zama se está convirtiendo en la capa
 de confidencialidad del T-REX Ledger — directamente relevante para `CONF_ERC3643`, que ya combina
@@ -96,7 +96,7 @@ por inversor.
 ## Qué hacen realmente los contratos { #what-the-contracts-actually-do }
 
 - `confidentialTransfer` / `confidentialTransferFrom` / `confidentialApprove` — transferencia/
-  asignación cifrada según ERC-7984, con semántica de fallo silencioso basada en `TFHE.select`
+  asignación cifrada según ERC-7984, con semántica de fallo silencioso basada en `FHE.select`
   cuando el saldo es insuficiente (coincide con la convención de ERC-7984, no es un fallo).
 - `confidentialMint` / `confidentialBurn` — restringidos a propietario/agente, y conceden al
   conjunto de visores (arriba) acceso sobre cada handle mutado. En `ConfidentialERC3643`,

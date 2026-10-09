@@ -36,15 +36,15 @@ distribuiti tramite `contracts/src/factory/EwpgConfidentialFactory.sol`.
 ## Quali catene eseguono effettivamente questo { #which-chains-actually-run-this }
 
 Il coprocessore fhEVM di Zama funziona su **Ethereum e Base** (secondo l'annuncio di prodotto "fhEVM Coprocessor" di
-Zama) — più **Sepolia** oggi come testnet pienamente configurata (gli indirizzi reali di ACL/Executor/
-Payment/KMSVerifier/Gateway sono inclusi in `contracts/lib/fhevm/config/`, e gli stessi indirizzi Sepolia reali
+Zama) — più **Sepolia** oggi come testnet pienamente configurata (gli indirizzi reali di ACL/FHEVMExecutor/
+KMSVerifier sono in `ZamaConfig.sol` di `contracts/lib/fhevm/library-solidity/config/`, e gli stessi indirizzi Sepolia reali
 sono racchiusi in `@zama-fhe/relayer-sdk` come `SepoliaConfig`). Gli indirizzi **mainnet** di Zama su Ethereum
 erano ancora in fase di finalizzazione al momento della stesura di questo articolo (obiettivo Q3 2026) e sono
 aggiornabili dalla governance anche una volta live.
 
 **Fhenix e Inco NON sono chain Zama fhEVM.** Gestiscono i propri stack FHE separati e incompatibili.
 `ConfidentialERC20`/`ConfidentialERC3643` sono costruiti specificatamente contro
-`TFHE.sol`/Gateway API di Zama e non funzionano su nessuna delle due.
+la libreria `FHE` di Zama (fhevm-solidity 0.14) e non funzionano su nessuna delle due.
 
 **T-REX Chain**: nel marzo 2026 T-REX Network ha annunciato che Zama sta diventando lo strato di confidenzialità
 per il T-REX Ledger — direttamente rilevante per `CONF_ERC3643`, che già combina identità/conformità T-REX
@@ -89,7 +89,7 @@ costo di implementazione/gas, senza la complessità di riconciliazione dell'offe
 ## Cosa fanno effettivamente i contratti { #what-the-contracts-actually-do }
 
 - `confidentialTransfer` / `confidentialTransferFrom` / `confidentialApprove` — trasferimento/allowance
-  crittografati ERC-7984, con semantica di fallimento silenzioso basata su `TFHE.select` in caso di saldo
+  crittografati ERC-7984, con semantica di fallimento silenzioso basata su `FHE.select` in caso di saldo
   insufficiente (corrisponde alla convenzione ERC-7984, non è un bug).
 - `confidentialMint` / `confidentialBurn` — riservati a proprietario/agente, concedono il set di visualizzatori
   (sopra) su ogni handle modificato. Su `ConfidentialERC3643`, `confidentialBurn` è anche la primitiva di

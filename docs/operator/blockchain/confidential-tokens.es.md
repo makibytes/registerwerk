@@ -10,7 +10,7 @@ fhEVM.
 ## Requisitos previos { #prerequisites }
 
 1. Una cadena con **infraestructura real de Zama fhEVM**: Ethereum Sepolia hoy (las direcciones documentadas
-están incluidas como dependencia vendorizada en `contracts/lib/fhevm/config/` y se incluyen en `@zama-fhe/relayer-sdk` como
+están incluidas como dependencia vendorizada en `contracts/lib/fhevm/library-solidity/config/` y se incluyen en `@zama-fhe/relayer-sdk` como
 `SepoliaConfig`), o la red principal Ethereum/Base una vez que Zama publica las direcciones finales allí.
 La implementación confidencial está restringida a `Chain.ETHEREUM`/`Chain.BASE` — **no** Fhenix/Inco.
 2. `EwpgConfidentialFactory` implementado y configurado con las direcciones FHEVM reales de esa cadena

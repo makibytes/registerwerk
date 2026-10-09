@@ -39,15 +39,15 @@ bereitgestellt über `contracts/src/factory/EwpgConfidentialFactory.sol`.
 
 Zamas fhEVM-Coprozessor läuft auf **Ethereum und Base** (gemäß Zamas eigener Produktankündigung
 zum „fhEVM Coprocessor") – plus schon heute **Sepolia** als vollständig konfiguriertes Testnetz
-(echte ACL-/Executor-/Payment-/KMSVerifier-/Gateway-Adressen sind unter
-`contracts/lib/fhevm/config/` eingebunden, und dieselben echten Sepolia-Adressen sind in
+(die echten ACL-/FHEVMExecutor-/KMSVerifier-Adressen stehen in `ZamaConfig.sol` unter
+`contracts/lib/fhevm/library-solidity/config/`, und dieselben echten Sepolia-Adressen sind in
 `@zama-fhe/relayer-sdk` als `SepoliaConfig` gebündelt). Zamas eigene Ethereum-**Mainnet**-Adressen
 waren zum Zeitpunkt der Erstellung noch nicht final festgelegt (Zielquartal Q3 2026) und bleiben
 auch nach dem Livegang per Governance aktualisierbar.
 
 **Fhenix und Inco sind KEINE Zama-fhEVM-Chains.** Sie betreiben ihre eigenen, separaten,
 inkompatiblen FHE-Stacks. `ConfidentialERC20`/`ConfidentialERC3643` sind speziell gegen Zamas
-`TFHE.sol`/Gateway-API gebaut und funktionieren auf keinem von beiden.
+`FHE`-Bibliothek (fhevm-solidity 0.14) gebaut und funktionieren auf keinem von beiden.
 
 **T-REX Chain**: Das T-REX Network kündigte im März 2026 an, dass Zama zur Vertraulichkeitsschicht
 für die T-REX Ledger wird – direkt relevant für `CONF_ERC3643`, das bereits T-REX-Identität/
@@ -96,7 +96,7 @@ Bestandsabgleichs pro Anleger.
 ## Was die Verträge tatsächlich tun { #what-the-contracts-actually-do }
 
 - `confidentialTransfer` / `confidentialTransferFrom` / `confidentialApprove` — ERC-7984-
-  verschlüsselter Transfer/Allowance, mit `TFHE.select`-basierter Silent-Failure-Semantik bei
+  verschlüsselter Transfer/Allowance, mit `FHE.select`-basierter Silent-Failure-Semantik bei
   unzureichendem Guthaben (entspricht der ERC-7984-Konvention, kein Bug).
 - `confidentialMint` / `confidentialBurn` — owner-/agent-gegated, gewähren dem oben beschriebenen
   Viewer-Set Zugriff auf jedes mutierte Handle. Bei `ConfidentialERC3643` ist `confidentialBurn`

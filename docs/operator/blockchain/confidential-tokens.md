@@ -10,7 +10,7 @@ fhEVM.
 ## Prerequisites
 
 1. A chain with **real Zama fhEVM infrastructure** — Ethereum Sepolia today (documented addresses
-   are vendored in `contracts/lib/fhevm/config/`, and bundled in `@zama-fhe/relayer-sdk` as
+   are vendored in `contracts/lib/fhevm/library-solidity/config/`, and bundled in `@zama-fhe/relayer-sdk` as
    `SepoliaConfig`), or Ethereum/Base mainnet once Zama publishes final addresses there.
    Confidential deployment is gated to `Chain.ETHEREUM`/`Chain.BASE` — **not** Fhenix/Inco.
 2. `EwpgConfidentialFactory` deployed and configured with that chain's real FHEVM addresses
