@@ -1,0 +1,17 @@
+name: Set up Foundry
+description: >-
+  Installs the Foundry toolchain at the one version this repository pins, so a bump is a one-line change.
+
+# Keep in step with the other places that name the same release (they cannot read this file):
+# contracts/Dockerfile.demo (two FROM lines), docker-compose.yml (the anvil image) and
+# backend/src/test/java/de/makibytes/registerwerk/indexer/internal/GraphNodeReorgIT.java (the Testcontainers anvil image). See
+# docs/platform/continuous-integration.md.
+#
+# The version stays literal here rather than an input: callers must not drift apart again.
+
+runs:
+  using: composite
+  steps:
+    - uses: foundry-rs/foundry-toolchain@v1
+      with:
+        version: v1.8.5

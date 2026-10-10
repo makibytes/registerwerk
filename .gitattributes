@@ -1,0 +1,7 @@
+# Line endings are fixed in the repository, not left to each checkout's core.autocrlf: the claims registry
+# (docs/claims/registry.json) pins evidence files by the SHA-256 of their exact bytes, so a CRLF checkout
+# on Windows would make every pin mismatch. Binary files are detected automatically.
+* text=auto eol=lf
+
+# The Maven wrapper's Windows batch file is committed with CRLF; leave its bytes alone.
+*.cmd -text

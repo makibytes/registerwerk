@@ -31,15 +31,13 @@ jobs:
       - uses: ./.github/actions/contract-libs
       - uses: actions/setup-node@v7
         with:
-          node-version: "24.19.0"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: indexer/evm/subgraph/package-lock.json
       # `npm test` starts with validate-abi-parity.mjs, which diffs the checked-in subgraph ABIs
       # against the canonical Forge artifacts under contracts/out (gitignored), so the contracts
       # must be built first.
-      - uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.8.5
+      - uses: ./.github/actions/setup-foundry
       - name: Build contracts (canonical ABIs)
         run: forge build
         working-directory: contracts

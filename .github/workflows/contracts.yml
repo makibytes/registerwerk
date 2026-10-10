@@ -26,9 +26,7 @@ jobs:
       - uses: ./.github/actions/contract-libs
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.8.5
+        uses: ./.github/actions/setup-foundry
 
       # No `forge install` here: with no arguments it checks out every submodule in the repository,
       # including the private docs/_chaincache, and fails. The contract-libs action above already
@@ -49,12 +47,12 @@ jobs:
           script/DeployLocalTrexDemo.s.sol
         working-directory: contracts
 
-      # `forge build --sizes` fails on any contract over EIP-170/EIP-3860; the wrapper keeps that and
-      # adds one explicit, shrink-only exemption (EwpgConfidentialFactory, see the script and
-      # docs/platform/known-limitations.md).
+      # Forge's own `--sizes` margins still measure against EIP-170/EIP-3860, so the wrapper checks the
+      # EIP-7954 limits (64 KiB runtime / 128 KiB initcode) itself and prints deploy gas. It supports a
+      # shrink-only exemption list for owned debt; that list is empty (see the script header).
       - uses: actions/setup-node@v7
         with:
-          node-version: "24.19.0"
+          node-version-file: .nvmrc
       - name: Test the contract-size checker
         run: node scripts/check-contract-sizes.test.mjs
       - name: Enforce deployable contract sizes
@@ -101,9 +99,7 @@ jobs:
       # requirement"). Slither is run directly instead, on the same pinned Foundry the test job uses
       # (Slither shells out to `forge build` for Foundry projects).
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.8.5
+        uses: ./.github/actions/setup-foundry
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"

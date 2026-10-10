@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: "24.19.0"
+          node-version-file: .nvmrc
       - name: Step-up matrix and API route index are up to date
         run: node scripts/gen-stepup-matrix.mjs --check
       - name: Translated pages have not fallen behind English
