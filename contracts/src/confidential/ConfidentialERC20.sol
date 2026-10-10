@@ -97,6 +97,7 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement {
     /// @notice requestId => the total-supply handle that was made publicly decryptable for it.
     mapping(uint256 => euint64) public supplyDisclosureHandle;
     mapping(uint256 => bool) public supplyDisclosureFulfilled;
+    /// @notice The supply of the NEWEST fulfilled disclosure request (see {lastDisclosureRequestId}).
     uint64 public lastDisclosedSupply;
     uint256 public lastDisclosureRequestId;
     uint256 private _nextDisclosureRequestId;
@@ -402,8 +403,13 @@ contract ConfidentialERC20 is Ownable, EwpgDocumentManagement {
 
         uint64 decryptedSupply = abi.decode(abiEncodedCleartexts, (uint64));
         supplyDisclosureFulfilled[requestId] = true;
-        lastDisclosedSupply = decryptedSupply;
-        lastDisclosureRequestId = requestId;
+        // Fulfilment is permissionless and the KMS proof of an older request stays valid, so it can
+        // arrive after a newer one: an older request is still recorded (flag + event) but must never
+        // overwrite the figure of a newer request as "the last disclosed supply".
+        if (requestId > lastDisclosureRequestId) {
+            lastDisclosedSupply = decryptedSupply;
+            lastDisclosureRequestId = requestId;
+        }
         emit SupplyDisclosureFulfilled(requestId, decryptedSupply);
     }
 

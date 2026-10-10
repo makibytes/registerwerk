@@ -356,4 +356,31 @@ contract ConfidentialERC20Test is FhevmMockSetup {
         token.fulfillSupplyDisclosure(requestId, cleartexts, proof);
         assertEq(token.lastDisclosedSupply(), 100, "the disclosed value is the supply at request time");
     }
+
+    /// Fulfilment is permissionless, and the KMS proof of an older request stays valid. Relaying it after a
+    /// newer request was fulfilled must not roll "the last disclosed supply" back to the older figure.
+    function test_supplyDisclosure_olderRequestFulfilledLateDoesNotOverwriteTheNewerFigure() public {
+        _mint(alice, 100);
+        vm.prank(owner);
+        uint256 first = token.requestSupplyDisclosure();
+        euint64 firstHandle = token.supplyDisclosureHandle(first);
+
+        _mint(alice, 50);
+        vm.prank(owner);
+        uint256 second = token.requestSupplyDisclosure();
+        euint64 secondHandle = token.supplyDisclosureHandle(second);
+
+        (bytes memory newerClear, bytes memory newerProof) = _decryptionProof(secondHandle, 150);
+        token.fulfillSupplyDisclosure(second, newerClear, newerProof);
+        assertEq(token.lastDisclosedSupply(), 150);
+
+        (bytes memory olderClear, bytes memory olderProof) = _decryptionProof(firstHandle, 100);
+        vm.expectEmit(true, false, false, true);
+        emit ConfidentialERC20.SupplyDisclosureFulfilled(first, 100);
+        token.fulfillSupplyDisclosure(first, olderClear, olderProof);
+
+        assertTrue(token.supplyDisclosureFulfilled(first), "the older request is still recorded as fulfilled");
+        assertEq(token.lastDisclosedSupply(), 150, "but the newest figure stays");
+        assertEq(token.lastDisclosureRequestId(), second);
+    }
 }

@@ -5,9 +5,10 @@
 // bare imports (`@angular/core`, `rxjs`, ...) have to resolve to THAT app's single copy. A
 // committed symlink to one fixed app breaks the other: the customer build either found a second
 // Angular (operator's) and crashed at runtime inside shared components, or found nothing (CI
-// installs only one app) and failed with NG2012/TS18046. The apps call this from `postinstall`
-// and from the `pre*` hooks of their build/start/test/lint scripts, so the link is always
-// re-pointed before anything compiles. The Dockerfiles do the same with `ln -sfn`.
+// installs only one app) and failed with NG2012/TS18046. The apps call this from the `pre*`
+// hooks of their build/start/test/lint scripts, so the link is always re-pointed before anything
+// compiles (not from `postinstall`: the Dockerfiles run `npm ci` before frontend-shared is copied in).
+// The Dockerfiles re-point the link themselves with `ln -sfn`.
 //
 // Run with the app directory as cwd (npm does that for package scripts):
 //   node ../frontend-shared/link-node-modules.mjs
