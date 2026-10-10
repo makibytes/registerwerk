@@ -18,9 +18,15 @@ on:
       - monitoring/**
       - scripts/lint-placeholders.sh
       - scripts/check-alert-metrics.sh
+      - scripts/docker-build-retry.sh
+      - scripts/docker-hub-mirror.sh
+      - scripts/test-docker-build-retry.sh
       - backend/src/main/java/**
       - backend/src/main/resources/application.yml
-      - .github/workflows/infra.yml
+      # Any workflow or composite-action edit is linted (the "workflows" job); previously only an edit
+      # of this very file triggered it, so a broken backend.yml was never actionlint-checked.
+      - .github/workflows/**
+      - .github/actions/**
   pull_request:
     branches: [main, develop]
     paths:
@@ -31,8 +37,13 @@ on:
       - monitoring/**
       - scripts/lint-placeholders.sh
       - scripts/check-alert-metrics.sh
+      - scripts/docker-build-retry.sh
+      - scripts/docker-hub-mirror.sh
+      - scripts/test-docker-build-retry.sh
       - backend/src/main/java/**
       - backend/src/main/resources/application.yml
+      - .github/workflows/**
+      - .github/actions/**
 
 concurrency:
   group: infra-ci-${{ github.ref }}
@@ -218,3 +229,13 @@ jobs:
       - uses: actions/checkout@v7
       - name: actionlint
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+
+  # The Docker build wrapper every container job depends on; tested against a stub `docker`, so a
+  # regression in its retry rules shows up here instead of as a mysteriously slow or flaky build.
+  build-scripts:
+    name: Docker Build Scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash scripts/test-docker-build-retry.sh

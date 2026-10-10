@@ -68,6 +68,10 @@ jobs:
       - name: Build and verify (tests + JaCoCo)
         run: ./mvnw verify -B
         env:
+          # Testcontainers pulls postgres, MinIO and its Ryuk reaper from Docker Hub, whose anonymous
+          # rate limit hits shared runner IPs. This prefixes every Docker Hub image it starts with
+          # Google's pull-through cache (the daemon-wide registry mirror made this job slow, 65a938d8).
+          TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
           DB_URL: jdbc:postgresql://localhost:5432/registerwerk_test
           DB_USER: registerwerk
           DB_PASSWORD: testpassword

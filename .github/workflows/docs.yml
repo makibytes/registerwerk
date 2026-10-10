@@ -76,10 +76,16 @@ jobs:
           npx --prefix docs playwright install --with-deps chromium
           docker run --rm -d --name registerwerk-docs-ci -p 48003:80 registerwerk-docs:ci
           trap 'docker stop registerwerk-docs-ci' EXIT
+          healthy=
           for _ in {1..30}; do
-            curl --fail --silent http://127.0.0.1:48003/healthz && break
+            if curl --fail --silent http://127.0.0.1:48003/healthz; then healthy=1; break; fi
             sleep 1
           done
+          if [ -z "$healthy" ]; then
+            echo "::error::the docs container did not become healthy within 30 s"
+            docker logs registerwerk-docs-ci
+            exit 1
+          fi
           npm --prefix docs run test:browser
 
       # docs/Dockerfile runs `mkdocs build --strict` in its build stage. The resulting image is
