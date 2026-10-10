@@ -141,6 +141,8 @@ After any frontend, documentation UI, authentication, routing, CSS, icon/font, o
 
 With the local demo stack running, execute `cd docs && npm run test:frontends && npm run test:browser`. The frontend suite uses the seeded trader and local operator accounts, writes desktop/mobile screenshots to `/tmp/registerwerk-headless`, and accepts `CUSTOMER_BASE_URL`, `OPERATOR_BASE_URL`, credential, and screenshot-directory environment overrides.
 
+**Claims pins:** `docs/claims/registry.json` pins evidence files (e.g. `ERC3525.sol`, `EwpgERC3525Test.t.sol`, `validate-abi-parity.mjs`) by SHA-256, so editing one makes the `Claims registry pins` check fail. After the file is final run `node scripts/repin-claims.mjs --write --run` (runs the evidence command, then renews the pin) and mention the re-pin in the commit; CI notes: `docs/platform/continuous-integration.md`.
+
 ```bash
 docker compose up --build                    # full stack
 docker compose up --build frontend-operator  # rebuild one service

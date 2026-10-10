@@ -96,7 +96,7 @@ function exactKeys(value, allowed, required, location, errors) {
   return true;
 }
 
-function resolveRepositoryFile(repo, reference, location, errors) {
+export function resolveRepositoryFile(repo, reference, location, errors) {
   if (typeof reference !== "string" || !reference || reference.includes("#") || path.isAbsolute(reference)) {
     errors.push(`${location}: reference must be a repository-relative file path without an ignored anchor`);
     return null;
@@ -405,7 +405,14 @@ export function verifyClaims({ repo = defaultRepo, asOf = new Date().toISOString
         } else {
           const file = resolveRepositoryFile(repo, evidence.reference, evidenceLocation, errors);
           if (!HASH.test(evidence.sha256 ?? "")) errors.push(`${evidenceLocation}: pinned SHA-256 is required`);
-          else if (file && sha256(fs.readFileSync(file)) !== evidence.sha256) errors.push(`${evidenceLocation}: evidence SHA-256 mismatch`);
+          else if (file) {
+            const actual = sha256(fs.readFileSync(file));
+            if (actual !== evidence.sha256) {
+              errors.push(`${evidenceLocation}: evidence SHA-256 mismatch for ${evidence.reference} `
+                + `(pinned ${evidence.sha256.slice(0, 12)}…, file is now ${actual.slice(0, 12)}…); `
+                + `re-run its evidence command, then \`node scripts/repin-claims.mjs --write\``);
+            }
+          }
           if (evidence.type === "TEST") {
             if (!Object.hasOwn(evidenceCommands, evidence.ciCommandId ?? "")) errors.push(`${evidenceLocation}: unknown ciCommandId`);
             else if (HASH.test(evidence.sha256 ?? "") && file && sha256(fs.readFileSync(file)) === evidence.sha256) {

@@ -1,0 +1,35 @@
+name: Claims registry pins
+
+# The claims registry pins its evidence files by SHA-256 (docs/claims/README.md), so any edit of a
+# pinned file makes the pin stale. The full "Claims governance" workflow (claims.yml) also runs the
+# heavy evidence commands and only runs for main/feat/fix/release, which let a stale pin on develop
+# surface days later as a red main. This job is the cheap half of it — verifier tests, the verifier
+# itself and the re-pin tool, no toolchains — and runs for every branch and pull request, so the
+# commit that edits a pinned file is the one that turns red. Fix: `node scripts/repin-claims.mjs`.
+
+on:
+  push:
+    branches: [main, develop, feat/**, fix/**, release/**, review/**]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claims-registry-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pins:
+    name: Evidence pins and wording scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/verify-claims.test.mjs
+      - run: node scripts/repin-claims.test.mjs
+      - run: node scripts/verify-claims.mjs

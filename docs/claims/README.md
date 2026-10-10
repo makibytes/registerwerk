@@ -53,7 +53,12 @@ or correct wording that triggers the scanner.
 4. Compute the text and canonical-record hashes, run both verifier commands, then run the affected
    evidence command. Obtain the approvals described above.
 5. Renewal repeats evidence execution/review, advances `reviewedAt`, `expiresAt`, registry revision
-   and record hash. A changed statement gets a new review and text hash.
+   and record hash. A changed statement gets a new review and text hash. When only a pinned evidence
+   file changed, `node scripts/repin-claims.mjs --write --run` runs the affected evidence commands and,
+   if they pass, renews that file's pin, the record hash of the affected claim and the registry revision
+   (and nothing else; it is not a review). The `Claims registry pins` workflow runs the verifier on
+   every push and pull request, so a stale pin fails on the commit that edited the file; see
+   [Continuous integration](../platform/continuous-integration.md).
 6. Never delete an ID. Retire it in place as `FALSE_RETIRED`, preserve its history entry, replace
    the registered statement with an explicit negative correction that remains in the referenced
    file, explain the correction in limitations, and re-hash the record.
@@ -69,6 +74,7 @@ Run locally:
 node scripts/verify-claims.test.mjs
 node scripts/verify-claims.mjs
 node scripts/run-claim-evidence.mjs <command-id>
+node scripts/repin-claims.mjs            # dry run: stale evidence pins; add --write [--run] to renew them
 ```
 
 Current controlled statements:
