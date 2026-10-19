@@ -141,6 +141,11 @@ renounceRole(DEFAULT_ADMIN_ROLE, deployerEoa);
 transferOwnership(safeAddress);
 ```
 
+`RegisterwerkDeploymentRegistry`, `EwpgTREXFactory` and `EwpgConfidentialFactory` hand over in two
+steps: after `transferOwnership(safeAddress)` the Safe must send `acceptOwnership()` before the move
+counts. Until then the deployer is still the owner, so a mistyped address cannot take the upgrade key
+or the deployment authority away. Check `owner()` afterwards, not just the transaction receipt.
+
 `AssetTokenFactory.registryWallet` is `immutable` — it cannot be repointed at the Safe after
 deployment. If the factory itself needs multisig control, the Safe must be the deployer of
 the factory (i.e. hold `REGISTRY_WALLET_PRIVATE_KEY`'s role from the start, via a Safe

@@ -263,6 +263,12 @@ immutable and keep their old behavior; see *Legacy markets* below.
   has no effect. Previously a curator could list any contract that returned the right
   `loanToken()` and allocate all idle cash to it. Existing vaults are immutable: depositors redeem
   from idle cash, and the curator deallocates every market and removes it.
+- **Vault shares carry six extra decimals.** `totalAssets()` counts cash sent to the vault by plain
+  transfer, so with no virtual-share offset the first depositor could mint one share, donate a large
+  amount and round every smaller deposit that follows down to zero shares. `_decimalsOffset()` is 6:
+  the donation would have to exceed the victim's deposit a million times over. A vault over a
+  6-decimal stablecoin therefore has 12-decimal shares; read a position in loan-token units with
+  `convertToAssets(balanceOf(account))` rather than from the share count.
 
 **Legacy markets.** The backend flags a registered market as `riskParametersLegacy` when it fails
 these checks (read live from the market and its oracle; a failed read counts as legacy). Such a

@@ -87,8 +87,8 @@ Frontends are stateless — upgrades are zero-downtime.
 | Contract | Upgradeable | Upgrade path |
 |----------|------------|-------------|
 | `AssetTokenFactory` | No (CREATE2 factory) | Deploy new factory, update backend config |
-| `RegisterwerkDeploymentRegistry` | Yes (UUPS proxy) | Multisig-authorized implementation upgrade |
-| `EwpgTREXFactory` | No | Deploy new factory |
+| `RegisterwerkDeploymentRegistry` | Yes (UUPS proxy) | Multisig-authorized implementation upgrade; the owner is the upgrade key and changes in two steps (`transferOwnership`, then `acceptOwnership` by the new owner) |
+| `EwpgTREXFactory` | No | Deploy new factory (ownership is two-step as well) |
 | `IdentityRegistryStorage` | Yes (UUPS proxy) | Upgrade proxy implementation |
 | `ModularCompliance` | Yes (UUPS proxy) | Upgrade proxy implementation |
 | Token contracts (per issuance) | No | Cannot be upgraded after deployment |
