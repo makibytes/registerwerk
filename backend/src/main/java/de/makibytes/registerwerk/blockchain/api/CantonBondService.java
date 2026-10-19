@@ -60,8 +60,9 @@ import de.makibytes.registerwerk.finality.api.ChainSubmissionExecutor;
  * compiled when the {@code canton} profile is active ({@code -Pcanton}).
  * Without that profile, {@link CantonBondDisabledStub} is registered instead.
  *
- * <p>DAML templates are defined in {@code daml/daml/Registerwerk/Bond/}. Run
- * {@code daml/build.sh} to regenerate Java bindings when templates change.
+ * <p>DAML templates are defined in {@code daml/daml/Registerwerk/Bond/}. The encoding below is
+ * written by hand: when a template's arguments change, change the encoder with them (the
+ * profile tests in {@code CantonProfile*} pin the argument layout).
  *
  * <p>Commands use package-name addressing and encode the nested {@code EwpgBondTerms}, enum,
  * list, and date values exactly as declared by the DAML templates. Keeping this hand-written

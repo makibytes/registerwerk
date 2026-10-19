@@ -1,0 +1,157 @@
+-- | The refusals of the bond templates: what a lifecycle choice must not do. Each template carries
+-- the same guards (status, maturity, call schedule), so a regression in one copy is caught here
+-- rather than in production.
+module Registerwerk.Bond.Test.GuardTest where
+
+import Daml.Script
+import DA.Date (date, Month(..))
+import Registerwerk.Bond.Types
+import Registerwerk.Bond.FixedBond (FixedRateBond(..))
+import Registerwerk.Bond.FixedBond qualified as FixedBond
+import Registerwerk.Bond.FloatingBond (FloatingRateBond(..))
+import Registerwerk.Bond.FloatingBond qualified as FloatingBond
+import Registerwerk.Bond.ZeroBond (ZeroCouponBond(..))
+import Registerwerk.Bond.ZeroBond qualified as ZeroBond
+
+bondTerms : Text -> Bool -> [CallEntry] -> EwpgBondTerms
+bondTerms assetId callable callSchedule = EwpgBondTerms with
+  assetId
+  faceValue = 1000.0
+  currencyIso = "EUR"
+  issueDate = date 2026 Jun 30
+  maturityDate = date 2029 Jun 30
+  dayCount = ActActIcma
+  paymentFrequency = Annual
+  callable
+  callSchedule
+
+fixedBond : Party -> Text -> EwpgBondTerms -> FixedRateBond
+fixedBond registry assetId t = FixedRateBond with
+  assetId
+  registryAdmin = registry
+  issuer = registry
+  regulatorObserver = registry
+  terms = t
+  couponRate = 0.05
+  status = "ACTIVE"
+
+-- | A suspended instrument refuses every lifecycle choice until it is resumed.
+suspendedBondRefusesLifecycleChoices : Script ()
+suspendedBondRefusesLifecycleChoices = script do
+  registry <- allocateParty "Registry"
+  let assetId = "33333333-3333-3333-3333-333333333333"
+  c0 <- submit registry do
+    createCmd (fixedBond registry assetId (bondTerms assetId False []))
+  c1 <- submit registry do exerciseCmd c0 FixedBond.SuspendInstrument
+  submitMustFail registry do
+    exerciseCmd c1 FixedBond.PayCoupon with
+      paymentDate = date 2027 Jun 30; amountPerUnit = 50.0; txRef = "while-suspended"
+  submitMustFail registry do
+    exerciseCmd c1 FixedBond.Redeem with redemptionDate = date 2029 Jun 30
+  c2 <- submit registry do exerciseCmd c1 FixedBond.ResumeInstrument
+  submit registry do
+    exerciseCmd c2 FixedBond.PayCoupon with
+      paymentDate = date 2027 Jun 30; amountPerUnit = 50.0; txRef = "after-resume"
+  pure ()
+
+-- | A coupon needs a positive amount and cannot fall after maturity; redemption cannot precede it.
+couponAndRedemptionDatesAreChecked : Script ()
+couponAndRedemptionDatesAreChecked = script do
+  registry <- allocateParty "Registry"
+  let assetId = "44444444-4444-4444-4444-444444444444"
+  c0 <- submit registry do
+    createCmd (fixedBond registry assetId (bondTerms assetId False []))
+  submitMustFail registry do
+    exerciseCmd c0 FixedBond.PayCoupon with
+      paymentDate = date 2027 Jun 30; amountPerUnit = 0.0; txRef = "zero-amount"
+  submitMustFail registry do
+    exerciseCmd c0 FixedBond.PayCoupon with
+      paymentDate = date 2029 Jul 1; amountPerUnit = 50.0; txRef = "after-maturity"
+  submitMustFail registry do
+    exerciseCmd c0 FixedBond.Redeem with redemptionDate = date 2029 Jun 29
+  submit registry do
+    exerciseCmd c0 FixedBond.Redeem with redemptionDate = date 2029 Jun 30
+
+-- | Early call: only callable terms, and only a (date, price) pair that is on the schedule.
+earlyCallNeedsCallableTermsAndAScheduledEntry : Script ()
+earlyCallNeedsCallableTermsAndAScheduledEntry = script do
+  registry <- allocateParty "Registry"
+  let schedule = [CallEntry with callDate = date 2028 Jun 30; callPrice = 1.02]
+
+  let fixedId = "55555555-5555-5555-5555-555555555555"
+  notCallable <- submit registry do
+    createCmd (fixedBond registry fixedId (bondTerms fixedId False schedule))
+  submitMustFail registry do
+    exerciseCmd notCallable FixedBond.EarlyCall with
+      callDate = date 2028 Jun 30; callPrice = 1.02
+
+  let callableId = "66666666-6666-6666-6666-666666666666"
+  callable <- submit registry do
+    createCmd (fixedBond registry callableId (bondTerms callableId True schedule))
+  submitMustFail registry do
+    exerciseCmd callable FixedBond.EarlyCall with
+      callDate = date 2028 Jun 30; callPrice = 1.01 -- right date, wrong price
+  submitMustFail registry do
+    exerciseCmd callable FixedBond.EarlyCall with
+      callDate = date 2028 Jul 1; callPrice = 1.02 -- right price, wrong date
+  submit registry do
+    exerciseCmd callable FixedBond.EarlyCall with
+      callDate = date 2028 Jun 30; callPrice = 1.02
+  remaining <- query @FixedRateBond registry
+  assertMsg "EarlyCall archives the called instrument; the non-callable one is untouched"
+    (map fst remaining == [notCallable])
+
+-- | A floating coupon needs a fixed rate first.
+floatingCouponNeedsAFixedRate : Script ()
+floatingCouponNeedsAFixedRate = script do
+  registry <- allocateParty "Registry"
+  let assetId = "77777777-7777-7777-7777-777777777777"
+  c0 <- submit registry do
+    createCmd FloatingRateBond with
+      assetId
+      registryAdmin = registry
+      issuer = registry
+      regulatorObserver = registry
+      terms = bondTerms assetId False []
+      referenceRate = "EURIBOR_3M"
+      spread = 0.01
+      latestFixedRate = None
+      status = "ACTIVE"
+  submitMustFail registry do
+    exerciseCmd c0 FloatingBond.PayCoupon with
+      paymentDate = date 2027 Jun 30; amountPerUnit = 41.0; txRef = "no-fixing-yet"
+  pure ()
+
+-- | The zero-coupon template: redeemable only at or after maturity, then archived.
+zeroCouponBondRedeemsAtMaturity : Script ()
+zeroCouponBondRedeemsAtMaturity = script do
+  registry <- allocateParty "Registry"
+  let assetId = "88888888-8888-8888-8888-888888888888"
+  c0 <- submit registry do
+    createCmd ZeroCouponBond with
+      assetId
+      registryAdmin = registry
+      issuer = registry
+      regulatorObserver = registry
+      terms = bondTerms assetId False []
+      issuePrice = 0.80
+      status = "ACTIVE"
+  submitMustFail registry do
+    exerciseCmd c0 ZeroBond.Redeem with redemptionDate = date 2029 Jun 29
+  c1 <- submit registry do exerciseCmd c0 ZeroBond.SuspendInstrument
+  submitMustFail registry do
+    exerciseCmd c1 ZeroBond.Redeem with redemptionDate = date 2029 Jun 30
+  c2 <- submit registry do exerciseCmd c1 ZeroBond.ResumeInstrument
+  submit registry do
+    exerciseCmd c2 ZeroBond.Redeem with redemptionDate = date 2029 Jun 30
+  remaining <- query @ZeroCouponBond registry
+  assertMsg "Redeem archives the instrument" (null remaining)
+
+-- | The instrument's asset id must be the one in its terms.
+termsMustCarryTheSameAssetId : Script ()
+termsMustCarryTheSameAssetId = script do
+  registry <- allocateParty "Registry"
+  submitMustFail registry do
+    createCmd (fixedBond registry "99999999-9999-9999-9999-999999999999"
+      (bondTerms "00000000-0000-0000-0000-000000000000" False []))
+  pure ()
