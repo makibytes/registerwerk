@@ -20,10 +20,18 @@ path-filtered (a backend-only change does not build the frontends) and run for p
 | Claims governance | The same verifier plus the heavy evidence commands; `main`, `feat/**`, `fix/**`, `release/**` and pull requests to `main` |
 | Container Build & Sign | Builds, scans, pushes and signs the images; `main` only, once Backend CI, Frontend CI, Contracts CI and Secret Scanning have succeeded for the same commit |
 
+## Token permissions
+
+Every workflow starts with a read-only `GITHUB_TOKEN` (`contents: read`). A job asks for more only where it
+needs it: `security-events: write` for the jobs that upload SARIF to code scanning (the image scans, Slither,
+CodeQL), `actions: read` for the gate in Container Build & Sign, `packages: write` and `id-token: write` for the
+jobs that push and sign images, and `contents: write` for the job that attaches the SBOM to a release. A new
+job inherits nothing beyond reading the repository.
+
 ## Hash checks: what is compared, and why a pin goes stale
 
 CI compares SHA-256 values in exactly three places, and none of them is an image digest. Container
-images are referenced by tag (`node:24.19.0-alpine`), so CI does not compare image hashes at all.
+images are referenced by tag (`node:26.12.0-alpine`), so CI does not compare image hashes at all.
 The `sha256:` lines in a failed Docker log are BuildKit printing layer ids while it pulls.
 
 | Check | Pinned value | Why |
@@ -82,10 +90,10 @@ listed here where it cannot be:
 
 | Tool | Single source | Other places to bump with it |
 |---|---|---|
-| Node 24.19.0 | `.nvmrc` (every `actions/setup-node` step reads it) | `node:24.19.0-alpine` in `docs/Dockerfile`, both frontend Dockerfiles and `zama-relayer/Dockerfile` (the `engines` fields say `24.x` and need no change) |
+| Node 26.12.0 | `.nvmrc` (every `actions/setup-node` step reads it) | `node:26.12.0-alpine` in `docs/Dockerfile`, both frontend Dockerfiles and `zama-relayer/Dockerfile` (the `engines` fields say `26.x` and need no change for a patch release) |
 | Foundry v1.8.5 | `.github/actions/setup-foundry` | `contracts/Dockerfile.demo`, the anvil image in `docker-compose.yml`, `GraphNodeReorgIT` |
 | PostgreSQL 18.6 | `TestPostgres.IMAGE` | `docker-compose.yml`, `postgres-wal/Dockerfile`, the service image in `backend.yml` |
-| Trivy v0.73.0 | repeated in each scanning step | all steps that scan an image |
+| Trivy v0.76.0 | `.github/actions/trivy-image-scan` (every image scan and its SARIF upload) | none |
 
 The contracts' Solidity libraries are git submodules under `contracts/lib/`. CI initialises only those
 (the `.github/actions/contract-libs` action) because `docs/_chaincache` is a private repository the
@@ -98,7 +106,7 @@ must move with the gitlinks.
 node scripts/verify-claims.test.mjs && node scripts/repin-claims.test.mjs && node scripts/verify-claims.mjs
 bash scripts/test-docker-build-retry.sh
 node scripts/verify-docs-parity.mjs && node scripts/gen-stepup-matrix.mjs --check
-docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7      # every workflow
+docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12      # every workflow
 ```
 
 The backend, frontend, contract and docs checks have their own commands in `CLAUDE.md`.

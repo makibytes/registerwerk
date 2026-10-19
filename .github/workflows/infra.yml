@@ -45,6 +45,9 @@ on:
       - .github/workflows/**
       - .github/actions/**
 
+permissions:
+  contents: read
+
 concurrency:
   group: infra-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -73,7 +76,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v5
         with:
-          version: "v3.16.3"
+          version: "v4.3.1"
       - name: Parse gateway/kong.yml
         run: |
           docker run --rm -e KONG_DATABASE=off \
@@ -101,7 +104,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v5
         with:
-          version: "v3.16.3"
+          version: "v4.3.1"
 
       # Static binary, matching this repo's existing pattern of pinning exact tool versions
       # (dpm in daml.yml, wal-g/restic images in the backup chart) rather than tracking `latest`.
@@ -181,7 +184,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v5
         with:
-          version: "v3.16.3"
+          version: "v4.3.1"
       # The Helm copy is a template: render it with test values, then compare with gateway/kong.yml
       # with comments stripped, the redis host line and the ip-restriction allow list (deliberately
       # different: rendered from kong.adminAllowCidrs / compose-demo ranges) normalised.
@@ -228,7 +231,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: actionlint
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
   # The Docker build wrapper every container job depends on; tested against a stub `docker`, so a
   # regression in its retry rules shows up here instead of as a mysteriously slow or flaky build.

@@ -8,6 +8,9 @@ on:
     branches: [main, develop]
     paths: [daml/**, .github/workflows/daml.yml]
 
+permissions:
+  contents: read
+
 concurrency:
   group: daml-ci-${{ github.ref }}
   cancel-in-progress: true

@@ -3,14 +3,13 @@ name: Zama Relayer CI
 on:
   push:
     branches: [main, feat/**, fix/**, develop, review/**]
-    paths: [zama-relayer/**, scripts/docker-build-retry.sh, scripts/docker-hub-mirror.sh, .github/workflows/relayer.yml]
+    paths: [zama-relayer/**, scripts/docker-build-retry.sh, scripts/docker-hub-mirror.sh, .github/workflows/relayer.yml, .github/actions/trivy-image-scan/**]
   pull_request:
     branches: [main, develop]
-    paths: [zama-relayer/**, scripts/docker-build-retry.sh, scripts/docker-hub-mirror.sh, .github/workflows/relayer.yml]
+    paths: [zama-relayer/**, scripts/docker-build-retry.sh, scripts/docker-hub-mirror.sh, .github/workflows/relayer.yml, .github/actions/trivy-image-scan/**]
 
 permissions:
   contents: read
-  security-events: write
 
 concurrency:
   group: relayer-ci-${{ github.ref }}
@@ -21,6 +20,9 @@ jobs:
     name: Lint, Test & Build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write  # SARIF upload of the image scan
     defaults:
       run:
         working-directory: zama-relayer
@@ -39,20 +41,10 @@ jobs:
       - name: Build production container
         run: ../scripts/docker-build-retry.sh -t registerwerk-zama-relayer:ci .
       - name: Scan production container
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: ./.github/actions/trivy-image-scan
         with:
-          version: v0.73.0
-          scan-type: image
           image-ref: registerwerk-zama-relayer:ci
-          format: sarif
-          output: trivy-relayer.sarif
-          severity: HIGH,CRITICAL
-          limit-severities-for-sarif: true
-          exit-code: "1"
-      - uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: trivy-relayer.sarif
+          sarif: trivy-relayer.sarif
 
   # github/codeql-action was previously used ONLY as a SARIF uploader for the Trivy
   # image scan above — actual CodeQL static analysis of the TypeScript source never ran.

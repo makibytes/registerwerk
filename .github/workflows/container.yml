@@ -14,12 +14,9 @@ on:
   release:
     types: [published]
 
+# Read-only by default; every job below asks for exactly what it needs.
 permissions:
   contents: read
-  packages: write
-  id-token: write  # for Cosign OIDC keyless signing
-  security-events: write
-  actions: read     # gate job reads the CI runs of the commit
 
 concurrency:
   group: container-${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.ref }}
@@ -30,6 +27,9 @@ jobs:
     name: CI Gate
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read  # reads the CI runs of the commit
     outputs:
       proceed: ${{ steps.gate.outputs.proceed }}
       sha: ${{ steps.gate.outputs.sha }}
@@ -67,6 +67,11 @@ jobs:
     if: needs.gate.outputs.proceed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write         # push to GHCR
+      id-token: write         # Cosign OIDC keyless signing
+      security-events: write  # SARIF upload of the image scan
     steps:
       - uses: actions/checkout@v7
         with:
@@ -105,20 +110,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Trivy image scan (gate — must pass before push)
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: ./.github/actions/trivy-image-scan
         with:
-          version: v0.73.0
           image-ref: ghcr.io/${{ github.repository }}/backend:${{ needs.gate.outputs.sha }}
-          format: sarif
-          output: trivy-backend.sarif
-          severity: HIGH,CRITICAL
-          limit-severities-for-sarif: true
-          exit-code: "1"
-
-      - uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: trivy-backend.sarif
+          sarif: trivy-backend.sarif
 
       - name: Push
         id: push
@@ -172,6 +167,11 @@ jobs:
     if: needs.gate.outputs.proceed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write         # push to GHCR
+      id-token: write         # Cosign OIDC keyless signing
+      security-events: write  # SARIF upload of the image scan
     steps:
       - uses: actions/checkout@v7
         with:
@@ -219,20 +219,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend-operator
 
       - name: Trivy image scan (gate — must pass before push)
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: ./.github/actions/trivy-image-scan
         with:
-          version: v0.73.0
           image-ref: ghcr.io/${{ github.repository }}/frontend-operator:${{ needs.gate.outputs.sha }}
-          format: sarif
-          output: trivy-frontend-operator.sarif
-          severity: HIGH,CRITICAL
-          limit-severities-for-sarif: true
-          exit-code: "1"
-
-      - uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: trivy-frontend-operator.sarif
+          sarif: trivy-frontend-operator.sarif
 
       - name: Push
         id: push
@@ -269,6 +259,11 @@ jobs:
     if: needs.gate.outputs.proceed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write         # push to GHCR
+      id-token: write         # Cosign OIDC keyless signing
+      security-events: write  # SARIF upload of the image scan
     steps:
       - uses: actions/checkout@v7
         with:
@@ -303,20 +298,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend-customer
 
       - name: Trivy image scan (gate — must pass before push)
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: ./.github/actions/trivy-image-scan
         with:
-          version: v0.73.0
           image-ref: ghcr.io/${{ github.repository }}/frontend-customer:${{ needs.gate.outputs.sha }}
-          format: sarif
-          output: trivy-frontend-customer.sarif
-          severity: HIGH,CRITICAL
-          limit-severities-for-sarif: true
-          exit-code: "1"
-
-      - uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: trivy-frontend-customer.sarif
+          sarif: trivy-frontend-customer.sarif
 
       - name: Push
         id: push
@@ -353,6 +338,11 @@ jobs:
     if: needs.gate.outputs.proceed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write         # push to GHCR
+      id-token: write         # Cosign OIDC keyless signing
+      security-events: write  # SARIF upload of the image scan
     steps:
       - uses: actions/checkout@v7
         with:
@@ -384,20 +374,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=zama-relayer
 
       - name: Trivy image scan (gate — must pass before push)
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: ./.github/actions/trivy-image-scan
         with:
-          version: v0.73.0
           image-ref: ghcr.io/${{ github.repository }}/zama-relayer:${{ needs.gate.outputs.sha }}
-          format: sarif
-          output: trivy-zama-relayer.sarif
-          severity: HIGH,CRITICAL
-          limit-severities-for-sarif: true
-          exit-code: "1"
-
-      - uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: trivy-zama-relayer.sarif
+          sarif: trivy-zama-relayer.sarif
 
       - name: Push
         id: push
@@ -429,6 +409,8 @@ jobs:
     name: Attach SBOM + Provenance
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: write  # attaches the SBOM to the release
     # Waits on all four image builds (not just build-backend, as before ) so a release
     # never gets an SBOM/provenance attachment implying "everything shipped cleanly" if any one
     # image's Trivy gate actually failed.

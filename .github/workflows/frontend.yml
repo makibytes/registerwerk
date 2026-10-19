@@ -10,6 +10,7 @@ on:
       - scripts/docker-build-retry.sh
       - scripts/docker-hub-mirror.sh
       - .github/workflows/frontend.yml
+      - .github/actions/trivy-image-scan/**
   pull_request:
     branches: [main, develop]
     paths:
@@ -18,10 +19,11 @@ on:
       - frontend-shared/**
       - scripts/docker-build-retry.sh
       - scripts/docker-hub-mirror.sh
+      - .github/workflows/frontend.yml
+      - .github/actions/trivy-image-scan/**
 
 permissions:
   contents: read
-  security-events: write
 
 concurrency:
   group: frontend-ci-${{ github.ref }}
@@ -57,6 +59,9 @@ jobs:
     name: Operator Frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write  # SARIF upload of the image scan
     defaults:
       run:
         working-directory: frontend-operator
@@ -76,25 +81,18 @@ jobs:
         run: scripts/docker-build-retry.sh -f frontend-operator/Dockerfile -t registerwerk-operator:ci .
         working-directory: .
       - name: Scan production container
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: ./.github/actions/trivy-image-scan
         with:
-          version: v0.73.0
-          scan-type: image
           image-ref: registerwerk-operator:ci
-          format: sarif
-          output: trivy-op.sarif
-          severity: HIGH,CRITICAL
-          limit-severities-for-sarif: true
-          exit-code: "1"
-      - uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-op.sarif') != ''
-        with:
-          sarif_file: trivy-op.sarif
+          sarif: trivy-op.sarif
 
   frontend-customer:
     name: Customer Frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write  # SARIF upload of the image scan
     defaults:
       run:
         working-directory: frontend-customer
@@ -116,20 +114,10 @@ jobs:
         run: scripts/docker-build-retry.sh -f frontend-customer/Dockerfile -t registerwerk-customer:ci .
         working-directory: .
       - name: Scan production container
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: ./.github/actions/trivy-image-scan
         with:
-          version: v0.73.0
-          scan-type: image
           image-ref: registerwerk-customer:ci
-          format: sarif
-          output: trivy-cust.sarif
-          severity: HIGH,CRITICAL
-          limit-severities-for-sarif: true
-          exit-code: "1"
-      - uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-cust.sarif') != ''
-        with:
-          sarif_file: trivy-cust.sarif
+          sarif: trivy-cust.sarif
 
   # github/codeql-action was previously used ONLY as a SARIF uploader for each app's
   # Trivy container-image scan above — actual CodeQL static analysis of the TypeScript/Angular

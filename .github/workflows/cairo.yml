@@ -8,6 +8,9 @@ on:
     branches: [main, develop]
     paths: [contracts/cairo/**, .github/workflows/cairo.yml]
 
+permissions:
+  contents: read
+
 concurrency:
   group: cairo-ci-${{ github.ref }}
   cancel-in-progress: true
