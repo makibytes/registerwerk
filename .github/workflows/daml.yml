@@ -33,7 +33,7 @@ jobs:
       # stops with SDK_NOT_INSTALLED, hence the explicit SDK-install step below.
       - name: Install dpm
         env:
-          DPM_VERSION: "1.0.21"
+          DPM_VERSION: "1.0.22"
         run: |
           curl -fsSL -o dpm.tar.gz \
             "https://github.com/digital-asset/dpm/releases/download/${DPM_VERSION}/dpm-${DPM_VERSION}-linux-amd64.tar.gz"
@@ -43,7 +43,7 @@ jobs:
           rm dpm.tar.gz
 
       # With no argument `dpm install` is `dpm install package`: it installs the SDK pinned by
-      # sdk-version in daml/daml.yaml (3.5.2), so the version is not repeated here. The test
+      # sdk-version in daml/daml.yaml (3.6.0), so the version is not repeated here. The test
       # package (daml/test) pins the same SDK.
       - name: Install the Daml SDK pinned in daml.yaml
         run: dpm install
