@@ -410,4 +410,41 @@ contract EwpgRepoVaultTest is Test {
         vm.expectRevert(RegisterwerkGated.ZeroOperatingOrg.selector);
         new EwpgRepoVault(ecosystemOracle, loanToken, factory, address(0), address(operatorOrgId), TIMELOCK, "V", "V");
     }
+
+    // ── ERC-4626 first-depositor inflation attack ────────────────────────────
+
+    /// @dev {totalAssets} counts cash sent to the vault by plain transfer. With no virtual-share offset a
+    ///      first depositor could mint one share, donate a large amount and then round a later, smaller
+    ///      deposit down to zero shares — taking it. The offset makes that donation cost more than it can
+    ///      ever win.
+    function test_firstDepositorInflation_cannotTakeALaterDeposit() public {
+        address attacker = address(0xA77);
+        address victim = address(0xB0B);
+        loanToken.mint(attacker, 10_001e6);
+        loanToken.mint(victim, 5_000e6);
+        vm.prank(attacker);
+        loanToken.approve(address(vault), type(uint256).max);
+        vm.prank(victim);
+        loanToken.approve(address(vault), type(uint256).max);
+
+        vm.startPrank(attacker);
+        vault.deposit(1, attacker); // one wei: the first share
+        loanToken.transfer(address(vault), 10_000e6); // the donation that inflates the share price
+        vm.stopPrank();
+
+        vm.prank(victim);
+        vault.deposit(5_000e6, victim);
+
+        // The victim holds shares and can get (all but rounding dust of) the deposit back ...
+        assertGt(vault.balanceOf(victim), 0, "victim minted no shares");
+        uint256 victimValue = vault.convertToAssets(vault.balanceOf(victim));
+        assertGe(victimValue, 5_000e6 - 1e4, "victim lost the deposit"); // rounding only: < 0.0002 %
+        // ... and the attacker, who paid 10_000e6 + 1, does not get that back.
+        uint256 attackerValue = vault.convertToAssets(vault.balanceOf(attacker));
+        assertLt(attackerValue, 10_000e6, "the donation paid off");
+    }
+
+    function test_shareDecimals_carrySixVirtualDecimals() public view {
+        assertEq(vault.decimals(), loanToken.decimals() + 6);
+    }
 }

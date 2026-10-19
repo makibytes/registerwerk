@@ -2,13 +2,15 @@
 pragma solidity ^0.8.36;
 
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /// @notice Canonical address catalogue for a Registerwerk deployment.
 /// @dev This coordination layer is upgradeable; issued asset contracts remain immutable unless
-///      their own standard (such as the T-REX suite) explicitly uses audited proxies.
-contract RegisterwerkDeploymentRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+///      their own standard (such as the T-REX suite) explicitly uses audited proxies. The owner is
+///      also the upgrade authority, so ownership moves in two steps ({transferOwnership} then
+///      {acceptOwnership} by the new owner): a mistyped address can never take the upgrade key away.
+contract RegisterwerkDeploymentRegistry is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     struct Deployment {
         address contractAddress;
         uint64 revision;
@@ -35,6 +37,7 @@ contract RegisterwerkDeploymentRegistry is Initializable, OwnableUpgradeable, UU
 
     function initialize(address initialOwner) external initializer {
         __Ownable_init(initialOwner);
+        __Ownable2Step_init();
     }
 
     function setDeployment(bytes32 standardId, address contractAddress, bytes32 metadataHash) external onlyOwner {

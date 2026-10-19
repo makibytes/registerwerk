@@ -483,7 +483,10 @@ contract EwpgBondDesk is RegisterwerkGated {
     ///         full position — payment and delivery of the final leg stay atomic. Gated
     ///         by the AML topic rather than KYC: redemption is a payout event, so the
     ///         desk re-checks the stricter of the two claim topics independently of
-    ///         whichever topic gated the issuance.
+    ///         whichever topic gated the issuance. Like every {requiresClaim} gate this
+    ///         reads the claims of the *caller's* org (the operating org's paying agent), not
+    ///         of `holder`; the holder's own standing is the T-REX identity registry's and the
+    ///         backend screening gate's business.
     ///
     ///         Requires the final coupon period to be open (its record-date snapshot taken
     ///         by {payCoupon}), so burning the position cannot forfeit the last coupon.

@@ -13,8 +13,10 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 ///         both legs in one successful transaction, or the trade expires and the
 ///         escrowed leg is reclaimed. Either leg may be the locked one:
 ///         exact-leg conservation assumes payment and asset tokens without transfer fees,
-///         rebases, or other balance-changing hooks. Chain finality and legal-register
-///         reconciliation are separate from this transaction-level behavior.
+///         rebases, or other balance-changing hooks: a lock whose escrow does not arrive in full
+///         reverts {UnexpectedTransferAmount}, so one trade can never be paid out of another
+///         trade's escrow. Chain finality and legal-register reconciliation are separate from this
+///         transaction-level behavior.
 ///
 ///           - {lockAsset}:   the seller escrows the asset token; the buyer settles by
 ///                            paying the payment token (buyer → seller) and receives the
@@ -179,6 +181,9 @@ contract DvpSettlement is ReentrancyGuardTransient, AccessControl {
     error TermsMismatch(bytes32 tradeId, bytes32 expectedTermsHash, bytes32 actualTermsHash);
     error PartyFrozen(bytes32 tradeId, address party);
     error InvalidDestination();
+    /// @notice The escrow that arrived was not the amount asked for — a token with a transfer fee or
+    ///         another balance-changing hook, which this contract does not support.
+    error UnexpectedTransferAmount(address token, uint256 expected, uint256 received);
     /// @notice {forceCancel} may only return the escrow to the trade's locker or counterparty;
     ///         use {proposeForceCancel} for a destination named in a legal order.
     error DestinationNotTradeParty(bytes32 tradeId, address to);
@@ -204,7 +209,7 @@ contract DvpSettlement is ReentrancyGuardTransient, AccessControl {
         _initTrade(
             tradeId, msg.sender, buyer, assetToken, assetAmount, paymentToken, paymentAmount, LockedLeg.Asset, expiry
         );
-        assetToken.safeTransferFrom(msg.sender, address(this), assetAmount);
+        _escrow(assetToken, msg.sender, assetAmount);
         _emitLocked(tradeId);
     }
 
@@ -225,7 +230,7 @@ contract DvpSettlement is ReentrancyGuardTransient, AccessControl {
         _initTrade(
             tradeId, seller, msg.sender, assetToken, assetAmount, paymentToken, paymentAmount, LockedLeg.Payment, expiry
         );
-        paymentToken.safeTransferFrom(msg.sender, address(this), paymentAmount);
+        _escrow(paymentToken, msg.sender, paymentAmount);
         _emitLocked(tradeId);
     }
 
@@ -447,6 +452,16 @@ contract DvpSettlement is ReentrancyGuardTransient, AccessControl {
     function _isFrozen(IERC20 token, address account) private view returns (bool) {
         (bool ok, bytes memory ret) = address(token).staticcall(abi.encodeWithSignature("isFrozen(address)", account));
         return ok && ret.length >= 32 && abi.decode(ret, (uint256)) != 0;
+    }
+
+    /// @dev Pulls exactly `amount` into escrow or reverts. Settlement later pays out the full recorded
+    ///      amount, so an escrow that arrived short (a fee-on-transfer token) would be topped up from
+    ///      the escrow of other trades in the same token.
+    function _escrow(IERC20 token, address from, uint256 amount) private {
+        uint256 balanceBefore = token.balanceOf(address(this));
+        token.safeTransferFrom(from, address(this), amount);
+        uint256 received = token.balanceOf(address(this)) - balanceBefore;
+        if (received != amount) revert UnexpectedTransferAmount(address(token), amount, received);
     }
 
     function _emitLocked(bytes32 tradeId) private {

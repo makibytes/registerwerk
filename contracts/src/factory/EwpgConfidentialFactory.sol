@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.36;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "../confidential/ConfidentialERC20.sol";
 import "../confidential/ConfidentialERC3643.sol";
 
@@ -25,7 +25,7 @@ import "../confidential/ConfidentialERC3643.sol";
  * once per target network/chain and configure it with that network's real
  * addresses via {setFhevmInfra} before calling either deploy function.
  */
-contract EwpgConfidentialFactory is Ownable {
+contract EwpgConfidentialFactory is Ownable2Step {
     enum TokenType { CONFIDENTIAL_ERC20, CONFIDENTIAL_ERC3643 }
 
     ConfidentialERC20.FhevmInfra public fhevmInfra;

@@ -202,6 +202,30 @@ contract EwpgRepoMarketTest is Test {
         assertEq(loanToken.balanceOf(lender1), assetsBefore + 1);
     }
 
+    /// @dev The views project interest with the same maths the next state change books: what a lender or
+    ///      borrower reads after a long quiet period is what they are then actually owed or owe.
+    function test_accrual_viewsEqualWhatTheNextStateChangeBooks() public {
+        vm.prank(alice);
+        market.setReserveFactor(1000);
+        vm.prank(lender1);
+        market.supply(1_000_000e6);
+        vm.prank(alice);
+        market.pledgeAndBorrow(100, 7_000e6);
+
+        vm.warp(block.timestamp + 90 days);
+        uint256 projectedDebt = market.debtOf(alice);
+        uint256 projectedClaim = market.balanceOf(lender1);
+        assertGt(projectedDebt, 7_000e6, "interest accrued");
+
+        vm.prank(liquidator);
+        market.supply(1e6); // any state-changing call accrues
+
+        assertEq(market.lastAccrualTimestamp(), block.timestamp);
+        assertEq(market.debtOf(alice), projectedDebt);
+        assertEq(market.balanceOf(lender1), projectedClaim);
+        assertGt(market.totalReserves(), 0, "the reserve share was booked");
+    }
+
     // ── borrower side: gating ────────────────────────────────────────────────
 
     function test_pledgeAndBorrow_revertsForUnboundWallet() public {

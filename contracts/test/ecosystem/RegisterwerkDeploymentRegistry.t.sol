@@ -57,6 +57,31 @@ contract RegisterwerkDeploymentRegistryTest is Test {
         assertEq(registry.deployment(id).revision, 1);
     }
 
+    function test_ownershipMovesInTwoSteps() public {
+        address next = address(0xA11CE);
+        registry.transferOwnership(next);
+        // Nominated, not yet in charge: the upgrade key has not moved.
+        assertEq(registry.owner(), address(this));
+        assertEq(registry.pendingOwner(), next);
+
+        vm.prank(address(0xBAD));
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, address(0xBAD)));
+        registry.acceptOwnership();
+
+        vm.prank(next);
+        registry.acceptOwnership();
+        assertEq(registry.owner(), next);
+        assertEq(registry.pendingOwner(), address(0));
+    }
+
+    function test_aMistypedNewOwnerCannotTakeTheUpgradeKey() public {
+        registry.transferOwnership(address(0xDEAD)); // nobody holds this key and nobody will accept
+        // The current owner is still in charge and can still upgrade.
+        RegisterwerkDeploymentRegistryV2 next = new RegisterwerkDeploymentRegistryV2();
+        registry.upgradeToAndCall(address(next), "");
+        assertEq(RegisterwerkDeploymentRegistryV2(address(registry)).contractVersion(), 2);
+    }
+
     function test_rejectsEOAAsDeployment() public {
         vm.expectRevert(RegisterwerkDeploymentRegistry.InvalidContractAddress.selector);
         registry.setDeployment(keccak256("ERC-20"), address(0x1234), bytes32(0));

@@ -27,7 +27,6 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
 
     uint256 private _navPerShare;     // fixed-point 1e18; 0 = not yet struck
     uint256 private _depositCap;      // 0 = unlimited
-    bool internal _inForceOp;
     uint256 private _strikeCounter;
     /// @dev block.timestamp of the latest setNavPerShare (0 = never struck). Forward-pricing
     ///      vaults compare it with a request's dealing point; see EwpgERC7540.
@@ -188,11 +187,9 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
         address to,
         uint256 value,
         string calldata legalBasis
-    ) external onlyRegistry {
+    ) external onlyRegistry forceOp {
         _beforeForceOp(from);
-        _inForceOp = true;
         _transfer(from, to, value);
-        _inForceOp = false;
         emit ForcedTransfer(from, to, value, legalBasis);
     }
 
@@ -213,18 +210,16 @@ contract EwpgERC4626 is ERC4626, EwpgCompliance, EwpgDocumentManagement {
         address from,
         uint256 value,
         string calldata legalBasis
-    ) external onlyRegistry {
+    ) external onlyRegistry forceOp {
         _beforeForceOp(from);
-        _inForceOp = true;
         _burn(from, value);
-        _inForceOp = false;
         emit ForceBurned(from, value, legalBasis);
     }
 
     // ── Compliance transfer hook ──────────────────────────────────────────────
 
     function _update(address from, address to, uint256 value) internal virtual override {
-        if (!_inForceOp) {
+        if (!_inForceOp()) {
             _requireTransferable(from, to);
             // Whitelist every share acquisition — including the mint leg of
             // deposit()/mint(). ERC-4626 deposits are permissionless by default,

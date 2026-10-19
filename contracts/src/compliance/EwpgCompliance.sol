@@ -29,6 +29,13 @@ abstract contract EwpgCompliance is IEwpgCompliant, IEwpgAdminControls {
     bool private _paused;
     uint256 private _supplyCap; // 0 = unlimited
 
+    /// @dev True only while a registry force operation runs (see {forceOp}); the token's transfer
+    ///      hook skips whitelist, freeze and pause checks then. Transient (EIP-1153) because it is set
+    ///      and cleared inside one call: as a storage bool it would cost a storage write at every
+    ///      forced operation (a new slot is ~110k gas under EIP-8037), and the protocol clears it even
+    ///      if a hook were ever to leave it set.
+    bool private transient _forceOpActive;
+
     // ── Events (registry handover) ─────────────────────────────────────────────
 
     event RegistryTransferStarted(address indexed currentRegistry, address indexed pendingRegistry);
@@ -40,6 +47,15 @@ abstract contract EwpgCompliance is IEwpgCompliant, IEwpgAdminControls {
     modifier onlyRegistry() {
         require(msg.sender == registry, "EwpgCompliance: caller is not registry");
         _;
+    }
+
+    /// @notice Lifts the compliance hooks for the duration of the function body — the regulatory
+    ///         override of eWpG §24 / §26. Apply it to the narrowest function that performs the move
+    ///         (and to nothing that makes an untrusted external call: the hooks are off while it runs).
+    modifier forceOp() {
+        _forceOpActive = true;
+        _;
+        _forceOpActive = false;
     }
 
     // ── Constructor ───────────────────────────────────────────────────────────
@@ -154,6 +170,11 @@ abstract contract EwpgCompliance is IEwpgCompliant, IEwpgAdminControls {
     }
 
     // ── Internal helpers called by token _update hooks ────────────────────────
+
+    /// @notice Whether a {forceOp} is running, i.e. the transfer hook must not apply compliance checks.
+    function _inForceOp() internal view returns (bool) {
+        return _forceOpActive;
+    }
 
     /// @notice Reverts if transfers are globally paused or either participant is frozen.
     ///         Call from the token's `_update` hook for all normal (non-forced) transfers.

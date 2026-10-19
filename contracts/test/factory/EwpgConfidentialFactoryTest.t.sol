@@ -56,6 +56,23 @@ contract EwpgConfidentialFactoryTest is FhevmMockSetup {
         assertEq(kmsVerifier, newInfra.kmsVerifierAddress);
     }
 
+    /// @dev Two-step handover: a mistyped new owner must not be able to take (or brick) the deployment authority.
+    function test_ownershipNeedsAcceptanceByTheNewOwner() public {
+        address successor = makeAddr("successor");
+        vm.prank(owner);
+        factory.transferOwnership(successor);
+        assertEq(factory.owner(), owner, "nominated, not yet in charge");
+        assertEq(factory.pendingOwner(), successor);
+
+        vm.prank(successor);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", successor));
+        factory.deployConfidentialErc20(ASSET_ID, "N", "S", initialViewers);
+
+        vm.prank(successor);
+        factory.acceptOwnership();
+        assertEq(factory.owner(), successor);
+    }
+
     function test_setFhevmInfra_revertsForNonOwner() public {
         vm.expectRevert(
             abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", address(this))

@@ -33,9 +33,6 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
     /// @dev Aggregate total minted across all ids (for supply cap).
     uint256 private _totalMinted;
 
-    /// @dev When true, compliance checks are skipped for the current call frame.
-    bool private _inForceOp;
-
     constructor(
         string memory _symbol,
         address registryWallet,
@@ -85,13 +82,12 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
     /// @notice Transfers `value` units of token `id` from `from` to `to`, bypassing all
     ///         compliance checks. Legal basis: eWpG §24 Berichtigung.
     ///
-    /// @dev IEwpgAdminControls.forcedTransfer encodes id in the high 128 bits of `value`
-    ///      and amount in the low 128 bits when called generically; but the explicit
-    ///      forcedTransferSingle below is preferred for on-chain use.
+    /// @dev The generic IEwpgAdminControls signature has no id parameter: `value` is the amount of
+    ///      id 0. Use {forcedTransferSingle} (any id) or {forcedTransferBatch}.
     ///
     ///      Balances are moved through the internal {ERC1155-_update} rather than
     ///      {_safeTransferFrom}. The safe path invokes {IERC1155Receiver-onERC1155Received}
-    ///      on `to` while {_inForceOp} is still true, which would let a malicious recipient
+    ///      on `to` while the force operation is still active, which would let a malicious recipient
     ///      re-enter and move frozen / non-whitelisted tokens with all compliance checks
     ///      disabled. Going through _update performs no external call, closing that window;
     ///      nonReentrant is kept as defence-in-depth. A court-ordered §24 correction must
@@ -126,24 +122,28 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         uint256[] calldata amounts,
         string calldata legalBasis
     ) external onlyRegistry nonReentrant {
-        _inForceOp = true;
-        _update(from, to, ids, amounts);
-        _inForceOp = false;
+        _forceUpdate(from, to, ids, amounts);
         for (uint256 i; i < ids.length; i++) {
             emit ForcedTransfer(from, to, amounts[i], legalBasis);
         }
     }
 
-    /// @dev Moves a single (id, amount) between two non-zero addresses without invoking
-    ///      the ERC-1155 acceptance callback. Used only by the forced-operation paths.
+    /// @dev Moves (id, amount) pairs between two non-zero addresses without invoking the ERC-1155
+    ///      acceptance callback. Used only by the forced-operation paths.
+    function _forceUpdate(address from, address to, uint256[] memory ids, uint256[] memory amounts)
+        private
+        forceOp
+    {
+        _update(from, to, ids, amounts);
+    }
+
+    /// @dev Single-pair form of {_forceUpdate}.
     function _forceMove(address from, address to, uint256 id, uint256 amount) private {
         uint256[] memory ids = new uint256[](1);
         uint256[] memory amounts = new uint256[](1);
         ids[0] = id;
         amounts[0] = amount;
-        _inForceOp = true;
-        _update(from, to, ids, amounts);
-        _inForceOp = false;
+        _forceUpdate(from, to, ids, amounts);
     }
 
     // ── Forced approve — regulatory override ──────────────────────────────────
@@ -174,10 +174,8 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         address from,
         uint256 value,
         string calldata legalBasis
-    ) external override onlyRegistry {
-        _inForceOp = true;
+    ) external override onlyRegistry forceOp {
         _burn(from, 0, value);
-        _inForceOp = false;
         emit ForceBurned(from, value, legalBasis);
     }
 
@@ -187,10 +185,8 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         uint256 id,
         uint256 amount,
         string calldata legalBasis
-    ) external onlyRegistry {
-        _inForceOp = true;
+    ) external onlyRegistry forceOp {
         _burn(from, id, amount);
-        _inForceOp = false;
         emit ForceBurned(from, amount, legalBasis);
     }
 
@@ -218,7 +214,7 @@ contract EwpgERC1155 is ERC1155, Ownable, EwpgCompliance, EwpgDocumentManagement
         uint256[] memory ids,
         uint256[] memory values
     ) internal override {
-        if (!_inForceOp) {
+        if (!_inForceOp()) {
             if (from != address(0) && to != address(0)) {
                 _requireTransferable(from, to);
                 require(isWhitelisted(to), "EwpgERC1155: recipient not whitelisted");

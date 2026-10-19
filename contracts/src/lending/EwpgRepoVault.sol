@@ -165,6 +165,16 @@ contract EwpgRepoVault is ERC4626, RegisterwerkGated, ReentrancyGuardTransient {
         return super.redeem(shares, receiver, owner);
     }
 
+    /// @dev Six virtual decimals of share precision. {totalAssets} counts cash sent to the vault by
+    ///      plain transfer, so with the default offset of zero a first depositor could mint one share,
+    ///      donate a large amount and round every smaller deposit that follows down to zero shares. At
+    ///      this offset the donation must exceed the victim's deposit a million times over, which is
+    ///      never worth it. Shares therefore carry `asset decimals + 6` decimals; {convertToAssets}
+    ///      is the way to read a position in loan-token units.
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return 6;
+    }
+
     /// @notice Total assets under management: idle cash held directly plus the vault's current
     ///         claim (principal + accrued interest) in every allocated market.
     function totalAssets() public view override returns (uint256 total) {

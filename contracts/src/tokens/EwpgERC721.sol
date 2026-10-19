@@ -27,9 +27,6 @@ contract EwpgERC721 is ERC721, Ownable, EwpgCompliance, EwpgDocumentManagement {
     /// @dev Total number of tokens ever minted (does not decrease on burn). Used for cap check.
     uint256 private _totalMinted;
 
-    /// @dev When true, compliance checks are skipped for the current call frame.
-    bool private _inForceOp;
-
     constructor(
         string memory name,
         string memory symbol,
@@ -70,10 +67,8 @@ contract EwpgERC721 is ERC721, Ownable, EwpgCompliance, EwpgDocumentManagement {
         address to,
         uint256 value,
         string calldata legalBasis
-    ) external override onlyRegistry {
-        _inForceOp = true;
+    ) external override onlyRegistry forceOp {
         _transfer(from, to, value);
-        _inForceOp = false;
         emit ForcedTransfer(from, to, value, legalBasis);
     }
 
@@ -82,7 +77,8 @@ contract EwpgERC721 is ERC721, Ownable, EwpgCompliance, EwpgDocumentManagement {
     /// @notice Approves `spender` for `tokenId` on behalf of `owner`, bypassing owner consent.
     ///         To be used exclusively for BaFin / court orders requiring regulatory approval override.
     ///         Passing auth=address(0) to _approve bypasses the ownership/authorization check.
-    /// @param owner      Current token owner (used for event; not checked on-chain).
+    /// @param owner      Current token owner; must be the owner of `tokenId`, so the audit event
+    ///                   can never name someone else.
     /// @param spender    Address being approved to transfer the token.
     /// @param tokenId    Token identifier to approve.
     /// @param legalBasis Reference to legal authority (e.g. "BaFin Az. 2025-002").
@@ -92,6 +88,7 @@ contract EwpgERC721 is ERC721, Ownable, EwpgCompliance, EwpgDocumentManagement {
         uint256 tokenId,
         string calldata legalBasis
     ) external override onlyRegistry {
+        require(_requireOwned(tokenId) == owner, "EwpgERC721: not the token owner");
         _approve(spender, tokenId, address(0));
         emit ForcedApprove(owner, spender, tokenId, legalBasis);
     }
@@ -100,17 +97,17 @@ contract EwpgERC721 is ERC721, Ownable, EwpgCompliance, EwpgDocumentManagement {
 
     /// @notice Burns `tokenId` regardless of whitelist, freeze, or pause.
     ///         Legal basis: eWpG §26 Einziehung.
-    /// @param from       Current owner (used for event; ownership verified by ERC-721).
+    /// @param from       Current owner; must be the owner of `value`, so the audit event can never
+    ///                   name someone else.
     /// @param value      tokenId to burn.
     /// @param legalBasis Reference to legal authority.
     function forceBurn(
         address from,
         uint256 value,
         string calldata legalBasis
-    ) external override onlyRegistry {
-        _inForceOp = true;
+    ) external override onlyRegistry forceOp {
+        require(_requireOwned(value) == from, "EwpgERC721: not the token owner");
         _burn(value);
-        _inForceOp = false;
         emit ForceBurned(from, value, legalBasis);
     }
 
@@ -134,7 +131,7 @@ contract EwpgERC721 is ERC721, Ownable, EwpgCompliance, EwpgDocumentManagement {
     ///      unless the call is a force operation.
     function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
         address from = _ownerOf(tokenId);
-        if (!_inForceOp) {
+        if (!_inForceOp()) {
             if (from != address(0) && to != address(0)) {
                 _requireTransferable(from, to);
                 require(isWhitelisted(to), "EwpgERC721: recipient not whitelisted");

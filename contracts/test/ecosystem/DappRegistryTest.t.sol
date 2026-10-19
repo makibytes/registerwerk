@@ -113,6 +113,23 @@ contract DappRegistryTest is Test {
         assertTrue(oracle.isApprovedInstance(instance));
     }
 
+    /// @dev Suspending an org freezes its self-administration (OrgRegistry, PermissionRegistry); attesting
+    ///      an instance of its dApp is self-administration too. The operator keeps its own authority.
+    function test_attestInstance_bySuspendedPublisherAdmin_reverts() public {
+        _register();
+        vm.prank(operator);
+        orgRegistry.suspendOrg(address(publisherOrgId), "sanctions review");
+
+        vm.prank(publisherAdmin);
+        vm.expectRevert("DappRegistry: publisher org not active");
+        dappRegistry.attestInstance(dappId, instance);
+        assertEq(dappRegistry.dappOf(instance), bytes32(0));
+
+        vm.prank(operator);
+        dappRegistry.attestInstance(dappId, instance);
+        assertEq(dappRegistry.dappOf(instance), dappId);
+    }
+
     function test_attestInstance_revertsForStranger() public {
         _register();
         vm.prank(stranger);

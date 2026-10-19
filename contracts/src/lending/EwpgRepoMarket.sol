@@ -932,35 +932,17 @@ contract EwpgRepoMarket is RegisterwerkGated, ReentrancyGuardTransient {
     ///      reserve ({reserveFactorBps} share) and depositors (the remainder), then rolls
     ///      `lastAccrualTimestamp` forward. Unlike `EwpgRepoFacility`'s rate-based
     ///      approximation, this computes the actual underlying-token interest amount so the
-    ///      reserve split is exact regardless of utilization drift within the period.
+    ///      reserve split is exact regardless of utilization drift within the period. The maths
+    ///      lives in {_pendingIndices}, which the views use too, so a view can never disagree with
+    ///      what the next state-changing call books.
     function _accrue() private {
-        uint256 timeDelta = block.timestamp - lastAccrualTimestamp;
-        if (timeDelta == 0) return;
+        if (block.timestamp == lastAccrualTimestamp) return;
+        // Project first: the projection measures the time since `lastAccrualTimestamp`.
+        (uint256 newLiquidityIndex, uint256 newBorrowIndex, uint256 reserveShare) = _pendingIndices();
         lastAccrualTimestamp = block.timestamp;
-        if (totalScaledDebt == 0) return;
-
-        uint256 debtBefore = Math.mulDiv(totalScaledDebt, borrowIndex, WAD);
-
-        uint256 util = utilization();
-        uint256 rate = baseRateWad + Math.mulDiv(slopeWad, util, WAD);
-        uint256 growth = Math.mulDiv(rate, timeDelta, SECONDS_PER_YEAR);
-        borrowIndex += Math.mulDiv(borrowIndex, growth, WAD);
-
-        uint256 debtAfter = Math.mulDiv(totalScaledDebt, borrowIndex, WAD);
-        uint256 interestAccrued = debtAfter - debtBefore;
-
-        uint256 reserveShare = Math.mulDiv(interestAccrued, reserveFactorBps, BPS_DENOMINATOR);
-        if (reserveShare > 0) {
-            totalReserves += reserveShare;
-        }
-
-        uint256 depositorShare = interestAccrued - reserveShare;
-        if (depositorShare > 0 && totalScaledDeposits > 0) {
-            uint256 totalDepositsUnderlying = Math.mulDiv(totalScaledDeposits, liquidityIndex, WAD);
-            if (totalDepositsUnderlying > 0) {
-                liquidityIndex += Math.mulDiv(liquidityIndex, depositorShare, totalDepositsUnderlying);
-            }
-        }
+        liquidityIndex = newLiquidityIndex;
+        borrowIndex = newBorrowIndex;
+        totalReserves += reserveShare;
     }
 
     /// @dev View-only projection of what {_accrue} would do, without mutating state. Returns

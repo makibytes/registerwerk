@@ -24,11 +24,6 @@ contract EwpgERC20 is ERC20, Ownable, EwpgCompliance, EwpgDocumentManagement {
     /// @notice Links this contract to the off-chain registry asset record.
     bytes32 public immutable assetId;
 
-    /// @dev Guards _update: when set to true, compliance checks are skipped for
-    ///      the current call frame. Used by forcedTransfer and forceBurn so that
-    ///      regulatory override operations bypass whitelist/freeze/pause.
-    bool private _inForceOp;
-
     constructor(
         string memory name,
         string memory symbol,
@@ -80,10 +75,8 @@ contract EwpgERC20 is ERC20, Ownable, EwpgCompliance, EwpgDocumentManagement {
         address to,
         uint256 amount,
         string calldata legalBasis
-    ) external override onlyRegistry {
-        _inForceOp = true;
+    ) external override onlyRegistry forceOp {
         _transfer(from, to, amount);
-        _inForceOp = false;
         emit ForcedTransfer(from, to, amount, legalBasis);
     }
 
@@ -116,10 +109,8 @@ contract EwpgERC20 is ERC20, Ownable, EwpgCompliance, EwpgDocumentManagement {
         address from,
         uint256 amount,
         string calldata legalBasis
-    ) external override onlyRegistry {
-        _inForceOp = true;
+    ) external override onlyRegistry forceOp {
         _burn(from, amount);
-        _inForceOp = false;
         emit ForceBurned(from, amount, legalBasis);
     }
 
@@ -134,7 +125,7 @@ contract EwpgERC20 is ERC20, Ownable, EwpgCompliance, EwpgDocumentManagement {
     /// @dev Enforce whitelist, freeze, and pause on all non-mint, non-burn transfers,
     ///      unless the call is a force operation (which bypasses compliance by design).
     function _update(address from, address to, uint256 amount) internal override {
-        if (!_inForceOp) {
+        if (!_inForceOp()) {
             if (from != address(0) && to != address(0)) {
                 // Normal transfer: check whitelist, freeze, pause
                 _requireTransferable(from, to);

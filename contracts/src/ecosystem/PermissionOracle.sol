@@ -32,6 +32,10 @@ contract PermissionOracle is AccessControl, IPermissionOracle {
 
     event ComponentUpdated(bytes32 indexed name, address oldAddress, address newAddress);
 
+    /// @notice A required component (org, permission or trusted-issuers registry) was set to the
+    ///         zero address. Every query would then revert instead of answering `false`.
+    error ZeroComponent(bytes32 name);
+
     constructor(
         address admin,
         IOrgRegistry orgRegistry_,
@@ -39,6 +43,9 @@ contract PermissionOracle is AccessControl, IPermissionOracle {
         EcosystemTrustedIssuersRegistry trustedIssuersRegistry_
     ) {
         require(admin != address(0), "PermissionOracle: zero admin address");
+        _requireComponent("ORG_REGISTRY", address(orgRegistry_));
+        _requireComponent("PERMISSION_REGISTRY", address(permissionRegistry_));
+        _requireComponent("TRUSTED_ISSUERS_REGISTRY", address(trustedIssuersRegistry_));
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(OPERATOR_ROLE, admin);
         orgRegistry = orgRegistry_;
@@ -49,11 +56,13 @@ contract PermissionOracle is AccessControl, IPermissionOracle {
     // ── Component pointers (operator) ─────────────────────────────────────────
 
     function setOrgRegistry(IOrgRegistry newRegistry) external onlyRole(OPERATOR_ROLE) {
+        _requireComponent("ORG_REGISTRY", address(newRegistry));
         emit ComponentUpdated("ORG_REGISTRY", address(orgRegistry), address(newRegistry));
         orgRegistry = newRegistry;
     }
 
     function setPermissionRegistry(IPermissionRegistry newRegistry) external onlyRole(OPERATOR_ROLE) {
+        _requireComponent("PERMISSION_REGISTRY", address(newRegistry));
         emit ComponentUpdated("PERMISSION_REGISTRY", address(permissionRegistry), address(newRegistry));
         permissionRegistry = newRegistry;
     }
@@ -62,6 +71,7 @@ contract PermissionOracle is AccessControl, IPermissionOracle {
         external
         onlyRole(OPERATOR_ROLE)
     {
+        _requireComponent("TRUSTED_ISSUERS_REGISTRY", address(newRegistry));
         emit ComponentUpdated("TRUSTED_ISSUERS_REGISTRY", address(trustedIssuersRegistry), address(newRegistry));
         trustedIssuersRegistry = newRegistry;
     }
@@ -164,6 +174,12 @@ contract PermissionOracle is AccessControl, IPermissionOracle {
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
+
+    /// @dev The DappRegistry may stay unset (instance attestation is opt-in); the other three are the
+    ///      oracle's whole job.
+    function _requireComponent(bytes32 name, address component) private pure {
+        if (component == address(0)) revert ZeroComponent(name);
+    }
 
     /// @dev A claim counts when its issuer is trusted for the topic in the ecosystem TIR
     ///      and the issuer itself still considers the claim valid (signature + revocation).

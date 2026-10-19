@@ -3,7 +3,6 @@ pragma solidity ^0.8.36;
 
 import "../standards/erc3525/ERC3525.sol";
 import "../compliance/EwpgCompliance.sol";
-import {TransientSlot} from "@openzeppelin/contracts/utils/TransientSlot.sol";
 
 /// @title EwpgERC3525
 /// @notice Semi-fungible security token (EIP-3525) for eWpG-regulated bonds and fund shares.
@@ -45,19 +44,6 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
 
     mapping(uint256 => SlotConfig) private _slots;
     mapping(uint256 => bool) private _frozenTokens; // tokenId → frozen
-    /// @dev True only while a registry force operation runs (it lifts the whitelist/freeze/pause
-    ///      hooks). Transient (EIP-1153): it is set and cleared inside one transaction, and as a
-    ///      storage bool it would create a slot (~110k gas under EIP-8037) in every forced operation.
-    bytes32 private constant _FORCE_OP_SLOT = keccak256("registerwerk.EwpgERC3525.inForceOp");
-
-    function _inForceOp() private view returns (bool) {
-        return TransientSlot.tload(TransientSlot.asBoolean(_FORCE_OP_SLOT));
-    }
-
-    function _setForceOp(bool active) private {
-        TransientSlot.tstore(TransientSlot.asBoolean(_FORCE_OP_SLOT), active);
-    }
-
     // ── Events ────────────────────────────────────────────────────────────────
 
     event SlotPaused(uint256 indexed slot, address indexed by);
@@ -169,12 +155,10 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         uint256 toTokenId,
         uint256 value,
         string calldata legalBasis
-    ) external onlyRegistry {
+    ) external onlyRegistry forceOp {
         require(slotOf(fromTokenId) == slotOf(toTokenId),
                 "EwpgERC3525: tokens in different slots");
-        _setForceOp(true);
         _transferValue(fromTokenId, toTokenId, value);
-        _setForceOp(false);
         emit ForcedValueTransfer(fromTokenId, toTokenId, value, legalBasis);
     }
 
@@ -182,11 +166,9 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         uint256 tokenId,
         uint256 value,
         string calldata legalBasis
-    ) external onlyRegistry {
-        _setForceOp(true);
+    ) external onlyRegistry forceOp {
         require(balanceOf(tokenId) >= value, "EwpgERC3525: insufficient balance");
         _burnValue(tokenId, value);
-        _setForceOp(false);
         emit ForcedValueBurn(tokenId, value, legalBasis);
     }
 
@@ -204,21 +186,21 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
         address to,
         uint256 value,
         string calldata legalBasis
-    ) external override onlyRegistry {
-        _setForceOp(true);
+    ) external override onlyRegistry forceOp {
         _transfer(from, to, value);
-        _setForceOp(false);
         emit ForcedTransfer(from, to, value, legalBasis);
     }
 
     /// @notice Approves `spender` for the NFT with id `value` on behalf of `owner`,
-    ///         bypassing owner consent.
+    ///         bypassing owner consent. `owner` must be the token's owner, so the audit event
+    ///         can never name someone else.
     function forcedApprove(
         address owner,
         address spender,
         uint256 value,
         string calldata legalBasis
     ) external override onlyRegistry {
+        require(_requireOwned(value) == owner, "EwpgERC3525: not the token owner");
         _approve(spender, value, address(0));
         emit ForcedApprove(owner, spender, value, legalBasis);
     }
@@ -226,19 +208,19 @@ contract EwpgERC3525 is ERC3525, EwpgCompliance {
     /// @notice Fully cancels the token with id `value`: burns all remaining balance and
     ///         deletes the NFT itself. Legal basis: eWpG §26 Einziehung. Unlike
     ///         forceBurnValue (which reduces a token's balance while keeping it alive),
-    ///         this removes the position entirely.
+    ///         this removes the position entirely. `from` must be the token's owner, so the audit
+    ///         event can never name someone else.
     function forceBurn(
         address from,
         uint256 value,
         string calldata legalBasis
-    ) external override onlyRegistry {
-        _setForceOp(true);
+    ) external override onlyRegistry forceOp {
+        require(_requireOwned(value) == from, "EwpgERC3525: not the token owner");
         uint256 remaining = balanceOf(value);
         if (remaining > 0) {
             _burnValue(value, remaining);
         }
         _burnToken(value);
-        _setForceOp(false);
         emit ForceBurned(from, value, legalBasis);
     }
 

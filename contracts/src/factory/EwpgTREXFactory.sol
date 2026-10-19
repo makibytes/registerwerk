@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.27;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@erc3643/factory/ITREXFactory.sol";
 import "@erc3643/ERC-3643/IERC3643.sol";
 import "@erc3643/ERC-3643/IERC3643IdentityRegistry.sol";
@@ -34,7 +34,7 @@ import {EwpgERC3643} from "../tokens/EwpgERC3643.sol";
  * The salt is a human-readable string (e.g. the assetId hex string) used for
  * CREATE2 — it must be unique across all deployments on a given chain.
  */
-contract EwpgTREXFactory is Ownable {
+contract EwpgTREXFactory is Ownable2Step {
     // ── Events ─────────────────────────────────────────────────────────────
 
     event EwpgSuiteDeployed(

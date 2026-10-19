@@ -92,4 +92,21 @@ contract EwpgTrexSuiteOwnershipTest is Test {
         ICtrAdmin(suite[3]).addClaimTopic(2);
         vm.stopPrank();
     }
+
+    /// @dev The suite factory itself hands over in two steps too (a mistyped successor must not be able
+    ///      to take or brick the deployment authority). {TrexSuiteDeployer} already accepted for `operator`.
+    function test_suiteFactoryOwnershipNeedsAcceptanceByTheNewOwner() public {
+        TrexDeployment memory trex = TrexSuiteDeployer.deploy(operator);
+        address successor = address(0x5);
+        assertEq(trex.factory.owner(), operator);
+
+        vm.prank(operator);
+        trex.factory.transferOwnership(successor);
+        assertEq(trex.factory.owner(), operator, "nominated, not yet in charge");
+        assertEq(trex.factory.pendingOwner(), successor);
+
+        vm.prank(successor);
+        trex.factory.acceptOwnership();
+        assertEq(trex.factory.owner(), successor);
+    }
 }

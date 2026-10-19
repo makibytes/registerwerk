@@ -85,10 +85,14 @@ contract DappRegistry is AccessControl, IDappRegistry {
         require(dapp.status == DappStatus.Active, "DappRegistry: dapp not active");
         require(instance != address(0), "DappRegistry: zero instance address");
         require(_dappOfInstance[instance] == bytes32(0), "DappRegistry: instance already attested");
-        require(
-            hasRole(OPERATOR_ROLE, msg.sender) || orgRegistry.isOrgAdmin(dapp.publisherOrg, msg.sender),
-            "DappRegistry: not operator or publisher admin"
-        );
+        if (!hasRole(OPERATOR_ROLE, msg.sender)) {
+            // Same rule as OrgRegistry and PermissionRegistry: suspending an org freezes its
+            // self-administration, and attesting an instance is self-administration.
+            require(orgRegistry.isOrgActive(dapp.publisherOrg), "DappRegistry: publisher org not active");
+            require(
+                orgRegistry.isOrgAdmin(dapp.publisherOrg, msg.sender), "DappRegistry: not operator or publisher admin"
+            );
+        }
 
         _dappOfInstance[instance] = dappId;
         emit InstanceAttested(dappId, instance);

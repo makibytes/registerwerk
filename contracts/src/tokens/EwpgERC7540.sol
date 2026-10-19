@@ -4,6 +4,7 @@ pragma solidity ^0.8.36;
 import "./EwpgERC4626.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 /// @title EwpgERC7540
 /// @notice Async tokenized vault (EIP-7540) for eWpG-regulated funds with T+1 / NAV-cutoff settlement.
@@ -36,7 +37,12 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 ///      address is unfrozen or the registry force-cancels the request to a
 ///      destination named per case (forceCancelDepositRequest / forceCancelRedeemRequest).
 ///      Forced operations on the vault's own share custody are rejected.
-contract EwpgERC7540 is EwpgERC4626 {
+///
+/// @dev Every function that calls the underlying token is `nonReentrant`. {requestDeposit} books the
+///      balance it *received*; a token with a sender hook (ERC-777 style) could re-enter it mid-transfer
+///      and have the inner deposit counted a second time in the outer one's balance delta, minting shares
+///      for cash that never arrived.
+contract EwpgERC7540 is EwpgERC4626, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
     // ── Storage ───────────────────────────────────────────────────────────────
@@ -261,6 +267,7 @@ contract EwpgERC7540 is EwpgERC4626 {
     ///         assets and the other pending requests.
     function requestDeposit(uint256 assets, address controller, address owner)
         external
+        nonReentrant
         returns (uint256 requestId)
     {
         require(assets > 0, "EwpgERC7540: zero assets");
@@ -332,7 +339,7 @@ contract EwpgERC7540 is EwpgERC4626 {
 
     /// @notice Operator fulfills a pending redemption request at the current NAV, which must have been
     ///         struck at or after the request's dealing point (see {setDealingCutoff}).
-    function fulfillRedeemRequest(uint256 requestId) external onlyRegistry {
+    function fulfillRedeemRequest(uint256 requestId) external onlyRegistry nonReentrant {
         RedeemRequest storage req = _redeemRequests[requestId];
         require(req.pending, "EwpgERC7540: not pending");
         require(block.timestamp >= _requestTimestamps[requestId] + _minSettlementDelay,
@@ -352,7 +359,7 @@ contract EwpgERC7540 is EwpgERC4626 {
 
     // ── Cancel ────────────────────────────────────────────────────────────────
 
-    function cancelDepositRequest(uint256 requestId) external {
+    function cancelDepositRequest(uint256 requestId) external nonReentrant {
         DepositRequest storage req = _depositRequests[requestId];
         require(req.pending, "EwpgERC7540: not pending");
         require(msg.sender == req.controller || msg.sender == registry,
@@ -386,7 +393,7 @@ contract EwpgERC7540 is EwpgERC4626 {
     // rejected because they would silently strand other investors' requests.
 
     function forceCancelDepositRequest(uint256 requestId, address to, string calldata legalBasis)
-        external onlyRegistry
+        external onlyRegistry nonReentrant
     {
         DepositRequest storage req = _depositRequests[requestId];
         require(req.pending, "EwpgERC7540: not pending");
@@ -404,10 +411,14 @@ contract EwpgERC7540 is EwpgERC4626 {
         require(req.pending, "EwpgERC7540: not pending");
         _requireForceDestination(to);
         req.pending = false;
-        _inForceOp = true;
-        _transfer(address(this), to, req.shares);
-        _inForceOp = false;
+        _releaseEscrowedShares(to, req.shares);
         emit ForcedRequestCancelled(requestId, to, legalBasis);
+    }
+
+    /// @dev Moves escrowed redemption shares to `to` past the whitelist/freeze/pause hooks (the
+    ///      registry's per-case destination decision stands in for them).
+    function _releaseEscrowedShares(address to, uint256 shares) private forceOp {
+        _transfer(address(this), to, shares);
     }
 
     function _requireForceDestination(address to) private view {

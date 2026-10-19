@@ -150,4 +150,47 @@ contract PermissionOracleTest is Test {
         vm.expectRevert();
         oracle.setOrgRegistry(orgRegistry);
     }
+
+    // A zero component would make every query revert instead of answering `false` (the oracle's own
+    // contract), and the operator could lock every gated dApp out with one mistyped call.
+
+    function test_constructor_rejectsZeroComponents() public {
+        vm.expectRevert(abi.encodeWithSelector(PermissionOracle.ZeroComponent.selector, bytes32("ORG_REGISTRY")));
+        new PermissionOracle(operator, IOrgRegistry(address(0)), permissions, tir);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(PermissionOracle.ZeroComponent.selector, bytes32("PERMISSION_REGISTRY"))
+        );
+        new PermissionOracle(operator, orgRegistry, IPermissionRegistry(address(0)), tir);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(PermissionOracle.ZeroComponent.selector, bytes32("TRUSTED_ISSUERS_REGISTRY"))
+        );
+        new PermissionOracle(operator, orgRegistry, permissions, EcosystemTrustedIssuersRegistry(address(0)));
+    }
+
+    function test_setters_rejectZeroAndKeepTheOldComponent() public {
+        vm.startPrank(operator);
+        vm.expectRevert(abi.encodeWithSelector(PermissionOracle.ZeroComponent.selector, bytes32("ORG_REGISTRY")));
+        oracle.setOrgRegistry(IOrgRegistry(address(0)));
+        vm.expectRevert(
+            abi.encodeWithSelector(PermissionOracle.ZeroComponent.selector, bytes32("PERMISSION_REGISTRY"))
+        );
+        oracle.setPermissionRegistry(IPermissionRegistry(address(0)));
+        vm.expectRevert(
+            abi.encodeWithSelector(PermissionOracle.ZeroComponent.selector, bytes32("TRUSTED_ISSUERS_REGISTRY"))
+        );
+        oracle.setTrustedIssuersRegistry(EcosystemTrustedIssuersRegistry(address(0)));
+        vm.stopPrank();
+
+        assertEq(address(oracle.orgRegistry()), address(orgRegistry));
+        assertTrue(oracle.hasPermission(alice, PERM_OPEN));
+    }
+
+    /// @dev Instance attestation is opt-in, so the DappRegistry may be unset again.
+    function test_dappRegistry_mayStayUnset() public {
+        vm.prank(operator);
+        oracle.setDappRegistry(IDappRegistryView(address(0)));
+        assertFalse(oracle.isApprovedInstance(address(0x42)));
+    }
 }

@@ -11,6 +11,7 @@ import "@erc3643/compliance/modular/ModularCompliance.sol";
 import "@onchain-id/solidity/contracts/Identity.sol";
 import "@onchain-id/solidity/contracts/proxy/ImplementationAuthority.sol";
 import "@onchain-id/solidity/contracts/factory/IdFactory.sol";
+import {Vm} from "forge-std/Vm.sol";
 import "../../src/factory/EwpgTREXFactory.sol";
 import "../../src/tokens/EwpgERC3643.sol";
 
@@ -43,7 +44,9 @@ struct TrexDeployment {
 ///      caller had written this deployment sequence inline. `deploy` still finishes by
 ///      explicitly transferring ownership of every `Ownable` piece of infrastructure to
 ///      `owner_`, so callers get a deterministic result regardless of who happened to be
-///      `msg.sender` during the intermediate steps.
+///      `msg.sender` during the intermediate steps. ({EwpgTREXFactory} is two-step: the helper
+///      accepts on `owner_`'s behalf when `owner_` is not already the deployer — a cheat-code
+///      `prank`, which only ever happens in a test.)
 library TrexSuiteDeployer {
     /// @notice Deploys a complete, empty T-REX + ONCHAINID environment and hands
     ///         ownership of the reusable infrastructure (the T-REX implementation
@@ -95,7 +98,13 @@ library TrexSuiteDeployer {
         // ── 4. Hand control to the caller-designated owner ───────────────────
         trexAuthority.transferOwnership(owner_);
         idFactory.transferOwnership(owner_);
+        // The eWpG factory hands over in two steps. A script deploying as `owner_` already is the owner
+        // (nothing to accept); a test deploying for another address accepts on that address's behalf.
         factory.transferOwnership(owner_);
+        if (factory.owner() != owner_) {
+            Vm(address(uint160(uint256(keccak256("hevm cheat code"))))).prank(owner_);
+            factory.acceptOwnership();
+        }
 
         dep.factory = factory;
         dep.idFactory = idFactory;
