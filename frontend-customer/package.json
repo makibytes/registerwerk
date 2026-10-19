@@ -2,7 +2,7 @@
   "name": "registerwerk-customer",
   "version": "0.1.0",
   "engines": {
-    "node": "24.x"
+    "node": "26.x"
   },
   "scripts": {
     "prestart": "node ../frontend-shared/link-node-modules.mjs",

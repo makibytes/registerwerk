@@ -67,7 +67,7 @@ app — both are always reached directly at their own port.
 
 - Docker & Docker Compose
 - JDK 25 (for local backend development; the build targets Java 25 and fails on older JDKs)
-- Node 24 / npm (for frontend development)
+- Node 26 / npm (for frontend development)
 - Foundry (`curl -L https://foundry.paradigm.xyz | bash`)
 
 ### 1. Copy environment file

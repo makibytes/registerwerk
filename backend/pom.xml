@@ -416,6 +416,27 @@
 
   <build>
     <plugins>
+      <!-- ── Toolchain floor ──────────────────────────────────────────────── -->
+      <!-- A clear message instead of a compiler error deep in the build when the JDK is too old
+           (`java.version` is 25) or Maven predates the wrapper's 3.9 line. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-toolchain</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <requireMavenVersion><version>[3.9.6,)</version></requireMavenVersion>
+                <requireJavaVersion><version>[25,)</version></requireJavaVersion>
+                <banDuplicatePomDependencyVersions/>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
       <!-- ── Spring Boot Maven Plugin ────────────────────────────────────── -->
       <plugin>
         <groupId>org.springframework.boot</groupId>

@@ -637,7 +637,7 @@ zamaRelayer:
     limits:
       cpu: 500m
       memory: 512Mi
-  # node:24.19.0-alpine's runtime stage already runs as `USER node` (uid/gid 1000) at the
+  # node:26.12.0-alpine's runtime stage already runs as `USER node` (uid/gid 1000) at the
   # Dockerfile level — unlike the two nginx-based frontends above, nothing here binds a privileged
   # port (PORT defaults to 3001), so no NET_BIND_SERVICE capability is needed and runAsNonRoot only
   # has to agree with the image's own default user.

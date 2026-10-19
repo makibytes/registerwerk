@@ -15,7 +15,7 @@
 # Build context is the repo root, because mkdocs.yml lives there and docs/hooks.py is referenced
 # from it as `docs/hooks.py`.
 
-FROM node:24.19.0-alpine AS docs-assets
+FROM node:26.12.0-alpine AS docs-assets
 WORKDIR /assets
 COPY docs/package.json docs/package-lock.json ./
 RUN npm ci --omit=dev

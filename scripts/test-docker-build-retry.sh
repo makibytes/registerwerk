@@ -16,7 +16,7 @@ echo "$count" > "$STUB_DIR/count"
 echo "$*" >> "$STUB_DIR/args"
 case "$(sed -n "${count}p" "$STUB_DIR/plan")" in
   ok)        echo "stub: built"; exit 0 ;;
-  transient) echo "ERROR: failed to solve: node:24: unexpected status from HEAD request: 429 Too Many Requests" >&2; exit 1 ;;
+  transient) echo "ERROR: failed to solve: node:26: unexpected status from HEAD request: 429 Too Many Requests" >&2; exit 1 ;;
   tls)       echo "Get \"https://registry-1.docker.io/v2/\": net/http: TLS handshake timeout" >&2; exit 1 ;;
   denied)    echo "Error response from daemon: toomanyrequests: You have reached your unauthenticated pull rate limit." >&2; exit 1 ;;
   *)         echo "ERROR: process \"/bin/sh -c npm ci\" did not complete successfully: exit code: 1" >&2; exit 1 ;;
