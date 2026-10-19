@@ -3,8 +3,8 @@ pragma solidity ^0.8.36;
 
 import "forge-std/Script.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IEntryPoint} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
-import {ERC4337Utils} from "@openzeppelin/contracts/account/utils/draft-ERC4337Utils.sol";
+import {IEntryPoint} from "@openzeppelin/contracts/interfaces/IERC4337.sol";
+import {ERC4337Utils} from "@openzeppelin/contracts/account/utils/ERC4337Utils.sol";
 import "../src/ecosystem/interfaces/IPermissionOracle.sol";
 import "../src/ecosystem/EwpgPaymaster.sol";
 import "../src/examples/EwpgRepoFacility.sol";

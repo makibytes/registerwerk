@@ -30,6 +30,10 @@ remappings = [
     # eth-infinitism/account-abstraction v0.8.0 (GPL-3.0 / MIT): a pinned submodule used ONLY by
     # test/ecosystem/EwpgPaymaster.t.sol to instantiate the real EntryPoint; nothing in src/ or script/
     # imports it, so it is never deployed or shipped with the repo's own (proprietary) sources.
+    # Deliberately NOT on v0.9.0 although that is the newest release: the paymaster, the backend's
+    # voucher service (requiredPrefund) and the deploy script target the canonical EntryPoint v0.8
+    # singleton, and the test must exercise the code that runs there. Moving to v0.9 (ABI-compatible,
+    # adds paymasterSignature) is a product decision that also needs a v0.9 bundler.
     "@account-abstraction/contracts/=lib/account-abstraction/contracts/"
 ]
 fs_permissions = [

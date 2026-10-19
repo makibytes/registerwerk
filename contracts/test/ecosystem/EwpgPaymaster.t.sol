@@ -6,7 +6,7 @@ import {
     PackedUserOperation as OzPackedUserOperation,
     IEntryPoint as OzIEntryPoint,
     IPaymaster
-} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+} from "@openzeppelin/contracts/interfaces/IERC4337.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {EntryPoint} from "@account-abstraction/contracts/core/EntryPoint.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";

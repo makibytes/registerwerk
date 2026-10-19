@@ -6,7 +6,7 @@ import {ERC7821} from "@openzeppelin/contracts/account/extensions/draft-ERC7821.
 import {SignerWebAuthn} from "@openzeppelin/contracts/utils/cryptography/signers/SignerWebAuthn.sol";
 import {AbstractSigner} from "@openzeppelin/contracts/utils/cryptography/signers/AbstractSigner.sol";
 import {SignerP256} from "@openzeppelin/contracts/utils/cryptography/signers/SignerP256.sol";
-import {IEntryPoint} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+import {IEntryPoint} from "@openzeppelin/contracts/interfaces/IERC4337.sol";
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import {Execution} from "@openzeppelin/contracts/interfaces/draft-IERC7579.sol";
 import {ERC7579Utils} from "@openzeppelin/contracts/account/utils/draft-ERC7579Utils.sol";

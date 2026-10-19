@@ -2,7 +2,7 @@
 pragma solidity ^0.8.36;
 
 import "forge-std/Test.sol";
-import {IEntryPoint, PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+import {IEntryPoint, PackedUserOperation} from "@openzeppelin/contracts/interfaces/IERC4337.sol";
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import {Account as ERC4337Account} from "@openzeppelin/contracts/account/Account.sol";
 import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
