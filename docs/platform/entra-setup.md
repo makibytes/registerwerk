@@ -191,6 +191,10 @@ declaring the deployment good.
       count. This covers Graph reachability, token acquisition and context availability in one call.
 - [ ] **Sign in as a test customer.** Conditional Access should force MFA registration if none
       exists.
+- [ ] **Check the role-based navigation.** The portal reads the account's roles and legal entity from
+      `GET /api/v1/auth/session` (resolved from the `app_user` row), not from the Entra token, which carries
+      neither. The menu must match the roles you assigned; if it is empty, that request failed (for example
+      403 because no `app_user` row exists for this sign-in yet).
 - [ ] **Decode the access token.** Confirm `aud` matches `JWT_AUDIENCE`, and that `acrs`,
       `xms_cc` and `auth_time` are present. If `acrs` is missing, re-check the optional claims —
       this is the single most common misconfiguration.

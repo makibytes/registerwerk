@@ -1,7 +1,10 @@
 import { Injectable, inject } from '@angular/core';
+import { HttpClient, HttpContext } from '@angular/common/http';
 import type { AccountInfo, PublicClientApplication } from '@azure/msal-browser';
-import { Observable, from, of, throwError } from 'rxjs';
+import { SUPPRESS_ERROR_TOAST } from '@registerwerk/ui';
+import { Observable, firstValueFrom, from, of, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
+import { environment } from '../../../environments/environment';
 import { AUTH_CONFIG } from './auth-config';
 import { TokenSource } from './token-source';
 
@@ -35,15 +38,27 @@ function decodePayload(token: string): Record<string, unknown> {
 @Injectable()
 export class MsalTokenSource extends TokenSource {
   private readonly config = inject(AUTH_CONFIG);
+  private readonly http = inject(HttpClient);
 
   private pca!: PublicClientApplication;
   private account: AccountInfo | null = null;
   private cachedToken: string | null = null;
+  /**
+   * The account as the backend resolves it (`GET /auth/session`): roles and legal entity come from the
+   * `app_user` row, never from the IdP, so the Entra access token itself carries neither. Null until
+   * loaded, or when the backend has no account for this sign-in yet.
+   */
+  private session: Record<string, unknown> | null = null;
   /** Retained from the dynamic import: `instanceof` needs the constructor, not just the type. */
   private interactionRequiredError!: new (...args: never[]) => Error;
 
+  /** Seam for the tests: the dynamic import is what keeps MSAL out of the initial bundle. */
+  protected loadMsal(): Promise<typeof import('@azure/msal-browser')> {
+    return import('@azure/msal-browser');
+  }
+
   async initialize(): Promise<void> {
-    const msal = await import('@azure/msal-browser');
+    const msal = await this.loadMsal();
     this.interactionRequiredError = msal.InteractionRequiredAuthError;
 
     this.pca = new msal.PublicClientApplication({
@@ -78,6 +93,7 @@ export class MsalTokenSource extends TokenSource {
       this.pca.setActiveAccount(this.account);
       // Prime the cache so guards, which are synchronous, see a signed-in user on first paint.
       await this.refreshSilently();
+      await this.loadSession();
     }
   }
 
@@ -88,7 +104,8 @@ export class MsalTokenSource extends TokenSource {
   getProfile(): Record<string, unknown> | null {
     if (!this.cachedToken) return null;
     try {
-      return decodePayload(this.cachedToken);
+      const claims = decodePayload(this.cachedToken);
+      return this.session ? { ...claims, ...this.session } : claims;
     } catch {
       return null;
     }
@@ -164,6 +181,7 @@ export class MsalTokenSource extends TokenSource {
     // Not an error: the error interceptor calls this on a genuine 401 before redirecting to
     // sign-in, and dropping the cached token is exactly the right local effect.
     this.cachedToken = null;
+    this.session = null;
   }
 
   enterImpersonation(_code: string, _entityId: string, _entityName: string): Observable<void> {
@@ -185,6 +203,22 @@ export class MsalTokenSource extends TokenSource {
 
   supportsImpersonation(): boolean {
     return false;
+  }
+
+  /**
+   * Fetches the backend's view of the signed-in account. The answer to this probe belongs to this method,
+   * so its failure (for example 403 for an account that has not been provisioned yet) neither toasts nor
+   * blocks sign-in: the token claims remain the fallback, as before.
+   */
+  private async loadSession(): Promise<void> {
+    if (!this.cachedToken) return;
+    try {
+      this.session = await firstValueFrom(this.http.get<Record<string, unknown>>(
+        `${environment.apiUrl}/auth/session`,
+        { context: new HttpContext().set(SUPPRESS_ERROR_TOAST, true) }));
+    } catch {
+      this.session = null;
+    }
   }
 
   private async refreshSilently(): Promise<void> {

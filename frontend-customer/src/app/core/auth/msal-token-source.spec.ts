@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { SUPPRESS_ERROR_TOAST } from '@registerwerk/ui';
 import { MsalTokenSource } from './msal-token-source';
 import { AUTH_CONFIG, AuthConfig } from './auth-config';
 
@@ -25,7 +28,7 @@ describe('MsalTokenSource', () => {
 
     beforeEach(() => {
         TestBed.configureTestingModule({
-            providers: [MsalTokenSource, { provide: AUTH_CONFIG, useValue: entraConfig }],
+            providers: [MsalTokenSource, { provide: AUTH_CONFIG, useValue: entraConfig }, provideHttpClient(), provideHttpClientTesting()],
         });
         source = TestBed.inject(MsalTokenSource);
     });
@@ -109,6 +112,71 @@ describe('MsalTokenSource', () => {
             (source as unknown as {
                 cachedToken: string | null;
             }).cachedToken = 'not-a-jwt';
+            expect(source.getProfile()).toBeNull();
+        });
+    });
+
+    describe('initialize() - the profile comes from the backend, not from the raw Entra token', () => {
+        // An Entra access token carries neither the account's roles (they live in app_user, never in the IdP)
+        // nor its legal entity; the backend resolves both and `GET /auth/session` returns them. Reading the
+        // raw token alone left every role-gated route and menu entry empty in Entra mode.
+        const entraToken = () => fakeJwt({ oid: 'entra-oid', preferred_username: 'a@example.com', name: 'Entra Name' });
+        const account = { homeAccountId: 'h', username: 'a@example.com' };
+        const sessionProfile = {
+            userId: 'u1', roles: ['INVESTOR'], email: 'a@example.com', name: 'Anna', entityId: 'ent-1',
+            entityName: null, impersonating: false, expiresAt: 1,
+        };
+        let http: HttpTestingController;
+
+        function stubMsal(silent: () => Promise<{ accessToken: string }>) {
+            vi.spyOn(source as unknown as { loadMsal(): Promise<unknown> }, 'loadMsal').mockResolvedValue({
+                PublicClientApplication: class {
+                    initialize = vi.fn(async () => undefined);
+                    handleRedirectPromise = vi.fn(async () => null);
+                    getActiveAccount = vi.fn(() => account);
+                    getAllAccounts = vi.fn(() => [account]);
+                    setActiveAccount = vi.fn();
+                    acquireTokenSilent = vi.fn(silent);
+                },
+                InteractionRequiredAuthError: class extends Error {},
+            });
+        }
+        const sessionRequest = () => vi.waitFor(() => http.expectOne(r => r.url.endsWith('/auth/session')));
+
+        beforeEach(() => { http = TestBed.inject(HttpTestingController); });
+
+        it('uses the roles and entity of GET /auth/session over the token claims', async () => {
+            stubMsal(async () => ({ accessToken: entraToken() }));
+
+            const init = source.initialize();
+            const req = await sessionRequest();
+            // the probe answers its caller: a 403 for a not-yet-provisioned account must not toast "Access denied"
+            expect(req.request.context.get(SUPPRESS_ERROR_TOAST)).toBe(true);
+            req.flush(sessionProfile);
+            await init;
+
+            expect(source.getProfile()).toMatchObject({ roles: ['INVESTOR'], entityId: 'ent-1', name: 'Anna', email: 'a@example.com' });
+        });
+
+        it('falls back to the token claims when the session call fails (account not provisioned yet)', async () => {
+            stubMsal(async () => ({ accessToken: entraToken() }));
+
+            const init = source.initialize();
+            (await sessionRequest()).flush({ message: 'no account' }, { status: 403, statusText: 'Forbidden' });
+            await init;
+
+            expect(source.isAuthenticated()).toBe(true);
+            expect(source.getProfile()).toMatchObject({ name: 'Entra Name', preferred_username: 'a@example.com' });
+            expect(source.getProfile()?.['roles']).toBeUndefined();
+        });
+
+        it('asks the backend nothing when no token could be acquired silently', async () => {
+            stubMsal(async () => { throw new Error('login_required'); });
+
+            await source.initialize();
+
+            http.expectNone(r => r.url.endsWith('/auth/session'));
+            expect(source.isAuthenticated()).toBe(false);
             expect(source.getProfile()).toBeNull();
         });
     });

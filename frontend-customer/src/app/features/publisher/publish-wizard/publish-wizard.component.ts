@@ -20,6 +20,7 @@ import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
 import { MarketplaceService } from '../../../core/api/marketplace.service';
+import { manifestSignRequest } from './manifest-signing';
 import {
   DappListingView,
   DappRequiredPermissionView,
@@ -30,7 +31,7 @@ import {
 
 /** Minimal EIP-1193 provider shape — just enough of `window.ethereum` for account + signing calls. */
 interface Eip1193Provider {
-  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
+  request(args: { method: string; params?: readonly unknown[] }): Promise<unknown>;
 }
 
 function windowEthereum(): Eip1193Provider | undefined {
@@ -607,10 +608,7 @@ export class PublishWizardComponent implements OnInit {
       if (!account) {
         throw new Error(`Browser wallet has no account ${wallet}. Switch accounts and retry.`);
       }
-      this.signature = (await ethereum.request({
-        method: 'personal_sign',
-        params: [this.manifestHash, account],
-      })) as string;
+      this.signature = (await ethereum.request(manifestSignRequest(this.manifestHash, account))) as string;
       signed = true;
     } catch (err: unknown) {
       this.error = err instanceof Error ? err.message : 'Browser wallet signing failed.';
