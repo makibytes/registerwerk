@@ -18,11 +18,15 @@ COPY package.json package-lock.json ./
 # avoidable HIGH/CRITICAL advisories even though the relayer starts with plain `node`.
 # The pinned node tag can lag patched Alpine packages (the Trivy gate in CI fails on a fixable
 # OpenSSL HIGH otherwise), so the runtime layer is upgraded during the build, as backend/Dockerfile does.
+# viem lists `typescript` as an (optional) peer and npm keeps it when it is in the tree, even with
+# --omit=dev. Since TypeScript 7 that package ships a native compiler written in Go, whose standard
+# library carries its own HIGH advisories; nothing here compiles at run time, so it is removed.
 RUN apk upgrade --no-cache \
     && apk add --no-cache python3 make g++ \
     && npm ci --omit=dev \
     && npm uninstall --global npm \
-    && apk del python3 make g++
+    && apk del python3 make g++ \
+    && rm -rf node_modules/typescript node_modules/@typescript
 COPY --from=builder /app/dist ./dist
 USER node
 EXPOSE 3001
