@@ -14,6 +14,7 @@ import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.shared.DocumentSigningService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.Money;
 import de.makibytes.registerwerk.shared.RegisterClock;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -30,7 +31,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -247,7 +247,7 @@ public class SteuerbescheinigungService {
                             ? (line.asset().getIsin() != null ? line.asset().getIsin() : line.asset().getName())
                             : "(Asset gelöscht)";
                         PdfHelper.writeText(content, cols[0], y, fontRegular, 8, PdfHelper.truncate(assetDesc, 32));
-                        PdfHelper.writeText(content, cols[1], y, fontRegular, 8, line.grossIncome().setScale(2, RoundingMode.HALF_UP).toPlainString() + " " + line.currency());
+                        PdfHelper.writeText(content, cols[1], y, fontRegular, 8, Money.forDisplay(line.grossIncome(), line.currency()).toPlainString() + " " + line.currency());
                         PdfHelper.writeText(content, cols[2], y, fontRegular, 8, "Coupon-Service (settled)");
                         y -= 12;
                     }
@@ -267,7 +267,7 @@ public class SteuerbescheinigungService {
                     }
                     PdfHelper.writeText(content, margin, y, fontBold, 10,
                             "Summe Erträge " + total.getKey() + ": "
-                                    + total.getValue().setScale(2, RoundingMode.HALF_UP).toPlainString() + " " + total.getKey());
+                                    + Money.forDisplay(total.getValue(), total.getKey()).toPlainString() + " " + total.getKey());
                     y -= 14;
                 }
                 if (y < margin + 100) { // keep the closing notes together above the footer

@@ -14,6 +14,7 @@ import de.makibytes.registerwerk.finality.api.FinalityLevel;
 import de.makibytes.registerwerk.finality.api.GatedOperation;
 import de.makibytes.registerwerk.shared.DocumentSigningService;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.Money;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -27,7 +28,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -236,7 +236,7 @@ public class CorporateActionConfirmationService {
                     write(c, MARGIN, y, fontBold, 11, "Zahlungen (Fortsetzung / continued):");
                     y -= 16;
                 }
-                writeRow(c, cols, y, fontRegular, entry, entitiesById);
+                writeRow(c, cols, y, fontRegular, entry, entitiesById, action.getCurrency());
                 y -= 12;
             }
 
@@ -272,12 +272,13 @@ public class CorporateActionConfirmationService {
     }
 
     private void writeRow(PDPageContentStream c, float[] cols, float y, PDType1Font font,
-                          CorporateActionEntry entry, Map<UUID, LegalEntity> entitiesById) throws IOException {
+                          CorporateActionEntry entry, Map<UUID, LegalEntity> entitiesById, String currency)
+            throws IOException {
         LegalEntity investor = entry.getInvestorId() != null ? entitiesById.get(entry.getInvestorId()) : null;
         write(c, cols[0], y, font, 8, safe(investor != null ? investor.getEntityNumber() : null));
         write(c, cols[1], y, font, 8, entry.getNominalAtRecord() != null ? entry.getNominalAtRecord().toPlainString() : "0");
         write(c, cols[2], y, font, 8, entry.getEntitlementAmount() != null
-                ? entry.getEntitlementAmount().setScale(2, RoundingMode.HALF_UP).toPlainString() : "—");
+                ? Money.forDisplay(entry.getEntitlementAmount(), currency).toPlainString() : "—");
         String wallet = entry.getWalletAddress();
         write(c, cols[3], y, font, 8, wallet != null ? wallet.substring(0, Math.min(16, wallet.length())) + "…" : "—");
     }

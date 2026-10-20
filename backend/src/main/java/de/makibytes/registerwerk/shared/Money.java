@@ -48,6 +48,19 @@ public final class Money {
         return round(amount, minorUnits(currency));
     }
 
+    /**
+     * An already-computed figure for a printed document: at the currency's minor unit (JPY 0, EUR 2, BHD 3 digits)
+     * when {@code currency} is a valid ISO 4217 code, otherwise exactly as stored. Unlike {@link #round} this never
+     * refuses: a legacy row without a usable currency must still print, and printing must not invent digits.
+     */
+    public static BigDecimal forDisplay(BigDecimal amount, String currency) {
+        try {
+            return round(amount, currency);
+        } catch (IllegalArgumentException unknownCurrency) {
+            return amount;
+        }
+    }
+
     /** {@code amount} rounded {@link #MODE} to {@code scale} decimals (e.g. a stablecoin rail's decimals). */
     public static BigDecimal round(BigDecimal amount, int scale) {
         return amount.setScale(scale, MODE);

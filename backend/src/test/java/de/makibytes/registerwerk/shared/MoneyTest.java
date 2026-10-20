@@ -46,4 +46,17 @@ class MoneyTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Money.round(BigDecimal.ONE, (String) null)).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void forDisplayPrintsAtTheCurrencysMinorUnitOrAsStored() {
+        assertThat(Money.forDisplay(new BigDecimal("1000"), "JPY")).hasToString("1000");
+        assertThat(Money.forDisplay(new BigDecimal("1.234"), "BHD")).hasToString("1.234");
+        assertThat(Money.forDisplay(new BigDecimal("45"), "EUR")).hasToString("45.00");
+        assertThat(Money.forDisplay(new BigDecimal("1.005"), "EUR")).as("half-up, never a truncated digit")
+                .hasToString("1.01");
+        // A legacy row without a usable currency still prints, exactly as stored: no invented digits, no exception.
+        assertThat(Money.forDisplay(new BigDecimal("45.5"), null)).hasToString("45.5");
+        assertThat(Money.forDisplay(new BigDecimal("45.5"), "?")).hasToString("45.5");
+        assertThat(Money.forDisplay(new BigDecimal("45.5"), "XXX")).hasToString("45.5");
+    }
 }
