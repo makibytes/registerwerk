@@ -84,8 +84,10 @@ variables — `ZAMA_CONFIG_PRESET=sepolia`, `ZAMA_OPERATOR_DECRYPT_PRIVATE_KEY`,
     are placeholders that report "not configured" until a vendor client is wired, parked decision
     T7-05) or acknowledge the exception explicitly with `RELAYER_ALLOW_ENV_KEK=true` (logged as a
     warning). Production mode also requires `OPERATOR_DECRYPT_DURATION_DAYS` to be set explicitly
-    (the demo default is 365 days); a shorter lifetime means more frequent re-authorisation
-    (open decision T7-07). The key derivation of the env provider is unchanged on purpose: it stays
+    (the demo default is 365 days; the value must be an integer from 1 to 365, as the KMS accepts at
+    most that); a shorter lifetime means more frequent re-authorisation (open decision T7-07). It also
+    requires `RELAYER_API_KEY` to be at least 32 bytes. `PORT`, `CHAIN_ID` and `GATEWAY_CHAIN_ID` must be
+    integers: a typo now stops the start instead of surfacing later as a `NaN`. The key derivation of the env provider is unchanged on purpose: it stays
     byte-compatible with the backend and with already wrapped values.
 
 If the operator decrypt key may be compromised, revoke it per token:

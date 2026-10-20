@@ -85,6 +85,22 @@ function isTrue(env: NodeJS.ProcessEnv, name: string): boolean {
   return (env[name] ?? '').trim().toLowerCase() === 'true';
 }
 
+/** The shortest `RELAYER_API_KEY` production mode accepts (bytes), as for the backend's `JWT_DEV_SECRET`. */
+const MIN_PRODUCTION_API_KEY_BYTES = 32;
+
+/**
+ * An integer from the environment within [min, max]. `Number('abc')` is NaN and `Number('')` is 0; a NaN
+ * port or an EIP-712 `durationDays` would only fail much later, far from the typo that caused it.
+ */
+function intEnv(env: NodeJS.ProcessEnv, name: string, fallback: number, min: number, max: number): number {
+  const raw = (env[name] ?? '').trim();
+  const value = raw === '' ? fallback : Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}, got: ${raw === '' ? fallback : raw}`);
+  }
+  return value;
+}
+
 function requireEnv(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (!value || value.trim() === '') {
@@ -109,11 +125,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayerConfig 
   }
 
   const config: RelayerConfig = {
-    port: Number(env.PORT ?? '3001'),
-    chainId: Number(env.CHAIN_ID ?? '11155111'),
+    port: intEnv(env, 'PORT', 3001, 1, 65535),
+    chainId: intEnv(env, 'CHAIN_ID', 11155111, 1, Number.MAX_SAFE_INTEGER),
     preset: preset as 'sepolia' | 'custom',
     sepoliaNetworkUrlOverride: env.SEPOLIA_NETWORK_RPC_URL,
-    operatorDecryptDurationDays: Number(env.OPERATOR_DECRYPT_DURATION_DAYS ?? '365'),
+    // The KMS accepts a decryption authorisation of at most 365 days.
+    operatorDecryptDurationDays: intEnv(env, 'OPERATOR_DECRYPT_DURATION_DAYS', 365, 1, 365),
     apiKey: requireEnv(env, 'RELAYER_API_KEY'),
   };
 
@@ -122,7 +139,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayerConfig 
       networkUrl: requireEnv(env, 'NETWORK_RPC_URL'),
       relayerUrl: requireEnv(env, 'RELAYER_URL'),
       chainId: config.chainId,
-      gatewayChainId: Number(requireEnv(env, 'GATEWAY_CHAIN_ID')),
+      gatewayChainId: intEnv(env, 'GATEWAY_CHAIN_ID', Number.NaN, 1, Number.MAX_SAFE_INTEGER),
       aclContractAddress: requireEnv(env, 'ACL_CONTRACT_ADDRESS'),
       kmsContractAddress: requireEnv(env, 'KMS_CONTRACT_ADDRESS'),
       inputVerifierContractAddress: requireEnv(env, 'INPUT_VERIFIER_CONTRACT_ADDRESS'),
@@ -131,6 +148,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayerConfig 
         env, 'VERIFYING_CONTRACT_ADDRESS_INPUT_VERIFICATION'
       ),
     };
+  }
+
+  if (productionMode && Buffer.byteLength(config.apiKey, 'utf8') < MIN_PRODUCTION_API_KEY_BYTES) {
+    throw new Error(
+      `RELAYER_PRODUCTION_MODE=true requires RELAYER_API_KEY to be at least ${MIN_PRODUCTION_API_KEY_BYTES} bytes ` +
+      '(it is the only credential in front of the decryption capability)'
+    );
   }
 
   config.operatorDecryptPrivateKey = resolveOperatorDecryptPrivateKey(env, productionMode);

@@ -5,6 +5,7 @@ import { toHex } from '../src/hex.js';
 
 const OPERATOR_KEY = `0x${'1'.repeat(64)}`;
 const API_KEY = 'test-relayer-api-key';
+const STRONG_API_KEY = 'x'.repeat(40);
 /** Every scenario below needs a valid RELAYER_API_KEY present so it can exercise what it's
  *  actually testing rather than failing on the (also required, ) API key check first. */
 const withApiKey = (env: Record<string, string | undefined> = {}) => ({ RELAYER_API_KEY: API_KEY, ...env });
@@ -142,7 +143,7 @@ describe('loadConfig', () => {
       return { OPERATOR_DECRYPT_PRIVATE_KEY_WRAPPED: wrapped, RELAYER_KEK_MASTER_KEY: 'master' };
     };
     const prod = (extra: Record<string, string | undefined> = {}) =>
-      withApiKey({ RELAYER_PRODUCTION_MODE: 'true', OPERATOR_DECRYPT_DURATION_DAYS: '30', ...extra });
+      withApiKey({ RELAYER_API_KEY: STRONG_API_KEY, RELAYER_PRODUCTION_MODE: 'true', OPERATOR_DECRYPT_DURATION_DAYS: '30', ...extra });
 
     it('refuses the ENV_VAR KEK provider unless explicitly allowed', () => {
       expect(() => loadConfig(prod(wrappedEnv()))).toThrow(/refuses the ENV_VAR KEK provider/);
@@ -159,6 +160,11 @@ describe('loadConfig', () => {
       expect(config.operatorDecryptPrivateKey).toBe(OPERATOR_KEY);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('RELAYER_ALLOW_ENV_KEK'));
       warn.mockRestore();
+    });
+
+    it('refuses a short RELAYER_API_KEY', () => {
+      expect(() => loadConfig(prod({ RELAYER_API_KEY: 'short', ...wrappedEnv() })))
+        .toThrow(/RELAYER_API_KEY to be at least 32 bytes/);
     });
 
     it('requires an explicit OPERATOR_DECRYPT_DURATION_DAYS', () => {
@@ -182,6 +188,34 @@ describe('loadConfig', () => {
       expect(config.operatorDecryptPrivateKey).toBe(OPERATOR_KEY);
       expect(config.operatorDecryptDurationDays).toBe(365);
       warn.mockRestore();
+    });
+  });
+
+  describe('numeric settings', () => {
+    it.each([
+      ['PORT', 'abc'], ['PORT', '0'], ['PORT', '70000'], ['PORT', '30.5'],
+      ['CHAIN_ID', '-1'], ['CHAIN_ID', 'sepolia'],
+      ['OPERATOR_DECRYPT_DURATION_DAYS', '0'], ['OPERATOR_DECRYPT_DURATION_DAYS', '366'],
+      ['OPERATOR_DECRYPT_DURATION_DAYS', 'forever'],
+    ])('rejects %s=%s instead of carrying a NaN or a nonsense value into the signed request', (name, value) => {
+      expect(() => loadConfig(withApiKey({ [name]: value }))).toThrow(new RegExp(`${name} must be an integer`));
+    });
+
+    it('accepts the documented bounds', () => {
+      const config = loadConfig(withApiKey({ PORT: '65535', OPERATOR_DECRYPT_DURATION_DAYS: '1' }));
+      expect(config.port).toBe(65535);
+      expect(config.operatorDecryptDurationDays).toBe(1);
+    });
+
+    it('rejects a missing or malformed GATEWAY_CHAIN_ID for the custom preset', () => {
+      const custom = {
+        ZAMA_CONFIG_PRESET: 'custom', NETWORK_RPC_URL: 'http://rpc', RELAYER_URL: 'http://relayer',
+        ACL_CONTRACT_ADDRESS: '0x1', KMS_CONTRACT_ADDRESS: '0x2', INPUT_VERIFIER_CONTRACT_ADDRESS: '0x3',
+        VERIFYING_CONTRACT_ADDRESS_DECRYPTION: '0x4', VERIFYING_CONTRACT_ADDRESS_INPUT_VERIFICATION: '0x5',
+      };
+      expect(() => loadConfig(withApiKey({ ...custom }))).toThrow(/GATEWAY_CHAIN_ID must be an integer/);
+      expect(() => loadConfig(withApiKey({ ...custom, GATEWAY_CHAIN_ID: 'x' }))).toThrow(/GATEWAY_CHAIN_ID must be an integer/);
+      expect(loadConfig(withApiKey({ ...custom, GATEWAY_CHAIN_ID: '54321' })).custom?.gatewayChainId).toBe(54321);
     });
   });
 });
