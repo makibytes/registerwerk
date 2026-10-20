@@ -9,7 +9,7 @@ The standard is pre-deployed on the public Canton Network (mainnet and devnet),
 so no custom DAR upload is required for production deployments on CN.
 
 For **private Canton domains**, the token-standard DAR must be loaded on the
-participant during bootstrap (see `indexer/canton/config/bootstrap.canton`).
+participant (the local sandbox in `indexer/canton` uploads this module's DAR at start-up).
 
 ## Build and test
 

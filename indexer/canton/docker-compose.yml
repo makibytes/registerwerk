@@ -1,0 +1,23 @@
+services:
+  # Canton open-source sandbox for local development: one participant and one synchronizer in a
+  # single JVM, in-memory storage. Provides the Ledger API on port 5001 that the Registerwerk
+  # backend connects to.
+  #
+  # Production operators run their own participant (on-premises or cloud-hosted).
+  # This sidecar is for development / smoke-testing only.
+  canton:
+    build: .
+    image: registerwerk-canton-sandbox:3.6.2
+    ports:
+      - "5001:5001"     # Ledger API (gRPC)
+      - "5002:5002"     # Admin API (gRPC, participant management)
+      - "5013:5013"     # JSON Ledger API (HTTP; also serves /livez and /readyz)
+    volumes:
+      # The bond DAR (`cd daml && dpm build`) is uploaded at start-up when it exists.
+      - ../../daml/.daml/dist:/dars:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:5013/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
