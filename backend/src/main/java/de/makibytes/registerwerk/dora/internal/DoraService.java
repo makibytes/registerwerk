@@ -117,6 +117,10 @@ public class DoraService {
                     Instant due = f.apply(now);
                     return due == null ? Double.NaN : (double) Duration.between(now, due).getSeconds();
                 })
+                // The observed object is a lambda / method reference nothing else points to; Micrometer holds a
+                // gauge's object weakly by default, so after a garbage collection the gauge would read NaN - which
+                // here means "no open deadline" and silences the pre-breach alert.
+                .strongReference(true)
                 .tag("breach_type", breachType)
                 .description("Seconds until the next open (not yet breached) DORA deadline of this type; NaN if none")
                 .register(meterRegistry);
@@ -125,6 +129,7 @@ public class DoraService {
     private static void registerBreachGauge(MeterRegistry meterRegistry, String breachType,
                                              java.util.function.Supplier<Integer> counter) {
         Gauge.builder("registerwerk_dora_deadline_breaches", counter, c -> (double) c.get())
+                .strongReference(true) // the lambda has no other reference; see registerDueGauge
                 .tag("breach_type", breachType)
                 .description("Count of overdue DORA reporting deadlines/resilience tests, tagged by breach_type")
                 .register(meterRegistry);

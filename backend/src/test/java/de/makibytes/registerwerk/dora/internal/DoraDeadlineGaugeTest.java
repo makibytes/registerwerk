@@ -123,6 +123,20 @@ class DoraDeadlineGaugeTest {
     }
 
     @Test
+    @DisplayName("the gauges survive garbage collection (Micrometer holds a gauge's object weakly by default)")
+    void gaugesSurviveGarbageCollection() {
+        reportMajor(Instant.now());
+        for (int i = 0; i < 5; i++) {
+            System.gc();
+        }
+        for (String type : List.of("classification", "initial_report", "intermediate_report", "final_report")) {
+            assertThat(breaches(type)).as("breaches " + type).isNotNaN();
+        }
+        assertThat(due("classification")).as("a MAJOR incident has a classification deadline").isNotNaN();
+        assertThat(due("initial_report")).isNotNaN();
+    }
+
+    @Test
     @DisplayName("no open incidents: every breach type reads NaN (nothing to warn about) and no breach counts")
     void noOpenIncidentsIsNaN() {
         for (String type : List.of("classification", "initial_report", "intermediate_report", "final_report")) {
