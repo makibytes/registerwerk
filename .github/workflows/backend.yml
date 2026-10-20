@@ -131,20 +131,33 @@ jobs:
           image-ref: registerwerk-backend:ci
           sarif: trivy-backend.sarif
 
-  # A second, independent dependency scanner (NVD/CPE matching). It has its own job because its first
-  # run downloads the whole NVD (~400k records, ~50 minutes even with an API key) and must not hold up,
-  # or be cancelled by the time limit of, the image scan above. The database is cached between runs, so
-  # later runs only fetch what changed.
+  # A second, independent dependency scanner (NVD/CPE matching). It has its own job so that it cannot hold up,
+  # or be cancelled by the time limit of, the image scan above.
+  #
+  # The NVD data comes from the Dependency-Check project's own mirror of the NVD (a data feed rebuilt about
+  # every hour by github.com/dependency-check/DependencyCheck_Builder and served from GitHub Pages: ~200 MB in
+  # all, a cold run needs minutes), NOT from the NVD REST API. That API delivered ~2,000 records a minute in
+  # October 2026 and a cold run needs 410,000: it timed out after 120 minutes with half of them, and the
+  # plugin's maintainers say the slowness is upstream and not fixable on our side. The feed is data NIST
+  # published; the same project ships the plugin this job already executes.
+  #
+  # The database is cached per ISO week so a run only fetches what changed since. GitHub scopes caches to a
+  # branch (and the default branch), so the first run on a new branch starts cold; that is cheap now.
   dependency-check:
     name: OWASP Dependency-Check
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 45
     needs: build-test
     defaults:
       run:
         working-directory: backend
     env:
+      # Pinned so the gate does not change underneath the build. Part of the cache key: a new plugin version
+      # may change the database schema.
+      ODC_VERSION: "13.0.0"
       NVD_DATA_DIR: ${{ github.workspace }}/.dependency-check-data
+      # {0} is replaced by a year or "modified". The directory also serves cache.properties and *.meta.
+      NVD_FEED_URL: https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/nvdcve-{0}.json.gz
     steps:
       - uses: actions/checkout@v7
 
@@ -155,38 +168,75 @@ jobs:
           distribution: temurin
           cache: maven
 
-      # Newest database first; every run saves a fresh entry under its own key (old ones are evicted).
+      - name: Week of the database cache
+        id: week
+        run: echo "iso=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      # An older database of the same plugin version is fine: the run below only updates it.
       - name: Restore the NVD database
         id: nvd-cache
         uses: actions/cache/restore@v6
         with:
           path: .dependency-check-data
-          key: dependency-check-nvd-${{ github.run_id }}
-          restore-keys: dependency-check-nvd-
+          key: dependency-check-nvd-v${{ env.ODC_VERSION }}-${{ steps.week.outputs.iso }}
+          restore-keys: dependency-check-nvd-v${{ env.ODC_VERSION }}-
 
-      # NVD rejects requests without an API key (repository secret NVD_API_KEY). The plugin reads the
-      # Maven user properties `failBuildOnCVSS` and `format`; the `dependency-check.`-prefixed spellings
-      # this step used before are ignored, so it ran with the defaults (never fail, HTML report).
-      # The plugin version is pinned so the gate does not change underneath the build.
+      # A mirror that stopped updating would silently weaken the gate: the scan would pass against old data.
+      # Warn after three days, fail after seven (the plugin itself treats a database older than a week as
+      # due for a full refresh). The retries absorb a transient GitHub Pages error.
+      - name: Check that the NVD mirror is current
+        working-directory: .
+        run: |
+          props=$(curl -fsS --retry 5 --retry-all-errors --retry-delay 5 --max-time 60 "${NVD_FEED_URL%/*}/cache.properties")
+          stamp=$(printf '%s\n' "$props" | sed -n 's/^lastModifiedDate=//p')
+          stamp=${stamp//\\/}   # the properties file escapes the colons as \:
+          [ -n "$stamp" ] || { echo "::error::cache.properties of the NVD mirror has no lastModifiedDate"; exit 1; }
+          age_days=$(( ( $(date -u +%s) - $(date -u -d "$stamp" +%s) ) / 86400 ))
+          echo "NVD mirror last updated $stamp (${age_days} day(s) ago)"
+          if [ "$age_days" -gt 7 ]; then
+            echo "::error::The NVD mirror is $age_days days old; a scan against it would be misleading"; exit 1
+          elif [ "$age_days" -gt 3 ]; then
+            echo "::warning::The NVD mirror is $age_days days old"
+          fi
+
+      # The plugin reads the Maven user properties `failBuildOnCVSS` and `format` (the `dependency-check.`-
+      # prefixed spellings are ignored, so they would run with the defaults: never fail, HTML report).
+      # No NVD API key is needed (or passed) in feed mode. A run that ends before a report exists (the mirror
+      # was unreachable) is retried; one that wrote a report and still failed is the gate speaking, and
+      # is not retried.
       - name: OWASP Dependency-Check
         id: owasp
-        timeout-minutes: 120
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        run: ./mvnw org.owasp:dependency-check-maven:13.0.0:check -B
-             -DnvdApiKey="$NVD_API_KEY"
-             -DdataDirectory="$NVD_DATA_DIR"
-             -DsuppressionFiles=dependency-check-suppressions.xml
-             -DfailBuildOnCVSS=7
-             -Dformat=JSON
+        timeout-minutes: 30
+        run: |
+          for attempt in 1 2 3; do
+            rm -f target/dependency-check-report.json
+            if ./mvnw "org.owasp:dependency-check-maven:${ODC_VERSION}:check" -B \
+                 -DnvdDatafeedUrl="$NVD_FEED_URL" \
+                 -DconnectionTimeout=30000 -DreadTimeout=180000 \
+                 -DdataDirectory="$NVD_DATA_DIR" \
+                 -DsuppressionFiles=dependency-check-suppressions.xml \
+                 -DfailBuildOnCVSS=7 \
+                 -Dformat=JSON; then
+              exit 0
+            fi
+            if [ -f target/dependency-check-report.json ]; then
+              echo "::error::Dependency-Check reported findings at or above the CVSS threshold"; exit 1
+            fi
+            echo "::warning::Attempt $attempt ended before a report was written (feed unreachable?)"
+            sleep $((attempt * 30))
+          done
+          echo "::error::Dependency-Check could not complete after 3 attempts"; exit 1
 
-      # Also after a failed gate (the database is complete by then); not after a cancellation.
+      # Only a database that was brought up to date is worth keeping, so save when the analysis got as far as
+      # writing its report (also after a failed gate), never after a timeout or a failed download: a partly
+      # filled database restored by the next run would just be a slower start. An exact key hit is not saved
+      # again; it is refreshed by the next run's update.
       - name: Save the NVD database
-        if: ${{ !cancelled() }}
+        if: ${{ always() && steps.nvd-cache.outputs.cache-hit != 'true' && hashFiles('backend/target/dependency-check-report.json') != '' }}
         uses: actions/cache/save@v6
         with:
           path: .dependency-check-data
-          key: dependency-check-nvd-${{ github.run_id }}
+          key: dependency-check-nvd-v${{ env.ODC_VERSION }}-${{ steps.week.outputs.iso }}
 
       - name: Upload OWASP report
         uses: actions/upload-artifact@v7

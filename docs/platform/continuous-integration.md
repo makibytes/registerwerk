@@ -6,7 +6,7 @@ path-filtered (a backend-only change does not build the frontends) and run for p
 
 | Workflow | What it guards |
 |---|---|
-| Backend CI | Unit and integration tests with the JaCoCo coverage gate, Canton-profile tests, a Trivy scan of the production image, OWASP Dependency-Check in its own job, destructive-migration check |
+| Backend CI | Unit and integration tests with the JaCoCo coverage gate, Canton-profile tests, a Trivy scan of the production image, OWASP Dependency-Check in its own job (NVD data from the project's mirror, see below), destructive-migration check |
 | Frontend CI | Operator and customer portal lint, tests, production build and image scan; lint of the shared UI library |
 | Contracts CI | `forge test`, formatting, contract-size gate, coverage report, Slither |
 | Indexers CI | EVM subgraph: ABI parity with the Forge artifacts, manifest rendering, codegen, build, npm audit |
@@ -19,6 +19,27 @@ path-filtered (a backend-only change does not build the frontends) and run for p
 | Claims registry pins | The claims verifier, its tests and the re-pin tool on every push and pull request (see below) |
 | Claims governance | The same verifier plus the heavy evidence commands; `main`, `feat/**`, `fix/**`, `release/**` and pull requests to `main` |
 | Container Build & Sign | Builds, scans, pushes and signs the images; `main` only, once Backend CI, Frontend CI, Contracts CI and Secret Scanning have succeeded for the same commit |
+
+## Where the OWASP Dependency-Check job gets its vulnerability data
+
+The job reads the NVD from the Dependency-Check project's own mirror, a data feed that
+[github.com/dependency-check/DependencyCheck_Builder](https://github.com/dependency-check/DependencyCheck_Builder)
+rebuilds from the NVD every few hours and serves from GitHub Pages (`nvdDatafeedUrl` in `backend.yml`). It does not
+call the NVD REST API: a full download through the API needs about 410,000 records, delivered at roughly 2,000 a
+minute in October 2026, so it overran a two-hour limit with half of them, and the plugin's maintainers describe the
+slowness as upstream and not fixable from the client. The mirror is about 200 MB and a cold run from an empty
+database takes minutes. No NVD API key is used.
+
+- **Freshness.** A step reads the mirror's `cache.properties` first and fails the job if the data is more than seven
+  days old (it warns after three), so a mirror that stopped updating cannot make the scan pass against stale data.
+- **Caching.** The database is cached per ISO week and plugin version, so a run only fetches what changed since. GitHub
+  scopes caches to a branch and to the default branch, so the first run on a new branch starts cold; that now costs
+  minutes, not hours.
+- **Retries.** A run that ends before it wrote its report (the mirror was unreachable) is retried up to three times; a
+  run that wrote a report and still failed is the CVSS 7 gate and is not retried.
+- **Trust.** The mirror is run by the project that also publishes the plugin this job executes, and each file carries a
+  SHA-256 the plugin verifies. If you would rather not depend on it, mirror the NVD yourself with the project's `vulnz`
+  tool and point `NVD_FEED_URL` at your copy; the `{0}` placeholder is replaced by a year or `modified`.
 
 ## Token permissions
 
