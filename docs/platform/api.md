@@ -121,4 +121,4 @@ The OpenAPI document and Swagger UI are served **by the backend**, not by this d
     This site (port 48003) is a static MkDocs reference — it does not proxy the backend. Open the links above directly in a browser while the stack is running (`docker compose up -d`).
 
 !!! warning "Enabling SWAGGER_ENABLED exposes the spec without authentication"
-    When enabled, `/swagger-ui.html`, `/swagger-ui/**` and `/api-docs/**` are public (`permitAll` in the security configuration): anyone who can reach the backend can read the full route and schema catalogue. Nothing refuses `SWAGGER_ENABLED=true` in production mode. Leave it off in production, or put the backend behind an allow-list that excludes these paths.
+    When enabled, `/swagger-ui.html`, `/swagger-ui/**` and `/api-docs/**` are public (`permitAll` in the security configuration): anyone who can reach the backend can read the full route and schema catalogue. Production mode refuses to start with `SWAGGER_ENABLED=true`, so this only applies to development and test deployments.

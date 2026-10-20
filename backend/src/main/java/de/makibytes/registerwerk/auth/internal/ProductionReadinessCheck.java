@@ -200,6 +200,13 @@ class ProductionReadinessCheck {
         if (Boolean.parseBoolean(env.getProperty("registerwerk.trading.demo-instant-settlement", "false"))) {
             throw new IllegalStateException("registerwerk.trading.demo-instant-settlement must be false in production mode.");
         }
+        // The OpenAPI document and Swagger UI are permitAll in SecurityConfig: unauthenticated, and they list every
+        // operator route, parameter and schema. Enabled only for development.
+        if (Boolean.parseBoolean(env.getProperty("springdoc.api-docs.enabled", "false"))
+                || Boolean.parseBoolean(env.getProperty("springdoc.swagger-ui.enabled", "false"))) {
+            throw new IllegalStateException("SWAGGER_ENABLED (springdoc.api-docs / springdoc.swagger-ui) must be false in "
+                    + "production mode — the OpenAPI document and Swagger UI are served without authentication.");
+        }
         String[] demoBeans = beanFactory.getBeanNamesForType(DemoOnly.class, true, false);
         if (demoBeans.length > 0) {
             throw new IllegalStateException("Demo seeder beans are registered in production mode ("

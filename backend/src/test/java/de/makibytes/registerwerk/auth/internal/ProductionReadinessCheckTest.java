@@ -79,6 +79,17 @@ class ProductionReadinessCheckTest {
     }
 
     @Test
+    @DisplayName("production + Swagger UI / OpenAPI document enabled is refused (they are served without authentication)")
+    void swaggerRefused() {
+        env.setProperty("springdoc.swagger-ui.enabled", "true");
+        assertThatThrownBy(() -> check().check()).hasMessageContaining("SWAGGER_ENABLED");
+
+        env.setProperty("springdoc.swagger-ui.enabled", "false");
+        env.setProperty("springdoc.api-docs.enabled", "true");
+        assertThatThrownBy(() -> check().check()).hasMessageContaining("SWAGGER_ENABLED");
+    }
+
+    @Test
     @DisplayName("production + demo-instant-settlement=true is refused")
     void demoInstantSettlementRefused() {
         env.setProperty("registerwerk.trading.demo-instant-settlement", "true");

@@ -72,7 +72,7 @@ cd backend
 ./mvnw verify -Pcanton
 ```
 
-The profile compiles against Daml/Canton 3.5.2 Ledger API v2 bindings and the custom DAR targets
+The profile compiles against the Daml/Canton 3.6.2 Ledger API v2 bindings (the DAR is built with SDK 3.6.0, see `daml/README.md`) and the custom DAR targets
 Daml-LF 2.1. Package-name addressing (`#registerwerk-canton`) is used instead of a package hash.
 Without the profile, `CantonBondDisabledStub` fails bond operations explicitly. The profile build
 and unit tests verify Java/protobuf compatibility, but a live participant conformance test is still

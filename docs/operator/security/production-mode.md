@@ -28,6 +28,7 @@ Set `REGISTERWERK_PRODUCTION_MODE=true` (environment variable, `-Dregisterwerk.p
 | Wallet keys | `REGISTERWERK_WALLET_MASTER_KEY` unset; KEK provider unset or `ENV_VAR` (must be `AWS_KMS`, `AZURE_KEY_VAULT` or `GCP_KMS`) | `REGISTERWERK_WALLET_MASTER_KEY`, `REGISTERWERK_WALLET_KEK_PROVIDER` |
 | Signing custody | Neither a PKCS#11 HSM (`REGISTERWERK_HSM_ENABLED=true`) nor a cloud-KMS signer (`REGISTERWERK_WALLET_SIGNER=kms`); the SoftHSM profile without `registerwerk.wallet.hsm.allow-software-token=true`; the published demo HSM PIN | `REGISTERWERK_HSM_*`, `REGISTERWERK_WALLET_SIGNER` |
 | Cloud-KMS signer | Provider unsupported, key version missing or malformed, or the key does not answer | `registerwerk.wallet.kms.*` |
+| API documentation | `SWAGGER_ENABLED=true` (the OpenAPI document and Swagger UI are served without authentication) | `SWAGGER_ENABLED` |
 | Step-up | `registerwerk.auth.step-up.allow-unenrolled=true` (bypasses the TOTP second factor) | `registerwerk.auth.step-up.allow-unenrolled` |
 | Admin account | `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` unset or the published example password; the seeded administrator still has its initial password 24 hours after seeding while it is the only usable administrator | `DEFAULT_ADMIN_*` |
 | Demo data | `SEED_DEMO_DATA=true`; demo seeder beans registered; `registerwerk.trading.demo-instant-settlement=true` | `SEED_DEMO_DATA`, `registerwerk.trading.demo-instant-settlement` |
@@ -46,7 +47,7 @@ Two checks only warn and never block start-up: the ERC-3643 ClaimIssuer manager 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SWAGGER_ENABLED` | `false` | Serves the OpenAPI document and Swagger UI **without authentication**. Nothing refuses it in production mode; keep it off ([REST API overview](../../platform/api.md#openapi-swagger-ui)) |
+| `SWAGGER_ENABLED` | `false` | Serves the OpenAPI document and Swagger UI **without authentication**. Production mode refuses to start while it is on ([REST API overview](../../platform/api.md#openapi-swagger-ui)) |
 | `LINK_BY_EMAIL_WITHOUT_VERIFICATION` | blank | Links an IdP identity to an existing account by e-mail even when the token does not assert a verified address. Blank means allowed outside production mode and refused in production mode |
 | `CLAIMS_ALLOW_UNAPPROVED_IN_NONPROD` | `false` | Break-glass for issuing on-chain claims to a non-approved entity; honoured only outside production profiles |
 | `SPERRVERMERK_AUTO_EXPIRE_TYPES` | empty | Block types the daily job may lift automatically after their expiry date; by default none, so an expired block goes to `EXPIRY_REVIEW` and keeps blocking |
