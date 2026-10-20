@@ -170,7 +170,7 @@ reprocessed range is skipped rather than duplicated.
 |---|---|---|
 | graph-node | Stops indexing / reports `hasIndexingErrors` | Backend degrades that tick to "write everything PROVISIONAL, skip reorg re-verification" rather than failing the sync; investigate graph-node directly |
 | EVM/Starknet/Stellar RPC | Connection lost | `consecutive_errors` increments; resumes from cursor on reconnect; `ERROR` status after 10 consecutive failures |
-| Solana Yellowstone gRPC | Stream drops | Polling fallback (`SolanaTransferSyncService`) fills gaps on its own 10-minute cron regardless of stream health |
+| Solana RPC | Polling fails (`getSignaturesForAddress` / `getTransaction` error) | The poll for that mint is aborted without saving anything and the cursor stays; the next 10-minute run retries from the same point; `ERROR` status after 5 consecutive failures |
 | Canton ledger stream | Stream drops | `ERROR` status after 5 consecutive failures (lower threshold than other chains — see `CantonTransferSyncService`) |
 
 ## Subgraph re-indexing (EVM only)

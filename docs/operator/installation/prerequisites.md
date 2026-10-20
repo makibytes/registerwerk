@@ -30,7 +30,7 @@ title: Prerequisites
 - **SMTP server** — for onboarding and KYC notification emails
 - **S3-compatible storage** — for KYC documents ≥5 MB (AWS S3, MinIO, Cloudflare R2)
 - **EVM RPC endpoints** — per chain (Infura, Alchemy, QuickNode, or self-hosted)
-- **Solana RPC** — with Geyser/Yellowstone support (Helius, Triton, or self-hosted validator)
+- **Solana RPC** — with full `getSignaturesForAddress` / `getTransaction` history (Helius, Triton, or a self-hosted validator)
 
 ## Network ports
 

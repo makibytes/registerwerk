@@ -1,11 +1,11 @@
 # eWpG Registry — Token Indexers
 
 Dieses Verzeichnis enthält die Setup-Konfigurationen für die optionalen Indexer-Sidecar-Stacks
-(`evm/`, `solana/`, `canton/`, `starknet/`, `stellar/`), die alle emittierten Token auf allen
-angebundenen Blockchains überwachen. Starknet und Stellar benötigen dabei **keinen** externen
-Sidecar-Dienst wie graph-node oder Yellowstone — der Backend-Service spricht direkt per
-JSON-RPC bzw. Horizon-REST mit der Chain; `indexer/starknet/` und `indexer/stellar/` stellen
-nur optionale lokale Entwicklungsknoten bereit (siehe deren jeweilige READMEs).
+(`evm/`, `canton/`, `starknet/`, `stellar/`), die alle emittierten Token auf allen
+angebundenen Blockchains überwachen. Solana, Starknet und Stellar benötigen dabei **keinen** externen
+Sidecar-Dienst wie graph-node — der Backend-Service spricht direkt per JSON-RPC bzw. Horizon-REST
+mit der Chain; `indexer/starknet/` und `indexer/stellar/` stellen nur optionale lokale
+Entwicklungsknoten bereit (siehe deren jeweilige READMEs).
 
 ## Architektur
 
@@ -14,7 +14,7 @@ nur optionale lokale Entwicklungsknoten bereit (siehe deren jeweilige READMEs).
                 │            eWpG Registry Backend                 │
                 │                                                   │
                 │  GraphNodeSyncService  (poll alle 30s)           │
-                │  SolanaTransferSyncService  (WebSocket + Poll)   │
+                │  SolanaTransferSyncService  (poll alle 10min)    │
                 │  CantonTransferSyncService  (Ledger-API-Stream)  │
                 │  StarknetTransferSyncService  (poll alle 30s)    │
                 │  StellarTransferSyncService  (poll alle 30s)     │
@@ -24,19 +24,19 @@ nur optionale lokale Entwicklungsknoten bereit (siehe deren jeweilige READMEs).
                 │  → verfolgt Cursor in indexer_state              │
                 └──────┬─────────────────────────┬─────────────────┘
                        │                         │
-          ┌────────────▼──────────┐   ┌──────────▼──────────┐
-          │   The Graph           │   │  Yellowstone gRPC    │
-          │   (graph-node)        │   │  (Solana Geyser)     │
-          │   für alle EVM-Chains │   │  für Solana          │
-          └────────────┬──────────┘   └──────────┬───────────┘
-                       │                         │
-          ┌────────────▼──────────────────────────▼───────────┐
+          ┌────────────▼──────────┐
+          │   The Graph           │
+          │   (graph-node)        │
+          │   für alle EVM-Chains │
+          └────────────┬──────────┘
+                       │
+          ┌────────────▼──────────────────────────────────────┐
           │  Ethereum  Polygon  Base  …weitere EVM-Chains      │
-          │                                    Solana          │
           └────────────────────────────────────────────────────┘
 
-    Starknet und Stellar (kein Sidecar dazwischen — direktes RPC/Horizon-Polling):
+    Solana, Starknet und Stellar (kein Sidecar dazwischen — direktes RPC/Horizon-Polling):
 
+                Solana-RPC  ◄── getSignaturesForAddress / getTransaction ──  SolanaTransferSyncService
                 Starknet-RPC  ◄── starknet_getEvents ──  StarknetTransferSyncService
                 Horizon (Stellar)  ◄── /payments cursor ──  StellarTransferSyncService
 ```
@@ -130,25 +130,13 @@ curl -X POST http://localhost:8000/subgraphs/name/ewpg/ethereum-sepolia \
 
 ---
 
-## Solana: Yellowstone Dragon's Mouth (gRPC Geyser)
+## Solana: JSON-RPC-Polling
 
-**Warum Yellowstone?**
-- Open-Source gRPC-Proxy für Solana's Geyser Plugin Interface
-- Echtzeit-Streaming von Transaktionen (wesentlich schneller als Polling)
-- Der Backend-`SolanaTransferSyncService` subscribt via gRPC auf SPL-Token-Transactions
-
-**Resilienz-Fallback**: Ein zusätzlicher `@Scheduled`-Job ruft alle 10 Minuten `getSignaturesForAddress` für jeden bekannten SPL-Mint auf und schließt damit Lücken, die beim gRPC-Ausfall entstanden sind.
-
-### Starten
-
-```bash
-# Yellowstone-Proxy hochfahren
-docker compose -f indexer/solana/docker-compose.yml up -d
-```
-
-Yellowstone benötigt einen Upstream-Endpunkt, der das Geyser-Plugin unterstützt
-(z.B. Helius, Triton, oder ein selbst betriebener Validator mit Yellowstone-Plugin).
-`YELLOWSTONE_UPSTREAM_ENDPOINT` in `.env` setzen.
+Der Backend-`SolanaTransferSyncService` pollt alle 10 Minuten `getSignaturesForAddress` für jeden
+bekannten SPL-Mint, holt jede neue Transaktion per `getTransaction` und bucht die Salden-Differenz
+(`postTokenBalances` minus `preTokenBalances`) je Owner als Transfer, Mint oder Burn. Es gibt keinen
+Sidecar und keinen gRPC-Stream; konfiguriert wird nur die RPC-URL (`SOLANA_MAINNET_RPC`,
+`SOLANA_DEVNET_RPC`). Details: `docs/operator/indexers/solana.md`.
 
 ---
 
@@ -198,8 +186,7 @@ Details siehe `indexer/stellar/README.md`.
 | graph-node | Stoppt die Indexierung | Bei Neustart setzt graph-node am letzten indexierten Block fort |
 | EVM-RPC-Node | graph-node verliert Verbindung | `GRAPH_ETHEREUM_REQUEST_RETRIES=10`, Fallback-RPCs konfigurierbar |
 | Backend ↔ graph-node Sync | Backend kann graph-node nicht erreichen | `indexer_state.consecutive_errors` zählt hoch; nach Reconnect wird von `last_synced_block` nachgeholt |
-| Yellowstone gRPC Stream | Stream bricht ab | Backend reconnectet; paralleler Polling-Job (`SOLANA_POLL`) füllt Lücken |
-| Solana-RPC | Polling schlägt fehl | `indexer_state.status = ERROR`; `IndexerMonitorService` warnt nach 2h |
+| Solana-RPC | Polling schlägt fehl | Der Poll des Mints wird ohne Speichern abgebrochen, der Cursor bleibt; `indexer_state.status = ERROR` nach 5 Fehlern; `IndexerMonitorService` warnt nach 2h |
 | Starknet-RPC | Polling schlägt fehl | `indexer_state.consecutive_errors` zählt hoch (max. 10) → `status = ERROR`; nächster Poll setzt am letzten `last_synced_block` fort |
 | Stellar-Horizon | Polling schlägt fehl | Wie Starknet; Cursor ist der Horizon-Paging-Token in `last_synced_signature` |
 
@@ -229,7 +216,7 @@ Jeder Eintrag enthält: `txHash`, `explorerTxUrl` (direkter Link zum Block-Explo
 | Chain | Transfer-Indexierung | Mechanismus |
 |---|---|---|
 | EVM (Ethereum, Polygon, Base, …) | ✓ | The Graph (`indexer/evm`) |
-| Solana | ✓ | Yellowstone gRPC + Polling (`indexer/solana`) |
+| Solana | ✓ (teilweise) | JSON-RPC-Polling mit Salden-Differenz (`SolanaTransferSyncService`); einfache `transfer`-Instruktionen ohne Mint-Konto werden nicht gesehen |
 | Canton | ✓ | Ledger-API-Stream (`indexer/canton`, `CantonTransferSyncService`) |
 | Starknet | ✓ | JSON-RPC `starknet_getEvents`-Polling (`indexer/starknet`, `StarknetTransferSyncService`) |
 | Stellar | ✓ (teilweise) | Horizon `/payments`-Cursor-Polling (`indexer/stellar`, `StellarTransferSyncService`) — erfasst nur Zahlungen, die den Issuer-Account berühren; reine Holder-zu-Holder-Transfers noch nicht. |

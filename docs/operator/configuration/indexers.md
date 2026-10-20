@@ -51,20 +51,10 @@ graph-node is configured via `indexer/evm/config/graph-node.toml`. The TOML file
 
 `GRAPH_ETHEREUM_REQUEST_RETRIES=10` is set by default. graph-node retries failed RPC calls before marking the indexer as failed.
 
-## Solana indexer (Yellowstone)
+## Solana indexer (RPC polling)
 
-Yellowstone is configured via `indexer/solana/config/yellowstone.toml`.
-
-```toml
-[grpc]
-address = "0.0.0.0:10000"
-
-[upstream]
-endpoint = "${YELLOWSTONE_UPSTREAM_ENDPOINT}"
-token = "${YELLOWSTONE_TOKEN}"
-```
-
-Set `YELLOWSTONE_UPSTREAM_ENDPOINT` to a Geyser-enabled Solana RPC endpoint.
+Solana needs no sidecar: the backend polls the chain's JSON-RPC endpoint (`SOLANA_MAINNET_RPC`,
+`SOLANA_DEVNET_RPC`). See [Solana](../indexers/solana.md).
 
 ## Backend sync configuration
 

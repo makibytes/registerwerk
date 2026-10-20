@@ -1,163 +1,57 @@
 ---
-title: Solana (Yellowstone gRPC)
+title: Solana (RPC polling)
 ---
 
-# Solana Indexer — Yellowstone gRPC
+# Solana indexer — RPC polling
 
-The Solana indexer uses **Yellowstone**, a Geyser plugin that streams real-time account updates and transactions via gRPC. A polling fallback covers periods when the gRPC stream is unavailable.
-
-## Architecture
-
-```
-Solana Validator (with Yellowstone Geyser plugin)
-        |
-        | (gRPC stream)
-        v
-  indexer/solana (Node.js service)
-        |
-        | (REST / WebSocket)
-        v
-  Backend Spring Boot
-```
-
-## Prerequisites
-
-- A Solana RPC endpoint with **Yellowstone gRPC** support
-  - Hosted options: [Helius](https://helius.dev), [Triton](https://triton.one)
-  - Self-hosted: requires a Solana validator with the Yellowstone plugin installed
-
-## Configuration
-
-`indexer/solana/yellowstone.yaml`:
-
-```yaml
-endpoint: "${SOLANA_YELLOWSTONE_ENDPOINT}"
-x_token: "${SOLANA_YELLOWSTONE_TOKEN}"
-
-subscriptions:
-  - type: transaction
-    accountInclude:
-      - "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"  # SPL Token program
-    commitment: confirmed
-
-polling:
-  enabled: true
-  fallback_rpc: "${SOLANA_MAINNET_RPC_URL}"
-  poll_interval_seconds: 2
-  max_blocks_per_poll: 10
-```
-
-Set in `.env`:
-
-```bash
-SOLANA_YELLOWSTONE_ENDPOINT=https://your-yellowstone-endpoint.helius.xyz:2083
-SOLANA_YELLOWSTONE_TOKEN=your_api_token
-SOLANA_MAINNET_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
-SOLANA_DEVNET_RPC_URL=https://devnet.helius-rpc.com/?api-key=YOUR_KEY
-```
-
-## Starting the Solana indexer
-
-```bash
-docker compose -f indexer/solana/docker-compose.yml up -d
-```
-
-Or for local development:
-
-```bash
-cd indexer/solana && npm install
-npm start
-```
-
-## SPL token tracking
-
-The Solana indexer tracks SPL token program events:
-- `Transfer` — token transfers between accounts
-- `MintTo` — token minting
-- `Burn` — token burning
-
-It filters events to only those involving token mint addresses registered in the backend. Unrelated SPL token activity is ignored.
-
-## Polling fallback
-
-If the Yellowstone gRPC stream disconnects or becomes unavailable, the indexer automatically switches to polling mode:
-
-1. Polls `getSignaturesForAddress` for the SPL Token program at the configured interval
-2. Fetches full transaction details for each new signature
-3. Parses token events from transaction logs
-4. Switches back to gRPC as soon as the stream reconnects
-
-The polling fallback is less efficient but ensures no events are missed during provider outages.
-
-## Monitoring
-
-The Solana indexer exposes a health endpoint:
-
-```bash
-curl http://localhost:3001/health
-```
-
-Response:
-
-```json
-{
-  "status": "healthy",
-  "mode": "grpc",
-  "latestSlot": 285614923,
-  "lastEventAt": "2025-04-06T12:00:00Z"
-}
-```
-
-If `mode` shows `polling`, the gRPC stream is down and the fallback is active. Investigate the Yellowstone endpoint.
-
-## Adding Solana Devnet
-
-The devnet indexer runs as a separate instance:
-
-```bash
-SOLANA_NETWORK=devnet \
-  SOLANA_YELLOWSTONE_ENDPOINT=https://devnet-yellowstone.example.com:2083 \
-  SOLANA_YELLOWSTONE_TOKEN=your_devnet_token \
-  SOLANA_DEVNET_RPC_URL=https://api.devnet.solana.com \
-  npm start
-```
-
-Or add a second service in the Docker Compose file with `SOLANA_NETWORK=devnet`.
-
-# Solana — Yellowstone gRPC Indexer
-
-Solana transfers are monitored via [Yellowstone Dragon's Mouth](https://github.com/rpcpool/yellowstone-grpc), a gRPC proxy for Solana's Geyser Plugin Interface.
-
-## Starting Yellowstone
-
-```bash
-docker compose -f indexer/solana/docker-compose.yml up -d
-```
-
-Set `YELLOWSTONE_UPSTREAM_ENDPOINT` to a Geyser-enabled endpoint:
-- [Helius](https://helius.dev)
-- [Triton One](https://triton.one)
-- A self-hosted Solana validator with the Yellowstone plugin
+Solana balances are indexed by the backend's `SolanaTransferSyncService`, which polls the chain's JSON-RPC
+endpoint. There is no separate indexer service, no Geyser plugin and no gRPC stream: the only Solana
+configuration is the RPC URL of the chain.
 
 ## How it works
 
-`SolanaTransferSyncService` in the backend:
-1. Opens a gRPC subscription to Yellowstone on startup (`@PostConstruct`)
-2. Filters transactions involving any known SPL mint address
-3. Parses transfers and upserts into `token_transfer`
+Every confirmed Solana deployment's mint address is tracked. A job registers new mints about a minute after
+a deployment is confirmed and at start-up; each registration seeds a per-mint cursor
+(`solana_mint_sync_cursor`).
 
-If the gRPC stream drops, the service reconnects automatically.
+A second job runs every 10 minutes (and holds a cluster lock, so only one replica polls):
 
-## Polling fallback
+1. `getSignaturesForAddress(mint)` pages back from the newest signature to the cursor.
+2. Every transaction is fetched with `getTransaction` (`jsonParsed`).
+3. What happened to the tracked mint is booked as the **balance delta**: `postTokenBalances` minus
+   `preTokenBalances`, summed per owner wallet. It does not matter which instruction moved the tokens
+   (`transferChecked`, `mintTo`, `burn`, batched or CPI-driven), nor whether the token is SPL or Token-2022.
+4. Owners with a positive delta are matched against owners with a negative delta into `TRANSFER` rows; an
+   unmatched positive residual is a `MINT`, an unmatched negative one a `BURN`. A Token-2022 transfer fee
+   therefore shows up as a small burn next to the transfer.
 
-A separate `@Scheduled` job runs every 10 minutes:
-- Calls `getSignaturesForAddress` for every known SPL mint
-- Fills any gaps caused by stream downtime
-- Deduplication via UNIQUE constraint prevents double-counting
+A `getTransaction` that fails or returns `null` aborts the whole poll for that mint: nothing is saved and the
+cursor does not move, so the transaction is retried at the next run. The cursor advances only in the same
+database transaction that stores the rows.
+
+## Configuration
+
+Set the RPC endpoints in `.env` (or in the chain configuration of the operator portal):
+
+```bash
+SOLANA_MAINNET_RPC=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+SOLANA_DEVNET_RPC=https://devnet.helius-rpc.com/?api-key=YOUR_KEY
+```
+
+The public endpoints (`api.mainnet-beta.solana.com`, `api.devnet.solana.com`) are rate limited and do not
+keep long history; use a provider that serves `getSignaturesForAddress` and `getTransaction` for the whole
+life of your mints. Nothing else needs to be started.
 
 ## Registering a new SPL token
 
-When a Solana asset deployment is created via the API, the backend automatically starts monitoring its mint address. No manual configuration needed.
+When a Solana asset deployment is created through the API, the backend starts monitoring its mint address
+automatically. No manual configuration is needed.
+
+## Monitoring
+
+`IndexerMonitorService` watches the `SOLANA_POLL` state like the other indexers: consecutive RPC errors raise
+the state to `ERROR` (after 5 failures) and an alert follows when no poll has succeeded for two hours. See
+[Indexer resilience](resilience.md).
 
 !!! warning "Coverage status: partial observation"
     The indexer lists signatures by **mint address**. A plain (legacy) SPL `transfer` instruction does not reference the mint account, so such holder-to-holder movements are not seen. Registerwerk therefore reports Solana deployments as *partially observed* (`plain SPL transfers not observable`): holder sync stays BLOCKED and the register is never marked reconciled from indexed Solana history until token accounts are indexed.

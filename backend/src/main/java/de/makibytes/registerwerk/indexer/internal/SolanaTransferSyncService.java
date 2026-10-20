@@ -10,7 +10,6 @@ import de.makibytes.registerwerk.indexer.api.IndexerState;
 import de.makibytes.registerwerk.indexer.api.IndexerStateRepository;
 import de.makibytes.registerwerk.indexer.api.TokenTransfer;
 import de.makibytes.registerwerk.indexer.api.TokenTransferRepository;
-import jakarta.annotation.PostConstruct;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,22 +104,6 @@ public class SolanaTransferSyncService {
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
-
-    /** Logs the WebSocket stub state per enabled chain; the polling ingester is what feeds the register. */
-    @PostConstruct
-    public void startGeyserSubscriptions() {
-        try {
-            List<ChainConfig> solanaChains = chainConfigRepository
-                    .findByChainTypeAndEnabledTrue(ChainConfig.ChainType.SOLANA);
-            for (ChainConfig chain : solanaChains) {
-                subscribeToSplLogs(chain);
-            }
-            log.info("Solana Geyser/WebSocket subscriptions initialised for {} chain(s).",
-                    solanaChains.size());
-        } catch (Exception e) {
-            log.error("Failed to initialise Solana Geyser subscriptions: {}", e.getMessage(), e);
-        }
-    }
 
     /** P4-02: mints of already confirmed deployments are registered (cursor rows seeded) at startup. */
     @EventListener(ApplicationReadyEvent.class)
@@ -446,18 +429,6 @@ public class SolanaTransferSyncService {
     }
 
     // ── RPC ───────────────────────────────────────────────────────────────────
-
-    private void subscribeToSplLogs(ChainConfig chain) {
-        // Full WebSocket subscription requires a dedicated async WebSocket client. This stub logs
-        // intent and relies on the polling ingester until the WebSocket layer is wired up.
-        if (chain.getWsUrl() == null || chain.getWsUrl().isBlank()) {
-            log.debug("Chain {} has no wsUrl configured; Geyser subscription skipped.", chain.getIdentifier());
-            return;
-        }
-        log.info("Would subscribe to SPL Token logs on {} via WebSocket at {}. "
-                        + "(WebSocket subscription stub - polling is active.)",
-                chain.getIdentifier(), chain.getWsUrl());
-    }
 
     /**
      * Pages {@code getSignaturesForAddress} with {@code before} until the {@code until} boundary (the
