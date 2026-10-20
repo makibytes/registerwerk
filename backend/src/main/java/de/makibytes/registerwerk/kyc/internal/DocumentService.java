@@ -4,6 +4,7 @@ import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import de.makibytes.registerwerk.kyc.events.DocumentDeletedEvent;
 import de.makibytes.registerwerk.kyc.events.DocumentUploadedEvent;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.kyc.api.KycDocument;
 import de.makibytes.registerwerk.kyc.api.KycDocumentContent;
 import de.makibytes.registerwerk.kyc.api.KycDocumentContentRepository;
@@ -55,16 +56,19 @@ public class DocumentService {
     private final KycDocumentContentRepository kycDocumentContentRepository;
     private final S3DocumentStorageAdapter s3DocumentStorageAdapter;
     private final ApplicationEventPublisher eventPublisher;
+    private final RegisterClock registerClock;
 
     public DocumentService(
             KycDocumentRepository kycDocumentRepository,
             KycDocumentContentRepository kycDocumentContentRepository,
             S3DocumentStorageAdapter s3DocumentStorageAdapter,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            RegisterClock registerClock) {
         this.kycDocumentRepository = kycDocumentRepository;
         this.kycDocumentContentRepository = kycDocumentContentRepository;
         this.s3DocumentStorageAdapter = s3DocumentStorageAdapter;
         this.eventPublisher = eventPublisher;
+        this.registerClock = registerClock;
     }
 
     /**
@@ -94,7 +98,7 @@ public class DocumentService {
             LocalDate issueDate,
             LocalDate expiresAt) {
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = registerClock.today();
         if (docType != null && EXPIRY_REQUIRED.contains(docType) && expiresAt == null) {
             throw new IllegalArgumentException("expiresAt is required for document type " + docType
                     + " (identity and register evidence must carry its validity date)");

@@ -18,6 +18,7 @@ import de.makibytes.registerwerk.kyc.api.NaturalPerson;
 import de.makibytes.registerwerk.kyc.api.NaturalPersonRepository;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -69,6 +70,7 @@ public class KycReviewService {
     private final KycEvidenceService evidenceService;
     private final KycService kycService;
     private final ScreeningGate screeningGate;
+    private final RegisterClock registerClock;
 
     public KycReviewService(
             LegalEntityRepository legalEntityRepository,
@@ -79,7 +81,8 @@ public class KycReviewService {
             KycApprovalRecordRepository approvalRecordRepository,
             KycEvidenceService evidenceService,
             KycService kycService,
-            ScreeningGate screeningGate) {
+            ScreeningGate screeningGate,
+            RegisterClock registerClock) {
         this.legalEntityRepository = legalEntityRepository;
         this.beneficialOwnerRepository = beneficialOwnerRepository;
         this.naturalPersonRepository = naturalPersonRepository;
@@ -89,6 +92,7 @@ public class KycReviewService {
         this.evidenceService = evidenceService;
         this.kycService = kycService;
         this.screeningGate = screeningGate;
+        this.registerClock = registerClock;
     }
 
     /**
@@ -97,7 +101,7 @@ public class KycReviewService {
      * that never started KYC and rejected ones are not queued.
      */
     public List<QueueItem> queue() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = registerClock.today();
         List<QueueItem> items = new ArrayList<>();
         for (KycStatus status : List.of(KycStatus.IN_PROGRESS, KycStatus.EXPIRED, KycStatus.APPROVED)) {
             for (LegalEntity entity : legalEntityRepository.findByKycStatus(status)) {
@@ -156,7 +160,7 @@ public class KycReviewService {
 
         List<String> gaps = new ArrayList<>();
         if (entity.getKycStatus() == KycStatus.APPROVED) {
-            gaps.addAll(evidenceService.expiryGapsOf(entity, LocalDate.now()));
+            gaps.addAll(evidenceService.expiryGapsOf(entity, registerClock.today()));
         }
         gaps.addAll(evidenceService.evidenceGapsOf(entity, evidence));
 

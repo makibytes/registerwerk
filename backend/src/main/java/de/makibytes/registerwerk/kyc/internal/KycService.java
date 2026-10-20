@@ -24,6 +24,7 @@ import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.springframework.security.access.AccessDeniedException;
 import de.makibytes.registerwerk.customer.api.EntityStatus;
 import de.makibytes.registerwerk.customer.events.EntityReactivatedEvent;
@@ -51,6 +52,7 @@ public class KycService {
     private final ScreeningGate screeningGate;
     private final KycEvidenceService evidenceService;
     private final KycApprovalRecordRepository approvalRecordRepository;
+    private final RegisterClock registerClock;
 
     public KycService(
             LegalEntityRepository legalEntityRepository,
@@ -58,13 +60,15 @@ public class KycService {
             ApplicationEventPublisher eventPublisher,
             ScreeningGate screeningGate,
             KycEvidenceService evidenceService,
-            KycApprovalRecordRepository approvalRecordRepository) {
+            KycApprovalRecordRepository approvalRecordRepository,
+            RegisterClock registerClock) {
         this.legalEntityRepository = legalEntityRepository;
         this.jurisdictionApprovalRepository = jurisdictionApprovalRepository;
         this.eventPublisher = eventPublisher;
         this.screeningGate = screeningGate;
         this.evidenceService = evidenceService;
         this.approvalRecordRepository = approvalRecordRepository;
+        this.registerClock = registerClock;
     }
 
     /**
@@ -139,7 +143,7 @@ public class KycService {
             }
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = registerClock.today();
         LocalDate maxExpiry = evidenceService.latestAllowedExpiry(today);
         if (expiryDate != null && expiryDate.isAfter(maxExpiry)) {
             throw new IllegalArgumentException("expiryDate " + expiryDate + " exceeds the maximum validity of "
@@ -279,7 +283,7 @@ public class KycService {
         approval.setStatus(KycJurisdictionApproval.Status.APPROVED);
         approval.setApprovedBy(actorId);
         approval.setApprovedAt(Instant.now());
-        approval.setExpiresAt(expiresAt != null ? expiresAt : LocalDate.now().plusYears(1));
+        approval.setExpiresAt(expiresAt != null ? expiresAt : registerClock.today().plusYears(1));
         approval.setRejectionReason(null);
         approval.setOverrideNote(overrideNote);
 

@@ -6,6 +6,7 @@ import de.makibytes.registerwerk.kyc.api.KycJurisdictionApprovalRepository;
 import de.makibytes.registerwerk.kyc.events.KycRejectedEvent;
 import de.makibytes.registerwerk.kyc.events.KycRejectionCategory;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.shared.TestRegisterClock;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -27,7 +28,7 @@ class KycServiceRejectTest {
     private final KycJurisdictionApprovalRepository approvals = mock(KycJurisdictionApprovalRepository.class);
     private final KycService service = new KycService(entities, approvals,
             publisher, mock(ScreeningGate.class), mock(KycEvidenceService.class),
-            mock(de.makibytes.registerwerk.kyc.api.KycApprovalRecordRepository.class));
+            mock(de.makibytes.registerwerk.kyc.api.KycApprovalRecordRepository.class), TestRegisterClock.systemDefault());
 
     private KycRejectedEvent reject(KycRejectionCategory category) {
         UUID id = UUID.randomUUID();

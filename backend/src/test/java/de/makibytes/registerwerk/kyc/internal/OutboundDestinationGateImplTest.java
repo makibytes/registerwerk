@@ -8,6 +8,7 @@ import de.makibytes.registerwerk.deployment.api.AssetHolder;
 import de.makibytes.registerwerk.deployment.api.AssetHolderRepository;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.shared.TestRegisterClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,7 +46,7 @@ class OutboundDestinationGateImplTest {
         entities = mock(LegalEntityRepository.class);
         screening = mock(ScreeningGate.class);
         blocks = mock(HolderBlockGate.class);
-        gate = new OutboundDestinationGateImpl(holders, entities, screening, blocks, true);
+        gate = new OutboundDestinationGateImpl(holders, entities, screening, blocks, true, TestRegisterClock.systemDefault());
 
         AssetHolder holder = new AssetHolder();
         ReflectionTestUtils.setField(holder, "id", UUID.randomUUID());
@@ -101,7 +102,7 @@ class OutboundDestinationGateImplTest {
     @Test
     @DisplayName("the feature flag off skips the gate (demo profile only)")
     void disabledFlagSkips() {
-        var off = new OutboundDestinationGateImpl(holders, entities, screening, blocks, false);
+        var off = new OutboundDestinationGateImpl(holders, entities, screening, blocks, false, TestRegisterClock.systemDefault());
         assertThat(off.require(assetId, "0x" + "9".repeat(40), "mint")).isNull();
         verifyNoInteractions(entities);
     }

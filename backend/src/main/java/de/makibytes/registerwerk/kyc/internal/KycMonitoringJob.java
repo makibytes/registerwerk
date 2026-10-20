@@ -3,6 +3,7 @@ package de.makibytes.registerwerk.kyc.internal;
 import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.customer.api.KycStatus;
 import de.makibytes.registerwerk.kyc.events.KycExpiringEvent;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -26,17 +27,20 @@ class KycMonitoringJob {
 
     private final LegalEntityRepository entityRepository;
     private final ApplicationEventPublisher events;
+    private final RegisterClock registerClock;
 
-    KycMonitoringJob(LegalEntityRepository entityRepository, ApplicationEventPublisher events) {
+    KycMonitoringJob(LegalEntityRepository entityRepository, ApplicationEventPublisher events,
+                     RegisterClock registerClock) {
         this.entityRepository = entityRepository;
         this.events = events;
+        this.registerClock = registerClock;
     }
 
     @SchedulerLock(name = "kycMonitoring", lockAtMostFor = "PT30M")
     @Scheduled(cron = "0 0 2 * * *")
     @Transactional
     public void run() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = registerClock.today();
         LocalDate warningThreshold = today.plusDays(30);
         LocalDate expiredThreshold = today;
 

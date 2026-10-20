@@ -42,6 +42,7 @@ import de.makibytes.registerwerk.kyc.web.dto.KycDocumentResponse;
 import de.makibytes.registerwerk.kyc.web.dto.KycJurisdictionApprovalResponse;
 import de.makibytes.registerwerk.kyc.web.dto.KycApprovalRequest;
 import de.makibytes.registerwerk.kyc.web.dto.KycRejectionRequest;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import de.makibytes.registerwerk.shared.SecurityUtils;
 import de.makibytes.registerwerk.stepup.api.RequiresStepUp;
 import jakarta.validation.Valid;
@@ -64,16 +65,19 @@ public class KycController {
     private final KycService kycService;
     private final KycDocumentRepository kycDocumentRepository;
     private final KycComplianceService kycComplianceService;
+    private final RegisterClock registerClock;
 
     public KycController(
             DocumentService documentService,
             KycService kycService,
             KycDocumentRepository kycDocumentRepository,
-            KycComplianceService kycComplianceService) {
+            KycComplianceService kycComplianceService,
+            RegisterClock registerClock) {
         this.documentService = documentService;
         this.kycService = kycService;
         this.kycDocumentRepository = kycDocumentRepository;
         this.kycComplianceService = kycComplianceService;
+        this.registerClock = registerClock;
     }
 
     /**
@@ -241,7 +245,7 @@ public class KycController {
             Authentication auth) {
         LocalDate expiresAt = (body != null && body.expiresAt() != null)
             ? body.expiresAt()
-            : LocalDate.now().plusYears(1);
+            : registerClock.today().plusYears(1);
 
         String overrideNote = body != null ? body.overrideNote() : null;
 

@@ -19,6 +19,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import de.makibytes.registerwerk.shared.RegisterClock;
+import de.makibytes.registerwerk.shared.TestRegisterClock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -45,6 +48,8 @@ class BeneficialOwnerServiceTest {
     @Mock private LegalEntityRepository legalEntityRepository;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private ScreeningGate screeningGate;
+
+    @Spy private RegisterClock registerClock = TestRegisterClock.systemDefault();
 
     @InjectMocks
     private BeneficialOwnerService service;

@@ -7,9 +7,9 @@ import de.makibytes.registerwerk.kyc.api.PartyEligibilityGate;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.shared.AddressNormalizer;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -26,12 +26,14 @@ class PartyEligibilityGateImpl implements PartyEligibilityGate {
     private final LegalEntityRepository entityRepository;
     private final ScreeningGate screeningGate;
     private final HolderBlockGate holderBlockGate;
+    private final RegisterClock registerClock;
 
     PartyEligibilityGateImpl(LegalEntityRepository entityRepository, ScreeningGate screeningGate,
-                             HolderBlockGate holderBlockGate) {
+                             HolderBlockGate holderBlockGate, RegisterClock registerClock) {
         this.entityRepository = entityRepository;
         this.screeningGate = screeningGate;
         this.holderBlockGate = holderBlockGate;
+        this.registerClock = registerClock;
     }
 
     @Override
@@ -62,6 +64,6 @@ class PartyEligibilityGateImpl implements PartyEligibilityGate {
             return List.of("is unknown");
         }
         String wallet = walletAddress == null || walletAddress.isBlank() ? null : AddressNormalizer.normalize(walletAddress);
-        return PartyEligibility.reasons(entity, wallet, screeningGate, holderBlockGate, LocalDate.now());
+        return PartyEligibility.reasons(entity, wallet, screeningGate, holderBlockGate, registerClock.today());
     }
 }

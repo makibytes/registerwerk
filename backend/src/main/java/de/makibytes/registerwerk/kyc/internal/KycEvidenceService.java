@@ -12,6 +12,7 @@ import de.makibytes.registerwerk.kyc.api.KycComplianceService;
 import de.makibytes.registerwerk.kyc.api.NaturalPerson;
 import de.makibytes.registerwerk.kyc.api.NaturalPersonRepository;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +51,7 @@ public class KycEvidenceService {
     private final KycComplianceService kycComplianceService;
     private final ScreeningGate screeningGate;
     private final int maxValidityMonths;
+    private final RegisterClock registerClock;
 
     public KycEvidenceService(
             LegalEntityRepository legalEntityRepository,
@@ -58,7 +60,8 @@ public class KycEvidenceService {
             EddApprovalRepository eddApprovalRepository,
             KycComplianceService kycComplianceService,
             ScreeningGate screeningGate,
-            @Value("${registerwerk.kyc.max-validity-months:12}") int maxValidityMonths) {
+            @Value("${registerwerk.kyc.max-validity-months:12}") int maxValidityMonths,
+            RegisterClock registerClock) {
         this.legalEntityRepository = legalEntityRepository;
         this.beneficialOwnerRepository = beneficialOwnerRepository;
         this.naturalPersonRepository = naturalPersonRepository;
@@ -66,6 +69,7 @@ public class KycEvidenceService {
         this.kycComplianceService = kycComplianceService;
         this.screeningGate = screeningGate;
         this.maxValidityMonths = maxValidityMonths;
+        this.registerClock = registerClock;
     }
 
     /** Beneficial-owner coverage of one entity. {@code unexplainedPct} = 100 - identified (never negative). */
@@ -159,7 +163,7 @@ public class KycEvidenceService {
      * downgraded (T6-01 interim); the compliance officer works the list at the next review.
      */
     public List<Gap> evidenceGaps() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = registerClock.today();
         List<Gap> result = new ArrayList<>();
         for (LegalEntity entity : legalEntityRepository.findByKycStatus(KycStatus.APPROVED)) {
             List<String> gaps = gapsOf(entity, today);

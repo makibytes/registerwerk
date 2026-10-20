@@ -23,6 +23,7 @@ import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.screening.api.ScreeningTrigger;
 import de.makibytes.registerwerk.shared.EntityNotFoundException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -59,6 +60,7 @@ public class BeneficialOwnerService {
     private final LegalEntityRepository legalEntityRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final ScreeningGate screeningGate;
+    private final RegisterClock registerClock;
     private final EntityTaskPort entityTaskPort;
     private final KycDocumentRepository kycDocumentRepository;
     private final EddApprovalRepository eddApprovalRepository;
@@ -76,7 +78,8 @@ public class BeneficialOwnerService {
             EntityTaskPort entityTaskPort,
             KycDocumentRepository kycDocumentRepository,
             EddApprovalRepository eddApprovalRepository,
-            KycEvidenceService evidenceService) {
+            KycEvidenceService evidenceService,
+            RegisterClock registerClock) {
         this.beneficialOwnerRepository = beneficialOwnerRepository;
         this.naturalPersonRepository = naturalPersonRepository;
         this.legalEntityRepository = legalEntityRepository;
@@ -86,6 +89,7 @@ public class BeneficialOwnerService {
         this.kycDocumentRepository = kycDocumentRepository;
         this.eddApprovalRepository = eddApprovalRepository;
         this.evidenceService = evidenceService;
+        this.registerClock = registerClock;
     }
 
     /**
@@ -219,7 +223,7 @@ public class BeneficialOwnerService {
             throw new InvalidStateTransitionException("Beneficial owner link is ceased");
         }
         KycDocument doc = requireEntityDocument(entityId, documentId);
-        if (doc.getExpiresAt() != null && doc.getExpiresAt().isBefore(LocalDate.now())) {
+        if (doc.getExpiresAt() != null && doc.getExpiresAt().isBefore(registerClock.today())) {
             throw new IllegalArgumentException("The evidence document has expired.");
         }
         beneficialOwner.setVerifiedBy(actorId);

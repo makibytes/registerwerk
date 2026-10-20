@@ -7,6 +7,7 @@ import de.makibytes.registerwerk.customer.api.LegalEntityRepository;
 import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
+import de.makibytes.registerwerk.shared.TestRegisterClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,7 +41,7 @@ class PartyEligibilityGateImplTest {
         entities = mock(LegalEntityRepository.class);
         screening = mock(ScreeningGate.class);
         blocks = mock(HolderBlockGate.class);
-        gate = new PartyEligibilityGateImpl(entities, screening, blocks);
+        gate = new PartyEligibilityGateImpl(entities, screening, blocks, TestRegisterClock.systemDefault());
         entity = new LegalEntity();
         ReflectionTestUtils.setField(entity, "id", entityId);
         entity.setStatus(EntityStatus.ACTIVE);
@@ -108,6 +109,21 @@ class PartyEligibilityGateImplTest {
         when(blocks.isEntityBlocked(entityId)).thenReturn(true);
         assertThat(gate.check(entityId, null)).hasSize(1);
         assertThatThrownBy(() -> gate.require(entityId, null, "repo desk")).isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    @DisplayName("KYC expiry is judged on the register's calendar day, not the JVM's: 23:30 UTC is already tomorrow in Berlin")
+    void expiryUsesTheRegisterDay() {
+        var berlinTomorrow = new de.makibytes.registerwerk.shared.RegisterClock(
+                java.time.Clock.fixed(java.time.Instant.parse("2026-03-01T23:30:00Z"), java.time.ZoneOffset.UTC),
+                java.time.ZoneId.of("Europe/Berlin"));
+        var berlinGate = new PartyEligibilityGateImpl(entities, screening, blocks, berlinTomorrow);
+
+        entity.setKycExpiryDate(LocalDate.parse("2026-03-01")); // still "today" on a UTC clock, yesterday in Berlin
+        assertThat(berlinGate.check(entityId, WALLET)).anyMatch(r -> r.contains("expired KYC"));
+
+        entity.setKycExpiryDate(LocalDate.parse("2026-03-02")); // the register's today: not yet expired
+        assertThat(berlinGate.check(entityId, WALLET)).isEmpty();
     }
 
     @Test

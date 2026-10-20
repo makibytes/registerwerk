@@ -12,6 +12,7 @@ import de.makibytes.registerwerk.kyc.api.KycDocument;
 import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
 import de.makibytes.registerwerk.kyc.api.NaturalPersonRepository;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
+import de.makibytes.registerwerk.shared.TestRegisterClock;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -28,7 +29,7 @@ import static org.mockito.Mockito.when;
 class KycEvidenceTest {
 
     private final KycDocumentRepository docs = mock(KycDocumentRepository.class);
-    private final KycComplianceService compliance = new KycComplianceService(docs, new JurisdictionRequirementConfig());
+    private final KycComplianceService compliance = new KycComplianceService(docs, new JurisdictionRequirementConfig(), TestRegisterClock.systemDefault());
 
     private KycDocument doc(KycDocument.DocumentType type, LocalDate issue, LocalDate expires) {
         KycDocument d = new KycDocument();
@@ -79,7 +80,7 @@ class KycEvidenceTest {
         when(owners.findByEntityIdAndCeasedAtIsNull(entity.getId())).thenReturn(List.of());
 
         KycEvidenceService service = new KycEvidenceService(entities, owners, mock(NaturalPersonRepository.class),
-                mock(EddApprovalRepository.class), compliance, gate, 12);
+                mock(EddApprovalRepository.class), compliance, gate, 12, TestRegisterClock.systemDefault());
         List<KycEvidenceService.Gap> gaps = service.evidenceGaps();
 
         assertThat(gaps).hasSize(1);

@@ -3,11 +3,11 @@ package de.makibytes.registerwerk.kyc.api;
 import de.makibytes.registerwerk.kyc.api.KycDocument;
 import de.makibytes.registerwerk.customer.api.Jurisdiction;
 import de.makibytes.registerwerk.kyc.api.KycDocumentRepository;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -26,12 +26,15 @@ public class KycComplianceService implements de.makibytes.registerwerk.kyc.KycAp
 
     private final KycDocumentRepository kycDocumentRepository;
     private final JurisdictionRequirementConfig requirementConfig;
+    private final RegisterClock registerClock;
 
     public KycComplianceService(
             KycDocumentRepository kycDocumentRepository,
-            JurisdictionRequirementConfig requirementConfig) {
+            JurisdictionRequirementConfig requirementConfig,
+            RegisterClock registerClock) {
         this.kycDocumentRepository = kycDocumentRepository;
         this.requirementConfig = requirementConfig;
+        this.registerClock = registerClock;
     }
 
     public record DocumentStatus(
@@ -83,7 +86,7 @@ public class KycComplianceService implements de.makibytes.registerwerk.kyc.KycAp
             boolean present = best != null;
             boolean isExpired = present
                 && best.getExpiresAt() != null
-                && best.getExpiresAt().isBefore(LocalDate.now());
+                && best.getExpiresAt().isBefore(registerClock.today());
             // The age of a document runs from its issue date when one was captured (6-17), not from the upload.
             Instant documentDate = present ? documentDate(best) : null;
             boolean isTooOld = present && req.maxAge() != null

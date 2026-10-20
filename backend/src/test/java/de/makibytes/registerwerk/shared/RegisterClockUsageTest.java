@@ -22,10 +22,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RegisterClockUsageTest {
 
     private static final List<String> MODULES =
-            List.of("repo", "trading", "corporateactions", "asset", "registertransfer");
+            List.of("repo", "trading", "corporateactions", "asset", "registertransfer", "kyc");
 
     @Test
-    @DisplayName("repo/trading/corporateactions/asset/registertransfer never call LocalDate.now / LocalDateTime.now directly")
+    @DisplayName("repo/trading/corporateactions/asset/registertransfer/kyc never call LocalDate.now / LocalDateTime.now directly")
     void businessDatesComeFromTheRegisterClock() throws IOException {
         List<String> offenders = new ArrayList<>();
         for (String module : MODULES) {

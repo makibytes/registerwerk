@@ -8,6 +8,7 @@ import de.makibytes.registerwerk.kyc.api.HolderBlockGate;
 import de.makibytes.registerwerk.kyc.api.OutboundDestinationGate;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.shared.AddressNormalizer;
+import de.makibytes.registerwerk.shared.RegisterClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,7 +16,6 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -29,17 +29,20 @@ class OutboundDestinationGateImpl implements OutboundDestinationGate {
     private final ScreeningGate screeningGate;
     private final HolderBlockGate holderBlockGate;
     private final boolean enabled;
+    private final RegisterClock registerClock;
 
     OutboundDestinationGateImpl(AssetHolderRepository holderRepository,
                                 LegalEntityRepository entityRepository,
                                 ScreeningGate screeningGate,
                                 HolderBlockGate holderBlockGate,
-                                @Value("${registerwerk.chain.destination-gate.enabled:true}") boolean enabled) {
+                                @Value("${registerwerk.chain.destination-gate.enabled:true}") boolean enabled,
+                                RegisterClock registerClock) {
         this.holderRepository = holderRepository;
         this.entityRepository = entityRepository;
         this.screeningGate = screeningGate;
         this.holderBlockGate = holderBlockGate;
         this.enabled = enabled;
+        this.registerClock = registerClock;
     }
 
     @Override
@@ -59,7 +62,7 @@ class OutboundDestinationGateImpl implements OutboundDestinationGate {
                 .orElseThrow(() -> deny(purpose, address, "is not an active registered holder of this asset — onboard the holder first"));
         LegalEntity entity = entityRepository.findById(holder.getInvestorId())
                 .orElseThrow(() -> deny(purpose, address, "belongs to an unknown legal entity"));
-        List<String> reasons = PartyEligibility.reasons(entity, normalized, screeningGate, holderBlockGate, LocalDate.now());
+        List<String> reasons = PartyEligibility.reasons(entity, normalized, screeningGate, holderBlockGate, registerClock.today());
         if (!reasons.isEmpty()) {
             throw deny(purpose, address, "belongs to an entity that " + String.join("; ", reasons));
         }

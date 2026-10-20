@@ -19,6 +19,7 @@ import de.makibytes.registerwerk.kyc.web.dto.BeneficialOwnerRequest;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.screening.events.ScreeningPepConfirmedEvent;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
+import de.makibytes.registerwerk.shared.TestRegisterClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -55,7 +56,7 @@ class CddControlsTest {
     private final KycDocumentRepository docs = mock(KycDocumentRepository.class);
     private final EddApprovalRepository edds = mock(EddApprovalRepository.class);
     private final BeneficialOwnerService service = new BeneficialOwnerService(owners, persons, entities, publisher,
-            gate, tasks, docs, edds, mock(KycEvidenceService.class));
+            gate, tasks, docs, edds, mock(KycEvidenceService.class), TestRegisterClock.systemDefault());
 
     private final UUID entityId = UUID.randomUUID();
     private final UUID personId = UUID.randomUUID();

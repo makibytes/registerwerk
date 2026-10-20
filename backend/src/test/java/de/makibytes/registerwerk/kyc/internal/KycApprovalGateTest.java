@@ -20,6 +20,7 @@ import de.makibytes.registerwerk.kyc.events.KycApprovedEvent;
 import de.makibytes.registerwerk.screening.api.ScreeningGate;
 import de.makibytes.registerwerk.shared.ComplianceGateException;
 import de.makibytes.registerwerk.shared.InvalidStateTransitionException;
+import de.makibytes.registerwerk.shared.TestRegisterClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -62,9 +63,9 @@ class KycApprovalGateTest {
     private final ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
     private final KycApprovalRecordRepository records = mock(KycApprovalRecordRepository.class);
 
-    private final KycEvidenceService evidence = new KycEvidenceService(entities, owners, persons, edds, compliance, gate, 12);
+    private final KycEvidenceService evidence = new KycEvidenceService(entities, owners, persons, edds, compliance, gate, 12, TestRegisterClock.systemDefault());
     private final KycService service = new KycService(entities, mock(KycJurisdictionApprovalRepository.class),
-            publisher, gate, evidence, records);
+            publisher, gate, evidence, records, TestRegisterClock.systemDefault());
 
     private final UUID entityId = UUID.randomUUID();
     private final UUID actor = UUID.randomUUID();
