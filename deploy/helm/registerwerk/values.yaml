@@ -247,6 +247,13 @@ database:
 
 postgresql:
   enabled: true
+  # DEV/TEST ONLY. Bitnami stopped publishing versioned images under docker.io/bitnami (the tags this subchart
+  # pins return "not found", so a stock install ends in ImagePullBackOff); the frozen copies live under
+  # bitnamilegacy and receive no security fixes. That is tolerable for a throwaway cluster, not for anything
+  # holding register data: use database.shape=managed or cnpg (see database above), which this chart's
+  # production overlay already requires.
+  image:
+    repository: bitnamilegacy/postgresql
   auth:
     database: registerwerk
     # Schema OWNER / migrator login: used only by Flyway (SPRING_FLYWAY_USER/PASSWORD).
@@ -329,6 +336,12 @@ cloudSqlProxy:
 
 kong:
   enabled: true
+  # The subchart's default image is kong:3.6 (its chart 2.38; even the newest 2.x chart only pins the floating
+  # "3.9"), years behind what gateway/kong.yml is written against and what Compose runs and the gateway checks
+  # exercise. Pinned to the same patch release as docker-compose.yml; keep the two in step.
+  image:
+    repository: kong
+    tag: "3.9.4"
   # The chart's own default (true) runs Kong as a Kubernetes Ingress Controller instead of a
   # plain declarative-config gateway — and silently suppresses ALL of its dbless auto-env
   # logic when true (see charts/kong templates/_helpers.tpl's "KONG_DECLARATIVE_CONFIG"
@@ -424,32 +437,29 @@ networkPolicy:
         - protocol: TCP
           port: 8080
 
-# backs Kong's rate-limiting plugin (policy: redis, files/kong.yml) so the
-# per-minute/hour request throttle is a real fleet-wide limit shared across every Kong replica —
-# see the Chart.yaml dependency comment. Deliberately minimal: no persistence (rate-limit
-# counters are inherently ephemeral/self-healing — a restart just resets the window early, which
-# is a harmless direction to fail in), no auth (only reachable from inside the cluster network,
-# same trust boundary as Kong's own admin API).
-redis:
+# Kong's rate-limiting counters (policy: redis, files/kong.yml): a real fleet-wide per-minute/hour
+# throttle shared across every Kong replica, instead of N independent per-node counters. Rendered by
+# templates/valkey.yaml (Valkey speaks the Redis protocol, so Kong's `redis` policy is unchanged); it
+# replaced the Bitnami redis subchart, whose image tags no longer exist. Deliberately minimal: no persistence
+# (the counters are ephemeral, a restart just resets the windows early), no auth (only reachable from
+# inside the cluster, and templates/valkey.yaml's NetworkPolicy admits nothing but Kong).
+valkey:
   enabled: true
-  # Fixed (not release-name-derived): files/kong.yml's redis config block is a static file
-  # (.Files.Get, not tpl'd — see kong-configmap.yaml's own comment on the same constraint for
-  # dblessConfig.configMap) and must agree with this subchart's real Service name by literal
-  # string, same "one registerwerk release per namespace" assumption already made there.
-  fullnameOverride: registerwerk-redis
-  architecture: standalone
-  auth:
-    enabled: false
-  master:
-    persistence:
-      enabled: false
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 500m
-        memory: 256Mi
+  # The Service name files/kong.yml's rate-limiting host is rendered from. Fixed rather than
+  # release-derived: it must agree with the Kong subchart's static configuration, same "one registerwerk
+  # release per namespace" assumption as the Kong ConfigMap name.
+  serviceName: registerwerk-valkey
+  image:
+    repository: valkey/valkey
+    tag: "9.1.2-alpine"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
 
 # ─── Operator Frontend ──────────────────────────────────────────────────────
 # gives the Helm chart the same deployment coverage docker-compose.yml already has for
@@ -499,11 +509,11 @@ frontendOperator:
     limits:
       cpu: 250m
       memory: 128Mi
-  # nginx:1.30.4-alpine's master process binds :80 (a privileged port, <1024) before ever reading
+  # nginx:1.30.6-alpine's master process binds :80 (a privileged port, <1024) before ever reading
   # the `user` directive that drops worker processes to non-root — without NET_BIND_SERVICE, a
   # non-root runAsUser here makes that bind(2) fail with EACCES and the pod crash-loops before
   # serving a single request. 101 is the nginx image's own built-in "nginx" uid/gid (`id nginx`
-  # inside nginx:1.30.4-alpine), used instead of an arbitrary uid so ownership of files already
+  # inside nginx:1.30.6-alpine), used instead of an arbitrary uid so ownership of files already
   # baked into the image (/usr/share/nginx/html) lines up without also having to chown at build time.
   podSecurityContext:
     runAsNonRoot: true
@@ -581,7 +591,7 @@ frontendCustomer:
       cpu: 250m
       memory: 128Mi
   # See frontendOperator.podSecurityContext/securityContext above for the full rationale — the
-  # customer frontend image is built from the identical nginx:1.30.4-alpine base with the same
+  # customer frontend image is built from the identical nginx:1.30.6-alpine base with the same
   # `worker_processes 2` patch, so the same NET_BIND_SERVICE / uid 101 / read-only-root reasoning
   # applies unchanged.
   podSecurityContext:

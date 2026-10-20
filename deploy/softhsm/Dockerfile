@@ -1,4 +1,4 @@
-FROM alpine:3.22.1
+FROM alpine:3.24.2
 
 RUN apk add --no-cache softhsm opensc openssl \
     && addgroup -S -g 2000 registerwerk-hsm

@@ -426,9 +426,9 @@ services:
   # COMPOSE_PROFILES) and set REGISTERWERK_AUDIT_ANCHOR_SINK=s3 plus the REGISTERWERK_AUDIT_ANCHOR_S3_*
   # variables from .env.example. GOVERNANCE retention + create-bucket keep the demo bucket disposable;
   # production uses COMPLIANCE on a bucket provisioned with Object Lock. The official minio/minio images
-  # are no longer published, so this pins the last Bitnami repack (MinIO RELEASE.2025-05-24). Demo only.
+  # are no longer published, so this pins the last Bitnami repack (MinIO RELEASE.2025-07-23). Demo only.
   minio:
-    image: bitnamilegacy/minio:2025.5.24
+    image: bitnamilegacy/minio:2025.7.23
     profiles: [audit-anchor]
     logging: *default-logging
     environment:

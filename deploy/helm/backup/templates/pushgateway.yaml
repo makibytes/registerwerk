@@ -32,7 +32,7 @@ spec:
         runAsUser: 65534
       containers:
         - name: pushgateway
-          image: prom/pushgateway:v1.11.0
+          image: prom/pushgateway:v1.11.4
           args:
             # Backup runs are daily; anything the CronJobs pushed more than 36h ago is from a
             # run that's already either succeeded again or is itself covered by BackupStale —

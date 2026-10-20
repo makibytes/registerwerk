@@ -51,7 +51,7 @@ RUN python docs/prepare_chaincache_docs.py \
          cp site/sitemap.xml.gz "site/${locale}/sitemap.xml.gz"; \
        done
 
-FROM nginx:1.30.4-alpine
+FROM nginx:1.30.6-alpine
 RUN sed -i 's/^worker_processes.*/worker_processes 2;/' /etc/nginx/nginx.conf
 COPY --from=build /docs/site /usr/share/nginx/html
 COPY docs/nginx.conf /etc/nginx/conf.d/default.conf

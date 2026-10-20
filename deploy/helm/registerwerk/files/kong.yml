@@ -4,7 +4,7 @@
 #  — the Kong subchart ran its own stock defaults instead, silently
 # losing the admin-API scoping/header-stripping/rate-limiting verified in the Compose path.
 # Keep this file identical to the original whenever that one changes — the only deployment-
-# specific deltas are rate-limiting's redis.host and the ip-restriction allow list, which is
+# specific deltas are rate-limiting's redis.host (valkey.serviceName) and the ip-restriction allow list, which is
 # RENDERED from `kong.adminAllowCidrs` (this file is a template, tpl'd by kong-configmap.yaml;
 # infra.yml diffs the rendered result against gateway/kong.yml with that block normalised). The upstream target's
 # hostname is intentionally identical in both files — see that block's own comment for why.
@@ -201,14 +201,13 @@ plugins:
           - X-Entity-Id
           - X-Entity-Roles
 
-  # Rate limiting — Redis-backed so the per-minute/hour throttle is a real fleet-wide
+  # Rate limiting — Valkey-backed (Redis protocol) so the per-minute/hour throttle is a real fleet-wide
   # limit shared across every Kong replica, not a per-node counter. policy: local (the previous
   # default) counts independently on each node, so N Kong replicas silently multiplied the
   # effective limit by N — the throttle got weaker exactly when horizontal scale-out made it more
-  # important. redis.host below is this chart's Bitnami redis subchart Service name
-  # (values.yaml's redis.fullnameOverride pins it to this exact literal — see that comment for
-  # why a computed/release-templated name can't be used in a static file like this one); the
-  # Compose copy (../../../../gateway/kong.yml) points at Compose's "redis" service name instead.
+  # important. redis.host below is this chart's Valkey Service (valkey.serviceName in values.yaml,
+  # rendered by templates/valkey.yaml); the Compose copy (../../../../gateway/kong.yml) points at
+  # Compose's "valkey" service name instead.
   - name: rate-limiting
     service: registerwerk-backend
     config:
@@ -216,7 +215,7 @@ plugins:
       hour: 10000
       policy: redis
       redis:
-        host: registerwerk-redis-master
+        host: {{ .Values.valkey.serviceName }}
         port: 6379
       fault_tolerant: true
       hide_client_headers: false

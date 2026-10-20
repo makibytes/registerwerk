@@ -13,7 +13,7 @@ networks:
 services:
   # ─── Prometheus ────────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:v3.13.2
+    image: prom/prometheus:v3.15.0
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./alerts:/etc/prometheus/alerts:ro
@@ -28,7 +28,7 @@ services:
 
   # ─── Grafana ───────────────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:12.4.6
+    image: grafana/grafana:13.2.4
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-changeme}
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -44,38 +44,40 @@ services:
 
   # ─── Loki ──────────────────────────────────────────────────────────────────
   loki:
-    image: grafana/loki:3.7.4
+    image: grafana/loki:3.7.8
     volumes:
       - loki_data:/loki
     ports:
       - "127.0.0.1:${LOKI_HOST_PORT:-43100}:3100"
     restart: unless-stopped
 
-  # ─── Promtail (log shipper) ────────────────────────────────────────────────
-  promtail:
-    # NOTE: Promtail is end-of-life. Loki has moved on to 3.7.x while promtail stopped at 3.6.x;
-    # Grafana's replacement is Alloy (grafana/alloy), which subsumes promtail's scrape config.
-    # 3.6.11 is the last release — pinned here so the stack keeps working, but migrating this
-    # service to Alloy requires an explicit deployment change.
-    image: grafana/promtail:3.6.11
+  # ─── Alloy (log shipper) ───────────────────────────────────────────────────
+  # Grafana Alloy replaced Promtail, which is end-of-life (3.6.11 was its last release). alloy.alloy is the
+  # same discovery and the same labels, rewritten in Alloy's syntax. It discovers containers and reads their
+  # logs through the Docker daemon, so the socket mount is all it needs: without it nothing ever ships to Loki.
+  alloy:
+    image: grafana/alloy:v1.21.0
     volumes:
-      - /var/log:/var/log:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      # promtail.yml's docker_sd_configs job discovers scrape targets by talking to the
-      # Docker daemon directly, not by reading the containers directory above — without this
-      # socket mount, service discovery finds zero targets and nothing ever ships to Loki.
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./promtail.yml:/etc/promtail/config.yml:ro
-    command: -config.file=/etc/promtail/config.yml
+      - ./alloy.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
     depends_on: [loki]
     restart: unless-stopped
 
   # ─── Tempo (distributed tracing) ───────────────────────────────────────────
   tempo:
-    image: grafana/tempo:2.9.4
+    image: grafana/tempo:2.10.8
     volumes:
       - ./tempo.yml:/etc/tempo/config.yml:ro
-      - tempo_data:/tmp/tempo
+      # Tempo 2.10 runs as a non-root user: /var/tempo is the directory its image owns, so a fresh named volume
+      # is writable. (Up to 2.9 the data lived in /tmp/tempo, which a root-owned volume made unwritable for it;
+      # traces kept there are not migrated, they only live for the 14-day block_retention anyway.)
+      - tempo_data:/var/tempo
     command: -config.file=/etc/tempo/config.yml
     ports:
       - "127.0.0.1:${OTLP_GRPC_HOST_PORT:-44317}:4317"   # OTLP gRPC
@@ -89,14 +91,14 @@ services:
   # gives BackupStale (monitoring/alerts/registerwerk.yml) a real target to scrape once a backup
   # job exists here, rather than the alert silently having no data source at all.
   pushgateway:
-    image: prom/pushgateway:v1.11.0
+    image: prom/pushgateway:v1.11.4
     ports:
       - "127.0.0.1:${PUSHGATEWAY_HOST_PORT:-49091}:9091"
     restart: unless-stopped
 
   # ─── Alertmanager ──────────────────────────────────────────────────────────
   alertmanager:
-    image: prom/alertmanager:v0.33.1
+    image: prom/alertmanager:v0.34.1
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
@@ -136,3 +138,4 @@ volumes:
   grafana_data:
   loki_data:
   tempo_data:
+  alloy_data:

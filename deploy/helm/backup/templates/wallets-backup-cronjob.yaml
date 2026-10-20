@@ -26,7 +26,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: restic-backup
-              image: restic/restic:0.17.3
+              image: restic/restic:0.19.1
               command:
                 - /bin/sh
                 - -c
@@ -40,9 +40,11 @@ spec:
                   echo "Done."
                   {{- if .Values.monitoring.pushgatewayUrl }}
                   # Pushgateway rejects a body with no trailing newline (HTTP 400) — see
-                  # backup-cronjob.yaml's identical comment; same fix, same reason.
-                  printf 'wallets_backup_last_success_timestamp %s\n' "$(date +%s)" \
-                    | curl -s -X POST --data-binary @- \
+                  # backup-cronjob.yaml's identical comment; same fix, same reason. The restic image ships
+                  # busybox wget but NO curl, so the previous `curl ... || echo WARNING` pushed nothing, ever,
+                  # and the fallback hid it. wget needs a regular file (a pipe has no Content-Length).
+                  printf 'wallets_backup_last_success_timestamp %s\n' "$(date +%s)" > /tmp/metric \
+                    && wget -q -O /dev/null --post-file=/tmp/metric \
                       "{{ .Values.monitoring.pushgatewayUrl }}/metrics/job/registerwerk_wallets_backup" \
                     || echo "WARNING: backup succeeded but pushing the success metric failed"
                   {{- end }}

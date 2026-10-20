@@ -8,13 +8,13 @@
 # WAL-G publishes only glibc release binaries, so it is built from the pinned tag here.
 ARG POSTGRES_IMAGE=postgres:18.6-alpine
 
-FROM golang:1.25-alpine AS walg
+FROM golang:1.27.2-alpine AS walg
 ARG WALG_VERSION=v3.0.9
 RUN apk add --no-cache git
 RUN git clone --depth 1 --branch "${WALG_VERSION}" https://github.com/wal-g/wal-g.git /src
 WORKDIR /src/main/pg
-# WAL-G v3.0.x imports encoding/json/v2, which Go 1.25 only ships behind GOEXPERIMENT=jsonv2.
-RUN GOEXPERIMENT=jsonv2 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/wal-g/wal-g/cmd/pg.walgVersion=${WALG_VERSION}" -o /out/wal-g .
+# WAL-G v3.0.x imports encoding/json/v2: Go 1.25 only shipped it behind GOEXPERIMENT=jsonv2, Go 1.27 builds it as is.
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/wal-g/wal-g/cmd/pg.walgVersion=${WALG_VERSION}" -o /out/wal-g .
 
 FROM ${POSTGRES_IMAGE}
 COPY --from=walg /out/wal-g /usr/local/bin/wal-g

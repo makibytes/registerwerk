@@ -13,7 +13,7 @@ COPY frontend-operator/ ./
 ARG BUILD_CONFIG=production
 RUN npm run build -- --configuration=${BUILD_CONFIG}
 
-FROM nginx:1.30.4-alpine
+FROM nginx:1.30.6-alpine
 # The pinned nginx tag can lag patched Alpine packages (the Trivy gate in CI fails on fixable
 # HIGH CVEs in libexpat/util-linux otherwise), so upgrade the small runtime layer during the
 # build, as backend/Dockerfile does.

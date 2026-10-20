@@ -58,6 +58,9 @@ This page lists, in one place, what you should not assume. It has three parts: [
 - An S3 audit-anchor bucket with the default `COMPLIANCE` retention of 3,650 days keeps its objects for ten years even for a try-out; use `GOVERNANCE` and a short retention for trials.
 - In production mode, a registry-mutating transaction on a chain with fewer than two healthy RPC nodes stays pending instead of completing. A permanently dead configured node blocks automatic nonce repair until it is disabled.
 - The two portals must be served on distinct hostnames in production (the session cookie is shared per host). One-host deployments need the documented workaround.
+- The Helm chart is checked with `helm lint`, `helm template` and `kubeconform`, not installed on a cluster in CI: a manifest that is schema-valid but wrong at runtime (probes, volume permissions) is not caught. Install it on a test cluster before relying on a change.
+- The Helm chart's bundled PostgreSQL (`postgresql.enabled=true`) is for development and tests only. Bitnami no longer publishes the versioned images the subchart pins, so the chart points it at the frozen `bitnamilegacy/postgresql:16.4.0` copy, which gets no security fixes and is two major versions behind the PostgreSQL 18 that Compose and the tests use. Use `database.shape=managed` or `cnpg` for anything that holds register data.
+- The Helm backup chart's WAL-G CronJob names `ghcr.io/wal-g/wal-g:v3.0.0`. That image does not exist (WAL-G publishes release binaries, not images), so the base-backup job for the bundled PostgreSQL cannot start. The working, PITR-drilled path is the `postgres-wal` image of the Compose overlay (`scripts/pitr-drill.sh`); the Helm job needs that image published and the job adapted before it can be used.
 
 ## Decisions taken
 

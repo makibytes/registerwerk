@@ -3,7 +3,7 @@
 # (templates/ingress.yaml), so the ingress controller is admitted to Kong's proxy ports and to
 # nothing else in this chart (7B-02). The customer-frontend nginx proxies /api/ to Kong, and
 # Prometheus scrapes Kong's status port (:8100/metrics). Egress is left unrestricted: Kong must
-# reach the backend, Redis and DNS, and the backend's own policy already limits who may reach it.
+# reach the backend, Valkey and DNS, and the backend's own policy already limits who may reach it.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

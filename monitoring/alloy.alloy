@@ -1,0 +1,62 @@
+// Ships every container's stdout/stderr to Loki: the replacement for Promtail, which is end-of-life.
+// Same behaviour as the old promtail.yml: discover containers through the Docker socket, label each line
+// with `container` and the Compose `service`, pull the structured-logging fields out of the JSON line, keep
+// `level` as a label and the message as the line.
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.containers.output
+  refresh_interval = "5s"
+  forward_to       = [loki.process.json.receiver]
+}
+
+loki.process "json" {
+  stage.json {
+    expressions = {
+      level    = "level",
+      traceId  = "traceId",
+      spanId   = "spanId",
+      tenantId = "tenantId",
+      actorId  = "actorId",
+      message  = "message",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  stage.output {
+    source = "message"
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

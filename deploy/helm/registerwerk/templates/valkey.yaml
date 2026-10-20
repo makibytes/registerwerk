@@ -1,0 +1,114 @@
+{{- if .Values.valkey.enabled }}
+# Valkey (BSD-3, the Linux Foundation's Redis fork) holding ONLY Kong's rate-limiting counters
+# (policy: redis in files/kong.yml, the Redis protocol is unchanged). It replaced the Bitnami redis
+# subchart, whose docker.io/bitnami/redis image tags no longer exist. Deliberately minimal: one replica,
+# no persistence (a restart just resets the windows early, a harmless direction to fail in), no auth (see
+# values-production.yaml for why; the NetworkPolicy below is the trust boundary), nothing written to disk.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.valkey.serviceName }}
+  labels:
+    {{- include "registerwerk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: valkey
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: valkey
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: "{{ .Values.valkey.image.repository }}:{{ .Values.valkey.image.tag }}"
+          imagePullPolicy: {{ .Values.valkey.image.pullPolicy }}
+          args: ["valkey-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.valkey.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Fixed (not release-name-derived): files/kong.yml reads it from .Values.valkey.serviceName, and the
+  # Kong subchart's own values cannot reference a computed name, so one registerwerk release per namespace.
+  name: {{ .Values.valkey.serviceName }}
+  labels:
+    {{- include "registerwerk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+spec:
+  selector:
+    app.kubernetes.io/name: valkey
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+{{- if .Values.networkPolicy.enabled }}
+---
+# Only Kong may reach the counters. Without this any pod in the cluster could read or reset them, and
+# rate limiting fails open (fault_tolerant: true) as soon as Kong cannot use Valkey, so write access
+# to it is a switch for the gateway's throttle.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.valkey.serviceName }}
+  labels:
+    {{- include "registerwerk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: valkey
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kong
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 6379
+{{- end }}
+{{- end }}

@@ -19,7 +19,7 @@ import java.time.Duration;
  * images are no longer published, so this pins the last Bitnami repack (MinIO RELEASE 2025-05-24).
  */
 final class TestMinio {
-    static final String IMAGE = "bitnamilegacy/minio:2025.5.24";
+    static final String IMAGE = "bitnamilegacy/minio:2025.7.23";
     static final String ACCESS_KEY = "minioadmin";
     static final String SECRET_KEY = "minioadmin-it-secret";
 

@@ -10,7 +10,7 @@
 # registerwerk-postgres-secret) is created out-of-band per templates/secret.yaml's own
 # instructions; this file only tells each chart which key names to read and, where a genuinely
 # new key is introduced below (replication-password), says so in a comment next to the setting
-# that needs it. Redis auth is deliberately NOT enabled here — see that section's own comment for
+# that needs it. Valkey auth is deliberately NOT enabled here — see that section's own comment for
 # why turning it on without also wiring Kong's rate-limiting plugin would be a regression, not a
 # hardening step.
 #
@@ -80,16 +80,16 @@ postgresql:
         memory: 1Gi
         cpu: 500m
 
-# values.yaml's redis (rate-limiting counters only, see that file's own comment) runs
-# auth.enabled: false, and this overlay deliberately leaves it that way rather than flipping it on
-# half-wired. Turning on redis.auth.enabled here alone is actively worse than leaving it off:
+# values.yaml's valkey (rate-limiting counters only, see that file's own comment) runs
+# without auth, and this overlay deliberately leaves it that way rather than flipping it on
+# half-wired. Adding a password here alone is actively worse than leaving it off:
 # neither kong.yml copy's rate-limiting plugin has a config.redis.password field to authenticate
 # with (a static .Files.Get file can't reference a Secret at all — see gateway/kong.yml's own
 # header comment), and that plugin's fault_tolerant: true makes it fail OPEN — allow every request
-# through unthrottled — whenever it can't reach/authenticate to Redis. So enabling auth here, as a
+# through unthrottled — whenever it can't reach/authenticate to Valkey. So enabling auth here, as a
 # previous version of this file did, would silently disable rate limiting fleet-wide on install
 # while looking like a hardening step. The trust boundary in the meantime is the cluster
-# NetworkPolicy (templates/networkpolicy.yaml), which already restricts this Redis to Kong pods
+# NetworkPolicy (templates/valkey.yaml, rendered while networkPolicy.enabled), which admits Kong pods
 # only — and this instance holds nothing but rate-limit counters (no registry data, no session
 # state), so that boundary is a reasonable one to rely on until the real fix ships: switching
 # templates/kong-configmap.yaml from raw .Files.Get to tpl (matching how the frontend nginx

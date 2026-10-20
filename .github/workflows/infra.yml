@@ -117,7 +117,7 @@ jobs:
           sudo mv kubeconform /usr/local/bin/kubeconform
           rm kubeconform.tar.gz
 
-      # No `helm dependency build` needed: charts/*.tgz (kong, postgresql, redis) are already
+      # No `helm dependency build` needed: charts/*.tgz (kong, postgresql) are already
       # vendored and committed, so lint/template resolve against them directly without touching a
       # chart repository.
       #
@@ -194,7 +194,7 @@ jobs:
           helm template test . -f values.yaml -f ci/test-values.yaml --show-only templates/kong-configmap.yaml \
             | sed -n '/kong.yml: |-/,$p' | tail -n +2 | sed 's/^    //' > /tmp/helm-kong.yml
           norm() {
-            grep -v '^[[:space:]]*#' "$1" | sed -E '/^[[:space:]]*$/d; s/host: (valkey|redis|registerwerk-redis-master)$/host: REDIS/' \
+            grep -v '^[[:space:]]*#' "$1" | sed -E '/^[[:space:]]*$/d; s/host: (valkey|registerwerk-valkey)$/host: VALKEY/' \
               | awk '/^[[:space:]]+allow:$/ {print; skip=1; next} skip && /^[[:space:]]+message:/ {skip=0} !skip {print}'
           }
           diff <(norm "$GITHUB_WORKSPACE/gateway/kong.yml") <(norm /tmp/helm-kong.yml)

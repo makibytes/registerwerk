@@ -4,9 +4,6 @@ dependencies:
   version: 15.5.38
 - name: kong
   repository: https://charts.konghq.com
-  version: 2.38.0
-- name: redis
-  repository: https://charts.bitnami.com/bitnami
-  version: 19.6.4
-digest: sha256:6448569dd4571000192f7fb1de997abfbd347695afd1e87863827a5a214487bd
-generated: "2026-08-16T23:59:56.17229+02:00"
+  version: 2.52.0
+digest: sha256:3db782b50f74bfcc4d286ef055c2d2e6332d067d3e8dabac904eb08acfd2d4ed
+generated: "2026-10-20T05:01:50.673068+02:00"
