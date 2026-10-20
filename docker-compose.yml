@@ -794,15 +794,17 @@ services:
   # Backs Kong's rate-limiting plugin (policy: redis, gateway/kong.yml) so the per-minute/hour
   # request throttle is a real limit shared across every Kong worker/replica rather than a
   # per-node counter (see gateway/kong.yml's own comment on why policy: local silently multiplies
-  # the effective limit). Not exposed to the host — only reachable on the compose network, same
-  # trust boundary as Kong's own admin API. No persistence: rate-limit counters are inherently
-  # ephemeral/self-healing, so a restart just resets the window early, a harmless failure mode.
-  redis:
-    image: redis:7.4-alpine
+  # the effective limit). Valkey (BSD-3, the Linux Foundation's Redis fork) speaks the Redis
+  # protocol, so Kong's `redis` policy is unchanged. Not exposed to the host — only reachable on
+  # the compose network, same trust boundary as Kong's own admin API. No persistence: rate-limit
+  # counters are inherently ephemeral/self-healing, so a restart just resets the window early, a
+  # harmless failure mode.
+  valkey:
+    image: valkey/valkey:9.1.2-alpine
     logging: *default-logging
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -815,7 +817,7 @@ services:
           memory: 256m
 
   kong:
-    image: kong:3.9.3
+    image: kong:3.9.4
     logging: *default-logging
     environment:
       KONG_DATABASE: "off"
@@ -852,7 +854,7 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-      redis:
+      valkey:
         condition: service_healthy
     ports:
       - "${KONG_BIND_ADDR:-0.0.0.0}:${KONG_PROXY_HOST_PORT:-48000}:8000"
@@ -865,7 +867,7 @@ services:
       # process, loads the Kong Lua runtime and parses kong.conf just to stat a pidfile — running
       # forever, plus once per retry during boot.
       #
-      # The image ships no curl, wget, nc or busybox (verified against kong:3.9.3), but it does
+      # The image ships no curl, wget, nc or busybox (verified against kong:3.9.4), but it does
       # ship bash, so a real HTTP round trip costs exactly one bash: /dev/tcp opens the socket and
       # `head -c 12` reads just the status line. Kong answers `HTTP/1.1 404` for an unrouted `/`,
       # which is a perfectly good liveness signal — it proves the proxy port is listening and the

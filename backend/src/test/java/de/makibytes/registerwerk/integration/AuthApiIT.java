@@ -483,6 +483,20 @@ class AuthApiIT {
     }
 
     @Test
+    @DisplayName("A cacheable public read must not set the per-client XSRF-TOKEN cookie; the bootstrap read still does")
+    void publicReads_setTheCsrfCookieOnlyOnTheBootstrapRead() {
+        // Kong's proxy-cache stores public GETs for 30 s and replays their headers: a cookie on one of them would
+        // be handed to every client. The SPAs' first call (auth/config, never cached) issues each browser's own.
+        ResponseEntity<String> bootstrap = restTemplate.getForEntity(url("/api/v1/public/auth/config"), String.class);
+        assertThat(setCookies(bootstrap)).anyMatch(cookie -> cookie.startsWith("XSRF-TOKEN="));
+
+        ResponseEntity<String> cacheable = restTemplate.getForEntity(
+            url("/api/v1/public/platform-capabilities"), String.class);
+        assertThat(cacheable.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(setCookies(cacheable)).noneMatch(cookie -> cookie.startsWith("XSRF-TOKEN="));
+    }
+
+    @Test
     @DisplayName("Session cookie alone does not exempt a mutating request from CSRF validation")
     void sessionCookie_withoutCsrfToken_isRejectedOnMutatingRequest() {
         ResponseEntity<LoginResponse> loginResponse = restTemplate.postForEntity(

@@ -40,7 +40,7 @@ Only bundled Kong OSS plugins are active by default (see `gateway/kong.yml`):
 |---|---|
 | `proxy-cache` | Caches public-route GET 200 responses for 30-60 seconds |
 | `request-transformer` | Strips any client-supplied `X-Entity-Id`/`X-Entity-Roles` on public routes, so nothing can be smuggled in before the backend even sees the request |
-| `rate-limiting` | 300 requests/minute, 10,000/hour per client IP (Redis-backed, shared across Kong replicas) |
+| `rate-limiting` | 300 requests/minute, 10,000/hour per client IP (Valkey-backed, shared across Kong replicas) |
 | `bot-detection` | Blocks common crawler/scanner user agents |
 | `ip-restriction` | Restricts `/api/v1/admin/**` to operator-network CIDRs, matched against the real client IP (see below) |
 | `cors` | Cross-origin headers for the customer Angular frontend |

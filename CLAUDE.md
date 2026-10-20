@@ -212,4 +212,4 @@ Marketplace = metadata-only listings: signed manifests (EIP-191 `personal_sign` 
 
 **Indexers:** EVM (Graph Node / RPC) and Solana write to `token_transfer` / `indexer_state` tables. `IndexerMonitorService` checks liveness.
 
-**Kong 3.9** (`gateway/`, image `kong:3.9.3` in `docker-compose.yml`): declarative `kong.yml`, DB-less. Plugins: `rate-limiting`, `proxy-cache` on public routes, `request-transformer` (strips client-supplied identity headers), `cors`, `bot-detection`, `ip-restriction` on `/api/v1/admin`, `response-transformer` (security headers). It does **not** validate JWTs — `openid-connect` is Enterprise/Konnect-only. Operator bypasses Kong entirely.
+**Kong 3.9** (`gateway/`, image `kong:3.9.4` in `docker-compose.yml`): declarative `kong.yml`, DB-less. Plugins: `rate-limiting`, `proxy-cache` on public routes, `request-transformer` (strips client-supplied identity headers), `cors`, `bot-detection`, `ip-restriction` on `/api/v1/admin`, `response-transformer` (security headers). It does **not** validate JWTs — `openid-connect` is Enterprise/Konnect-only. Operator bypasses Kong entirely.

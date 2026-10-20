@@ -44,4 +44,4 @@ Errors use the `ErrorResponse` record (`status`, `message`, `timestamp`, `path`)
 
 ## Rate limiting
 
-Customer API calls pass through Kong, which limits each client IP to 300 requests per minute and 10,000 per hour, counted in Redis so the limit is shared across Kong replicas (see [API gateway](installation/api-gateway.md)). Calls from the operator portal do not pass through Kong and are not subject to this limit. Rate-limit headers (`X-RateLimit-Limit-Minute`, `X-RateLimit-Remaining-Minute`) are included in responses; an exceeded limit is answered `429`.
+Customer API calls pass through Kong, which limits each client IP to 300 requests per minute and 10,000 per hour, counted in Valkey (Redis protocol) so the limit is shared across Kong replicas (see [API gateway](installation/api-gateway.md)). Calls from the operator portal do not pass through Kong and are not subject to this limit. Rate-limit headers (`X-RateLimit-Limit-Minute`, `X-RateLimit-Remaining-Minute`) are included in responses; an exceeded limit is answered `429`.

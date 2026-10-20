@@ -57,11 +57,31 @@ public final class SpaCsrfConfig {
     }
 
     public static final class CsrfCookieFilter extends OncePerRequestFilter {
+        /**
+         * The one public read that hands a browser its XSRF-TOKEN: the SPAs call it first on every page load, and
+         * the gateway must never cache it (gateway/kong.yml routes it separately).
+         */
+        static final String BOOTSTRAP_PATH = "/api/v1/public/auth/config";
+
+        /**
+         * Any other public read is cacheable by design (Kong's proxy-cache stores it for 30 s, and a CDN in front
+         * could too), and a cache replays {@code Set-Cookie} verbatim: one XSRF-TOKEN would be handed to every
+         * client, which defeats the double-submit check. Public reads are CSRF-exempt anyway (see SecurityConfig),
+         * and every browser still gets its own cookie from {@link #BOOTSTRAP_PATH} and from protected requests.
+         */
+        private static boolean isCacheablePublicRead(HttpServletRequest request) {
+            String method = request.getMethod();
+            String path = request.getRequestURI();
+            return ("GET".equals(method) || "HEAD".equals(method))
+                    && path.startsWith("/api/v1/public/")
+                    && !BOOTSTRAP_PATH.equals(path);
+        }
+
         @Override
         protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
                 throws ServletException, IOException {
             CsrfToken csrfToken = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
-            if (csrfToken != null) {
+            if (csrfToken != null && !isCacheablePublicRead(request)) {
                 csrfToken.getToken(); // triggers lazy resolution -> writes the XSRF-TOKEN cookie
             }
             filterChain.doFilter(request, response);

@@ -16,7 +16,7 @@ _format_version: "3.0"
 # into this file only when running Kong Enterprise/Konnect. Never forward
 # identity headers from clients: the backend derives identity from the JWT.
 
-# routes through a Kong upstream (active + passive health checks) instead of a bare
+# The backend is reached through a Kong upstream (active + passive health checks) instead of a bare
 # `url:` pointing straight at the backend hostname. This is on top of, not instead of, whatever
 # L4 load balancing the deployment platform's own service discovery already does (a Docker
 # Compose service name round-robins DNS across replicas; a Kubernetes Service load-balances
@@ -67,6 +67,16 @@ services:
         strip_path: false
         methods: [GET, POST]
 
+      # The SPAs' first call on every page load. It is the one public read the backend lets set the browser's
+      # own XSRF-TOKEN cookie (SpaCsrfConfig.CsrfCookieFilter), so it is routed on its own and NEVER cached:
+      # proxy-cache replays Set-Cookie verbatim, which would hand one token to every client. Kong prefers the
+      # longer path, so this wins over api-public for exactly this URL.
+      - name: api-public-bootstrap
+        paths:
+          - /api/v1/public/auth/config
+        strip_path: false
+        methods: [GET]
+
       # OpenAPI docs + liveness — no auth
       - name: api-docs
         paths:
@@ -101,7 +111,8 @@ plugins:
       latency_metrics: true
       upstream_health_metrics: true
 
-  # Response caching — PUBLIC routes only. Caching authenticated registry data
+  # Response caching — PUBLIC routes only (never api-public-bootstrap, never a response that sets a cookie:
+  # the backend sends no Set-Cookie on cacheable public reads, see SpaCsrfConfig.CsrfCookieFilter). Caching authenticated registry data
   # at the gateway would serve stale compliance state (and, mis-keyed, another
   # user's responses); an eWpG register must always read current state.
   #
@@ -157,6 +168,14 @@ plugins:
           - X-Entity-Roles
 
   - name: request-transformer
+    route: api-public-bootstrap
+    config:
+      remove:
+        headers:
+          - X-Entity-Id
+          - X-Entity-Roles
+
+  - name: request-transformer
     route: api-docs
     config:
       remove:
@@ -164,12 +183,12 @@ plugins:
           - X-Entity-Id
           - X-Entity-Roles
 
-  # Rate limiting — Redis-backed so the per-minute/hour throttle is a real fleet-wide
+  # Rate limiting — Valkey-backed (Redis protocol) so the per-minute/hour throttle is a real fleet-wide
   # limit shared across every Kong replica, not a per-node counter. policy: local (the previous
   # default) counts independently on each node, so N Kong replicas silently multiplied the
   # effective limit by N — the throttle got weaker exactly when horizontal scale-out made it more
   # important. redis.host below is Compose's service name; the Helm copy
-  # (deploy/helm/registerwerk/files/kong.yml) points at the Bitnami redis subchart's Service
+  # (deploy/helm/registerwerk/files/kong.yml) points at the chart's own Service
   # instead — see that file's own comment.
   - name: rate-limiting
     service: registerwerk-backend
@@ -178,7 +197,7 @@ plugins:
       hour: 10000
       policy: redis
       redis:
-        host: redis
+        host: valkey
         port: 6379
       fault_tolerant: true
       hide_client_headers: false
@@ -256,6 +275,9 @@ plugins:
         - Authorization
         - Content-Type
         - X-Requested-With
+        # Sent by both portals on every money-/state-moving call that requires one (the idempotency
+        # interceptor in @registerwerk/ui); without it a preflight to Kong rejects those calls.
+        - Idempotency-Key
         # Second-approver token for 4-eyes (Vieraugenprinzip) endpoints — see
         # stepup/internal/StepUpEnforcementAspect. Without it the browser preflight
         # rejects every dual-control call routed through Kong.

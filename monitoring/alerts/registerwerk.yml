@@ -918,17 +918,18 @@ groups:
           summary: "Backup job has not pushed in over 25 hours"
           description: "The Pushgateway group registerwerk_pg_backup was last updated more than 25h ago."
 
-      # Kong's rate-limiting runs fault_tolerant (fail open): if Redis is unreachable every
-      # request is allowed through unthrottled and nothing else says so. redis_up needs a
-      # redis_exporter scrape job (job="redis"); without one this rule has no data.
+      # Kong's rate-limiting runs fault_tolerant (fail open): if its Valkey is unreachable every
+      # request is allowed through unthrottled and nothing else says so. redis_up (redis_exporter
+      # also scrapes Valkey, and keeps the metric names) needs a scrape job (job="redis"); without
+      # one this rule has no data.
       - alert: KongRateLimitRedisDown
         expr: redis_up == 0
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "Redis behind Kong rate limiting is down"
-          description: "Kong's rate-limiting plugin fails open without Redis: the API is currently unthrottled."
+          summary: "Valkey behind Kong rate limiting is down"
+          description: "Kong's rate-limiting plugin fails open without Valkey: the API is currently unthrottled."
 
       # ── Platform: default partitions, event publication (L1 gauges) ───────────────────────
       - alert: PartitionDefaultRowsPresent

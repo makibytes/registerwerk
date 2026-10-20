@@ -20,14 +20,14 @@
 
 services:
   # Backs kong.yml's rate-limiting plugin (policy: redis) — see the root docker-compose.yml's
-  # redis service comment for the full rationale. Kept in step with that service here since this
+  # valkey service comment for the full rationale. Kept in step with that service here since this
   # file loads the same kong.yml and would otherwise fail to boot standalone (rate-limiting
-  # errors out at startup if it can't reach its configured Redis host).
-  redis:
-    image: redis:7.4-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+  # errors out at startup if it can't reach its configured Redis-protocol host).
+  valkey:
+    image: valkey/valkey:9.1.2-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,7 +40,7 @@ services:
           memory: 256m
 
   kong:
-    image: kong:3.9.3
+    image: kong:3.9.4
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
@@ -52,7 +52,7 @@ services:
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_PLUGINS: bundled
     depends_on:
-      redis:
+      valkey:
         condition: service_healthy
     ports:
       - "${KONG_PROXY_HOST_PORT:-48000}:8000"
