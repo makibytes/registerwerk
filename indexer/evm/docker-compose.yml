@@ -6,7 +6,7 @@ services:
 
   # ── IPFS — stores subgraph deployments ────────────────────────────────────
   ipfs:
-    image: ipfs/kubo:v0.28.0
+    image: ipfs/kubo:v0.43.1
     ports:
       - "5001:5001"
     volumes:
@@ -43,7 +43,7 @@ services:
 
   # ── graph-node ─────────────────────────────────────────────────────────────
   graph-node:
-    image: graphprotocol/graph-node:v0.35.1
+    image: graphprotocol/graph-node:v0.45.0
     depends_on:
       graph-db:
         condition: service_healthy
