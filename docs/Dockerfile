@@ -21,14 +21,14 @@ COPY docs/package.json docs/package-lock.json ./
 RUN npm ci --omit=dev
 
 FROM squidfunk/mkdocs-material:9.7.7 AS build
-RUN pip install --no-cache-dir "mkdocs-static-i18n[material]==1.2.3"
+RUN pip install --no-cache-dir "mkdocs-static-i18n[material]==1.3.1"
 WORKDIR /docs
 COPY mkdocs.yml ./
 COPY docs/ ./docs/
 # Material otherwise downloads Mermaid from unpkg at runtime. The docs CSP correctly disallows
 # third-party scripts, so provide the pinned renderer locally before Material's bundle starts.
 COPY --from=docs-assets /assets/node_modules/mermaid/dist/mermaid.min.js \
-  ./docs/assets/vendor/mermaid-12.1.0.min.js
+  ./docs/assets/vendor/mermaid-12.2.0.min.js
 
 # hooks.py substitutes {{ backend_url }} into pages. This used to be read from the environment at
 # serve time; now that the site is prebuilt it is necessarily a build-time value. Override with

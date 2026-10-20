@@ -94,6 +94,11 @@ listed here where it cannot be:
 | Foundry v1.8.5 | `.github/actions/setup-foundry` | `contracts/Dockerfile.demo`, the anvil image in `docker-compose.yml`, `GraphNodeReorgIT` |
 | PostgreSQL 18.6 | `TestPostgres.IMAGE` | `docker-compose.yml`, `postgres-wal/Dockerfile`, the service image in `backend.yml` |
 | Trivy v0.76.0 | `.github/actions/trivy-image-scan` (every image scan and its SARIF upload) | none |
+| Kong 3.9.4 | `docker-compose.yml` | `gateway/docker-compose.kong.yml`, `kong.image.tag` in the Helm `values.yaml` (the Kong subchart otherwise defaults to an old image), the two `kong config parse` jobs in `infra.yml` |
+| Valkey 9.1.2 | `docker-compose.yml` | `gateway/docker-compose.kong.yml`, `valkey.image.tag` in the Helm `values.yaml` |
+| nginx 1.30.6 (stable line) | `frontend-operator/Dockerfile` | `frontend-customer/Dockerfile`, `docs/Dockerfile`, the comments in the Helm `values.yaml` that name it |
+| Go 1.27.2 and WAL-G v3.0.9 | `postgres-wal/Dockerfile` | none (WAL-G publishes no images, it is built from the tag) |
+| Mermaid 12.2.0 | `docs/package.json` | the vendored file name in `docs/Dockerfile` and `docs/overrides/main.html` |
 
 The contracts' Solidity libraries are git submodules under `contracts/lib/`. CI initialises only those
 (the `.github/actions/contract-libs` action) because `docs/_chaincache` is a private repository the

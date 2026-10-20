@@ -152,7 +152,7 @@ docker compose run --rm kong kong config parse /etc/kong/kong.yml
 docker compose up -d --force-recreate kong
 ```
 
-Kong re-reads `gateway/kong.yml` on start: DB-less mode has no migrations to run and no configuration to re-apply. On Kubernetes the Kong subchart version is pinned in `deploy/helm/registerwerk/Chart.yaml`; upgrade it there and run `helm upgrade`.
+Kong re-reads `gateway/kong.yml` on start: DB-less mode has no migrations to run and no configuration to re-apply. On Kubernetes the Kong subchart version is pinned in `deploy/helm/registerwerk/Chart.yaml` and the Kong image in `kong.image.tag` of `values.yaml` (the chart's own default image is much older than the one `gateway/kong.yml` is written for, so bump both); upgrade them there and run `helm upgrade`.
 
 ## Subgraph upgrades
 
