@@ -342,6 +342,14 @@ kong:
   image:
     repository: kong
     tag: "3.9.4"
+  # Without these the pods run unbounded (the subchart sets none). Same ceiling as docker-compose.yml's kong.
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
   # The chart's own default (true) runs Kong as a Kubernetes Ingress Controller instead of a
   # plain declarative-config gateway — and silently suppresses ALL of its dbless auto-env
   # logic when true (see charts/kong templates/_helpers.tpl's "KONG_DECLARATIVE_CONFIG"
@@ -519,6 +527,8 @@ frontendOperator:
     runAsNonRoot: true
     runAsUser: 101
     fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
@@ -598,6 +608,8 @@ frontendCustomer:
     runAsNonRoot: true
     runAsUser: 101
     fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
@@ -655,6 +667,8 @@ zamaRelayer:
     runAsNonRoot: true
     runAsUser: 1000
     fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:

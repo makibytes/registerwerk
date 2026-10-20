@@ -27,6 +27,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # Nothing in this pod calls the Kubernetes API. The default ServiceAccount is NOT created by this chart and
+      # Kubernetes mounts its token unless a pod opts out, so it is switched off here rather than assumed.
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.zamaRelayer.podSecurityContext | nindent 8 }}
       {{- with .Values.affinity }}

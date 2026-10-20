@@ -22,10 +22,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # Static-asset serving needs no cluster API access at all — see the backend Deployment's
-      # own serviceAccountName for why that one does mount a (read-only, empty-permission) token;
-      # nothing in this pod calls the Kubernetes API, so automountServiceAccountToken stays at the
-      # "default" ServiceAccount's default (false, per templates/serviceaccount.yaml).
+      # Static-asset serving needs no cluster API access at all (see the backend Deployment's own
+      # serviceAccountName for why that one does mount a read-only, empty-permission token).
+      # Nothing in this pod calls the Kubernetes API. The default ServiceAccount is NOT created by this chart and
+      # Kubernetes mounts its token unless a pod opts out, so it is switched off here rather than assumed.
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.frontendOperator.podSecurityContext | nindent 8 }}
       {{- with .Values.affinity }}
