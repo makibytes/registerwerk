@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hexToBytes, hashMessage, recoverAddress } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { manifestSignRequest } from './manifest-signing';
 
 const HASH = '0x' + '1b'.repeat(32);
@@ -23,7 +23,7 @@ describe('manifestSignRequest', () => {
   });
 
   it('produces a signature the backend accepts: it recovers over the text of the hash (WalletSignatureVerifierImpl)', async () => {
-    const key = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
+    const key = generatePrivateKey();
     const signature = await signedBy(manifestSignRequest(HASH, privateKeyToAccount(key).address), key);
 
     // The backend: Sign.getEthereumMessageHash(message.getBytes(UTF_8)) with message = the hash string.

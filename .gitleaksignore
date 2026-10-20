@@ -46,3 +46,8 @@ b0db7829847a07eaa2a254c55d2b81c1a5b709b8:scripts/e2e-exactly-once/run.sh:generic
 # Not a key: the PEM *header* string literal TrpAdapter checks for before parsing a PKCS#8 file
 # ("TRP private key must be unencrypted PKCS#8 PEM").
 16e59ab4622aedd9cbef353c3a0140f269d254e7:backend/src/main/java/de/makibytes/registerwerk/travelrule/internal/TrpAdapter.java:private-key:198
+
+# Anvil/Foundry's well-known, publicly documented account #1 key, which an earlier version of
+# manifest-signing.spec.ts used as its signer (reviewed 2026-10-20). The spec now generates a throwaway key
+# at run time; this entry only covers the commit that introduced the literal.
+80fddcdfe2ec2fcbbb9da66322720f0d0b3fa4c2:frontend-customer/src/app/features/publisher/publish-wizard/manifest-signing.spec.ts:generic-api-key:26
