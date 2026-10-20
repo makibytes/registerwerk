@@ -20,38 +20,44 @@
 
   <properties>
     <java.version>25</java.version>
-    <spring-modulith.version>2.1.0</spring-modulith.version>
+    <spring-modulith.version>2.1.1</spring-modulith.version>
     <web3j.version>6.0.0</web3j.version>
     <solanaj.version>1.28.0</solanaj.version>
-    <daml-bindings.version>3.5.10</daml-bindings.version>
-    <grpc.version>1.82.0</grpc.version>
+    <daml-bindings.version>3.6.2</daml-bindings.version>
+    <grpc.version>1.85.0</grpc.version>
     <mapstruct.version>1.6.3</mapstruct.version>
-    <springdoc.version>3.1.0</springdoc.version>
+    <springdoc.version>3.1.1</springdoc.version>
     <testcontainers.version>2.0.5</testcontainers.version>
     <jacoco.version>0.8.15</jacoco.version>
-    <awssdk.version>2.51.3</awssdk.version>
-    <shedlock.version>7.7.0</shedlock.version>
-    <resilience4j.version>2.2.0</resilience4j.version>
-    <!-- Narrow security patch overrides until the next Spring Boot BOM release carries them.
-         Boot 4.1.1 already manages Netty 4.2.17 and PostgreSQL 42.7.13 (the former netty/postgresql
-         overrides are gone), but still ships Tomcat 11.0.24 and Jackson 3.1.5 / 2.21.5, which the
-         Trivy image scan in backend.yml rejects: Tomcat security-constraint/authentication
-         bypasses fixed in 11.0.25, jackson-core/-databind HIGHs fixed in 3.1.7 / 2.21.7. -->
-    <tomcat.version>11.0.25</tomcat.version>
-    <jackson-bom.version>3.1.7</jackson-bom.version>
-    <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
+    <awssdk.version>2.57.0</awssdk.version>
+    <shedlock.version>7.10.1</shedlock.version>
+    <resilience4j.version>2.4.0</resilience4j.version>
+    <!-- Narrow security patch overrides until the next Spring Boot BOM release carries them. Boot 4.1.1
+         manages Tomcat 11.0.24, Jackson 3.1.5 / 2.21.5, Netty 4.2.17 and PostgreSQL JDBC 42.7.13, which the
+         Trivy image scan and the OWASP gate in backend.yml reject:
+         - Tomcat security-constraint/authentication bypasses (fixed in 11.0.25; 11.0.27 is the newest 11.0.x);
+         - jackson-core/-databind HIGHs (fixed in 3.1.7 / 2.21.7; the newest patches of those lines are used —
+           Jackson 3.2 / 2.22 are new minors outside the Boot 4.1 line and stay out until Boot ships them);
+         - Netty 4.2.13–4.2.17 request smuggling through a malformed Transfer-Encoding (CVE-2026-89044, fixed in 4.2.18);
+         - pgjdbc 42.7.4–42.7.13 pads short values with bytes of earlier statements on the same connection
+           (CVE-2026-107315, a leak across requests on a pooled connection) and ignores a `requireAuth` that
+           excludes every method (CVE-2026-107314); both fixed in 42.7.14.
+         Drop each line when the Boot BOM catches up. -->
+    <tomcat.version>11.0.27</tomcat.version>
+    <jackson-bom.version>3.1.8</jackson-bom.version>
+    <jackson-2-bom.version>2.21.8</jackson-2-bom.version>
+    <netty.version>4.2.19.Final</netty.version>
+    <postgresql.version>42.7.14</postgresql.version>
     <!-- Dependency-Check findings (backend.yml, failBuildOnCVSS=7) that are real, so fixed rather than suppressed:
          - Kotlin: CVE-2026-53914 affects Kotlin before 2.4.20 (the BOM still manages 2.3.21 for kotlin-stdlib,
-           which okhttp/web3j and tuweni pull in).
+           which okhttp/web3j and tuweni pull in); 2.4.21 is the newest 2.4.x.
          - vertx-core 4.5.11 reaches the app only through web3j -> tuweni-bytes, but it carries real advisories
            (GHSA-3g76-f9xq-8vp6 / GHSA-cphf-4846-3xx9, fixed in 4.5.27; CVE-2026-15075/15076 up to and including
            4.5.29). 4.5.35 is the newest 4.5.x patch release; the Boot BOM does not manage vert.x. -->
-    <kotlin.version>2.4.20</kotlin.version>
+    <kotlin.version>2.4.21</kotlin.version>
     <vertx.version>4.5.35</vertx.version>
-    <!-- Bouncy Castle publishes the provider artifacts at 1.85.2 while the PKIX/utility
-         artifacts currently use 1.85. Keep each artifact on its newest compatible patch. -->
-    <bouncycastle.provider.version>1.85.2</bouncycastle.provider.version>
-    <bouncycastle.pkix.version>1.85</bouncycastle.pkix.version>
+    <!-- Bouncy Castle: provider, util and PKIX artifacts are all published at 1.86 now (they used to differ by a patch). -->
+    <bouncycastle.version>1.86</bouncycastle.version>
     <!--
       Testcontainers requires a sufficiently new Docker API.
       Force a safe floor for test JVMs so host-level API pinning (e.g. 1.32)
@@ -86,22 +92,22 @@
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcprov-jdk15to18</artifactId>
-        <version>${bouncycastle.provider.version}</version>
+        <version>${bouncycastle.version}</version>
       </dependency>
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcprov-jdk18on</artifactId>
-        <version>${bouncycastle.provider.version}</version>
+        <version>${bouncycastle.version}</version>
       </dependency>
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcutil-jdk18on</artifactId>
-        <version>${bouncycastle.pkix.version}</version>
+        <version>${bouncycastle.version}</version>
       </dependency>
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcpkix-jdk18on</artifactId>
-        <version>${bouncycastle.pkix.version}</version>
+        <version>${bouncycastle.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -175,7 +181,7 @@
     <dependency>
       <groupId>com.networknt</groupId>
       <artifactId>json-schema-validator</artifactId>
-      <version>3.0.6</version>
+      <version>3.0.8</version>
     </dependency>
 
     <!-- ── Blockchain — EVM ────────────────────────────────────────────────── -->
@@ -210,27 +216,27 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-security-keyvault-keys</artifactId>
-      <version>4.10.6</version>
+      <version>4.11.3</version>
       <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-identity</artifactId>
-      <version>1.18.3</version>
+      <version>1.18.7</version>
       <optional>true</optional>
     </dependency>
     <!-- ── GCP Cloud KMS (optional — activate via REGISTERWERK_WALLET_KEK_PROVIDER=GCP_KMS) ── -->
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-kms</artifactId>
-      <version>2.98.0</version>
+      <version>2.102.0</version>
       <optional>true</optional>
     </dependency>
     <!-- ── Apache MINA SSHD SFTP (regulatory report filing) ─────────────── -->
     <dependency>
       <groupId>org.apache.sshd</groupId>
       <artifactId>sshd-sftp</artifactId>
-      <version>2.18.0</version>
+      <version>2.20.0</version>
     </dependency>
 
     <!-- ── Mapping ─────────────────────────────────────────────────────────── -->
@@ -296,7 +302,7 @@
     <dependency>
       <groupId>org.apache.pdfbox</groupId>
       <artifactId>pdfbox</artifactId>
-      <version>3.0.7</version>
+      <version>3.0.8</version>
     </dependency>
 
     <!-- ── PDF digital signing (CMS/PKCS#7 via PDFBox external-signing API) ──
@@ -308,7 +314,7 @@
     <dependency>
       <groupId>org.bouncycastle</groupId>
       <artifactId>bcpkix-jdk18on</artifactId>
-      <version>${bouncycastle.pkix.version}</version>
+      <version>${bouncycastle.version}</version>
     </dependency>
 
     <!-- ── AOP (for @RequiresStepUp enforcement) ─────────────────────────── -->
@@ -731,7 +737,7 @@
           <plugin>
             <groupId>org.codehaus.mojo</groupId>
             <artifactId>exec-maven-plugin</artifactId>
-            <version>3.6.3</version>
+            <version>3.6.4</version>
             <executions>
               <execution>
                 <id>forge-test</id>
