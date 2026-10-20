@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blobErrorMessage } from './blob-error.util';
+import { blobErrorMessage } from '@registerwerk/ui';
 
 describe('blobErrorMessage (9A-05)', () => {
   const blob = (body: string) => new Blob([body], { type: 'application/json' });

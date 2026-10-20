@@ -5,7 +5,7 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { Observable, Subject, of, throwError } from 'rxjs';
 import {
   ApprovalClaim, ApprovalFlowError, ApprovalFlowEvent, ApprovalQueueApi, ApprovalRequestSession, ApprovalRequestView,
-  awaitApproval, claimApproval, formatCountdown, parseApprovalTarget, prettyCanonicalBody,
+  SUPPRESS_ERROR_TOAST, awaitApproval, claimApproval, formatCountdown, parseApprovalTarget, prettyCanonicalBody,
 } from '@registerwerk/ui';
 import { environment } from '../../../environments/environment';
 import { ApprovalQueueService } from './approval-queue.service';
@@ -98,6 +98,24 @@ describe('ApprovalQueueService (HTTP shapes)', () => {
     expect(httpMock.expectOne(`${base}/r1/claim`).request.method).toBe('POST');
     service.cancel('r1').subscribe();
     expect(httpMock.expectOne(`${base}/r1/cancel`).request.method).toBe('POST');
+  });
+
+  it('the flow calls report their failure themselves (no global "Access denied" toast); the list reads keep it', () => {
+    const inline = (url: string) => httpMock.expectOne(url).request.context.get(SUPPRESS_ERROR_TOAST);
+    service.create({ action: 'KYC_APPROVE', method: 'POST', path: '/p' }).subscribe();
+    expect(inline(base)).toBe(true);
+    service.get('r1').subscribe();
+    expect(inline(`${base}/r1`)).toBe(true);
+    service.approve('r1', '123456').subscribe();
+    expect(inline(`${base}/r1/approve`)).toBe(true);
+    service.reject('r1').subscribe();
+    expect(inline(`${base}/r1/reject`)).toBe(true);
+    service.claim('r1').subscribe();
+    expect(inline(`${base}/r1/claim`)).toBe(true);
+    service.cancel('r1').subscribe();
+    expect(inline(`${base}/r1/cancel`)).toBe(true);
+    service.pendingCount().subscribe();
+    expect(inline(`${base}/pending/count`)).toBe(false);
   });
 
   it('full flow over HTTP: create -> poll PENDING -> poll APPROVED -> claim', async () => {

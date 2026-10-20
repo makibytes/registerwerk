@@ -20,7 +20,7 @@ import {
  * key is a SEPARATE, decrypt-only key (see `zama-relayer`'s `OPERATOR_DECRYPT_PRIVATE_KEY`), not
  * something the operator portal's browser session has access to. Mirrors
  * `frontend-customer/src/app/core/wallet/wallet.service.ts` — see that file for the fuller
- * rationale; this port intentionally keeps the same shape so `FheClientService` is identical in
+ * rationale. `FheClientService` is the same shared `FheClient` (`@registerwerk/ui`) in
  * both apps.
  */
 @Injectable({ providedIn: 'root' })

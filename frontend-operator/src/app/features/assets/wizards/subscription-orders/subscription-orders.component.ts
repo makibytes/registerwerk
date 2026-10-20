@@ -1,7 +1,7 @@
 import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, TemplateRef, ViewChild, inject
 } from '@angular/core';
-import { fetchAllPages } from '../../../../core/utils/paging.util';
+import { fetchAllPages } from '@registerwerk/ui';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';

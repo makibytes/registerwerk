@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { fetchAllPages } from '../utils/paging.util';
+import { fetchAllPages } from '@registerwerk/ui';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../environments/environment';

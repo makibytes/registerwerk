@@ -2,11 +2,10 @@ import { ChangeDetectorRef, Component, OnDestroy, OnInit, inject } from '@angula
 import { DatePipe } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { QrCodeComponent } from '@registerwerk/ui';
+import { QrCodeComponent, downloadBlob } from '@registerwerk/ui';
 import { Subscription, interval, takeWhile } from 'rxjs';
 import { SecurityService, TwoFactorStatus } from '../../core/api/security.service';
 import { DsarService, DsarErasureResult } from '../../core/api/dsar.service';
-import { downloadBlob } from '../../core/utils/download.util';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 
 const POLL_INTERVAL_MS = 5_000;

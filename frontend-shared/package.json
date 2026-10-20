@@ -1,0 +1,6 @@
+{
+  "name": "@registerwerk/ui-source",
+  "private": true,
+  "description": "Source of @registerwerk/ui, compiled by each portal. Not a package: this file only tells the bundler that the library has no import-time side effects, so a portal that imports one helper from the barrel (an interceptor, a parser) does not pull every component into its initial bundle.",
+  "sideEffects": false
+}

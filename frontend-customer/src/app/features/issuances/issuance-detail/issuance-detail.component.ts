@@ -1,6 +1,5 @@
 import { ChangeDetectorRef, Component, OnDestroy, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
 import { corporateActionProgress } from '../../../core/utils/lifecycle.labels';
-import { fetchAllPages } from '../../../core/utils/paging.util';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -31,8 +30,6 @@ import { Erc3643Service, ComplianceStatus, IdentityRegistryEntry } from '../../.
 import { Asset, AssetBondTerms, AssetDeployment, AssetDocument, AssetHolder, Chain, CorporateActionType, CorporateActionView, Network } from '../../../core/models';
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
-import { downloadBlob } from '../../../core/utils/download.util';
-import { blobErrorMessage } from '../../../core/utils/blob-error.util';
 
 /** Minimal ABI fragment for reading a confidential balance handle — see
  *  `investment-detail.component.ts`'s identical fragment for the fuller rationale. */
@@ -50,9 +47,7 @@ import {
   failAsyncSection,
   resolveAsyncSection,
 } from '../../../core/async/async-section';
-import {
-  ApprovalFlowError, ApprovalRequestSession, CreateApprovalRequest, StatusBadgeComponent, DataStatePillComponent, claimApproval,
-} from '@registerwerk/ui';
+import { ApprovalFlowError, ApprovalRequestSession, CreateApprovalRequest, StatusBadgeComponent, DataStatePillComponent, claimApproval, fetchAllPages, downloadBlob, blobErrorMessage } from '@registerwerk/ui';
 import { ApprovalQueueService } from '../../../core/api/approval-queue.service';
 import { ApprovalRequestBoxComponent } from '../../../shared/components/approval/approval-request-box.component';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';

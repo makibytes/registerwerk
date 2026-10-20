@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpContext, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable, switchMap, throwError } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { SUPPRESS_ERROR_TOAST } from '../interceptors/error-context';
+import { SUPPRESS_ERROR_TOAST } from '@registerwerk/ui';
 
 /** The step-up reason the backend's `@RequiresStepUp` names for a read-only support session. */
 export const IMPERSONATION_STEP_UP_REASON = 'ADMIN_IMPERSONATION';

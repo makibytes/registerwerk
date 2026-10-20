@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { idempotencyInterceptor, resetIdempotencyKeys } from './idempotency.interceptor';
+import { idempotencyInterceptor, resetIdempotencyKeys } from '@registerwerk/ui';
 
 describe('idempotencyInterceptor', () => {
   let http: HttpClient;

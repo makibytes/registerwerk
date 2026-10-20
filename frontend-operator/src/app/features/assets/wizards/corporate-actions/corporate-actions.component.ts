@@ -1,7 +1,7 @@
 import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject
 } from '@angular/core';
-import { downloadBlob } from '../../../../core/utils/download.util';
+import { downloadBlob } from '@registerwerk/ui';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';

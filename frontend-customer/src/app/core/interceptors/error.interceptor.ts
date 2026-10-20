@@ -5,7 +5,7 @@ import { catchError, tap, throwError } from 'rxjs';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { AuthService } from '../auth/auth.service';
 import { clearAuthRedirectCooldown, requestAuthRedirect } from '../auth/redirect-guard';
-import { SUPPRESS_ERROR_TOAST } from './error-context';
+import { SUPPRESS_ERROR_TOAST } from '@registerwerk/ui';
 
 /**
  * Reads an OAuth2 claims challenge out of a 401.

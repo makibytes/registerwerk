@@ -1,8 +1,7 @@
 import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, TemplateRef, ViewChild, inject
 } from '@angular/core';
-import { downloadBlob } from '../../../../core/utils/download.util';
-import { blobErrorMessage } from '../../../../core/utils/blob-error.util';
+import { downloadBlob, blobErrorMessage } from '@registerwerk/ui';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';

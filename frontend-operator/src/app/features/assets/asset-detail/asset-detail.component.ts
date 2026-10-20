@@ -1,5 +1,4 @@
 import { ChangeDetectorRef, Component, OnInit, Input, ViewChild, inject } from '@angular/core';
-import { downloadBlob } from '../../../core/utils/download.util';
 import { Router } from '@angular/router';
 import { MatTabGroup, MatTabsModule } from '@angular/material/tabs';
 import { MatCardModule } from '@angular/material/card';
@@ -45,7 +44,7 @@ import {
   KycComplianceResponse, VAULT_STANDARDS, TokenTransferResponse,
 } from '../../../core/models';
 
-import { StatusBadgeComponent, ChainNamePipe, DataTableComponent, TableColumn } from '@registerwerk/ui';
+import { StatusBadgeComponent, ChainNamePipe, DataTableComponent, TableColumn, downloadBlob } from '@registerwerk/ui';
 import { PageEvent } from '@angular/material/paginator';
 import { RegisterInvestorDialogComponent, RegisterInvestorData } from './register-investor-dialog.component';
 import { HolderSyncBannerComponent } from './holder-sync-banner.component';

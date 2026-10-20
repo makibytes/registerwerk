@@ -21,7 +21,7 @@ import { AddressPickerDialogComponent, AddressPickerDialogData } from '../../sha
 import { EndpointService } from '../../core/api/endpoint.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { TradingService } from '../../core/api/trading.service';
-import { downloadBlob } from '../../core/utils/download.util';
+import { downloadBlob } from '@registerwerk/ui';
 import {
   CatalogPaymentRail,
   CompanyTraderSettings,

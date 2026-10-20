@@ -1,9 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
+import { parseJsonPreservingBigNumbers } from '@registerwerk/ui';
 import { environment } from '../../../environments/environment';
 import { LendingMarket, LendingPosition, LendingQuote, LendingSupplyPosition } from '../models';
-import { parseJsonPreservingBigInts } from './json-bigint.util';
 import { LenderEligibility } from '../lending/lender-copy.util';
 
 @Injectable({ providedIn: 'root' })
@@ -39,10 +39,10 @@ export class LendingService {
     return this.getPreservingBigInts<LendingSupplyPosition[]>(`${this.base}/supply-positions`);
   }
 
-  /** GETs as raw text and parses with a bigint-safe reviver — see json-bigint.util.ts. */
+  /** GETs as raw text and parses and parses it without losing precision on 16+ digit amounts - see parseJsonPreservingBigNumbers in @registerwerk/ui. */
   private getPreservingBigInts<T>(url: string): Observable<T> {
     return this.http
       .get(url, { responseType: 'text' })
-      .pipe(map((text) => parseJsonPreservingBigInts(text) as T));
+      .pipe(map((text) => parseJsonPreservingBigNumbers(text) as T));
   }
 }

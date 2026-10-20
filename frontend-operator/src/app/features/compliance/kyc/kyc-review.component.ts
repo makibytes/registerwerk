@@ -1,4 +1,4 @@
-import { kycRejectionText } from '@registerwerk/ui';
+import { kycRejectionText, downloadBlob } from '@registerwerk/ui';
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -14,7 +14,6 @@ import { AuthService } from '../../../core/auth/auth.service';
 import { BeneficialOwnerService } from '../../../core/api/beneficial-owner.service';
 import { KycService } from '../../../core/api/kyc.service';
 import { Jurisdiction, KycReview, KycReviewBeneficialOwner, KycReviewDocument } from '../../../core/models';
-import { downloadBlob } from '../../../core/utils/download.util';
 import { withDualControl } from '../../../shared/components/step-up/with-dual-control';
 import { showActionError } from '../../../shared/utils/action-error';
 import {

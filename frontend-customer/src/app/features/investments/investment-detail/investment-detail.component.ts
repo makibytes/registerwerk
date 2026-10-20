@@ -31,8 +31,6 @@ import { AssetBondTerms, AssetDeployment, CorporateActionView, CouponScheduleEnt
 import { WalletService } from '../../../core/wallet/wallet.service';
 import { FheClientService } from '../../../core/fhe/fhe-client.service';
 import { AuthService } from '../../../core/auth/auth.service';
-import { downloadBlob } from '../../../core/utils/download.util';
-import { blobErrorMessage } from '../../../core/utils/blob-error.util';
 import { PlatformCapabilitiesService } from '../../../core/feature/platform-capabilities';
 
 /** Minimal ABI fragments for the two confidential-token calls this component makes directly
@@ -63,7 +61,7 @@ import {
   failAsyncSection,
   resolveAsyncSection,
 } from '../../../core/async/async-section';
-import { StatusBadgeComponent, DataStatePillComponent, FinalityBadgeComponent } from '@registerwerk/ui';
+import { StatusBadgeComponent, DataStatePillComponent, FinalityBadgeComponent, downloadBlob, blobErrorMessage } from '@registerwerk/ui';
 import { ChainIconComponent } from '../../../shared/components/chain-icon/chain-icon.component';
 
 import { AddressComponent } from '../../../shared/components/address.component';

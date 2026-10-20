@@ -1,6 +1,5 @@
 import { ChangeDetectorRef, Component, ElementRef, OnInit, inject, Input, ViewChild } from '@angular/core';
 import { switchMap } from 'rxjs/operators';
-import { downloadBlob } from '../../../core/utils/download.util';
 import { showActionError } from '../../../shared/utils/action-error';
 import { Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -44,7 +43,7 @@ import {
   BeneficialOwner,
 } from '../../../core/models';
 
-import { DataStatePillComponent, StatusBadgeComponent } from '@registerwerk/ui';
+import { DataStatePillComponent, StatusBadgeComponent, downloadBlob } from '@registerwerk/ui';
 import { AuthService } from '../../../core/auth/auth.service';
 
 interface OnchainIdentityView {

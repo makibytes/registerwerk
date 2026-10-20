@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, type MockedObject, vi } from "vitest";
 import { TestBed } from '@angular/core/testing';
-import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
+import { HttpClient, HttpContext, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Router } from '@angular/router';
+import { SUPPRESS_ERROR_TOAST } from '@registerwerk/ui';
 import { errorInterceptor } from './error.interceptor';
 import { AuthService } from '../auth/auth.service';
 import { MatSnackBar } from '@angular/material/snack-bar';
@@ -87,6 +88,31 @@ describe('errorInterceptor', () => {
         expect(authServiceSpy.clearSession).not.toHaveBeenCalled();
         expect(router.navigate).not.toHaveBeenCalled();
         expect(snackBarSpy.open).toHaveBeenCalled();
+    });
+
+    it('leaves a 403 to the caller when the request carries SUPPRESS_ERROR_TOAST (no generic "Access denied" over an inline message)', () => {
+        let error: { error?: { code?: string } } | undefined;
+        const context = new HttpContext().set(SUPPRESS_ERROR_TOAST, true);
+        http.post('/api/v1/auth/step-up', {}, { context }).subscribe({ error: e => (error = e) });
+
+        httpMock.expectOne('/api/v1/auth/step-up').flush(
+            { status: 403, code: 'STEP_UP_CODE_INVALID', message: 'The code is not valid' },
+            { status: 403, statusText: 'Forbidden' });
+
+        expect(error?.error?.code).toBe('STEP_UP_CODE_INVALID');
+        expect(snackBarSpy.open).not.toHaveBeenCalled();
+    });
+
+    it('still routes a forced password change and a 401 for a request that suppresses the toast', () => {
+        const context = new HttpContext().set(SUPPRESS_ERROR_TOAST, true);
+        http.get('/api/v1/a', { context }).subscribe({ error: () => undefined });
+        httpMock.expectOne('/api/v1/a').flush(
+            { code: 'PASSWORD_CHANGE_REQUIRED' }, { status: 403, statusText: 'Forbidden' });
+        expect(authServiceSpy.markPasswordChangeRequired).toHaveBeenCalled();
+
+        http.get('/api/v1/b', { context }).subscribe({ error: () => undefined });
+        httpMock.expectOne('/api/v1/b').flush('nope', { status: 401, statusText: 'Unauthorized' });
+        expect(authServiceSpy.clearSession).toHaveBeenCalled();
     });
 
     it('propagates network errors (status 0) without logging out', () => {

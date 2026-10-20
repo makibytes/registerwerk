@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { downloadBlob } from './download.util';
+import { downloadBlob } from '@registerwerk/ui';
 
 describe('downloadBlob', () => {
     beforeEach(() => vi.useFakeTimers());

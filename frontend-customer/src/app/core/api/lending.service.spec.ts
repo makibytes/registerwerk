@@ -23,4 +23,12 @@ describe('LendingService - lender eligibility preflight (T2-20)', () => {
       .flush({ productionMode: true, eligible: false, reasons: ['KYC is not APPROVED'] });
     expect(result).toEqual({ productionMode: true, eligible: false, reasons: ['KYC is not APPROVED'] });
   });
+
+  it('keeps token base units above 2^53 exact and leaves text inside strings alone', () => {
+    let result: { amount: string; note: string }[] = [];
+    service.supplyPositions().subscribe((r) => (result = r as unknown as { amount: string; note: string }[]));
+    http.expectOne(`${environment.apiUrl}/lending/supply-positions`).flush(
+      '[{"amount":1500000000000000000,"note":"market, 1234567890123456789 ,x [1234567890123456789]"}]');
+    expect(result).toEqual([{ amount: '1500000000000000000', note: 'market, 1234567890123456789 ,x [1234567890123456789]' }]);
+  });
 });

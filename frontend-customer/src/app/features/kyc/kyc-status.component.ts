@@ -14,8 +14,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { KycService } from '../../core/api/kyc.service';
 import { AuthService } from '../../core/auth/auth.service';
-import { downloadBlob } from '../../core/utils/download.util';
-import { kycRejectionText, toKycRejectionCategory } from '@registerwerk/ui';
+import { kycRejectionText, toKycRejectionCategory, downloadBlob } from '@registerwerk/ui';
 import {
   KycDocument,
   KycComplianceResponse,

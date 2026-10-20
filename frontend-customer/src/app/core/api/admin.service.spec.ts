@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { AdminService, handoffCodeFrom } from './admin.service';
-import { SUPPRESS_ERROR_TOAST } from '../interceptors/error-context';
+import { SUPPRESS_ERROR_TOAST } from '@registerwerk/ui';
 import { environment } from '../../../environments/environment';
 
 describe('AdminService', () => {

@@ -5,7 +5,6 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
-import { fetchAllPages } from '../../../core/utils/paging.util';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -23,7 +22,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatChipsModule } from '@angular/material/chips';
 import { InvestmentService } from '../../../core/api/investment.service';
 import { InvestmentRecord, TokenStandard } from '../../../core/models';
-import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponent, BarItem } from '@registerwerk/ui';
+import { StatusBadgeComponent, DonutChartComponent, DonutSlice, BarChartComponent, BarItem, fetchAllPages } from '@registerwerk/ui';
 
 
 import { AddressComponent } from '../../../shared/components/address.component';

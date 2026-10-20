@@ -6,7 +6,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { Router } from '@angular/router';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { errorInterceptor } from './error.interceptor';
-import { SUPPRESS_ERROR_TOAST } from './error-context';
+import { SUPPRESS_ERROR_TOAST } from '@registerwerk/ui';
 import { AuthService } from '../auth/auth.service';
 import { clearAuthRedirectCooldown } from '../auth/redirect-guard';
 

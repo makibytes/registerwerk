@@ -10,7 +10,7 @@ import { AUTH_CONFIG, AuthConfig } from './core/auth/auth-config';
 import { CookieTokenSource } from './core/auth/cookie-token-source';
 import { MsalTokenSource } from './core/auth/msal-token-source';
 import { TokenSource } from './core/auth/token-source';
-import { idempotencyInterceptor } from './core/interceptors/idempotency.interceptor';
+import { idempotencyInterceptor } from '@registerwerk/ui';
 import { authInterceptor } from './core/interceptors/auth.interceptor';
 import { errorInterceptor } from './core/interceptors/error.interceptor';
 import { PLATFORM_CAPABILITIES, PlatformCapabilities } from './core/feature/platform-capabilities';

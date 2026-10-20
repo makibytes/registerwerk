@@ -4,7 +4,8 @@ import { tap } from 'rxjs';
 /**
  * P4B-7: money-/state-moving admin and issuer endpoints require an `Idempotency-Key` header (the backend
  * answers 400 IDEMPOTENCY_KEY_REQUIRED without it). Mirror of the backend's `@RequiresIdempotencyKey`
- * handlers; keep in sync with `docs/platform/api.md (Idempotency-Key and amounts)`.
+ * handlers; keep in sync with `docs/platform/api.md (Idempotency-Key and amounts)`. One list for both portals
+ * (a header on an endpoint that does not require one is harmless), so it cannot drift between them.
  */
 export const IDEMPOTENT_ENDPOINTS: readonly RegExp[] = [
   /\/assets\/[^/]+\/deployments\/[^/]+\/(admin|issuer|solana-admin)\//,

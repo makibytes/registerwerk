@@ -4,7 +4,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { LendingAdminService, summarizeLegacyPause } from './lending-admin.service';
 import { environment } from '../../../environments/environment';
-import { IDEMPOTENT_ENDPOINTS } from '../interceptors/idempotency.interceptor';
+import { IDEMPOTENT_ENDPOINTS } from '@registerwerk/ui';
 
 describe('LendingAdminService', () => {
   let service: LendingAdminService;
@@ -23,6 +23,14 @@ describe('LendingAdminService', () => {
     service.listReconciliationTasks().subscribe((tasks) => (shortfall = tasks[0].shortfall));
     http.expectOne(`${base}/reconciliation-tasks`).flush('[{"id":"t","shortfall":12345678901234567890123}]');
     expect(shortfall).toBe('12345678901234567890123');
+  });
+
+  it('does not touch text inside strings that merely contain a long number between delimiters', () => {
+    let notes: string[] = [];
+    service.listReconciliationTasks().subscribe((tasks) => (notes = tasks.map((t) => (t as unknown as { note: string }).note)));
+    http.expectOne(`${base}/reconciliation-tasks`).flush(
+      '[{"id":"t","shortfall":12345678901234567890123,"note":"seen [1234567890123456789] and, 1234567890123456789 ,x"}]');
+    expect(notes).toEqual(['seen [1234567890123456789] and, 1234567890123456789 ,x']);
   });
 
   it('registerMarket() sends step-up bearer and second approver token', () => {

@@ -4,6 +4,7 @@
 
 export * from './lib/models';
 export * from './lib/async-section';
+export * from './lib/error-context';
 export * from './lib/status-badge/status-badge.component';
 export * from './lib/finality-badge/finality-badge.component';
 export * from './lib/data-state-pill/data-state-pill.component';
@@ -17,3 +18,8 @@ export * from './lib/qr-code/qr-code.component';
 export * from './lib/approval-queue/approval-queue';
 export * from './lib/decimal';
 export * from './lib/kyc-rejection';
+export * from './lib/blob-error.util';
+export * from './lib/download.util';
+export * from './lib/paging.util';
+export * from './lib/idempotency.interceptor';
+export * from './lib/fhe/fhe-client';

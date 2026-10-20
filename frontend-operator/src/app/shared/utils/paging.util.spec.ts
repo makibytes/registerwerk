@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { of } from 'rxjs';
-import { fetchAllPages, PageLike } from './paging.util';
+import { fetchAllPages, PageLike } from '@registerwerk/ui';
 
 function server(total: number, maxSize = 200) {
   const calls: number[] = [];

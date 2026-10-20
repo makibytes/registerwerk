@@ -1,9 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
+import { parseJsonPreservingBigNumbers } from '@registerwerk/ui';
 import { environment } from '../../../environments/environment';
 import { DualControlTokens, dualControlHeaders } from './dual-control-headers';
-import { parseJsonPreservingBigInts } from './json-bigint.util';
 
 export interface LendingMarketAdminView {
   id: string;
@@ -139,6 +139,6 @@ export class LendingAdminService {
   }
 
   private getPreservingBigInts<T>(url: string): Observable<T> {
-    return this.http.get(url, { responseType: 'text' }).pipe(map((text) => parseJsonPreservingBigInts(text) as T));
+    return this.http.get(url, { responseType: 'text' }).pipe(map((text) => parseJsonPreservingBigNumbers(text) as T));
   }
 }

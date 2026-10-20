@@ -7,7 +7,6 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
-import { downloadBlob } from '../../../core/utils/download.util';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -22,7 +21,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { forkJoin } from 'rxjs';
 
 
-import { DataTableComponent, TableColumn, PageHeaderComponent } from '@registerwerk/ui';
+import { DataTableComponent, TableColumn, PageHeaderComponent, downloadBlob } from '@registerwerk/ui';
 import { DoraService, ProviderRequest } from '../../../core/api/dora.service';
 import { IctIncident, ResilienceTest, ThirdPartyProvider } from '../../../core/models';
 import { openStepUp } from '../../../shared/components/step-up/open-step-up';

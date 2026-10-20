@@ -1,6 +1,7 @@
-import type { HttpClient } from '@angular/common/http';
+import { HttpContext, type HttpClient } from '@angular/common/http';
 import { EMPTY, Observable, Subscription, concat, of, throwError, timer } from 'rxjs';
 import { catchError, exhaustMap, map, switchMap, takeWhile, tap } from 'rxjs/operators';
+import { SUPPRESS_ERROR_TOAST } from '../error-context';
 
 /*
  * In-app approval queue (T8-02) - the framework-light half shared by the operator and the customer portal:
@@ -77,15 +78,21 @@ export interface ApprovalQueueApi {
   cancel(id: string): Observable<ApprovalRequestView>;
 }
 
-/** `/api/v1/approvals` over an app's own HttpClient (its interceptors attach the session). */
+/**
+ * `/api/v1/approvals` over an app's own HttpClient (its interceptors attach the session). The calls that take part
+ * in the request -> approve -> claim flow render their failure themselves (the dialog's session, the inbox's
+ * message), so they opt out of the global "Access denied" toast; the list reads keep it.
+ */
 export class ApprovalQueueClient implements ApprovalQueueApi {
+  private readonly inline = { context: new HttpContext().set(SUPPRESS_ERROR_TOAST, true) };
+
   constructor(private readonly http: HttpClient, private readonly baseUrl: string) {}
 
   create(request: CreateApprovalRequest): Observable<ApprovalRequestView> {
-    return this.http.post<ApprovalRequestView>(this.baseUrl, request);
+    return this.http.post<ApprovalRequestView>(this.baseUrl, request, this.inline);
   }
   get(id: string): Observable<ApprovalRequestView> {
-    return this.http.get<ApprovalRequestView>(`${this.baseUrl}/${id}`);
+    return this.http.get<ApprovalRequestView>(`${this.baseUrl}/${id}`, this.inline);
   }
   /** Approver inbox: other people's open requests, oldest first. */
   pending(page = 0, size = 20): Observable<ApprovalPage<ApprovalRequestView>> {
@@ -99,16 +106,16 @@ export class ApprovalQueueClient implements ApprovalQueueApi {
     return this.http.get<ApprovalPage<ApprovalRequestView>>(`${this.baseUrl}/mine`, { params: { page, size } });
   }
   approve(id: string, code: string, note?: string): Observable<ApprovalRequestView> {
-    return this.http.post<ApprovalRequestView>(`${this.baseUrl}/${id}/approve`, { code, note: note || undefined });
+    return this.http.post<ApprovalRequestView>(`${this.baseUrl}/${id}/approve`, { code, note: note || undefined }, this.inline);
   }
   reject(id: string, note?: string): Observable<ApprovalRequestView> {
-    return this.http.post<ApprovalRequestView>(`${this.baseUrl}/${id}/reject`, { note: note || undefined });
+    return this.http.post<ApprovalRequestView>(`${this.baseUrl}/${id}/reject`, { note: note || undefined }, this.inline);
   }
   cancel(id: string): Observable<ApprovalRequestView> {
-    return this.http.post<ApprovalRequestView>(`${this.baseUrl}/${id}/cancel`, {});
+    return this.http.post<ApprovalRequestView>(`${this.baseUrl}/${id}/cancel`, {}, this.inline);
   }
   claim(id: string): Observable<ApprovalClaim> {
-    return this.http.post<ApprovalClaim>(`${this.baseUrl}/${id}/claim`, {});
+    return this.http.post<ApprovalClaim>(`${this.baseUrl}/${id}/claim`, {}, this.inline);
   }
 }
 

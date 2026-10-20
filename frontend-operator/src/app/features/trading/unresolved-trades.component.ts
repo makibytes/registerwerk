@@ -7,7 +7,6 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
-import { downloadBlob } from '../../core/utils/download.util';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -17,7 +16,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatSnackBar } from '@angular/material/snack-bar';
 
-import { DataTableComponent, PageHeaderComponent, TableColumn } from '@registerwerk/ui';
+import { DataTableComponent, PageHeaderComponent, TableColumn, downloadBlob } from '@registerwerk/ui';
 import {
   TimeoutBacklog,
   TradingAdminService,
