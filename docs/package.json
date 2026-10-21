@@ -6,6 +6,7 @@
     "node": "26.x"
   },
   "scripts": {
+    "test:unit": "node --test scripts/lib/",
     "test:browser": "node ./scripts/verify-browser.mjs",
     "test:frontends": "node ./scripts/verify-frontends.mjs"
   },

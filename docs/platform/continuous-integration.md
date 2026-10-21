@@ -104,6 +104,25 @@ GitHub-hosted runners share egress addresses, and anonymous Docker Hub pulls are
     raises the limit far above the anonymous one and would remove this class of failure entirely. The
     workflows do not use one today.
 
+## The docs browser check and network changes
+
+The Documentation workflow starts the docs image as a container and drives it with headless Chromium
+(`docs/scripts/verify-browser.mjs`). Chromium watches the host's network events and aborts every request that
+is in flight when they change, reporting `net::ERR_NETWORK_CHANGED` on the console. Docker causes such events when it
+restarts (see the mirror script above) and also when it merely starts a container: a new veth interface, `docker0`
+coming up and address assignment over the following seconds. Started two seconds before the browser, as it was
+at first, the container made about one run in ten fail with nothing wrong in the docs (five of the last eight
+failures of the workflow). Two rules now apply:
+
+* **Container first, browser last.** The workflow starts the container, then installs the browser (~20 s of
+  otherwise idle network), and only then runs the check. A new step that starts a container belongs *before* the
+  browser install, not after.
+* **A network change is retried, nothing else is.** `docs/scripts/lib/network-retry.mjs` runs the whole check again,
+  on a fresh browser, up to three times, when the only errors an attempt saw are `ERR_NETWORK_CHANGED` (or an
+  attempt failed after the browser reported one). Any other console error or failed assertion fails at once. Each
+  retry prints a `::warning::` naming the failed request, so a flap is visible without failing the run. The policy
+  has unit tests (`npm --prefix docs run test:unit`) that run in the workflow before the image is built.
+
 ## Where toolchain versions are pinned
 
 A version that several files must agree on is kept in one place where the platform allows it, and
@@ -133,6 +152,7 @@ node scripts/verify-claims.test.mjs && node scripts/repin-claims.test.mjs && nod
 bash scripts/test-docker-build-retry.sh
 node scripts/verify-docs-parity.mjs && node scripts/gen-stepup-matrix.mjs --check
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12      # every workflow
+npm --prefix docs run test:unit                                       # retry policy of the docs browser check
 ```
 
 The backend, frontend, contract and docs checks have their own commands in `CLAUDE.md`.

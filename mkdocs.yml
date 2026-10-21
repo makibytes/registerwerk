@@ -647,6 +647,7 @@ exclude_docs: |
   TRANSLATION-TERMINOLOGY.md
   node_modules/
   build/
+  scripts/
   src/
   static/
   *.ts

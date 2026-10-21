@@ -50,6 +50,10 @@ jobs:
       - name: Verify runtime language-link origin handling
         run: node scripts/verify-docs-language-switcher.mjs
 
+      - name: Unit-test the browser-check helpers
+        working-directory: docs
+        run: npm run test:unit
+
       # The compose `docs` profile ships an image built from docs/Dockerfile, not the bare
       # upstream squidfunk/mkdocs-material image — this site requires mkdocs-static-i18n
       # (mkdocs.yml's plugins list), which the bare image doesn't have. Build the real image
@@ -71,11 +75,16 @@ jobs:
           -t registerwerk-docs:ci
           .
 
-      - name: Verify docs runtime behavior
+      # The order of the next four steps matters. Starting a container makes Docker create a veth interface,
+      # bring `docker0` up and assign addresses over the following seconds, and Chromium aborts every request
+      # that is in flight when the host's network changes (`net::ERR_NETWORK_CHANGED`). When the container
+      # start and the browser launch were two seconds apart in one step, the first page loads landed in that
+      # window and about one run in ten failed. So: start the container, let the browser download fill ~20 s
+      # of otherwise idle network time, and only then launch the browser. verify-browser.mjs additionally runs
+      # the whole check again if a network change still hits it (docs/platform/continuous-integration.md).
+      - name: Start the docs container
         run: |
-          npx --prefix docs playwright install --with-deps chromium
           docker run --rm -d --name registerwerk-docs-ci -p 48003:80 registerwerk-docs:ci
-          trap 'docker stop registerwerk-docs-ci' EXIT
           healthy=
           for _ in {1..30}; do
             if curl --fail --silent http://127.0.0.1:48003/healthz; then healthy=1; break; fi
@@ -86,7 +95,18 @@ jobs:
             docker logs registerwerk-docs-ci
             exit 1
           fi
-          npm --prefix docs run test:browser
+
+      - name: Install the browser
+        run: npx --prefix docs playwright install --with-deps chromium
+
+      - name: Verify docs runtime behavior
+        run: npm --prefix docs run test:browser
+
+      - name: Stop the docs container
+        if: always()
+        run: |
+          if [ "${{ job.status }}" != "success" ]; then docker logs registerwerk-docs-ci || true; fi
+          docker stop registerwerk-docs-ci || true
 
       # docs/Dockerfile runs `mkdocs build --strict` in its build stage. The resulting image is
       # deliberately a static nginx image, so running `build --strict` *after* this step would
