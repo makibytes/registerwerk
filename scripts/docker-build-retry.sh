@@ -6,9 +6,10 @@
 # single Dockerfile instruction runs. Two measures:
 #   1. On a GitHub-hosted runner the Docker daemon is pointed at Google's public pull-through cache
 #      of Docker Hub (mirror.gcr.io), see docker-hub-mirror.sh.
-#   2. A build that failed with a registry/network error is retried with a growing pause. Any other
-#      failure (a Dockerfile, compile or test error) is final on the first attempt: retrying it would
-#      only delay the red job by minutes.
+#   2. A build that failed with a registry/network error is retried with a growing pause. That includes
+#      a package manager losing its connection in a RUN step (`npm ci` with ECONNRESET, pip, Maven, git).
+#      Any other failure (a Dockerfile, compile or test error) is final on the first attempt: retrying
+#      it would only delay the red job by minutes.
 #
 # DOCKER_BUILD_ATTEMPTS (default 4) and DOCKER_BUILD_PAUSE (seconds, default 30, multiplied by the
 # attempt number) exist for scripts/test-docker-build-retry.sh.
@@ -18,6 +19,12 @@ set -uo pipefail
 
 # What a rate limit, an overloaded registry or a dropped connection looks like in BuildKit's output.
 transient='toomanyrequests|429 Too Many Requests|TLS handshake timeout|i/o timeout|connection reset|connection refused|unexpected EOF|: EOF$|50[234] (Bad Gateway|Service Unavailable|Gateway Time-?out)|unexpected status.*50[234]|temporary failure in name resolution|failed to do request'
+# The same kind of failure inside a RUN step, in the words of the tool that hit it: npm (its error
+# codes, not "connection reset"), pip, Maven, apk, and git/curl. Deliberately only network symptoms: a missing
+# package (npm E404), a lockfile mismatch or a failing test is a real error and stays final.
+transient="$transient|npm error code (ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ESOCKETTIMEDOUT|EPIPE)|npm error network"
+transient="$transient|ReadTimeoutError|Connection broken|Read timed out|Connect timed out|Connection timed out"
+transient="$transient|temporary error \(try again later\)|Could not resolve host|early EOF|RPC failed|fetch-pack: unexpected disconnect"
 
 attempts=${DOCKER_BUILD_ATTEMPTS:-4}
 pause_step=${DOCKER_BUILD_PAUSE:-30}

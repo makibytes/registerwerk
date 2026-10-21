@@ -19,6 +19,14 @@ case "$(sed -n "${count}p" "$STUB_DIR/plan")" in
   transient) echo "ERROR: failed to solve: node:26: unexpected status from HEAD request: 429 Too Many Requests" >&2; exit 1 ;;
   tls)       echo "Get \"https://registry-1.docker.io/v2/\": net/http: TLS handshake timeout" >&2; exit 1 ;;
   denied)    echo "Error response from daemon: toomanyrequests: You have reached your unauthenticated pull rate limit." >&2; exit 1 ;;
+  # Network failures of a package manager or git inside a RUN step, as BuildKit relays them.
+  npm_reset) printf '%s\n' '#13 28.36 npm error code ECONNRESET' '#13 28.36 npm error syscall read' '#13 28.36 npm error network read ECONNRESET' 'ERROR: process "/bin/sh -c npm ci --omit=dev" did not complete successfully: exit code: 152' >&2; exit 1 ;;
+  npm_dns)   printf '%s\n' 'npm error code EAI_AGAIN' 'npm error request to https://registry.npmjs.org/viem failed, reason: getaddrinfo EAI_AGAIN registry.npmjs.org' >&2; exit 1 ;;
+  pip_timeout) printf '%s\n' "WARNING: Retrying (Retry(total=0)) after connection broken by 'ReadTimeoutError(\"HTTPSConnectionPool(host='pypi.org', port=443): Read timed out.\")'" 'ERROR: process "/bin/sh -c pip install mkdocs" did not complete successfully: exit code: 1' >&2; exit 1 ;;
+  maven_timeout) echo "[ERROR] Failed to execute goal on project registerwerk: Could not transfer artifact org.springframework:spring-core:jar:7.0.0 from/to central (https://repo.maven.apache.org/maven2): Read timed out" >&2; exit 1 ;;
+  git_rpc)   printf '%s\n' 'error: RPC failed; curl 56 GnuTLS recv error (-54): Error in the pull function.' 'fatal: early EOF' >&2; exit 1 ;;
+  # A package that does not exist, or a lockfile that does not match, is a real error: never retried.
+  npm_404)   printf '%s\n' 'npm error code E404' 'npm error 404 Not Found - GET https://registry.npmjs.org/no-such-package-registerwerk' >&2; exit 1 ;;
   *)         echo "ERROR: process \"/bin/sh -c npm ci\" did not complete successfully: exit code: 1" >&2; exit 1 ;;
 esac
 STUB
@@ -58,5 +66,11 @@ run_case daemon_pull_limit_then_ok 0      3 "attempt 2/4"                      d
 run_case real_error_is_final      nonzero 1 "no registry or network error"     real ok
 run_case error_after_a_hiccup     nonzero 2 "no registry or network error"     transient real ok
 run_case gives_up_after_four      nonzero 4 "after 4 attempts"                 transient transient transient transient ok
+run_case npm_econnreset_then_ok   0       2 "retrying in 0s"                   npm_reset ok
+run_case npm_dns_then_ok          0       2 "retrying in 0s"                   npm_dns ok
+run_case pip_timeout_then_ok      0       2 "retrying in 0s"                   pip_timeout ok
+run_case maven_timeout_then_ok    0       2 "retrying in 0s"                   maven_timeout ok
+run_case git_rpc_failure_then_ok  0       2 "retrying in 0s"                   git_rpc ok
+run_case npm_404_is_final         nonzero 1 "no registry or network error"     npm_404 ok
 
 [ "$failures" = 0 ] && echo "docker-build-retry tests passed" || { echo "$failures case(s) failed"; exit 1; }
